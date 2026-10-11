@@ -57,7 +57,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock, Weak};
 use std::time::Duration;
-pub(crate) mod catalog;
 mod worker;
 use worker::Connection as AsyncConnection;
 
@@ -507,7 +506,6 @@ pub(crate) struct SqliteConnection {
     inner: AsyncConnection,
     #[cfg(feature = "perf-witness")]
     reader: bool,
-    catalog: Arc<catalog::StoredCatalog>,
     /// The gate every in-process writer to this connection's database queues
     /// on (FIG-3975), shared by all connections that open it.
     write_gate: Arc<Mutex<()>>,
@@ -597,8 +595,6 @@ impl SqliteConnection {
         );
         let pragmas = crate::connection_sql::open_pragmas(policy);
         let setup_gate = Arc::clone(&gate);
-        let catalog = Arc::new(catalog::StoredCatalog::default());
-        let setup_catalog = Arc::clone(&catalog);
         inner
             .call(move |c| {
                 // Journal setup must queue with schema installation and other
@@ -626,7 +622,6 @@ impl SqliteConnection {
                 set_wal_journal_mode(c, policy.busy_timeout, policy.operational)?;
                 c.execute_batch(&pragmas)?;
                 install_perf_statement_witness(c);
-                setup_catalog.observe(c);
                 Ok(())
             })
             .await?;
@@ -639,7 +634,6 @@ impl SqliteConnection {
             inner,
             #[cfg(feature = "perf-witness")]
             reader: false,
-            catalog,
             checkpoint: checkpoint_state(
                 target,
                 &gate,
@@ -708,7 +702,6 @@ impl SqliteConnection {
             inner,
             #[cfg(feature = "perf-witness")]
             reader: true,
-            catalog: Arc::new(catalog::StoredCatalog::default()),
             write_gate: gate,
             read_gate: read_gate(target),
             checkpoint: None,
@@ -835,7 +828,6 @@ impl SqliteConnection {
         F: FnOnce(&mut Connection) -> rusqlite::Result<T> + Send + 'static,
     {
         let window = lash_core_execution::facade_support::sql::Window::current();
-        let catalog = Arc::clone(&self.catalog);
         #[cfg(feature = "perf-witness")]
         let reader = self.reader;
         let f = move |c: &mut Connection| {
@@ -845,11 +837,8 @@ impl SqliteConnection {
             if observed {
                 crate::observed_sql::enable(c);
             }
-            // Catalog pre/post checks maintain the connection cache, outside
-            // the caller's operation. Reads needed by the callback still count.
-            let result = catalog.run(c, |c| {
-                lash_core_execution::facade_support::sql::Window::on_worker(window, || f(c))
-            });
+            let result =
+                lash_core_execution::facade_support::sql::Window::on_worker(window, || f(c));
             if observed {
                 c.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
             }

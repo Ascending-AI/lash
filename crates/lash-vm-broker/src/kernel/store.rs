@@ -689,7 +689,8 @@ impl DurableSnapshotStore {
                 for write in book.retire_unnamed(&self.exec, &membership) {
                     tx.write(write);
                 }
-                self.pin_release(&mut tx, &state, releases, expected.is_none())?;
+                self.pin_release(&mut tx, &state, releases, expected.is_none())
+                    .await?;
                 let (root, kernel) = (state.root, state.kernel);
                 // The park exports the whole state; a node the latest root
                 // reaches is stored, so only the others are staged and a
@@ -786,10 +787,10 @@ impl DurableSnapshotStore {
         Ok(Saved { rev, root, ledger })
     }
 
-    /// Pins the helper release `state` pins: on the execution's first root
-    /// its manifest's nodes are installed with the release's pin, and every
-    /// later root requires them.
-    fn pin_release(
+    /// Pins the helper release `state` pins: the store installs a release's
+    /// nodes with its pin once, on the first root of the first execution
+    /// that pins it; every later root requires them.
+    async fn pin_release(
         &self,
         tx: &mut lash_durable::ActorTx,
         state: &WholeState,
@@ -808,6 +809,32 @@ impl DurableSnapshotStore {
             .map_err(refused)?;
         let release = NodeId(whole.release.0);
         if !first {
+            tx.require(release);
+            return Ok(());
+        }
+        let name = releases
+            .manifests
+            .get(&release.child_ref())
+            .ok_or_else(|| refused("the state pins a release this build does not hold"))?
+            .release
+            .clone();
+        // A release this store already pins is stored whole: the commit
+        // rechecks the requirement under its protection. A pin this read
+        // cannot confirm is installed again, and the commit compares it.
+        let pinned = self
+            .cx
+            .durable_reads()
+            .map_err(refused)?
+            .hydrate(
+                RootOwner::ReleasePin {
+                    release: name.clone(),
+                },
+                Some(release),
+                READ_LIMITS,
+            )
+            .await
+            .is_ok();
+        if pinned {
             tx.require(release);
             return Ok(());
         }

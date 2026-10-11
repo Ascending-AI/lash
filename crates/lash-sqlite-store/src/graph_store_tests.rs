@@ -263,3 +263,111 @@ law!(a_commit_is_admitted_on_its_whole_encoding);
 law!(a_read_racing_replacement_and_collection_reads_one_whole_root);
 law!(a_collection_racing_commits_sweeps_nothing_they_rely_on);
 law!(a_reference_racing_its_roots_retirement_installs_whole_or_refuses);
+
+/// FIG-5912: a stored node's member of the build catalog hydrates with all
+/// it reaches, byte for byte as stored, and every node of that closure
+/// counts against each hydration limit, whether its bytes are read back or
+/// taken from the build.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_build_catalog_closure_hydrates_whole_within_every_limit() {
+    use lash_core_store::checkpoint_graph::{
+        DecodeDimension, DecodeLimits, EncodeBudget, ExplicitLimit, GraphStaging, NodeKind,
+        TokenWriter, TypedBody,
+    };
+    use lash_durable::domain::graph::RootOwner;
+    use lash_durable::{DurableError, DurableReads as _};
+
+    let body = |write: &dyn Fn(&mut TokenWriter)| {
+        let mut out = TokenWriter::new();
+        write(&mut out);
+        out.into_bytes()
+    };
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let leaf_body = body(&|out| out.text(&"x".repeat(200)));
+    let leaf = staging
+        .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&leaf_body))
+        .expect("a leaf");
+    let member_body = body(&|out| out.child(leaf.child_ref()));
+    let member = staging
+        .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&member_body))
+        .expect("a member");
+    let catalog = staging.nodes().clone();
+    lash_core_store::checkpoint_graph::node::register_immutable_catalog(&catalog);
+    let root_body = body(&|out| {
+        out.seq(2);
+        out.child(member.child_ref());
+        out.text("root");
+    });
+    let root = staging
+        .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&root_body))
+        .expect("a root");
+    let nodes = staging.into_nodes();
+
+    let tier = tier(false).await;
+    let installed = nodes.clone();
+    tier.store
+        .connection_for_testing()
+        .call(move |conn| {
+            crate::durable::install_staged(conn, &installed)
+                .map(|installed| installed.expect("the graph installs"))
+        })
+        .await
+        .expect("an install");
+    let session = lash_sansio::SessionId::parse("catalog-law").expect("a session id");
+    tier.foreign(ForeignWrite::RevisionRoot {
+        session: session.clone(),
+        revision: 1,
+        root: Some(root),
+    })
+    .await;
+    let owner = RootOwner::SessionRevision {
+        session,
+        revision: 1,
+    };
+    let hydrate = |limits: DecodeLimits| {
+        let owner = owner.clone();
+        let store = &tier.store;
+        async move { store.hydrate(owner, Some(root), limits).await }
+    };
+
+    let total: u64 = nodes.values().map(|node| node.len()).sum();
+    let graph = hydrate(DecodeLimits::within_total(total))
+        .await
+        .expect("the whole closure hydrates");
+    assert_eq!(graph.nodes.len(), nodes.len());
+    for (id, node) in &nodes {
+        assert_eq!(&*graph.nodes[id].bytes, &*node.bytes, "node {id:?}");
+    }
+    let limit = |dimension, actual, limit| {
+        Err::<(), _>(DurableError::Graph(GraphRefusal::DecodeLimit {
+            dimension,
+            actual,
+            limit,
+        }))
+    };
+    assert_eq!(
+        hydrate(DecodeLimits {
+            nodes: 2,
+            ..DecodeLimits::within_total(total)
+        })
+        .await
+        .map(drop),
+        limit(DecodeDimension::Nodes, 3, 2)
+    );
+    assert_eq!(
+        hydrate(DecodeLimits::within_total(total - 1))
+            .await
+            .map(drop),
+        limit(DecodeDimension::TotalBytes, total, total - 1)
+    );
+    let leaf_len = nodes[&leaf].len();
+    assert_eq!(
+        hydrate(DecodeLimits {
+            node_bytes: leaf_len - 1,
+            ..DecodeLimits::within_total(total)
+        })
+        .await
+        .map(drop),
+        limit(DecodeDimension::NodeBytes, leaf_len, leaf_len - 1)
+    );
+}

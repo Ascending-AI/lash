@@ -52,13 +52,18 @@ impl NodeId {
     /// The lowercase hex SQL key.
     #[must_use]
     pub fn to_hex(&self) -> String {
-        const HEX: &[u8; 16] = b"0123456789abcdef";
         let mut text = String::with_capacity(64);
-        for byte in self.0 {
-            text.push(char::from(HEX[usize::from(byte >> 4)]));
-            text.push(char::from(HEX[usize::from(byte & 0x0f)]));
-        }
+        self.write_hex(&mut text);
         text
+    }
+
+    /// Appends the lowercase hex SQL key to `out`.
+    pub fn write_hex(&self, out: &mut String) {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        for byte in self.0 {
+            out.push(char::from(HEX[usize::from(byte >> 4)]));
+            out.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
     }
 
     /// Reads a lowercase hex SQL key back. Uppercase is refused: one spelling.
@@ -286,79 +291,142 @@ pub fn check_envelope<'a>(
     parse_envelope(bytes, Some(expected))
 }
 
-/// Verified framing for one finite, immutable build catalog. Runtime data
-/// never enters this table, so it cannot grow with turns or stored values.
-struct ImmutableCatalog(BTreeMap<NodeId, VerifiedEnvelope>);
+/// The process's finite, immutable build catalog: its nodes' bytes by
+/// identity. Runtime data never enters it, so it cannot grow with turns or
+/// stored values. A member is checked (its digest and framing) the first
+/// time it is used, never at registration, so a process pays only for the
+/// members it reads; a member that does not check is never used.
+struct ImmutableCatalog(BTreeMap<NodeId, CatalogEntry>);
 
-struct VerifiedEnvelope {
+struct CatalogEntry {
+    id: NodeId,
     bytes: Arc<[u8]>,
+    /// The member's checked framing; none when its bytes do not check.
+    framing: OnceLock<Option<Framing>>,
+    /// Everything the member reaches; none when a node it reaches is not a
+    /// member that checks.
+    closure: OnceLock<Option<CatalogClosure>>,
+}
+
+struct Framing {
     kind: NodeKind,
     children_start: usize,
     children_len: usize,
     body_start: usize,
 }
 
-impl ImmutableCatalog {
-    fn check(nodes: &BTreeMap<NodeId, EncodedNode>) -> Result<Self, GraphRefusal> {
-        let mut checked = BTreeMap::new();
-        for (id, node) in nodes {
-            let envelope = check_envelope(&node.bytes, *id, &DecodeLimits::within_total(u64::MAX))?;
-            checked.insert(
-                *id,
-                VerifiedEnvelope {
-                    bytes: Arc::clone(&node.bytes),
+/// A member of the build catalog and every node it reaches, each a checked
+/// member: what a store holds once it holds the member.
+#[derive(Debug)]
+pub struct CatalogClosure {
+    nodes: Vec<EncodedNode>,
+}
+
+impl CatalogClosure {
+    /// The member first, then every node it reaches, each once.
+    #[must_use]
+    pub fn nodes(&self) -> &[EncodedNode] {
+        &self.nodes
+    }
+}
+
+impl CatalogEntry {
+    fn framing(&self) -> Option<&Framing> {
+        self.framing
+            .get_or_init(|| {
+                if self.bytes.len() as u64 > MAX_NODE_BYTES
+                    || NodeId::of_envelope(&self.bytes) != self.id
+                {
+                    return None;
+                }
+                let envelope = parse_framed(&self.bytes, Some(self.id)).ok()?;
+                Some(Framing {
                     kind: envelope.kind,
                     children_start: envelope.children.0.as_ptr().addr()
-                        - node.bytes.as_ptr().addr(),
+                        - self.bytes.as_ptr().addr(),
                     children_len: envelope.children.len() * 32,
-                    body_start: node.bytes.len() - envelope.body.len(),
-                },
-            );
-        }
-        Ok(Self(checked))
+                    body_start: self.bytes.len() - envelope.body.len(),
+                })
+            })
+            .as_ref()
     }
 
+    fn envelope<'a>(&self, bytes: &'a [u8]) -> Option<NodeEnvelope<'a>> {
+        let framing = self.framing()?;
+        let table = &bytes[framing.children_start..framing.children_start + framing.children_len];
+        Some(NodeEnvelope {
+            kind: framing.kind,
+            children: ChildTable(table.as_chunks::<32>().0),
+            body: &bytes[framing.body_start..],
+        })
+    }
+}
+
+impl ImmutableCatalog {
     fn get<'a>(&self, id: NodeId, bytes: &'a [u8]) -> Option<NodeEnvelope<'a>> {
-        let checked = self.0.get(&id)?;
-        if bytes != &*checked.bytes {
+        let entry = self.0.get(&id)?;
+        if bytes != &*entry.bytes {
             return None;
         }
-        let table = &bytes[checked.children_start..checked.children_start + checked.children_len];
-        Some(NodeEnvelope {
-            kind: checked.kind,
-            children: ChildTable(table.as_chunks::<32>().0),
-            body: &bytes[checked.body_start..],
-        })
+        entry.envelope(bytes)
+    }
+
+    fn closure(&self, id: NodeId) -> Option<&CatalogClosure> {
+        self.0
+            .get(&id)?
+            .closure
+            .get_or_init(|| {
+                let mut seen = std::collections::BTreeSet::new();
+                let mut nodes = Vec::new();
+                let mut pending = vec![id];
+                while let Some(id) = pending.pop() {
+                    if !seen.insert(id) {
+                        continue;
+                    }
+                    let entry = self.0.get(&id)?;
+                    let envelope = entry.envelope(&entry.bytes)?;
+                    pending.extend(envelope.children.iter());
+                    nodes.push(EncodedNode {
+                        id,
+                        bytes: Arc::clone(&entry.bytes),
+                    });
+                }
+                Some(CatalogClosure { nodes })
+            })
+            .as_ref()
     }
 }
 
 static IMMUTABLE_CATALOG: OnceLock<ImmutableCatalog> = OnceLock::new();
 
-/// Retains verified framing for the process's immutable build catalog.
-/// Every node is checked before installation; only byte-identical future
-/// reads reuse it. Exact byte equality proves the already-checked hash and
-/// framing; caller size limits still run on every checked read.
-///
-/// # Errors
-///
-/// Any refusal of [`check_envelope`].
-pub fn register_immutable_catalog(
-    nodes: &BTreeMap<NodeId, EncodedNode>,
-) -> Result<(), GraphRefusal> {
-    let checked = ImmutableCatalog::check(nodes)?;
-    let _ = IMMUTABLE_CATALOG.set(checked);
-    Ok(())
+/// Registers the process's immutable build catalog; the first registration
+/// wins. Nothing is checked here: [`check_envelope`] checks a member the
+/// first time it meets its exact bytes, and only a member that checked is
+/// reused. Caller size limits still run on every checked read.
+pub fn register_immutable_catalog(nodes: &BTreeMap<NodeId, EncodedNode>) {
+    let entries = nodes
+        .iter()
+        .map(|(id, node)| {
+            (
+                *id,
+                CatalogEntry {
+                    id: *id,
+                    bytes: Arc::clone(&node.bytes),
+                    framing: OnceLock::new(),
+                    closure: OnceLock::new(),
+                },
+            )
+        })
+        .collect();
+    let _ = IMMUTABLE_CATALOG.set(ImmutableCatalog(entries));
 }
 
-/// Shares an exact, verified member of the finite build catalog.
-/// Store caches use this to retain only immutable release data.
+/// The closure of build catalog member `id`, when every node it reaches is
+/// a member that checks. A store that holds the member holds all of it, so
+/// a reader takes its nodes from here rather than reading them back.
 #[must_use]
-pub fn immutable_catalog_node(id: NodeId, bytes: &[u8]) -> Option<EncodedNode> {
-    let checked = IMMUTABLE_CATALOG.get()?.0.get(&id)?;
-    (bytes == &*checked.bytes).then(|| EncodedNode {
-        id,
-        bytes: Arc::clone(&checked.bytes),
-    })
+pub fn immutable_closure(id: NodeId) -> Option<&'static CatalogClosure> {
+    IMMUTABLE_CATALOG.get()?.closure(id)
 }
 
 /// Parses an envelope without hashing it: magic, minimal varints, a
@@ -381,6 +449,11 @@ pub fn parse_envelope(
     {
         return Ok(envelope);
     }
+    parse_framed(bytes, node)
+}
+
+/// [`parse_envelope`] without the build catalog.
+fn parse_framed(bytes: &[u8], node: Option<NodeId>) -> Result<NodeEnvelope<'_>, GraphRefusal> {
     let refuse = |error| GraphRefusal::from_token(error, node, None);
     if bytes.len() < MAGIC.len() {
         return Err(if MAGIC.starts_with(bytes) {
@@ -468,18 +541,63 @@ mod catalog_tests {
 
     /// FIG-5894: memoized build envelopes cannot certify changed bytes under
     /// an old digest or conceal an out-of-range child slot under a new one.
+    /// FIG-5912: registration checks nothing, so a member whose bytes do not
+    /// check is never reused, and no closure reaches through it.
     #[test]
     fn a_catalog_only_reuses_byte_identical_verified_envelopes() {
         let child = NodeId([1; 32]);
         let bytes: Arc<[u8]> =
             write_envelope(NodeKind::FROZEN_VALUE, &[child.0], &[0x0b, 0]).into();
         let id = NodeId::of_envelope(&bytes);
-        let node = EncodedNode {
-            id,
-            bytes: bytes.clone(),
-        };
-        register_immutable_catalog(&BTreeMap::from([(id, node)])).unwrap();
+        let leaf: Arc<[u8]> = write_envelope(NodeKind::FROZEN_VALUE, &[], &[0]).into();
+        let leaf_id = NodeId::of_envelope(&leaf);
+        let parent: Arc<[u8]> =
+            write_envelope(NodeKind::FROZEN_VALUE, &[leaf_id.0], &[0x0b, 0]).into();
+        let parent_id = NodeId::of_envelope(&parent);
+        // Registered under a digest its bytes do not have.
+        let forged = NodeId([2; 32]);
+        let forged_parent: Arc<[u8]> =
+            write_envelope(NodeKind::FROZEN_VALUE, &[forged.0], &[0x0b, 0]).into();
+        let forged_parent_id = NodeId::of_envelope(&forged_parent);
+        let members = [
+            (id, bytes.clone()),
+            (leaf_id, leaf.clone()),
+            (parent_id, parent.clone()),
+            (forged, leaf.clone()),
+            (forged_parent_id, forged_parent.clone()),
+        ];
+        register_immutable_catalog(
+            &members
+                .iter()
+                .map(|(id, bytes)| {
+                    (
+                        *id,
+                        EncodedNode {
+                            id: *id,
+                            bytes: bytes.clone(),
+                        },
+                    )
+                })
+                .collect(),
+        );
         let catalog = IMMUTABLE_CATALOG.get().unwrap();
+        assert_eq!(
+            immutable_closure(parent_id)
+                .unwrap()
+                .nodes()
+                .iter()
+                .map(|node| node.id)
+                .collect::<Vec<_>>(),
+            vec![parent_id, leaf_id]
+        );
+        assert!(catalog.get(forged, &leaf).is_none());
+        assert_eq!(
+            check_envelope(&leaf, forged, &DecodeLimits::within_total(u64::MAX)).unwrap_err(),
+            GraphRefusal::HashMismatch(forged)
+        );
+        assert!(immutable_closure(forged).is_none());
+        assert!(immutable_closure(forged_parent_id).is_none());
+        assert!(immutable_closure(id).is_none(), "its child is no member");
         let copied = bytes.to_vec();
         let limits = DecodeLimits::within_total(u64::MAX);
         let envelope = check_envelope(&copied, id, &limits).expect("identical copied bytes");

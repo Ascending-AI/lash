@@ -84,6 +84,23 @@ pub struct ReleaseGraph {
 }
 
 impl ReleaseGraph {
+    /// Checks every node of every release this build holds, each once per
+    /// process: a host that installs the releases does it before its pool
+    /// is ready, so no turn checks them. A worker checks only what it reads.
+    ///
+    /// # Errors
+    ///
+    /// The refusal of a node that does not check: a defect of the build.
+    pub fn check(&self) -> Result<(), GraphStateFailure> {
+        for (id, node) in &self.nodes {
+            check_envelope(&node.bytes, *id, &DecodeLimits::within_total(u64::MAX))?;
+            if self.manifests.get(&id.child_ref()).is_some() {
+                let _ = lash_core_store::checkpoint_graph::node::immutable_closure(*id);
+            }
+        }
+        Ok(())
+    }
+
     /// The release manifest `release` names and every node it reaches, when
     /// this build holds it: what a park that pins it installs.
     #[must_use]
@@ -135,7 +152,6 @@ fn read_release_manifests() -> Result<ReleaseGraph, GraphStateFailure> {
         input.expect_struct(2).map_err(build_error)?;
         let id = NodeId(ChildRef::decode(&mut input).map_err(build_error)?.0);
         let bytes = input.bytes().map_err(build_error)?;
-        check_envelope(bytes, id, &DecodeLimits::within_total(u64::MAX))?;
         nodes.insert(
             id,
             EncodedNode {
@@ -145,7 +161,8 @@ fn read_release_manifests() -> Result<ReleaseGraph, GraphStateFailure> {
         );
     }
     input.finish().map_err(build_error)?;
-    lash_core_store::checkpoint_graph::node::register_immutable_catalog(&nodes)?;
+    // Each node is checked the first time a reader meets it.
+    lash_core_store::checkpoint_graph::node::register_immutable_catalog(&nodes);
     Ok(ReleaseGraph { manifests, nodes })
 }
 

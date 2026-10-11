@@ -28,6 +28,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
+use lash_core_store::checkpoint_graph::node::immutable_closure;
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, DecodeDimension, DecodeLimits, GraphRefusal, InstalledGraphMeasurement, NodeId,
     NodeSource, RootSource, StoredNode, check_envelope,
@@ -431,12 +432,42 @@ fn walk_within(
         if nodes.contains_key(&id) {
             continue;
         }
-        let cached = crate::conn::catalog::get(tx, id)?;
+        // A stored node's edges keep every child it names stored, and the
+        // child's own edges keep its children: a member of the build's
+        // catalog a stored node reaches is stored with all it reaches. Its
+        // bytes are the build's under their digests, so none is read back.
+        if id != root
+            && let Some(closure) = immutable_closure(id)
+        {
+            for node in closure.nodes() {
+                if nodes.contains_key(&node.id) {
+                    continue;
+                }
+                if let Err(refusal) = count(&nodes, &mut total, node.bytes.len(), limits) {
+                    return Ok(Err(refusal));
+                }
+                let len = node.bytes.len() as u64;
+                if len > limits.node_bytes {
+                    return Ok(Err(GraphRefusal::DecodeLimit {
+                        dimension: DecodeDimension::NodeBytes,
+                        actual: len,
+                        limit: limits.node_bytes,
+                    }));
+                }
+                nodes.insert(
+                    node.id,
+                    HydratedNode {
+                        encoding: BlobEncoding::Graph,
+                        bytes: std::sync::Arc::clone(&node.bytes),
+                    },
+                );
+            }
+            continue;
+        }
         // A reader of the graph alone records an opaque blob as opaque and
         // reads nothing of it.
         if let Some(skipped) = skipped.as_deref_mut()
             && id != root
-            && cached.is_none()
         {
             match stored_encoding(tx, &id)? {
                 Ok(Some(BlobEncoding::Opaque)) => {
@@ -447,46 +478,56 @@ fn walk_within(
                 Err(refusal) => return Ok(Err(refusal)),
             }
         }
-        let (bytes, encoding) = match cached {
-            Some(node) => (node.bytes, BlobEncoding::Graph),
-            None => {
-                let Some((bytes, encoding)) = (match stored_blob(tx, &id.to_hex())? {
-                    Ok(found) => found,
-                    Err(refusal) => return Ok(Err(refusal)),
-                }) else {
-                    return Ok(Err(GraphRefusal::MissingNode(id)));
-                };
-                (std::sync::Arc::<[u8]>::from(bytes), encoding)
-            }
+        let Some((bytes, encoding)) = (match stored_blob(tx, &id.to_hex())? {
+            Ok(found) => found,
+            Err(refusal) => return Ok(Err(refusal)),
+        }) else {
+            return Ok(Err(GraphRefusal::MissingNode(id)));
         };
-        let count = nodes.len() as u64 + 1;
-        total = total.saturating_add(bytes.len() as u64);
-        if count > limits.nodes {
-            return Ok(Err(GraphRefusal::DecodeLimit {
-                dimension: DecodeDimension::Nodes,
-                actual: count,
-                limit: limits.nodes,
-            }));
-        }
-        if total > limits.total_bytes {
-            return Ok(Err(GraphRefusal::DecodeLimit {
-                dimension: DecodeDimension::TotalBytes,
-                actual: total,
-                limit: limits.total_bytes,
-            }));
+        if let Err(refusal) = count(&nodes, &mut total, bytes.len(), limits) {
+            return Ok(Err(refusal));
         }
         if encoding == BlobEncoding::Graph {
             match check_envelope(&bytes, id, limits) {
-                Ok(envelope) => {
-                    stack.extend(envelope.children.iter());
-                    crate::conn::catalog::remember(tx, id, &bytes)?;
-                }
+                Ok(envelope) => stack.extend(envelope.children.iter()),
                 Err(refusal) => return Ok(Err(refusal)),
             }
         }
-        nodes.insert(id, HydratedNode { encoding, bytes });
+        nodes.insert(
+            id,
+            HydratedNode {
+                encoding,
+                bytes: bytes.into(),
+            },
+        );
     }
     Ok(Ok(nodes))
+}
+
+/// Counts one more node of `bytes` against `limits`, beside `nodes`.
+fn count(
+    nodes: &BTreeMap<NodeId, HydratedNode>,
+    total: &mut u64,
+    bytes: usize,
+    limits: &DecodeLimits,
+) -> Result<(), GraphRefusal> {
+    let count = nodes.len() as u64 + 1;
+    *total = total.saturating_add(bytes as u64);
+    if count > limits.nodes {
+        return Err(GraphRefusal::DecodeLimit {
+            dimension: DecodeDimension::Nodes,
+            actual: count,
+            limit: limits.nodes,
+        });
+    }
+    if *total > limits.total_bytes {
+        return Err(GraphRefusal::DecodeLimit {
+            dimension: DecodeDimension::TotalBytes,
+            actual: *total,
+            limit: limits.total_bytes,
+        });
+    }
+    Ok(())
 }
 
 pub(super) fn hydrate_in(
@@ -710,16 +751,15 @@ pub(super) fn install(
     // One statement checks every node referenced without being supplied,
     // one installs every supplied node, one reads back those already stored
     // and one writes the fresh nodes' edges, whatever their number.
-    let named: BTreeSet<String> = graph
+    let named: BTreeSet<&NodeId> = graph
         .external
         .iter()
         .chain(graph.external_roots.iter())
-        .map(NodeId::to_hex)
         .collect();
     if !named.is_empty() {
         let mut present = BTreeMap::new();
         let mut statement = tx.prepare_cached(SQL.sqlite.stored_encodings.sql())?;
-        let rows = statement.query_map([json_array(&named)], |row| {
+        let rows = statement.query_map([digest_array(named)], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
         for row in rows {
@@ -753,22 +793,14 @@ pub(super) fn install(
     // bytes bound as they are. An unchanged graph costs the same statements
     // at any size. A writer holds the database, so what is not stored now
     // is inserted.
-    let mut staged = BTreeMap::new();
     let mut present = BTreeSet::new();
-    for node in &graph.nodes {
-        if crate::conn::catalog::get(tx, node.id)?.is_some_and(|stored| stored.bytes == node.bytes)
-        {
-            present.insert(node.id.to_hex());
-        } else {
-            staged.insert(node.id.to_hex(), node);
-        }
-    }
+    let staged: BTreeMap<NodeId, _> = graph.nodes.iter().map(|node| (node.id, node)).collect();
     {
         let mut statement = tx.prepare_cached(SQL.sqlite.stored_nodes.sql())?;
-        let mut rows = statement.query([json_array(&staged.keys().collect::<Vec<_>>())])?;
+        let mut rows = statement.query([digest_array(staged.keys())])?;
         while let Some(row) = rows.next()? {
             let hash: String = row.get(0)?;
-            let Some(node) = staged.get(&hash) else {
+            let Some(node) = NodeId::from_hex(&hash).and_then(|id| staged.get(&id)) else {
                 continue;
             };
             if answer!(Ok::<_, rusqlite::Error>(encoding_of(row.get(2)?))) != BlobEncoding::Graph {
@@ -777,49 +809,60 @@ pub(super) fn install(
             if row.get_ref(1)?.as_blob()? != &node.bytes[..] {
                 return Ok(Err(GraphRefusal::ContentConflict(node.id)));
             }
-            present.insert(hash);
+            present.insert(node.id);
         }
     }
-    let mut inserted = BTreeSet::new();
-    for (hash, node) in &staged {
-        if present.contains(hash) {
+    let mut insert = tx.prepare_cached(SQL.graph.insert_blob.sql())?;
+    let mut hash = String::with_capacity(64);
+    let mut edges = String::from("[");
+    for node in staged.values() {
+        if present.contains(&node.id) {
             continue;
         }
-        cached_execute(
-            tx,
-            SQL.graph.insert_blob.sql(),
-            rusqlite::params![hash, &node.bytes[..], BlobEncoding::Graph as i64],
-        )?;
-        inserted.insert(hash.clone());
-    }
-    let mut edges = Vec::new();
-    for node in &graph.nodes {
-        let parent = node.id.to_hex();
-        if !inserted.contains(&parent) {
-            continue;
-        }
+        hash.clear();
+        node.id.write_hex(&mut hash);
+        insert.execute(rusqlite::params![
+            hash.as_str(),
+            &node.bytes[..],
+            BlobEncoding::Graph as i64
+        ])?;
         installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
         installed.new_nodes += 1;
         installed.sql_logical_bytes += blob_row_logical_bytes(node.bytes.len() as u64);
         for child in &node.children {
-            edges.push((parent.clone(), child.to_hex()));
+            if edges.len() > 1 {
+                edges.push(',');
+            }
+            edges.push_str("[\"");
+            edges.push_str(&hash);
+            edges.push_str("\",\"");
+            child.write_hex(&mut edges);
+            edges.push_str("\"]");
             installed.new_edges += 1;
             installed.sql_logical_bytes += EDGE_ROW_LOGICAL_BYTES;
         }
     }
-    if !edges.is_empty() {
-        cached_execute(tx, SQL.sqlite.insert_edges.sql(), [json_array(&edges)])?;
+    if edges.len() > 1 {
+        edges.push(']');
+        cached_execute(tx, SQL.sqlite.insert_edges.sql(), [edges])?;
     }
     Ok(Ok(installed))
 }
 
-/// `values` as one JSON array, the binding a `json_each` statement reads.
-fn json_array(values: &impl serde::Serialize) -> String {
-    #[expect(
-        clippy::expect_used,
-        reason = "strings and pairs of strings always encode as JSON"
-    )]
-    serde_json::to_string(values).expect("a list of digests encodes")
+/// `ids` as one JSON array of digests, the binding a `json_each`
+/// statement reads.
+fn digest_array<'a>(ids: impl IntoIterator<Item = &'a NodeId>) -> String {
+    let mut array = String::from("[");
+    for id in ids {
+        if array.len() > 1 {
+            array.push(',');
+        }
+        array.push('"');
+        id.write_hex(&mut array);
+        array.push('"');
+    }
+    array.push(']');
+    array
 }
 
 fn retire_pin(tx: &Connection, pin: &ReadPin) -> rusqlite::Result<bool> {
