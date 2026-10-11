@@ -1,227 +1,111 @@
-# E2E Scenario: Workbench Chat Projection Integrity
+# E2E Scenario: Composer and Mail-Trigger Notice Projection
 
-Read [../RULES.md](../RULES.md) before running this scenario. Its browser,
-checkpoint, three-layer reconciliation, real-token, Abort/RCA and teardown
-rules apply here.
+> Read [../RULES.md](../RULES.md) and the
+> [host-trigger evidence procedure](../host-trigger-evidence.md) first.
 
-**Purpose.** Judge the real-provider conversation across one composer send,
-a watcher registration, one button wake and a reload. FIG-972 requires one
-UI-owned user row for an opening input, correlated to committed input by
-`provenance.turn_id`. FIG-984 requires one committed marked reply per settled
-turn, independent of its termination or writer. Reasoning alongside a reply
-must not hide the answer (FIG-1406).
+**Purpose.** Judge whether a composer input and a host process-end notice each
+project once, with their committed identities and order preserved across the
+API, observation replay, rendered timeline and reload. Keep code, reasoning,
+and nested tool summaries attached to their canonical parent rows.
 
-The canonical source is `lash::transcript`. `/api/state.transcript` carries one
-record for every retained committed node, including named suppressions. Visible
-kinds are `user`, `assistant_reply`, `reasoning`, `tool_call`, `code_block`,
-`attachment` and `event`. Each record carries an opaque node-backed `row_id`,
-recorded `timestamp`, typed `provenance` and neutral `content`. The DOM tags all
-pieces of a canonical row with `data-transcript-row-id` and `data-turn-id`.
-The UI retains its own opening-input identity and attachments; compare its
-canonical DOM tag with the committed node rather than its product message ID.
+**Tier.** Economy, `deepseek/deepseek-v4-flash`, TypeScript, SQLite. Composer
+and registration turns call the live provider; mail injection is host-driven.
+Run this row exactly once.
 
-Settled answers consume `provenance.is_turn_reply`. They never select a reply
-by part kind, ID spelling, output accessor or protocol payload. Live prose,
-reasoning, code and tool activity are provisional. Settlement replaces the
-matching turn's preview with canonical rows; a retry reset retracts abandoned
-output. Reload renders those same records. Tool summaries retain only neutral
-operation/status facts, with an explicit omitted count; unavailable arguments,
-results, duration and stable live-call identity are not reconstructed.
+## Golden rules
 
-Deterministic Surfaces A–E are enforced by
-[scripts/workbench-transcript-projection-e2e.py](../../scripts/workbench-transcript-projection-e2e.py)
-and the shared production-JavaScript harness. This judged runbook owns the
-real-provider Phases 0–4 below.
+1. Canonical truth is `/api/state.transcript[]`. Preserve each `row_id`, typed
+   provenance and suppression decision. A model can emit more than one code or
+   reasoning row; reconcile actual identities rather than pinning those counts.
+2. A composer input commits one user row and its run one sealed assistant
+   reply. A process-end notice also commits a user row: identify it by
+   `process-end:<pid>` and its input/run provenance. Do not classify its text
+   as a composer action or discard it from the count.
+3. Reconcile the ordered visible canonical rows with the DOM and observation
+   replay after every settle. Record provisional drafts and ingress receipts
+   separately. No duplicate, missing or reordered row earns credit.
+4. Reload preserves every canonical row identity and content, including code
+   and reasoning. Compare order as well as cardinality.
+5. Compare nested tool summaries under `.code-tools > .tool`. An empty
+   execution output cannot justify losing its reasoning or terminal reply.
 
-## Scenario-specific golden rules
+## Deterministic companions
 
-1. **Count rows, never read prose.** A rendered row is a `#timeline .message` element; its
-   role is the `user` / `assistant` class, not the visible `you` / `agent` label. Two rows
-   whose bodies are byte-identical are still two rows — identical text is the defect
-   signature, never an excuse to merge them.
-2. **Reconcile all three layers at every step, and record the split.** Per
-   [../RULES.md](../RULES.md), rendered DOM vs durable state vs logs must agree. Do not stop
-   at "the DOM has two rows": determine whether the store has one committed assistant
-   message (a **render** defect) or two (a **commit** defect projected faithfully), and
-   whether the trace shows one execution or two. That split *is* the diagnosis and decides
-   the pipeline stage the RCA names. Apply the narrow settlement exception in
-   `RULES.md` for a journal-first process-command refusal: the attempt frame/trace preserves
-   the provider value while the intent outcome and turn/API/DOM projection carry the typed
-   refusal. Count that exact, identity-matched two-row settlement as designed behavior.
-3. **One turn execution per unit of work.** Exactly one `turn_completed` trace record per
-   composer send and exactly one per Red press. Extra assistant rows over one
-   `turn_completed` are projection duplication; extra `turn_completed` records are a
-   scheduler or wake-delivery fault, a different failure with a different owner.
-4. **A wake adds no user row.** The Red press is a host event, not a chat input. The wake
-   turn must add exactly one assistant row and leave the user-row count unchanged. A new
-   `you` row for a button press is a projection failure.
-5. **Settle by stability, not by a sleep.** After the `turn_completed` and idle gates, poll
-   until the row and message counts are unchanged across several consecutive samples before
-   counting. A duplicate that lands a second late must still be caught; a fixed sleep either
-   misses it or passes by luck.
-6. **Reload must preserve every durable identity.** The post-reload message/reasoning/code
-   multiset must equal the settled pre-reload multiset exactly. Tool details use the narrower
-   durable contract above: retained source operation/outcome summaries plus an explicit omitted
-   count. Backfill is a second, independent projection of committed state; never manufacture
-   unavailable live fields to make the two paths look identical.
-7. **Scope everything to one session id.** Shift `/?session_id=<S>` and scope every read —
-   `/api/state?session_id=<S>`, the `graph_nodes.session_id` filter, the product-event map
-   key, and the trace's `context.session_id` — to that id. An unscoped read mixes other
-   tabs' conversations into the counts and voids the run.
-8. **Use the browser dispatch hook for event identity.** Before navigation, install
-   `window.__LASH_WORKBENCH_TURN_EVENT_HOOK__ = (event, turnId) => ...` and record a deep copy
-   of every call. Correlate DOM checkpoints to that buffer. Trace vocabulary is corroboration,
-   not the event-side answer key.
-9. **Count nested tool rows where they live.** For each code block record
-   `code.querySelectorAll(":scope > .tool")`, each badge, and each available call id from the
-   hook. A timeline-child count cannot see tools. One live call must produce one child before
-   and after completion even when `call_id` is absent. Reload must reproduce each retained source
-   operation/outcome summary and one explicit `calls_omitted` row when the ledger overflowed;
-   arguments, results, duration, and stable call identity must remain unavailable.
-10. **Separate live from settled classes.** Capture transient retry/client-error/running rows at
-    their named checkpoint. For the reload identity gate compare only the settled histogram,
-    after `Done`, idle, empty `active_turns`, and count stability. Retry rows are turn-owned: a
-    delayed `Done` for turn A must not clear turn B's retry row.
+```sh
+kiln test //examples/agent-workbench:agent-workbench__unit_test \
+  --test_arg=tests::projection_suites_tests::canonical_rows_survive_every_registered_production_renderer \
+  --test_arg=tests::host_primitives_tests::a_process_end_notice_retried_after_a_lost_acknowledgement_reaches_the_session_once
+```
 
-## Deterministic projection proof
+Expect **2 executed, 2 passed**. The renderer law executes the registered
+production blocks against a durable transcript fixture. The host law resends
+notices after a lost cursor acknowledgement and checks one committed notice,
+with no second pending input. Shared laws already run for another row in this
+shift are cited by their receipt, not executed twice. Neither companion
+claims that a paid browser journey ran.
 
-Surfaces A–E are enforced by the scripted transcript projection gate. The
-shared production-renderer harness checks canonical row identity, content,
-suppression and typed input correlation. The deterministic Playwright scenario
-reconciles DOM, `/api/state`, and graph nodes before and after reload and a
-frame switch. CI runs this as the transcript projection functional gate.
+## Phase 0 — Boot and scope
 
-This judged runbook retains the real-provider Phases 0–4 below.
+Use the shared setup, create Work, and open one explicit session. Require an
+empty canonical transcript and rendered timeline. Save `00-startup.json`,
+`00-state.json`, and `00-scoped-empty.png`. Start a bounded observation replay
+capture using the same session id and retain its cursor identities.
 
-## Working material
+## Phase 1 — Composer
 
-- Require `OPENROUTER_API_KEY`. Boot an empty, port-isolated stack with
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`
-  (or `bash scripts/agent-workbench-dev.sh up --port <port>` with the same environment).
-  Gate `GET /healthz` → 200. Teardown on success or Abort is
-  `just agent-workbench-down <port>`.
-- Pick one run session id `<S>` = `runbook-chatproj-<run-id>` and open `/?session_id=<S>`.
-  Gate the rendered session id and `/api/state?session_id=<S>.settings.session_id` against
-  `<S>` before sending anything.
-- UI affordances: the chat composer and its **send** control, the transcript timeline, the
-  running/idle pill, and the left-sidebar **RED** trigger button.
-- **Layer 1 — rendered DOM:** `#timeline .message.user` and `#timeline .message.assistant`
-  row counts, plus each row's body text. The live stream renders a streaming assistant draft
-  that is replaced when the committed copy arrives; only count after the settle gate, or a
-  draft inflates the count.
-- **Layer 2 — durable state:** read `/api/state?session_id=<S>.transcript` and
-  `<data-dir>/lash-sessions.db`, table `graph_nodes`, filtered by
-  `session_id = <S> AND tombstoned = 0`, ordered by generation. Require an exact
-  node/row ID and timestamp match, including suppressed records. Count visible
-  `user` rows and marked `assistant_reply` rows; raw assistant protocol records
-  may be suppressed. Match DOM pieces using their canonical row tags and typed
-  turn provenance. Record `/api/state.messages` and the session's product-event
-  log as host evidence; host IDs may differ from canonical row IDs.
-- **Layer 3 — logs:** the trace file, which is `$AGENT_WORKBENCH_TRACE` whenever that variable
-  is set and only otherwise `<data-dir>/trace.jsonl`; reading the wrong one yields empty record
-  lists that look like a product failure. Records with
-  `context.session_id == <S>`. Count `type == "turn_completed"`; `context.turn_id` names the
-  execution and distinguishes a composer turn (`workbench-turn-…`) from a wake
-  (`workbench-queued-…`).
-- Role vocabulary differs per surface: the store writes `User` / `Assistant`, the API
-  `user` / `assistant`, the DOM classes `user` / `assistant` under `you` / `agent` labels.
-  Normalize role before comparing; never treat a label difference as content drift.
+Send a prompt asking for a short calculation and the marker
+`PROJECTION-COMPOSER-<run-id>` in the answer. Settle. Require one committed
+composer input and one sealed reply containing that marker in the API and
+DOM. Compare every actual canonical row and its order, including any reasoning
+and code. Save `01-state.json`, `01-dom.json`, `01-replay.json`, a trace extract,
+and `01-composer.png`.
 
-Save every named artifact and API/store/trace extract under the run's artifact directory.
+## Phase 2 — Register, then inject one mail occurrence
 
-## Phase 0 — Boot and scope one session
+Ask the agent to register **projection-watch** on the mail source, with a
+short process returning the event title and no mail-sending effect. Ask it to
+acknowledge a later process-end notice briefly through `chat.reply`. Settle,
+require exactly one owned registration, and reconcile the new composer input,
+registration code and sealed reply. Save `02-registration.json`,
+`02-registered-state.json`, and `02-registered.png`.
 
-Boot, gate `/healthz`, and open `/?session_id=<S>`. Require the composer, the RED trigger
-button, an empty transcript, the rendered session id `<S>`, and
-`/api/state?session_id=<S>` reporting `settings.session_id == <S>` with empty `messages`
-and empty `active_turns`. All three layers start at zero: no `graph_nodes` conversation
-rows, no `<S>` key in the product-event log, no `<S>` turn or conversation trace records
-(periodic `/api/work` responses are expected and allowed). Screenshot
-`00-scoped-empty.png`.
+Deliver `PROJECTION-MAIL-<run-id>` once through Accounts. Require one source
+occurrence, one binding to the captured subscription, and one successful
+process await result. Save `02-delivery.json` and `02-mail.png`.
+Settle its notice: exactly one new user row beginning
+`Triggered process <pid> ended:`, one admitted input under `process-end:<pid>`,
+and one sealed answer for that run. The two prior composer answers survive.
+Compare the full ordered canonical/API, replay and rendered rows; save
+`02-notice-state.json`, `02-notice-dom.json`, `02-notice-replay.json`, the trace
+extract and `02-notice.png`. The inbox injection itself is not a chat user row.
 
-## Phase 1 — One composer send, one pair of rows
+If an identity or projection gate fails, capture row ids, provenance, pending
+inputs, host bindings and DOM identities before Abort. Never repair the
+projection or continue to reload as though the preceding gate passed.
 
-Send one short turn containing a unique literal marker, e.g.
-`Reply with exactly this and nothing else: FIG985-PLAIN-<run-id> acknowledged`.
+## Phase 3 — Reload
 
-Gate, in order: one `turn_completed` for `<S>`; the idle pill and empty `active_turns`; then
-the settle gate. Now require **exactly**:
+Save all canonical row ids and content, then reload with
+`wait_until="domcontentloaded"`. Wait for snapshot recovery, settle, and
+require the same ordered visible rows in state and DOM. Suppressed rows remain
+suppressed; code tool summaries and reasoning retain their parent identity.
+Save `03-state.json`, `03-dom.json`, `03-identity-comparison.json`, and
+`03-reloaded.png`.
 
-- 1 rendered `.message.user` row and 1 rendered `.message.assistant` row;
-- 1 `user` and 1 `assistant` message in `/api/state.messages`;
-- 1 visible canonical `user` and 1 marked `assistant_reply`, each backed by its graph node;
-- 1 `turn_completed` record.
+## Phase 4 — Stop and score
 
-Record every message id at each layer. This is the FIG-972 regression gate: a second `you`
-row, or a second committed `User` message for one send, fails it. Screenshot
-`01-one-send.png` and save the four extracts as `01-one-send-{dom,state,store,trace}.json`.
-
-## Phase 2 — Register the watcher, then press RED once
-
-**2a — register.** Send `Let me know when I press a button` and let the agent register the
-button watcher. Gate a second `turn_completed`, idle, and the settle gate, then require the
-same invariant cumulatively: 2 user rows, 2 assistant rows, 2 committed pairs, 2
-`turn_completed`. Screenshot `02-watcher-registered.png`. A duplicate here is already a
-failure — do not press RED to "get to the real test".
-
-**2b — one press, one wake.** Press the **RED** button **exactly once**. Gate a
-`turn_completed` whose `context.turn_id` starts with `workbench-queued-`, then idle, then
-the settle gate. Require **exactly**:
-
-- the user-row count **unchanged** at 2 (golden rule 4);
-- 3 rendered `.message.assistant` rows — one new row, not two;
-- 3 `assistant` messages in `/api/state.messages` and 3 marked canonical replies,
-  each matched to a committed graph node;
-- 3 `turn_completed` records — one wake, not two.
-
-Read the wake's canonical reply using its typed turn provenance. Its text must
-appear in exactly one agent row even when reasoning accompanies it. Re-read the
-previous replies: a wake must neither duplicate its answer nor hide an earlier
-answer. Record row IDs, provenance, content and source node IDs in
-`03-red-press-{dom,state,store,trace}.json`. Screenshot
-`03-after-red-press.png` with the newest rows visible.
-
-On a surplus row, capture its canonical DOM tag and corresponding API/node
-records in `03-duplicate-ids.json`. Use typed provenance and the recorded writer
-to attribute it. A duplicate committed reply is a terminalization defect; extra
-DOM pieces beyond the canonical renderer contract are a projection defect.
-Preserve any mismatch between the layers in the RCA.
-
-## Phase 3 — Reload and require an identical multiset
-
-Record the pre-reload row multiset (role class + body text per row). Reload the page, gate
-the rendered session id and the settle gate, and require:
-
-- the post-reload row multiset **equals** the pre-reload multiset;
-- the per-role counts still equal Phase 2b's store and trace counts;
-- no reload-only and no live-only row.
-
-After settlement both the live page and reload consume canonical rows; their
-identity, content and class multisets must agree. Screenshot `04-after-reload.png` and save
-both multisets as `04-reload-multiset.json`.
-
-## Phase 4 — Teardown and score
-
-Run `just agent-workbench-down <port>` and confirm the workbench is gone.
+Use the shared teardown on success or Abort. Fill the scorecard and judge
+whether the composer reply and host notice are presented clearly as distinct
+inputs without concealing canonical rows or inventing duplicate ones.
 
 | Item | Objective gate | Verdict | Evidence |
-|------|----------------|---------|----------|
-| Boot/scope | `/healthz` 200; rendered and API session id both `<S>`; all three conversation layers empty | | `00-scoped-empty.png` |
-| One send, one pair | 1 user + 1 assistant row = 1+1 API = 1+1 store = 1 `turn_completed` | | `01-one-send.png`, `01-one-send-*.json` |
-| Watcher registration | cumulative 2+2 rows = 2+2 API = 2+2 store = 2 `turn_completed` | | `02-watcher-registered.png` |
-| One press, one wake | exactly 1 `workbench-queued-` `turn_completed`; user rows unchanged | | `03-red-press-trace.json` |
-| One press, one new agent row | 3 assistant rows = 3 API = 3 store = 3 `turn_completed` | | `03-after-red-press.png`, `03-red-press-*.json` |
-| Reasoned wake reply | the marked wake reply renders in exactly one agent row and in `/api/state.messages`, with its reasoning retained | | `03-red-press-{dom,state,store}.json` |
-| Reload identity | post-reload row multiset equals pre-reload multiset | | `04-after-reload.png`, `04-reload-multiset.json` |
-| Three-layer cross-check | every step reconciles DOM vs durable vs trace pairwise; no mismatch normalized away | | all four extracts per phase |
-| Duplicate attribution | on any surplus row, canonical DOM tags, row/node IDs, typed provenance and writers are recorded | | `03-duplicate-ids.json` |
-
-**Aggregate:** did every unit of conversational work — two composer sends and one button
-press — project into exactly one rendered row per role, identically on the live and reload
-paths, with the rendered DOM, the durable session graph, the state and product-event
-projections, and the turn trace all agreeing on how many messages and how many executions
-the session contains?
-
----
-
-_Stop triggers and the Abort/RCA + reporting protocol are in [../RULES.md](../RULES.md)._
+| --- | --- | --- | --- |
+| Boot/scope | judged model/dialect/store, explicit session, empty state and timeline | | `00-*` |
+| Composer projection | one input, one sealed marker reply; all canonical rows agree | | `01-*` |
+| Registration | one owned mail subscription; registration turn projects once | | `02-registration.json`, `02-registered-*` |
+| Mail delivery | one occurrence and process binding; successful title output | | `02-delivery.json`, `02-mail.png` |
+| Notice projection | one committed notice input and sealed reply; prior answers retained | | `02-notice-*`, trace |
+| Identity/order parity | canonical state, replay and rendered identities/content agree | | phase extracts |
+| Reload | identical ordered visible canonical rows, reasoning and code summaries | | `03-*` |
+| Companions | two named laws executed and passed, reusing shared receipt | | Kiln receipt |
+| Teardown and cost | host stopped; recorded live model usage/cost | | run receipt |

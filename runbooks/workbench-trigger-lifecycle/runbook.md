@@ -1,328 +1,122 @@
-# E2E Scenario: Workbench Trigger Lifecycle Beyond First Fire
+# E2E Scenario: Workbench Host-Trigger Lifecycle
 
-> **Read [../RULES.md](../RULES.md) first** — especially browser automation, polling,
-> named-checkpoint screenshots, real-token use, port-derived stacks, Abort/RCA, and
-> teardown ownership. This scenario extends the inbox world from
-> [../workbench-inbox-world/runbook.md](../workbench-inbox-world/runbook.md).
+> Read [../RULES.md](../RULES.md) and the
+> [host-trigger evidence procedure](../host-trigger-evidence.md) first.
 
-**Purpose.** Prove that a mail-triggered forwarding concierge remains safe and operable
-after its first delivery: it fires repeatedly without looping, can be disabled and
-re-enabled, can be deleted, and handles a fire during a foreground turn without taking
-over that turn's ingress.
+**Purpose.** Judge repeated mail delivery, a notice during a foreground turn,
+restart recovery, and removal of a host subscription. The workbench owns mail
+and cron sources; Lash supplies process starts, pinned definitions and one
+session ingress. [ADR 0139](../../docs/adr/0139-the-lash-vm-is-a-dialect-free-kernel.md)
+defines the kernel executing the authored definitions.
 
-**Mid-turn contract.** Trigger occurrence dispatch and its durable process may run while
-the session has a foreground turn. Any resulting session wake is durable queued work; it
-must not submit a competing turn while that foreground turn owns ingress. The session's
-engine claims that queued work at either legal boundary: `active_turn_checkpoint` while
-the foreground turn still owns ingress, or `idle` once that run settles. An
-`active_turn_checkpoint` claim is part of the current turn; an `idle` claim starts the
-next run. The workbench submits nothing itself: the wake is scheduled by lash, and the
-page's active-turn claim is released by `terminalize_turn_execution` in
-[`turns.rs`](../../examples/agent-workbench/src/turns.rs) once the followed run
-settles. The deterministic companion gate is
-`tests::button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn` in
-[`trigger_lifecycle.rs`](../../examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs).
+**Tier.** Economy, `deepseek/deepseek-v4-pro`, TypeScript, SQLite.
+One judged run; count process bindings and committed inputs rather than model prose.
 
-**Real tokens.** OpenRouter authors and runs the trigger process. No exact model prose or
-exact generated TypeScript is an answer key; the trigger API, inbox API, active-turn API,
-and work registry are.
+## Golden rules
 
-## Scenario-specific golden rules
+1. Capture the list record's `id` and `owner_session`; every fire and removal
+   must concern that subscription. An unrelated turn cannot replace it.
+2. One occurrence and subscription bind exactly one process; one process end
+   admits exactly one notice input under `process-end:<pid>`.
+3. A foreground turn retains one ingress owner while process work starts.
+   Inspect pending notice admission and its eventual committed row; no client
+   may manufacture a competing foreground turn.
+4. Only pinned rows dispatch. Removal stops dispatch before releasing the pin.
+5. A normal restart is continuity evidence. The deterministic companion owns
+   the precise crash between start and bind; a graceful restart cannot prove it.
+6. No delivery to the removed id after deletion. Use host-table evidence and
+   the causal fence, not an unscoped work-list count.
 
-1. **Capture the registration reference key.** After registration, save
-   `GET /api/triggers`. Every lifecycle mutation must affect that same
-   `subscription_key` and `subscription_id`; a replacement registration is not evidence of
-   re-enable. Disable and re-enable advance the record's `revision` (1 → 2 → 3) while both
-   identities stay fixed, so compare identities across a mutation and reserve
-   byte-for-byte equality for the unrelated-turn probe in Phase 1.
-2. **Silence means no delivery and no work.** For disabled and deleted probes, require
-   both no personal-inbox copy and no new process id. Use the completed causal-fence turn
-   described below; never use a blind sleep as evidence of absence. **Read the process-id
-   set from the session-scoped `GET /api/work?session_id=<session-id>`.** The default,
-   unscoped form serves the runtime-wide snapshot with `retired_since_ms = now - 10_000`
-   (`list_work` in [`routes.rs`](../../examples/agent-workbench/src/main_sections/routes.rs)),
-   so it drops terminal rows about ten seconds after they settle and a baseline taken from
-   it shrinks on its own between probes.
-3. **Count copies, not prose.** Each enabled work-inbox marker must produce exactly one
-   personal-inbox copy. The concierge may also run once for its own personal-inbox
-   emission and no-op on its account filter. That bounded extra run is the loop-breaker
-   working; a second copy or an unbounded-growing work rail is a failure.
-4. **Mid-turn work may start, ingress may not fork.** During the overlap gate, the
-   original turn address must remain the only entry in `active_turns` while `/api/work`
-   gains the trigger process. A second active address is an ingress-seam violation.
-5. **UI and API lifecycle state must agree.** The registration rail's action and enabled
-   styling must match `GET /api/triggers`. After deletion, the subscription key must be
-   absent from both surfaces.
-6. **Source text is not desired state.** After registration, an unrelated chat/code turn
-   and a later source version without the registration declaration must leave the captured
-   subscription unchanged. Only the explicit disable, re-enable, and delete operations in
-   this scenario may change it.
-7. **The captured contract, not the live catalog, is what delivery honours.** A
-   registration pins the source contract and provider route it was admitted against
-   (FIG-2913). Re-linking the module or editing the source catalog between fires must not
-   change how an existing subscription validates its occurrences or where it routes; a
-   fire after such an edit is evidence only if it still matches the captured contract. A
-   subscription registered before this capture landed is refused at decode, so this
-   scenario always boots a fresh, empty data dir — never a store carried over from an
-   earlier build.
+## Deterministic companions
 
-## Working material
+Run each full selector once on the workbench's SQLite unit target:
 
-- Require `OPENROUTER_API_KEY`. Boot an empty, port-isolated stack with
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`.
-  Gate `GET /healthz` → 200. Teardown is
-  `bash scripts/agent-workbench-dev.sh down --port <port>` with the same env, on success or
-  Abort. (The `just agent-workbench` / `just agent-workbench-down` recipes name the same
-  operations but do not carry this row's environment.)
-- UI affordances: chat/accounts tabs (`button.view-tab[data-view="chat"]` /
-  `button.view-tab[data-view="accounts"]`), account cards and compose forms
-  (`form.account-compose`), transcript,
-  running/idle pill, right-hand work rail, and left-hand **registrations** rail with
-  **disable**, **re-enable**, and **delete**. Adding an account submits only on **Enter** in
-  `#accountNameInput`: the input overlays its own submit button and intercepts the click.
-  Two `.view-tabs` containers exist in the DOM, one zero-sized, so a
-  `button.view-tab[data-view=…]` selector resolves to two elements and a naive click times
-  out on the invisible one — select the visible one explicitly.
-- Backend truth: `GET /api/state`, `GET /api/triggers`,
-  `PUT /api/triggers/{subscription_key}/enabled` with `{ "enabled": false|true }`,
-  `DELETE /api/triggers/{subscription_key}`, `GET /api/accounts/{slug}/inbox`,
-  `GET /api/work`, and `GET /api/work/{process_id}/await`.
-- The account compose form posts mail to `/api/accounts/{slug}/messages` as
-  `{"title":"<title>","text":"<text>"}`; both `title` and `text` are required.
-- Before judged execution, the deterministic companion should be green:
-  `kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn`.
-- Also capture the deferred-link replay companion before judged execution:
-  `kiln test --test_output=all //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test //crates/lash-vm-runtime:lash-vm-runtime__unit_test --test_arg=deferred`. Save the
-  complete output as `00-deferred-link-replay.txt`. This companion is operator-run and
-  deterministic: the judge only inspects its artifact and does not invoke a model tool,
-  provider, account, subscription, process, or other host-affecting operation.
+```sh
+kiln test //examples/agent-workbench:agent-workbench__unit_test \
+  --test_arg=tests::host_primitives_tests::a_delivery_that_crashed_between_start_and_bind_starts_one_process_and_binds_at_boot \
+  --test_arg=tests::host_primitives_tests::a_process_end_notice_retried_after_a_lost_acknowledgement_reaches_the_session_once \
+  --test_arg=tests::host_primitives_tests::a_session_tombstoned_before_its_registrations_were_removed_loses_them_at_boot \
+  --test_arg=tests::host_primitives_tests::a_delivery_that_cannot_start_is_recorded_failed_and_not_retried \
+  --test_arg=tests::host_primitives_tests::a_registration_left_pending_dispatches_nothing_and_is_pinned_at_boot \
+  --test_arg=tests::host_primitives_tests::a_removal_that_crashed_before_its_release_dispatches_nothing_and_finishes_at_boot \
+  --test_arg=tests::host_primitives_tests::a_cron_tick_is_recorded_once_across_a_restart_after_its_occurrence_was_pruned
+```
 
-The deferred-link companion must show all of these named cases green:
+Expect **7 executed, 7 passed**. These laws in
+[host_primitives.rs](../../examples/agent-workbench/src/main_sections/tests/host_primitives.rs)
+pin recovery, notice deduplication, tombstone cleanup, bounded start failure,
+pin admission, removal recovery and cron tick deduplication. Cron crash safety
+is companion evidence; the paid browser arm below judges mail, not cron timing.
+A failing law is a product finding, never grounds to weaken it.
 
-- `independent_link_can_accept_a_new_ambient_binding` proves the mask belongs only to
-  the admitted link identity;
-- `fault_after_resolver_return_repeats_discovery_on_the_replay`,
-  `fault_after_durable_record_never_reresolves_on_the_replay`, and
-  `fault_before_registration_reinstalls_recorded_route_on_the_replay` cover the three
-  named restart boundaries against the engine's journal and prove dependent tool
-  execution cannot cross a failed boundary; and
-- `revoked_route_refuses_without_replacing_the_journaled_grant` proves a restored route
-  cannot silently acquire replacement authority.
+## Phase 0 — Boot and register
 
-Also capture the dedicated deferred-trigger-definition companion:
-`kiln test --test_output=all //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test //crates/lash-vm-runtime:lash-vm-runtime__unit_test --test_arg=deferred_trigger --test_arg=--nocapture`. Save its
-complete output as `00-deferred-trigger-definition.txt`. This is a deterministic,
-operator-run link test: it reads definitions from in-memory test providers but does not
-activate a provider, create a subscription, execute a provider route, call a model, or
-change Tool Catalog membership.
+Use the shared setup. Save `00-startup.json`, `00-state.json` and
+`00-ready.png`. Create Work, then ask the agent to register **lifecycle-watch**
+on the mail source, returning the event title from a short process with no
+mail-sending effect. Ask it to acknowledge each process-end notice briefly and
+finish replies through `chat.reply`. Require one subscription owned by `<S>`
+with `source.kind = mail`; save `01-registration.json` and `01-registered.png`.
+Send an unrelated calculation turn, settle, and require the captured
+registration unchanged. Save `01-unrelated-state.json` and `01-unrelated.png`.
 
-The companion must show these cases green:
+## Phase 1 — Fire twice
 
-- `registry_applies_zero_one_two_provider_rule` proves an unannotated constructor has
-  exactly the specified outcomes: unavailable with zero providers, resolved with one,
-  and a deterministic ambiguity error with two;
-- `deferred_and_resident_definitions_build_equivalent_link_surfaces` proves one deferred
-  constructor and its named event schema fold to the same link surface as the resident
-  definition;
-- `deferred_trigger_constructor_and_event_schema_link` and
-  `deferred_trigger_references_inside_helpers_and_processes_are_gathered` prove the
-  frontend gathers direct, helper, and process-body receiver calls before target mapping is
-  typechecked (the case lost its `_for_both_frontends` suffix with
-  [ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md));
-- `deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping` proves missing
-  and ambiguous source definitions are reported before a downstream mapping error; and
-- `recorded_grant_masks_changed_ambient_and_preserves_route_without_activation` proves
-  the trigger record is distinct from deferred-tool state and replays its captured
-  provider route without consulting or activating that provider again; and
-- `recorded_unavailable_masks_later_ambient_trigger_definition` proves a captured
-  negative outcome remains unavailable when the ambient trigger catalog changes; and
-- `deferred_trigger_record_and_provider_route_survive_snapshot_restore` proves that
-  separate record, provider identity, and opaque route survive RLM state restoration;
-  and
-- `mixed_deferred_trigger_and_tool_links_keep_provider_records_separate` proves a mixed
-  link resolves each family into its own record and never folds a trigger definition
-  into deferred-tool state.
+Deliver titles `LIFE-ONE-<run-id>` and `LIFE-TWO-<run-id>` sequentially from
+Accounts, settling the first before the second. Save each source occurrence,
+subscription binding and process await result as `02-delivery-*.json`.
+Require two distinct process ids, one per occurrence, each completing with its
+title. Each end must reach `<S>` once, with one notice input and one sealed
+reply. Save `02-state.json`, the replay/trace extract, `02-mail.png`, and
+`02-notices.png`. A second occurrence is new work, not a redelivery probe.
 
-These are definition-linking claims only. Explicit authored registration remains the
-first operation allowed to create a subscription. Provider activation and route use
-belong to registration and delivery, not discovery.
+## Phase 2 — Fire during a turn
 
-**code mode snapshot cutover.** Snapshot version 19 adds the separate deferred-trigger
-resolution record, including captured provider identity and route. Version 18 snapshots
-cannot preserve that authority boundary and are rejected. Drain in-flight RLM sessions
-on the old build before deploying, or recreate development/test stores; do not add a
-compatibility decoder or silently reset a store.
+Start a foreground request using the Parallel search tool; ask for several
+lookups so the running boundary is observable. Save its one active address.
+While it remains active, deliver `LIFE-MID-<run-id>` and record the new host
+binding and pending notice. Require the active foreground address not to be
+replaced or duplicated. Settle the foreground and notice, then require its
+composer answer preserved and the notice input consumed once. Save
+`03-overlap.json`, `03-settled.json`, `03-running.png`, and `03-settled.png`.
+If no overlap is observed within the bound, mark that gate FAIL, not PASS.
 
-Enabling a deferred trigger resolver also adds one batched
-`deferred_trigger_resolution:v1` `LanguageRuntimeValue` command before deferred-tool
-resolution and before any dependent effect. Its effect id is distinct from the tool
-resolver's record, so the two outcomes cannot alias. This is an intentional journal
-ordinal cutover for deployments that enable the resolver: drain in-flight RLM
-`ExecCode` invocations before enabling it. A host with no resolver and no recorded
-trigger outcomes emits no trigger-definition command.
+## Phase 3 — Replace the host
 
-Save every API response named below under the run's artifact directory.
+Save subscription, occurrence bindings and canonical transcript identities.
+With the same data and run directories run
+`bash scripts/agent-workbench-dev.sh restart --port <port>`.
+Require a new PID, `/healthz`, the same subscription id, unchanged existing
+bindings and no duplicated or lost committed notice. The mock Accounts world
+is process-local: reopen Accounts and reconnect Work after replacement if its
+list is empty. This restores the test source without changing the persisted
+subscription. Deliver
+`LIFE-AFTER-RESTART-<run-id>`; require one new process and one new notice.
+Save `04-before.json`, `04-after.json`, `04-delivery.json`, and
+`04-restarted.png`. Cite the crash companion separately for start/bind recovery.
 
-## Phase 0 — Boot and build the inbox world
+## Phase 4 — Remove and fence
 
-Boot, gate `/healthz`, open the browser, and require the chat pane, trigger buttons, an
-empty registrations rail, and an empty work rail. Screenshot `00-fresh.png`.
+Cancel the captured subscription on the Triggers page. Require its id absent
+from the API and DOM. Deliver `LIFE-DELETED-<run-id>`, confirm the mail exists,
+then complete a short composer fence turn. Its occurrence must have no delivery
+for the deleted subscription and create no process for it. Save
+`05-deleted.json`, `05-fenced.json`, `05-deleted.png`, and `05-silent.png`.
+Stop the stack with the shared teardown, also on Abort.
 
-In **accounts**, add `Work` and `Personal`. Poll `GET /api/accounts` until the `work` and
-`personal` slugs exist and both cards render. Save the response and screenshot
-`01-inbox-world.png`.
-
-## Phase 1 — Register one forwarding concierge
-
-In chat, ask for the outcome, not TypeScript source: register one trigger named
-`lifecycle-forwarder` that copies each message received by `work` into `personal`, with
-an account filter so the personal emission is a no-op. Wait for the turn to settle.
-
-Poll `GET /api/triggers` until it returns exactly one enabled registration named
-`lifecycle-forwarder`. Save `02-registration.json`, record its `subscription_key`,
-`subscription_id`, source type, and source configuration, and require the registrations
-rail to show the target and source with the registration alias in its details/title and a
-**disable** action. The rendered name is the **process label**, not the trigger alias, and a
-process started without a declared label is labelled with the name of the document entry it
-starts (`admit_kernel_process` in `crates/lash-vm-runtime/src/process.rs`), so the row renders
-as `<entry> ← mail.received`. The
-`trigger key` is likewise the **derived subscription key** (`derived/v3/<hash>`), not the
-alias; the alias appears as a separate `alias lifecycle-forwarder` field, and only in the
-row's `title` attribute — the visible text truncates it away, so read the alias from the
-`title` of `.trigger-registration-detail`. Screenshot `02-registered.png`.
-
-Send one unrelated calculation turn that declares no trigger and wait for it to settle.
-Poll `GET /api/triggers` again and require the captured registration to be byte-for-byte
-unchanged. Save `02-unrelated-turn-registration.json`. A missing trigger namespace or a
-reconciliation warning is a failure: ordinary execution neither publishes nor replaces a
-global declaration set.
-
-## Phase 2 — Fire repeatedly and gate the loop-breaker
-
-**Take the process-id baseline from the session-scoped
-`GET /api/work?session_id=<session-id>`, not the unscoped form.** Every later phase compares
-against this baseline, so it must be stable: the unscoped endpoint serves the runtime-wide
-snapshot with `retired_since_ms = now - 10_000` and drops terminal rows about ten seconds
-after they settle, which makes an unscoped baseline shrink on its own between probes. This is
-golden rule 2's warning, repeated here because Phase 2 is where the baseline is taken.
-
-Record the baseline personal inbox and process-id set. From the `work` compose form,
-deliver two messages sequentially with unique titles
-`FIG425-LIFE-N1-<run-id>` and `FIG425-LIFE-N2-<run-id>`. Do not send a chat turn between
-delivery and forwarding.
-
-For each marker, poll the work inbox for the original and the personal inbox for exactly
-one traceable copy. Await each newly observed process through
-`GET /api/work/{process_id}/await` and require a terminal success. At the end require:
-
-- both markers occur exactly once in the personal inbox;
-- the work rail and `GET /api/work` agree on the new process ids;
-- the number of new runs is bounded to one or two per source delivery; and
-- the process-id set stops growing once every observed run is terminal.
-
-Save `03-repeat-work.json` and both inbox responses. Screenshot both inbox cards as
-`03-repeat-inboxes.png` and the work rail as `04-repeat-work-rail.png`.
-
-## Phase 3 — Disable, provoke, and prove silence
-
-Click **disable** on the captured registration. Poll until `GET /api/triggers` shows the
-same subscription key with `enabled: false` and the rail changes to **re-enable**. Save
-`05-disabled-registration.json` and screenshot `05-disabled.png`.
-
-Record the process-id set, then deliver `FIG425-LIFE-DISABLED-<run-id>` into `work`.
-Require the original in the work inbox. Establish a causal fence by sending a short chat
-turn containing `FIG425-LIFE-DISABLED-FENCE-<run-id>` and waiting until that user row and
-its assistant reply are committed, the UI is idle, and `/api/state.active_turns` is
-empty. Now require the disabled marker to be absent from `personal` and the process-id
-set to be unchanged. Save `06-disabled-state.json`, the two inbox responses, and the work
-response; screenshot `06-disabled-silent.png` with the original visible and no copy.
-
-## Phase 4 — Re-enable the same registration and fire again
-
-Click **re-enable**. Poll until the same captured subscription key is `enabled: true`; no
-new subscription key may appear. Save `07-reenabled-registration.json`.
-
-Deliver `FIG425-LIFE-REENABLED-<run-id>` into `work`. Poll for exactly one copy in
-`personal`, await the new process run(s), and require the work rail/API to agree. Save
-the inbox and work responses; screenshot `07-reenabled-fired.png`.
-
-## Phase 5 — Fire during a foreground turn
-
-Record the process-id set. Submit a foreground prompt containing
-`FIG425-LIFE-MIDTURN-CHAT-<run-id>` that requires the Parallel web-search MCP tool, making the overlap
-observable. Poll until `/api/state.active_turns` contains exactly one address and save it
-as `08-active-before-trigger.json`. The busy pill should remain running because trigger
-dispatch no longer emits a session `Done` while a foreground turn is active, but it is
-corroborating UI only: `active_turns` and `/api/work` are the authoritative overlap gate.
-
-While `/api/state.active_turns` still contains that exact address, deliver
-`FIG425-LIFE-MIDTURN-MAIL-<run-id>` into `work`. Poll until `/api/work` gains the
-concierge process **while** `/api/state.active_turns` still contains exactly the original
-address. Save both responses at that instant. Require no second active address. This is
-the first half of the ingress contract: occurrence/process work can land immediately,
-but it cannot take over foreground ingress. Screenshot `08-midturn-overlap.png` with the
-running pill and new work item visible.
-
-Then poll until the original turn commits and `active_turns` empties, the new process is
-terminal, exactly one personal copy exists, and any resulting queued wake has been
-claimed at either `active_turn_checkpoint` or `idle`. Both boundaries are a PASS:
-`active_turn_checkpoint` means the wake joined the current turn, while `idle` means it
-was claimed as the next turn.
-
-Detect the wake from the transcript and the turn, never from `queued_work`. A forwarding
-concierge can produce a session wake while `queued_work` stays empty and the trace carries
-no `agent_workbench.queued_work.*` record for the phase, so neither of those is evidence
-that no wake occurred. The two observables that do detect it are a `Background process
-wake` row in `/api/state.messages` and a second `exec_code_*` pair inside one turn id.
-Record "no wake produced" only when both of those are absent; a phase that reads
-`queued_work` alone passes this gate vacuously while a wake is being claimed into the
-turn.
-
-Then judge answer preservation. After the wake settles, the foreground turn's committed
-terminal answer must still render: the terminal the turn committed before the wake is
-still present in `/api/state.messages` and in the DOM. A turn id that carries two
-`terminal_finish` values of which only the last is rendered is a FAIL of this phase — the
-user's question was answered and the answer was then replaced. Save the trace slice for
-the turn id alongside the state snapshot so the two layers can be compared.
-
-Save `09-midturn-settled-state.json` and
-`09-midturn-work.json`; screenshot the newest transcript and work rail as
-`09-midturn-settled.png`. A process that appears only after the foreground turn is not a
-failure, but it does not satisfy the overlap gate; the deterministic companion remains
-the authoritative scheduler gate.
-
-## Phase 6 — Delete, provoke, and prove permanent silence
-
-Click **delete**, accept the confirmation, and poll until the captured subscription key
-is absent from `GET /api/triggers` and the rail reads `none in this session`. Save
-`10-deleted-registration.json`; screenshot `10-deleted.png`.
-
-Record the process-id set and deliver `FIG425-LIFE-DELETED-<run-id>` into `work`. Use a
-new completed chat fence exactly as in Phase 3. Require the original in `work`, no copy
-in `personal`, and no new process id. Save the state, work, and inbox responses;
-screenshot `11-deleted-silent.png`.
-
-## Phase 7 — Teardown and score
-
-Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env and confirm the workbench
-is gone.
+## Scorecard
 
 | Item | Objective gate | Verdict | Evidence |
-|------|----------------|---------|----------|
-| Boot/world | `/healthz` 200; `work` and `personal` agree in UI/API | | `00-fresh.png`, `01-inbox-world.png` |
-| Deferred-link replay | ambient changes are masked per link; all three restart boundaries replay the recorded authority | | `00-deferred-link-replay.txt` |
-| Registration identity | one enabled registration has the same `subscription_id` in the rail and `/api/triggers` | | `02-registered.png`, `02-registration.json` |
-| Repeated fires | two originals yield exactly two copies; bounded terminal runs | | `03-repeat-inboxes.png`, `04-repeat-work-rail.png` |
-| Disable silence | same reference key disabled; fenced probe creates no copy or process | | `05-disabled.png`, `06-disabled-silent.png` |
-| Re-enable | same reference key enabled and next probe forwards exactly once | | `07-reenabled-fired.png`, API artifacts |
-| Mid-turn ingress | process observed with the one original active address; queued wake claimed at `active_turn_checkpoint` or `idle` | | `08-midturn-overlap.png`, `09-midturn-settled.png`, `09-midturn-settled-state.json`, `09-midturn-work.json` |
-| Delete silence | reference key absent; fenced probe creates no copy or process | | `10-deleted.png`, `11-deleted-silent.png` |
-| UI/API agreement | registration, inbox, active-turn, and work surfaces agree throughout | | screenshots + saved API responses |
+| --- | --- | --- | --- |
+| Boot and register | judged geometry, model, owner and source; stable id after unrelated turn | | `00-*`, `01-*` |
+| Repeat fires | two occurrences, two distinct process bindings, successful title outputs | | `02-delivery-*`, `02-mail.png` |
+| Notice identity | one committed input and sealed reply per process; replay agrees with DOM | | `02-state.json`, `02-notices.png`, replay/trace |
+| Mid-turn delivery | original foreground address retained; notice consumed once; prior answer preserved | | `03-*` |
+| Restart continuity | new PID, same subscription and bindings, one subsequent delivery | | `04-*` |
+| Removal silence | id absent, post-delete occurrence has zero deliveries to that id | | `05-*` |
+| Crash and cron companions | all seven named laws executed and passed | | Kiln receipt |
+| Teardown and cost | host stopped; model usage/cost and any unavailable cost explained | | run receipt |
 
-**Aggregate:** did one durable concierge survive repeated fires, stop atomically when
-disabled or deleted, resume under the same identity, break its own feedback loop, and
-respect foreground-turn ingress when it fired mid-turn?
-
----
-
-_Stop triggers and the Abort/RCA + reporting protocol are in [../RULES.md](../RULES.md)._
+Judge whether the registration, its deliveries and the resulting notices stay
+understandable through these transitions. On Abort fill later items NOT RUN
+and preserve the failure; do not repeat the paid run.

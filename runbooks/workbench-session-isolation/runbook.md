@@ -1,203 +1,132 @@
-# E2E Scenario: Workbench Concurrent-Session Isolation
+# E2E Scenario: Session Isolation with Shared Mail-Source Fan-Out
 
-> **Read [../RULES.md](../RULES.md) first** — especially polling, named-checkpoint
-> screenshots, real-token use, port-derived stacks, the isolation-void rule below,
-> Abort/RCA, and teardown ownership.
+> Read [../RULES.md](../RULES.md) and the
+> [host-trigger evidence procedure](../host-trigger-evidence.md) first.
 
-**Purpose.** Shift two durable sessions concurrently through one workbench process and
-deliberately hunt for cross-session leaks in transcripts, trigger registrations, trigger
-delivery, and durable process projections. The two sessions use the same trigger source
-and deliberately similar process names so superficial partitioning cannot pass.
+**Purpose.** Two sessions in one workbench keep their conversations and
+registrations separate while a shared mail occurrence deliberately fans out
+to both. Judge routing by subscription owner and process identity. A shared
+source event is expected in both subscriptions; foreign composer text or a
+foreign process-end notice is a leak.
 
-**Real tokens.** Both sessions call OpenRouter; the overlap prompts also use the keyless
-Parallel Search MCP web tool to make concurrent turns observable. Gate on literal operator
-markers and structural API state, never exact assistant prose.
+**Tier.** Economy, `deepseek/deepseek-v4-pro`, TypeScript, SQLite. One judged
+run, two independent contexts and one host.
 
-## Scenario-specific golden rules
+## Golden rules
 
-1. **Two explicit session tabs, one process.** Use the sidebar's **new chat** twice and
-   retain both generated `session_id` query parameters. Do not boot a second workbench.
-2. **Scope every session API read.** Query `/api/state`, `/api/triggers`, and `/api/work`
-   with that tab's `?session_id=...`. An unscoped `/api/work` response is runtime-wide
-   and is not isolation evidence.
-3. **Use confusable fixtures, from one pinned cell.** Both registrations must have the same
-   derived display
-   name, `subscription_key`, button color, source type/configuration, and process label.
-   Execute both tabs with the same literal cell rather than the same prose request: these
-   values are content-addressed over the cell that was written, so prose cannot pin them.
-   Only `subscription_id`, process ids, and session ownership distinguish them.
-4. **Prove non-membership.** Presence in the expected session is only half a gate. Every
-   marker, registration `subscription_id`, and process id must also be absent from the
-   other session's rendered/API surface.
-5. **Isolation-void rule.** Any foreign transcript marker, foreign registration id,
-   foreign process id, UI/API disagreement, missing session query, or collapse of both
-   tabs onto one rendered session id voids the run immediately → Abort/RCA. Do not
-   continue collecting later evidence from contaminated state.
+1. Create A and B through **new chat** (`#newChat`) and pin each explicit
+   `session_id`. URL, `#sessionId`, and scoped state must agree; A differs from B.
+2. Both registrations use the same name **shared-mail-watch**, source
+   `{"kind":"mail"}` and event argument `event`. Their `id` values differ and
+   each `owner_session` equals its registering session. Source equality is
+   deliberate; a name cannot prove ownership.
+3. Every mail occurrence selects both pinned subscriptions atomically. Expect
+   two deliveries and two distinct process ids, including when the injection
+   request is scoped to only A. A caller's query is not a recipient filter.
+4. Each process-end notice reaches only its subscription owner. A's notice
+   input names A's bound process id; B's names B's. Each commits once and
+   receives one sealed answer. Shared event content is not a transcript leak.
+5. Composer markers must occur only in their own transcript, with matching
+   rendered/API canonical rows. Registration ids must never cross scoped lists.
+6. Host-delivery bindings establish process ownership. Session-scoped work
+   reads and drawers are observer views, not a guaranteed listing of host
+   starts. Do not substitute the runtime-wide list as an isolation oracle.
+7. Any foreign composer marker, foreign subscription or notice process id,
+   UI/API disagreement, or collapsed session identity invokes Abort immediately.
 
-## Working material
+## Deterministic companions
 
-- Require `OPENROUTER_API_KEY`. The web tool is the **keyless** Parallel Search MCP the
-  workbench registers itself (`WORKBENCH_SEARCH_MCP_SERVER` in `bootstrap.rs`); no search
-  provider key is needed or read. Boot one empty, port-isolated stack:
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`.
-  Gate `GET /healthz` → 200. Teardown on success or Abort:
-  `bash scripts/agent-workbench-dev.sh down --port <port>` with the same env. (The
-  `just agent-workbench` / `just agent-workbench-down` recipes name the same operations but
-  do not carry this row's environment.)
-- UI affordances: the chats sidebar (**new chat** `#newChat`, session rows in `#chatList`),
-  rendered session id, chat composer/transcript,
-  running/idle pill, Red/Blue trigger buttons, registrations rail, and work rail.
-- Scoped backend truth for session `<S>`:
-  `GET /api/state?session_id=<S>`, `GET /api/triggers?session_id=<S>`,
-  `POST /api/button-trigger?session_id=<S>`, and `GET /api/work?session_id=<S>`.
-  `GET /api/work/{process_id}/await` supplies terminal evidence after ownership is proven.
-- The button-trigger request body is exactly `{"button":"Red"}` or
-  `{"button":"Blue"}`; the `button` value is case-sensitive, so lowercase `red` or
-  `blue` returns HTTP 422.
-- Deterministic companion gate:
-  `kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=concurrent_sessions_isolate_transcripts`.
-  It runs simultaneous turns and simultaneous session-scoped occurrences against shared
-  stores, then asserts transcript non-membership and disjoint process projections.
+```sh
+kiln test //examples/agent-workbench:agent-workbench__unit_test \
+  --test_arg=tests::session_isolation_tests::concurrent_sessions_isolate_transcripts \
+  --test_arg=tests::host_primitives_tests::an_occurrence_recorded_while_a_subscription_is_removed_delivers_to_the_others \
+  --test_arg=tests::host_primitives_tests::a_process_end_notice_retried_after_a_lost_acknowledgement_reaches_the_session_once
+```
 
-Save all named API responses beneath the run's artifact directory. Use `A` and `B` in
-filenames only as aliases; record the full generated session ids in `00-sessions.json`.
+Expect **3 executed, 3 passed**. The transcript law covers simultaneous
+composer turns only. The recipient-selection law covers a shared occurrence
+with one deleting and one pinned subscription. The notice law covers keyed
+retry identity. Cross-session fan-out and owner routing are additionally
+judged below, not claimed as properties of the transcript-only companion.
+Cite any law already run for another row by its shared receipt.
 
-## Phase 0 — Boot two isolated tabs
+## Phase 0 — Boot and pin A/B
 
-Boot and gate `/healthz`. From the landing tab, click **new chat** (`#newChat`) twice. Each
-click creates a session, selects it and switches the landing tab to it in place, pinning the
-tab's URL to `?session_id=<id>`: after the first click record that id as A, after the second
-as B, waiting each time for `#sessionId` to show the new id. Then open two pages at
-`/?session_id=<A>` and `/?session_id=<B>` as Tab A and Tab B (or ctrl/middle-click each
-session's row in `#chatList`, whose link carries the same query; a headless driver must then
-capture the new page with `context.expect_page()` or equivalent). Reading the landing page
-instead of the opened pages leaves the operator on whichever session it last switched to,
-and golden rule 5 voids the run if both tabs collapse onto one session. Record each URL
-`session_id`, the rendered session id — the text of `#sessionId` — and
-`/api/state.settings.session_id`; require all three to agree within each
-tab and require A ≠ B. Both tabs must report the same server origin. Save
-`00-sessions.json`; screenshot `00-tab-a.png` and `00-tab-b.png`.
+Use the shared setup and create Work. Create two chats through the sidebar,
+then open independent contexts at their explicit URLs. Require different
+session ids on one origin, empty timelines, and empty scoped trigger lists.
+Save `00-startup.json`, `00-sessions.json`, `00-tab-a.png`, and `00-tab-b.png`.
 
-Close or ignore the original unscoped landing tab. Every remaining interaction and API
-request must target A or B explicitly.
+## Phase 1 — Register independently
 
-## Phase 1 — Register confusable triggers independently
+Ask each agent to register **shared-mail-watch** on the mail source, returning
+the event title from a short process without mail-sending effects. Ask it to
+acknowledge its process-end notices briefly through `chat.reply`. Settle each
+session independently. Require exactly one owned registration in each list,
+same name/source/event argument, and distinct ids. On each Triggers page the
+rendered `data-subscription-id` must equal its own id and exclude the other's.
+Save `01-triggers-a.json`, `01-triggers-b.json`, and `01-trigger-a.png` /
+`01-trigger-b.png`. Do not pin generated source or definition identity as a
+condition on nondeterministic model authorship.
 
-In each tab, submit **the same literal cell**, not a prose request. Golden rule 3 requires
-identical derived display name, `subscription_key`, source configuration and process label
-across the two tabs; derived keys are content-addressed over the cell that was actually
-written, so asking two models for the same outcome cannot satisfy it — two runs of one prompt
-have produced different keys and different targets. Hand both tabs one pinned cell that
-registers a trigger named `shared-blue-watch` for the Blue host button, starts the durable
-process, and records the button occurrence. Pin the `subscription_key` literally in that
-cell. Submit the two registration turns concurrently.
+## Phase 2 — Concurrent composer turns
 
-Pin the process label too, or expect the entry name. A process started without a declared
-label is labelled with the name of the document entry it starts (`admit_kernel_process` in
-`crates/lash-vm-runtime/src/process.rs`), so the rail renders `<entry> ← ui.button.pressed`.
-To gate on the literal label `mirror_job`, the pinned cell must call
-`processes.start({ label: "mirror_job" })` explicitly; otherwise gate on both tabs rendering
-**the same** entry name.
+Submit from both browsers concurrently: request several Parallel search
+lookups and repeat `ISOLATION-A-<run-id>` or `ISOLATION-B-<run-id>` respectively.
+Poll both states until each simultaneously has one distinct active address;
+save `02-active-a.json` / `02-active-b.json`. Settle independently and require
+the sealed assistant marker locally, never remotely, with ordered canonical
+DOM/API parity. The two registrations remain unchanged. Save
+`02-state-a.json`, `02-state-b.json`, `02-dom-a.json`, `02-dom-b.json`, and
+`02-transcript-a.png` / `02-transcript-b.png`.
 
-Poll each tab to idle **independently** — the two registration turns run concurrently, so a
-single shared wait reads one session's trigger list before its turn commits and sees an empty
-list that is a polling artefact, not a leak. Save `GET /api/triggers?session_id=A` and the B equivalent as
-`01-triggers-a.json` and `01-triggers-b.json`. Require exactly one enabled registration
-per session. Require identical derived display names, `subscription_key` values, source
-types, and source configurations, but distinct `subscription_id` values. Same-name,
-same-key registrations across the two tabs are correct: the owner scope participates in
-`subscription_id`, so neither equality is evidence of a leak. Require each registrations
-rail to render the common target and trigger source (`<label> ← ui.button.pressed`, where
-`<label>` is `mirror_job` when the pinned cell set it explicitly and the shared
-`__process_<hash>` lift name otherwise),
-the common trigger key, and only its own truncated id. Do **not** require the registrations
-rail to render the registration alias: it renders target label, source type, truncated id,
-trigger key, scope and incarnation, and `shared-blue-watch` appears nowhere on it — the alias
-is visible only in the transcript. (That the alias has no rail affordance is a UI gap worth
-filing, not a gate this row can hold.) Screenshot
-`01-trigger-a.png` and `01-trigger-b.png`.
+## Phase 3 — One occurrence, two owners
 
-Perform the first leak hunt now: A's `subscription_id` must be absent from B's API/DOM,
-and B's `subscription_id` absent from A's. Do not use the shared name or
-`subscription_key` for this check. Any id leak invokes the isolation-void rule.
+Deliver `ISOLATION-MAIL-<run-id>` once into Work from A. Confirm the inbox
+marker, then read the host tables. Require one occurrence with exactly two
+bindings: registration A to process A, registration B to process B, with the
+correct owners and distinct process ids. Await both ids to successful title
+outputs. Save `03-fanout.json`, `03-await-a.json`, `03-await-b.json`, and
+`03-mail.png`.
 
-## Phase 2 — Run two turns concurrently and hunt transcript leaks
+Settle each session's notice and answer. Require exactly one committed
+`process-end:<process A>` input in A and none in B; the inverse for process B.
+Each owner's sealed reply appears once in that owner's page/API. Save
+`03-state-a.json`, `03-state-b.json`, both replay/trace extracts and
+`03-notice-a.png` / `03-notice-b.png`.
 
-Prepare distinct literal markers `FIG425-ISO-A-<run-id>` and
-`FIG425-ISO-B-<run-id>`. In each tab, submit a prompt that includes its marker, requests
-one current fact via the Parallel web-search MCP tool, and asks that the marker be repeated in the answer.
-Trigger the two submissions concurrently through the browser driver.
+## Phase 4 — Remove one recipient
 
-Poll until both scoped `/api/state` responses simultaneously contain one active turn;
-save that overlap as `02-active-a.json` and `02-active-b.json`. Require the active turn
-addresses to be distinct. If no overlap is observed before the explicit timeout, the
-concurrency gate failed → Abort/RCA; sequential completion earns no credit.
+Cancel A's registration. Require A's scoped list empty while B's original id
+is unchanged. Deliver `ISOLATION-AFTER-REMOVE-<run-id>` once from B and complete
+a composer fence in A. Require the new occurrence to bind only B's
+subscription, one new B process, and one B notice; no A delivery or notice.
+Save `04-triggers-a.json`, `04-triggers-b.json`, `04-fanout.json`,
+`04-state-a.json`, `04-state-b.json`, and `04-final-a.png` / `04-final-b.png`.
+Do not infer absence from the age-filtered unscoped work list.
 
-Then poll both tabs to idle. Save `02-settled-a.json` and `02-settled-b.json`. Require:
+Complete the bidirectional matrix, then use the shared teardown:
 
-- A's UI/API transcript contains marker A and not marker B;
-- B's UI/API transcript contains marker B and not marker A;
-- each transcript's rendered ordered rows agree with its scoped state response; and
-- neither trigger list changed during the turns.
+| Surface | A contains | A excludes | B contains | B excludes |
+| --- | --- | --- | --- | --- |
+| Composer transcript | marker A | marker B | marker B | marker A |
+| Registration before removal | id A | id B | id B | id A |
+| Notice before removal | process A | process B | process B | process A |
+| Notice after removal | no new notice | new B process | new B process | new A process |
 
-Scroll each transcript to its newest row and capture `02-transcript-a.png` and
-`02-transcript-b.png`. Apply the isolation-void rule before continuing.
-
-## Phase 3 — Fire the same source concurrently
-
-Record the scoped process-id sets (normally empty). Activate the Blue trigger button in
-both tabs concurrently. Poll each scoped `/api/work` until it gains exactly one new
-`mirror_job` process. Save `03-work-a.json` and `03-work-b.json`; require the new process
-ids to be distinct.
-
-Await both ids with `/api/work/{process_id}/await` and require terminal success. Refresh
-the scoped work responses and require:
-
-- A contains A's process id and not B's;
-- B contains B's process id and not A's;
-- each rail renders the same sole new process as its scoped API;
-- both process labels are the same, and are `mirror_job` only if the Phase 1 cell pinned it
-  explicitly (otherwise both are the same `__process_<hash>` lift name); and
-- both trigger registrations remain present and owned by their original session.
-
-The same source/configuration and same label are deliberate: matching by either must not
-broadcast delivery or projection across sessions. Screenshot `03-work-a.png` and
-`03-work-b.png` with the terminal rows visible.
-
-## Phase 4 — Final bidirectional leak matrix
-
-Save fresh scoped state, trigger, and work responses for both sessions. Complete every
-cell; a single failed non-membership check invokes the isolation-void rule.
-
-| Surface | Tab A must contain | Tab A must exclude | Tab B must contain | Tab B must exclude |
-|---------|--------------------|--------------------|--------------------|--------------------|
-| Transcript | marker A | marker B | marker B | marker A |
-| Triggers | subscription id A | subscription id B | subscription id B | subscription id A |
-| Work | process A | process B | process B | process A |
-
-Screenshot the complete A surface as `04-final-a.png` and B as `04-final-b.png`. Save the
-matrix inputs as `04-state-*.json`, `04-triggers-*.json`, and `04-work-*.json`.
-
-## Phase 5 — Teardown and score
-
-Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env and confirm the one workbench process
-is gone.
+## Scorecard
 
 | Item | Objective gate | Verdict | Evidence |
-|------|----------------|---------|----------|
-| Two sessions/one process | distinct URL/rendered/API ids on one origin | | `00-sessions.json`, `00-tab-*.png` |
-| Trigger ownership | same-name, same-key registrations have distinct ids and no cross-listing | | `01-triggers-*.json`, `01-trigger-*.png` |
-| Concurrent turns | both scoped states were active at once with distinct addresses | | `02-active-*.json` |
-| Transcript isolation | each marker present locally and absent remotely in UI/API | | `02-settled-*.json`, `02-transcript-*.png` |
-| Trigger delivery isolation | simultaneous same-source fires start one local process each | | `03-work-*.json` |
-| Process projection isolation | process ids disjoint and absent from the foreign rail/API | | `03-work-*.png`, `04-work-*.json` |
-| Final leak matrix | all three bidirectional non-membership rows pass | | `04-final-*.png`, `04-*.json` |
-| UI/API agreement | transcript, trigger, and work surfaces agree in both tabs | | all screenshots + scoped API artifacts |
+| --- | --- | --- | --- |
+| Two sessions/one host | distinct explicit ids, empty initial scoped surfaces | | `00-*` |
+| Registration ownership | same-name mail subscriptions, distinct ids, no cross-listing | | `01-*` |
+| Concurrent composer isolation | overlapping active addresses; local sealed marker only | | `02-*` |
+| Shared source fan-out | one occurrence binds two distinct owned processes | | `03-fanout.json`, await results |
+| Notice owner routing | one notice per process only in its owner's API and DOM | | `03-state-*`, `03-notice-*`, replay/trace |
+| Recipient removal | only B receives the next occurrence; A stays silent | | `04-*` |
+| Final non-membership | every matrix row passes in both directions | | matrix extracts |
+| Companions | three named laws executed and passed, shared receipts reused | | Kiln receipt |
+| Teardown and cost | host stopped; model usage/cost recorded | | run receipt |
 
-**Aggregate:** did two concurrently active sessions remain disjoint at every durable and
-rendered seam even when their trigger sources and process labels were intentionally
-indistinguishable?
-
----
-
-_Stop triggers and the Abort/RCA + reporting protocol are in [../RULES.md](../RULES.md)._
+Judge whether shared-source delivery remains intelligible without exposing a
+foreign conversation. Preserve any leak finding and mark later gates NOT RUN.

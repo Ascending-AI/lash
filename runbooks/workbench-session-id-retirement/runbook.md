@@ -63,6 +63,23 @@ receipts, the rotated id, and the typed retirement response — never on model p
    `<rotated-id>` as the current usable session and must still refuse `<retired-id>` with
    the same typed 409.
 
+## Deterministic companions
+
+```sh
+kiln test //examples/agent-workbench:agent-workbench__unit_test \
+  --test_arg=tests::host_primitives_tests::a_retired_session_leaves_no_registration \
+  --test_arg=tests::recoverable_chat_tests::retired_session_http_refusals_record_structured_admission_evidence
+```
+
+Expect **2 executed, 2 passed** on SQLite. The first pins removal of host
+registrations at retirement; the second pins the typed retirement fence across
+HTTP surfaces. Capture the full Kiln receipt. Use the
+[host-trigger evidence procedure](../host-trigger-evidence.md) for mail fan-out,
+host process bindings, typed notice provenance, and teardown. This row's model
+is `deepseek/deepseek-v4-pro` at the economy tier, TypeScript, SQLite; run once.
+The existing process-deletion assertions below are retained pending the audit
+ruling; host-trigger delivery evidence does not settle that question.
+
 ## Working material
 
 - Require `OPENROUTER_API_KEY`; a missing key is a harness gap → Abort. Create one fresh
@@ -72,7 +89,7 @@ receipts, the rotated id, and the typed retirement response — never on model p
   Gate `GET /healthz` → 200. Teardown on success or Abort:
   `just agent-workbench-down <port>`.
 - Browser affordances: the rendered session id, chat composer and timeline, running/idle
-  pill, **stop turn**, Red/Blue trigger buttons, registrations rail, and work rail. Two
+  pill, **stop turn**, Accounts and Triggers pages, and the work drawer (`#workToggle`). Two
   rendered literals are gates: the empty timeline reads
   `no turns yet. ask the agent something below, or see what it can watch on the triggers
   page.` and an empty registrations list reads
@@ -80,19 +97,21 @@ receipts, the rotated id, and the typed retirement response — never on model p
 - Backend truth for id `<S>`: `GET /api/state?session_id=<S>`,
   `GET /api/observations?session_id=<S>`, `POST /api/turn?session_id=<S>`,
   `POST /api/turn/input?session_id=<S>`, `GET /api/triggers?session_id=<S>`,
-  `POST /api/button-trigger?session_id=<S>`, `GET /api/work?session_id=<S>`,
+  `POST /api/accounts/work/messages?session_id=<S>`, `GET /api/work?session_id=<S>`,
   `GET /api/work/{process_id}/await`, `POST /api/turn/cancel?session_id=<S>`, and
   `DELETE /api/session?session_id=<S>`.
-- The button-trigger request body is exactly `{"button":"Red"}` or
-  `{"button":"Blue"}`; the `button` value is case-sensitive, so lowercase `red` or
-  `blue` returns HTTP 422.
+- Create Work in Accounts. Mail injection takes `{"title":"<marker>","text":"<body>"}`.
+  One POST is one shared mail occurrence. Inspect deliveries by subscription id
+  and owner in `<data-dir>/host-triggers.db`, then await their exact process ids;
+  the session-scoped work drawer is an observer view, not host delivery ownership.
 - Durable truth on the default SQLite stack:
   `<data-dir>/lash-sessions.db`. The live id has a `session_meta` row; the
   retired id has a `deleted_sessions` row and no live session metadata. Save query
   results as JSON artifacts rather than treating terminal output as the record.
-- Trigger truth: `/api/triggers?session_id=<S>` records expose
-  `subscription_id`, `subscription_key`, `incarnation`, `revision`, and registrant
-  scope. Save complete records.
+- Trigger truth: `/api/triggers?session_id=<S>` records expose `id`,
+  `owner_session`, `name`, `source`, `event_arg`, `args`, and `created_at_ms`.
+  Save complete records. The returned registration result's `subscription_id`
+  equals its list record's `id`. The Triggers page renders name and mail source.
 - The browser's scoped fetch wrapper captures `session_id` when the page loads. After
   deletion, navigate to a new page at `/?session_id=<rotated-id>`; changing only the
   rendered label does not retarget the old page's API calls.
@@ -113,25 +132,17 @@ Perform all four operations, polling each to a settled state before starting the
    verbatim. Poll to idle. Require the ordered user/assistant pair in the rendered
    timeline and `/api/state`, and require the **assistant** row in both surfaces to
    contain the exact marker.
-2. Ask the agent to register a trigger named `retirement-watch` for the Blue host button
-   that starts a durable process labelled `retirement_job` whose settled output is the
-   marker `RETIREMENT-JOB-DONE`. **Pin the `subscription_key`, the host-facing process
-   label, and the returned marker literally in the prompt.** Whether a cell uses an
-   explicit key or lets one be derived is the model's choice, and two runs of the same
-   prose produced `retirement-watch` and `derived/v3/<hash>`; Phase 4 compares this key
-   across the retired and rotated scopes, so an unpinned key makes that comparison a gate
-   on model behaviour. The process shape is the cell's choice in the same way: one run's
-   pinned label still produced an inlined body under a derived `__process_<hash>` label,
-   so Phases 1.3 and 4.3 score the triggered process by the pinned marker, not the
-   label. Poll to idle and require
-   exactly one enabled registration in `/api/triggers?session_id=<retired-id>` and the
-   registrations rail. Record the complete registration as registration A.
-3. Activate Blue. Poll `GET /api/work?session_id=<retired-id>` — the delivery settles in
-   seconds, so bound the poll at 30 seconds — until exactly one new process appears in
-   the scope. Its shape is the cell's choice: a `tool-intent` process labelled
-   `retirement_job` and a `process:trigger-delivery` process carrying the marker both
-   satisfy it. Record its id, await `/api/work/{process_id}/await` until terminal, and
-   require the settled output to be `RETIREMENT-JOB-DONE`.
+2. Ask the agent to register **retirement-watch** on the mail source, with a
+   short process returning `RETIREMENT-JOB-DONE` and no mail-sending effects.
+   Ask it to acknowledge process-end notices through `chat.reply`. Settle and
+   require one record with `name = retirement-watch`, `source.kind = mail`,
+   `owner_session = <retired-id>`, and its id on the Triggers page. Save it as A.
+3. Deliver `RETIREMENT-BEFORE-<run-id>` into Work once. Require one occurrence
+   bound to registration A and one process completing with
+   `RETIREMENT-JOB-DONE`; save the host rows and exact process await result.
+   Require one committed notice input under `process-end:<pid>` and one sealed
+   reply in the retired session. Count host delivery evidence separately from
+   session-originated scoped work; record both views without assuming equality.
 4. Start one more turn long enough to observe running, then press **stop turn**. Capture
    every `/api/turn/cancel` receipt the click produces: the after-step Stop answers
    `cancellation_recorded_terminal_pending`, and a second, escalated Abort follows only
@@ -142,8 +153,9 @@ Perform all four operations, polling each to a settled state before starting the
    it does not. A driver that waits for a second receipt that never arrives, or scores
    the rendered id against the wrong receipt, would wrongly score a FAIL.
 
-Save `01-retired-state.json`, `01-retired-triggers.json`,
-`01-retired-work.json`, and `01-retired-cancel.json`. Scroll the timeline and work rail
+Save `01-retired-host-deliveries.json`, `01-retired-process-await.json`,
+`01-retired-state.json`, `01-retired-triggers.json`,
+`01-retired-work.json`, and `01-retired-cancel.json`. Scroll the timeline and work drawer
 to their newest entries and screenshot `01-retired-session-populated.png`.
 
 ## Phase 2 — Delete and record the rotation
@@ -160,7 +172,7 @@ Call the DELETE through an in-page fetch; do not substitute the rendered reset b
 which posts `POST /api/reset`. A bare DELETE fetch does not apply its returned snapshot
 to the current page, so the rendered session-id label on that page does not rotate.
 
-Do not use the delete response's empty message list as proof of fresh state: it describes
+Do not use the delete response's empty transcript as proof of fresh state: it describes
 the rotated target before the browser has independently opened and read it. Screenshot
 the post-delete page as `02-delete-returned-rotation.png`. The still-rendered retired id
 on that bare-fetch page is expected, not a contract violation; Phase 4 opens a page
@@ -184,7 +196,7 @@ or observing surface changed by the retirement fence:
 1. Record `GET /api/work?session_id=<retired-id>`. The **scoped** work read is behind the
    retirement fence and must return HTTP 409 with the same canonical `error`:
    `list_work` calls `state.admit_session(&query, "api.work.list")` for the
-   explicit-session form (`examples/agent-workbench/src/main_sections/routes.rs:862`).
+   explicit-session form in [routes.rs](../../examples/agent-workbench/src/main_sections/routes.rs).
    Only the **default (unscoped)** work query is unfenced. Put the before/after set
    comparison on that unscoped runtime-wide read, not on the scoped one. Submit
    `POST /api/turn?session_id=<retired-id>` with a non-empty marker prompt. Require HTTP
@@ -217,7 +229,7 @@ conditions at once:
 - `/api/triggers?session_id=<rotated-id>` is empty and the registrations list renders
   `Nothing is registered yet. Ask the agent to watch a source above.`;
 - `GET /api/work?session_id=<rotated-id>` is empty;
-- `FIG754-RETIRED-<run-id>`, registration A's identity fields, and the retired process id
+- `FIG754-RETIRED-<run-id>`, registration A's id and owner, and the retired process id
   are absent from every rendered and scoped API surface.
 
 Save `04-rotated-fresh-state.json`, `04-rotated-fresh-triggers.json`, and
@@ -228,24 +240,25 @@ Then prove the rotated id is alive:
 1. Submit a turn containing `FIG754-ROTATED-<run-id>` and require the ordered pair in the
    page and `/api/state`. The **assistant** row in both surfaces must contain the exact
    marker, and the turn must settle.
-2. Register `retirement-watch` for the same Blue source and `retirement_job` target, with
-   the **same pinned `subscription_key`, process label, and `RETIREMENT-JOB-DONE`
-   marker** used in Phase 1.
-   Require exactly one enabled registration whose registrant is scoped to
-   `<rotated-id>`. Its derived display name and `subscription_key` must equal
-   registration A's, while its `subscription_id` must differ. Same-name, same-key
-   registration is correct across the retired and rotated owner scopes; the distinct
-   global id is the isolation gate.
-3. Activate Blue. Poll `GET /api/work?session_id=<rotated-id>` on the same 30-second
-   bound and shape rule as Phase 1.3 until exactly one new process appears in the
-   rotated scope. Require its id to differ from the retired session's process id, await
-   it to terminal, and require the settled output to be `RETIREMENT-JOB-DONE`.
+2. Register **retirement-watch** again on the mail source, with the same
+   name, event argument and fixed result marker as Phase 1. Require one record
+   owned by `<rotated-id>` whose `id` differs from A's. Its name and source
+   match A; no old registration id reappears. Model-authored definitions may
+   differ, so definition identity is not the isolation gate.
+3. Deliver `RETIREMENT-AFTER-<run-id>` once into Work. This is shared mail-source
+   fan-out: require its occurrence to select only the new registration, with no
+   delivery for A or owner `<retired-id>`. Require one new differently-id'd
+   process completing with `RETIREMENT-JOB-DONE` and one committed
+   `process-end:<pid>` notice plus sealed reply in `<rotated-id>`. The
+   subscription-owner join, not the injecting query or global process list,
+   proves routing. Save host bindings and the process await result.
 4. Start another long turn and press **stop turn**. As in Phase 1.4, capture every
    `/api/turn/cancel` receipt the click produces and require the rendered
    `turn stopped · request <id>` to match the request id of the receipt carrying the
    committed cancellation.
 
-Save `04-rotated-live-state.json`, `04-rotated-live-triggers.json`,
+Save `04-rotated-host-deliveries.json`, `04-rotated-process-await.json`,
+`04-rotated-live-state.json`, `04-rotated-live-triggers.json`,
 `04-rotated-live-work.json`, and `04-rotated-live-cancel.json`. Scroll to the settled
 assistant row and fresh work card; screenshot `04-rotated-session-usable.png`.
 
@@ -290,7 +303,8 @@ Run `just agent-workbench-down <port>` and confirm the Workbench process is gone
 | Retired id refused | repeated state HTTP 409 and rendered single-use explanation | | `03-retired-id-refused.*` |
 | Retired work refused | turn, observations, and turn-input return the same 409; scoped work is unchanged | | `03-retired-id-refused.json` |
 | Rotation inherited nothing | empty transcript, triggers, and scoped work; retired identities absent | | `04-rotated-fresh-*` |
-| Rotation is usable | assistant marker, fresh registration, one new differently-id'd process settling the marker, and matching cancellation | | `04-rotated-live-*`, `04-rotated-session-usable.png` |
+| Rotation is usable | assistant marker, fresh owned mail registration, one new bound process and notice, no old recipient, matching cancellation | | `04-rotated-live-*`, `04-rotated-session-usable.png` |
+| Deterministic companions | two full-path laws executed and passed | | Kiln receipt |
 | Restart preserves both rules | new PID, rotated session restored, retired id still refused | | `05-*` or not-run reason |
 
 **Aggregate:** did deletion permanently retire the named id, did the Workbench rotate to
