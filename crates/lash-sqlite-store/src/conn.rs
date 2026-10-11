@@ -1165,7 +1165,8 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     /// FIG-5933 counts physical write transactions, including rollback, and
-    /// never publishes a clock for a refused commit.
+    /// never publishes a clock for a refused commit. FIG-5943 excludes writes
+    /// on other connections from this law's worker counts.
     #[cfg(feature = "perf-witness")]
     #[tokio::test]
     async fn latency_witness_counts_rollbacks_without_publishing_their_clocks() {
@@ -1183,6 +1184,11 @@ mod tests {
         )
         .await
         .unwrap();
+        let unrelated = installed(
+            &DatabaseTarget::File(dir.path().join("unrelated.db")),
+            SqliteConnectionPolicy::development(SqliteSynchronous::Normal),
+        )
+        .await;
         let collector = Collector::install().unwrap();
         conn.write(|_| {
             stage(|| CommitMark::Accepted {
@@ -1200,11 +1206,35 @@ mod tests {
         })
         .await
         .unwrap();
+        unrelated
+            .write_flow(|_| Ok(TxOutcome::Rollback(())))
+            .await
+            .unwrap();
         reader
             .call(|c| c.query_row("SELECT 1", [], |r| r.get::<_, u64>(0)))
             .await
             .unwrap();
-        let snapshot = collector.snapshot();
+        let writer_thread = conn
+            .inner
+            .call(|_| Ok(format!("{:?}", std::thread::current().id())))
+            .await
+            .unwrap();
+        let reader_thread = reader
+            .inner
+            .call(|_| Ok(format!("{:?}", std::thread::current().id())))
+            .await
+            .unwrap();
+        // A call answers before its Busy guard drops. Closing each worker
+        // drains its final receipt before the snapshot, without a timing wait.
+        conn.inner.close().await.unwrap();
+        reader.inner.close().await.unwrap();
+        unrelated.inner.close().await.unwrap();
+        let mut snapshot = collector.snapshot();
+        // The collector is process-wide; only these two connections belong
+        // to this law. Other tests' workers must not affect its exact counts.
+        snapshot
+            .workers
+            .retain(|_, worker| worker.thread == writer_thread || worker.thread == reader_thread);
         assert!(snapshot.inputs["committed"].accepted.is_some());
         assert!(!snapshot.inputs.contains_key("refused"));
         assert_eq!(
