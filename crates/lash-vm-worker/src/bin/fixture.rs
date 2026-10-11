@@ -10,6 +10,24 @@ fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     let mode = args.get(1).map(String::as_str).unwrap_or("");
     let fd = args.get(2).and_then(|arg| arg.parse::<i32>().ok());
+    if mode == "bootstrap_wait" {
+        use std::io::Read;
+        use std::os::fd::FromRawFd;
+        let index = args
+            .iter()
+            .position(|arg| arg == "--lash-vm-worker")
+            .expect("worker entry");
+        let socket = args[index + 1].parse::<i32>().expect("socket");
+        #[expect(
+            unsafe_code,
+            reason = "fixture consumes the socket passed by its owning launcher"
+        )]
+        let mut pipe = unsafe { std::os::unix::net::UnixStream::from_raw_fd(socket) };
+        // The parent waits for Ready; this fixture waits for a request.
+        // Neither can advance, so only the existing watchdog ends the wait.
+        let _ = pipe.read_exact(&mut [0]);
+        return;
+    }
     if matches!(
         mode,
         "protocol_below" | "protocol_above" | "opposite_generation" | "crate_version"

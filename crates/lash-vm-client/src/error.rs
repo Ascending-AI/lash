@@ -113,6 +113,19 @@ impl PoolError {
         }
         .into()
     }
+    /// Socket timeouts carry no duration. The supervisor that owns the
+    /// wait supplies its elapsed time before exposing a silence verdict.
+    pub(crate) fn with_silence(self, elapsed: std::time::Duration) -> Self {
+        match self {
+            Self::Infrastructure(InfrastructureOutcome::WorkerUnresponsive { .. }) => {
+                InfrastructureOutcome::WorkerUnresponsive {
+                    silent_ms: elapsed.as_millis().min(u128::from(u64::MAX)) as u64,
+                }
+                .into()
+            }
+            other => other,
+        }
+    }
     /// Classify failures of the configured executable at the shared spawn seam.
     pub(crate) fn spawn(error: std::io::Error, executable: &std::path::Path) -> Self {
         let fault = match error.kind() {

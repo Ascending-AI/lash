@@ -832,6 +832,23 @@ fn a_heap_profiled_worker_writes_its_profile_under_confinement_across_a_reset() 
     let _ = std::fs::remove_dir_all(&directory);
 }
 
+/// FIG-6007: silence during the Ready handshake reports the actual wait,
+/// just as silence during guest execution does. It is not an instant exit.
+#[test]
+fn a_worker_silent_during_bootstrap_reports_the_time_it_was_silent() {
+    let mut config = config("bootstrap_wait");
+    config.protocol.no_response_watchdog = std::time::Duration::from_millis(20);
+    let error = WorkerPool::new(config).err().expect("the watchdog fires");
+    let PoolError::Infrastructure(InfrastructureOutcome::WorkerUnresponsive { silent_ms }) = error
+    else {
+        panic!("a typed silence verdict: {error:?}")
+    };
+    assert!(
+        silent_ms >= 20,
+        "the handshake waited, but reports {silent_ms} ms"
+    );
+}
+
 /// The kernel worker's live protocol is admitted before any guest request.
 /// Synthetic-next keeps the same refusal as the plain parent.
 #[test]

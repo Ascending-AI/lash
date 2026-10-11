@@ -195,10 +195,14 @@ impl Pool {
         self.spawn_ready_until(Instant::now() + self.config.protocol.no_response_watchdog)
     }
     fn spawn_ready_until(&self, deadline: Instant) -> Result<Worker, PoolError> {
+        let started = Instant::now();
         let mut worker = Worker::spawn(&self.config)?;
         worker.measurements = Some(self.measurements.clone());
         let deadline = deadline.min(Instant::now() + self.config.protocol.no_response_watchdog);
-        let frame = worker.receive(deadline)?;
+        // Bootstrap silence starts before exec, not at the first socket read.
+        let frame = worker
+            .receive(deadline)
+            .map_err(|error| error.with_silence(started.elapsed()))?;
         let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
         fence.admit(&frame.header).map_err(PoolError::breach)?;
         match frame.message {

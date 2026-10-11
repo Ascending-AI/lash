@@ -114,7 +114,9 @@ impl Worker {
         bytes: &[u8],
         timeout: Duration,
     ) -> Result<(), PoolError> {
-        write_frame(&mut self.pipe, bytes, Instant::now() + timeout)?;
+        let started = Instant::now();
+        write_frame(&mut self.pipe, bytes, started + timeout)
+            .map_err(|error| error.with_silence(started.elapsed()))?;
         if let Some(measurements) = &self.measurements {
             let mut measurements = measurements
                 .lock()
@@ -126,6 +128,7 @@ impl Worker {
     }
 
     pub fn receive(&mut self, deadline: Instant) -> Result<WorkerFrame, PoolError> {
+        let started = Instant::now();
         let bytes = match self
             .inbound
             .read_frame(&mut self.pipe, &self.codec, deadline)
@@ -143,7 +146,7 @@ impl Worker {
                 }
                 .into());
             }
-            result => result?,
+            result => result.map_err(|error| error.with_silence(started.elapsed()))?,
         };
         if let Some(measurements) = &self.measurements {
             let mut measurements = measurements
