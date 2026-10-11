@@ -15,6 +15,7 @@ use std::sync::LazyLock;
 
 use lash_durable::domain::{
     DomainRefusal, ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite,
+    request_roots,
 };
 use lash_durable::{DurableError, Epoch};
 use lash_sansio::{SessionId, TurnId};
@@ -49,6 +50,11 @@ lash_store_sql::statements! {
              SELECT ?1, ?2, ?3, json_extract(value, '$[0]'), json_extract(value, '$[1]')
                FROM json_each(?4)";
 
+        /// Install the edges of newly stored immutable index nodes only.
+        insert_index_edges = "INSERT INTO prompt_text_edges (parent, child)
+             SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
+               FROM json_each(?1)";
+
         /// Release the request edges of every call of owner `?2` in session
         /// `?1` but call `?3` (none when `?3` is null), returning each text
         /// they named.
@@ -75,7 +81,11 @@ lash_store_sql::statements! {
              WHERE stored.hash IN (SELECT value FROM json_each(?1))
                AND NOT EXISTS (
                    SELECT 1 FROM prompt_snapshot_texts AS edge WHERE edge.hash = stored.hash
-               )";
+               ) AND NOT EXISTS (
+                   SELECT 1 FROM prompt_prefixes AS prefix WHERE prefix.hash = stored.hash
+               ) AND NOT EXISTS (
+                   SELECT 1 FROM prompt_text_edges AS edge WHERE edge.child = stored.hash
+               ) RETURNING hash";
     }
 }
 
@@ -119,6 +129,17 @@ CREATE TABLE IF NOT EXISTS prompt_snapshot_texts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_prompt_snapshot_texts_hash ON prompt_snapshot_texts (hash);
+
+CREATE TABLE IF NOT EXISTS prompt_text_edges (
+    parent TEXT NOT NULL REFERENCES prompt_texts(hash) ON DELETE CASCADE,
+    child TEXT NOT NULL REFERENCES prompt_texts(hash),
+    PRIMARY KEY (parent, child)
+);
+CREATE INDEX IF NOT EXISTS idx_prompt_text_edges_child ON prompt_text_edges(child);
+CREATE TABLE IF NOT EXISTS prompt_prefixes (
+    session_id TEXT PRIMARY KEY,
+    hash TEXT NOT NULL REFERENCES prompt_texts(hash)
+);
 ";
 
 fn call_params(call: &PromptCallKey) -> (String, String, String) {
@@ -137,6 +158,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
             request,
             snapshot_texts,
             request_texts,
+            prefix,
         } => {
             let (session, owner, ordinal) = call_params(call);
             let recorded = tx
@@ -151,29 +173,54 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                     DomainRefusal::PromptCallRecorded { call: call.clone() },
                 )));
             }
-            // The first text under each address stands for it.
-            let mut distinct = BTreeMap::new();
-            for text in snapshot_texts.iter().chain(request_texts) {
-                distinct
-                    .entry(text.hash.as_str())
-                    .or_insert(text.text.as_str());
-            }
-            if distinct.is_empty() {
-                return Ok(Ok(()));
-            }
-            // Only the bodies the store does not hold are bound.
-            let held = hash_set(
-                tx,
-                SQLITE_SQL.held_texts.sql(),
-                [encode(&distinct.keys().collect::<Vec<_>>())?],
-            )?;
-            let unheld: Vec<_> = distinct
+            let distinct: BTreeMap<_, _> = snapshot_texts
                 .iter()
-                .filter(|(hash, _)| !held.contains(**hash))
+                .chain(request_texts)
+                .map(|text| (text.hash.as_str(), text))
                 .collect();
+            let mut frontier: BTreeSet<&str> = snapshot_texts
+                .iter()
+                .map(|text| text.hash.as_str())
+                .chain(request_roots(request_texts))
+                .chain(prefix.as_deref())
+                .collect();
+            let mut unheld = BTreeMap::new();
+            // Probe only new index paths: an existing immutable node owns
+            // its complete closure, so no child metadata is resubmitted.
+            while !frontier.is_empty() {
+                let held = hash_set(tx, SQLITE_SQL.held_texts.sql(), [encode(&frontier)?])?;
+                let mut next = BTreeSet::new();
+                for hash in frontier {
+                    if held.contains(hash) || unheld.contains_key(hash) {
+                        continue;
+                    }
+                    let Some(text) = distinct.get(hash) else {
+                        return Ok(Err(DurableError::Domain(
+                            DomainRefusal::PromptFragmentMissing {
+                                hash: hash.to_owned(),
+                            },
+                        )));
+                    };
+                    next.extend(text.children.iter().map(String::as_str));
+                    unheld.insert(hash, text);
+                }
+                frontier = next;
+            }
             if !unheld.is_empty() {
-                let stored = hash_set(tx, SQLITE_SQL.insert_texts.sql(), [encode(&unheld)?])?;
-                debug_assert_eq!(stored.len(), unheld.len());
+                let bodies: Vec<_> = unheld
+                    .iter()
+                    .map(|(hash, text)| (*hash, text.text.as_str()))
+                    .collect();
+                hash_set(tx, SQLITE_SQL.insert_texts.sql(), [encode(&bodies)?])?;
+                let paths: BTreeSet<_> = unheld
+                    .iter()
+                    .flat_map(|(hash, text)| {
+                        text.children
+                            .iter()
+                            .map(move |child| (*hash, child.as_str()))
+                    })
+                    .collect();
+                cached_execute(tx, SQLITE_SQL.insert_index_edges.sql(), [encode(&paths)?])?;
             }
             cached_execute(
                 tx,
@@ -185,6 +232,18 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                     encode(&edges(snapshot_texts, request_texts))?
                 ],
             )?;
+            if matches!(call.call, ModelCallId::Turn { .. }) {
+                let old = hash_set(tx, SQL.release_prefix.sql(), [session.as_str()])?;
+                if let Some(prefix) = prefix {
+                    cached_execute(tx, SQL.set_prefix.sql(), rusqlite::params![session, prefix])?;
+                }
+                reclaim(tx, &old)?;
+            }
+            Ok(Ok(()))
+        }
+        PromptWrite::ResetPrefix { session } => {
+            let old = hash_set(tx, SQL.release_prefix.sql(), [session.as_str()])?;
+            reclaim(tx, &old)?;
             Ok(Ok(()))
         }
         PromptWrite::Settle { session, run, open } => {
@@ -215,7 +274,7 @@ pub(crate) fn release(
     session: &SessionId,
     run: Option<&TurnId>,
 ) -> rusqlite::Result<()> {
-    let released = match run {
+    let mut released = match run {
         None => {
             let hashes = hash_set(
                 tx,
@@ -239,6 +298,9 @@ pub(crate) fn release(
             hashes
         }
     };
+    if run.is_none() {
+        released.extend(hash_set(tx, SQL.release_prefix.sql(), [session.as_str()])?);
+    }
     reclaim(tx, &released)
 }
 
@@ -251,14 +313,30 @@ fn edges<'a>(
     let part =
         |part, texts: &'a [PromptText]| texts.iter().map(move |text| (part, text.hash.as_str()));
     part(SNAPSHOT_PART, snapshot_texts)
-        .chain(part(REQUEST_PART, request_texts))
+        .chain(
+            request_roots(request_texts)
+                .into_iter()
+                .map(|hash| (REQUEST_PART, hash)),
+        )
         .collect()
 }
 
 /// Reclaim every text among `released` no remaining edge references.
 fn reclaim(tx: &Connection, released: &BTreeSet<String>) -> rusqlite::Result<()> {
-    if !released.is_empty() {
-        cached_execute(tx, SQLITE_SQL.reclaim_texts.sql(), [encode(released)?])?;
+    let mut frontier = released.clone();
+    while !frontier.is_empty() {
+        let children: BTreeMap<_, _> = frontier
+            .iter()
+            .map(|hash| {
+                hash_set(tx, SQL.read_children.sql(), [hash])
+                    .map(|children| (hash.clone(), children))
+            })
+            .collect::<rusqlite::Result<_>>()?;
+        let removed = hash_set(tx, SQLITE_SQL.reclaim_texts.sql(), [encode(&frontier)?])?;
+        frontier = removed
+            .iter()
+            .flat_map(|hash| children[hash].iter().cloned())
+            .collect();
     }
     Ok(())
 }
@@ -330,6 +408,9 @@ pub(super) fn texts(tx: &Connection, hashes: &[String]) -> Answer<Vec<PromptText
         {
             found.push(PromptText {
                 hash: hash.clone(),
+                children: hash_set(tx, SQL.read_children.sql(), [hash])?
+                    .into_iter()
+                    .collect(),
                 text,
             });
         }

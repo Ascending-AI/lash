@@ -745,6 +745,7 @@ impl TurnDrive for L3Drive {
                         request: r#"{"left_by_another_build":true}"#.to_owned(),
                         snapshot_texts: Vec::new(),
                         request_texts: Vec::new(),
+                        prefix: None,
                     }));
                 }
                 cx.commit(tx, MATERIAL_LOST).await?;

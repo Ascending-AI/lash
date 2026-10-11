@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::store::BlobRef;
 use crate::store::plugin_writers::PluginRevision;
-use lash_sansio::llm::types::AttachmentSlot;
 
 /// The longest local section or wrapper key, in bytes.
 pub const PROMPT_KEY_MAX_BYTES: usize = 64;
@@ -510,56 +509,76 @@ pub struct PromptSnapshot {
 /// bytes of two literals store equal leading chunks.
 pub const PROVIDER_BODY_CHUNK_BYTES: usize = 32 * 1024;
 
-/// The request template an admitted call sends, as its record stores it
-/// (ADR 0133 §6, ADR 0135 §6): the route that lowered it, whether it
-/// streams outside its JSON, the generation receipt its provider built, and
-/// its segments in wire order. A literal is stored as content-addressed chunks of its own,
-/// so a template that shares a literal prefix with an earlier call's shares
-/// that prefix's chunks. A slot is recorded inline: its ref, position,
-/// acceptance and codec, never a delivered value.
+/// A content-addressed fragment tree of the exact admitted wire template.
+/// Prefix subtrees are shared; an append replaces only the right index path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChunkedRequestTemplate {
     pub fetch_horizon: lash_sansio::llm::attachment_delivery::DeliveryFetchHorizon,
     pub route: lash_sansio::llm::types::ProviderRouteIdentity,
-    /// Only routes whose JSON carries no response mode record it here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_stream: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<lash_sansio::llm::types::GenerationReceipt>,
-    /// See [`RecordedRequestTemplate::wire_features`](lash_sansio::llm::types::RecordedRequestTemplate).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wire_features: Vec<Box<str>>,
-    /// Every segment, in wire order.
-    pub segments: Vec<ChunkedSegment>,
+    /// One immutable root, including the ordered attachment slots.
+    pub root: PromptTextRef,
+    /// Lowered history through its final message, without the closing
+    /// envelope. Session ownership keeps this prefix between calls.
+    pub prefix: Option<PromptTextRef>,
 }
 
-/// One stored segment of a [`ChunkedRequestTemplate`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "segment", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ChunkedSegment {
-    /// Literal JSON text: its length in bytes and every chunk, in order.
+/// A stored wire fragment or a binary index node. Its encoded bytes have
+/// their own content address; each branch has exactly two edges.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "fragment", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RequestFragment {
     Literal {
-        bytes: u64,
-        chunks: Vec<PromptTextRef>,
+        text: String,
     },
-    /// One attachment slot, filled per attempt.
     Attachment {
-        slot: lash_sansio::llm::types::AttachmentSlot,
+        slot: Box<lash_sansio::llm::types::AttachmentSlot>,
     },
+    Branch {
+        left: PromptTextRef,
+        right: PromptTextRef,
+    },
+}
+
+impl RequestFragment {
+    /// Index bodies have a separate content domain from arbitrary audit
+    /// text, whose equal spelling must never stand for an installed tree.
+    pub fn reference(body: &str) -> PromptTextRef {
+        let mut addressed = b"lash.request-fragment/1\0".to_vec();
+        addressed.extend_from_slice(body.as_bytes());
+        PromptTextRef {
+            blob: BlobRef::for_content(&addressed),
+            bytes: u32::try_from(body.len()).unwrap_or(u32::MAX),
+        }
+    }
+
+    pub fn children(&self) -> Vec<String> {
+        match self {
+            Self::Branch { left, right } => vec![
+                left.blob.as_str().to_owned(),
+                right.blob.as_str().to_owned(),
+            ],
+            Self::Literal { .. } | Self::Attachment { .. } => Vec::new(),
+        }
+    }
 }
 
 /// Why a recorded template could not be assembled as admitted.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ProviderBodyError {
+    #[error("request fragment {hash} does not match its reference")]
+    FragmentMismatch { hash: String },
+    #[error("request fragment does not decode: {reason}")]
+    Index { reason: String },
     /// A chunk the record names is not among the texts read back.
     #[error("request template chunk {hash} is missing")]
     MissingChunk { hash: String },
-    /// An assembled literal is not its recorded length.
-    #[error(
-        "an assembled request template literal holds {assembled} bytes, not the recorded {recorded}"
-    )]
-    Length { assembled: u64, recorded: u64 },
     /// The assembled segments are not a valid template.
     #[error("the assembled request template is invalid: {0}")]
     Template(#[from] lash_sansio::llm::types::TemplateError),
@@ -585,27 +604,136 @@ fn chunk_text(text: &str, texts: &mut Vec<(BlobRef, String)>) -> Vec<PromptTextR
     chunks
 }
 
+/// Store a fragment by its exact encoding, never by re-rendered JSON.
+fn keep_fragment(fragment: &RequestFragment, texts: &mut Vec<(BlobRef, String)>) -> PromptTextRef {
+    let body = serde_json::to_string(fragment).expect("wire fragments encode");
+    let reference = RequestFragment::reference(&body);
+    texts.push((reference.blob.clone(), body));
+    reference
+}
+
+/// A canonical append tree: the left subtree is the largest complete
+/// power-of-two prefix smaller than the sequence. Every completed subtree
+/// keeps its address when the sequence grows.
+fn fragment_tree(fragments: &[PromptTextRef], texts: &mut Vec<(BlobRef, String)>) -> PromptTextRef {
+    if fragments.len() == 1 {
+        return fragments[0].clone();
+    }
+    let split = 1usize << (fragments.len() - 1).ilog2();
+    let left = fragment_tree(&fragments[..split], texts);
+    let right = fragment_tree(&fragments[split..], texts);
+    keep_fragment(&RequestFragment::Branch { left, right }, texts)
+}
+
 impl ChunkedRequestTemplate {
-    /// Record `template` as chunks: the record and each literal chunk's text
-    /// by its content address.
+    /// Content-aligned JSON lexical segments, including punctuation, keep
+    /// their boundaries when a message is appended or an earlier message
+    /// changes. Large lexical segments split from their own start on UTF-8
+    /// boundaries, rather than from the start of the whole literal.
     pub fn chunk(
         template: &lash_sansio::llm::types::RecordedRequestTemplate,
     ) -> (Self, Vec<(BlobRef, String)>) {
         use lash_sansio::llm::types::RequestSegment;
         let mut texts = Vec::new();
-        let segments = template
-            .segments()
-            .iter()
-            .map(|segment| match segment {
-                RequestSegment::Literal { text } => ChunkedSegment::Literal {
-                    bytes: u64::try_from(text.len()).unwrap_or(u64::MAX),
-                    chunks: chunk_text(text, &mut texts),
+        let mut fragments = Vec::new();
+        let mut depth = 0usize;
+        let mut history_depth = None;
+        let mut history_key = false;
+        let mut prefix_end = None;
+        for segment in template.segments() {
+            match segment {
+                RequestSegment::Attachment { slot } => fragments.push(keep_fragment(
+                    &RequestFragment::Attachment { slot: slot.clone() },
+                    &mut texts,
+                )),
+                RequestSegment::Literal { text } => {
+                    let mut start = 0;
+                    let mut quoted = false;
+                    let mut escaped = false;
+                    let mut cuts = Vec::new();
+                    for (offset, ch) in text.char_indices() {
+                        if quoted {
+                            if escaped {
+                                escaped = false;
+                                // Rendered history carried in one JSON string
+                                // still has content-aligned line boundaries.
+                                if ch == 'n' {
+                                    cuts.push(&text[start..offset + 1]);
+                                    start = offset + 1;
+                                }
+                            } else if ch == '\\' {
+                                escaped = true;
+                            } else if ch == '"' {
+                                quoted = false;
+                            }
+                        } else if ch == '"' {
+                            quoted = true;
+                        } else if matches!(ch, '{' | '}' | '[' | ']' | ',' | ':') {
+                            if start < offset {
+                                cuts.push(&text[start..offset]);
+                            }
+                            cuts.push(&text[offset..offset + 1]);
+                            start = offset + 1;
+                        }
+                    }
+                    if start < text.len() {
+                        cuts.push(&text[start..]);
+                    }
+                    for token in cuts {
+                        let trimmed = token.trim();
+                        if trimmed == "]" && history_depth == Some(depth) {
+                            prefix_end = Some(fragments.len());
+                            history_depth = None;
+                        }
+                        if trimmed == "[" && history_key {
+                            history_depth = Some(depth + 1);
+                        }
+                        match trimmed {
+                            "{" | "[" => depth += 1,
+                            "}" | "]" => depth = depth.saturating_sub(1),
+                            ":" => {}
+                            _ => {
+                                history_key = depth == 1
+                                    && matches!(
+                                        trimmed,
+                                        "\"messages\"" | "\"contents\"" | "\"input\""
+                                    )
+                            }
+                        }
+                        let mut rest = token;
+                        while !rest.is_empty() {
+                            let mut end = rest.len().min(PROVIDER_BODY_CHUNK_BYTES);
+                            while !rest.is_char_boundary(end) {
+                                end -= 1;
+                            }
+                            let (part, tail) = rest.split_at(end);
+                            fragments.push(keep_fragment(
+                                &RequestFragment::Literal {
+                                    text: part.to_owned(),
+                                },
+                                &mut texts,
+                            ));
+                            rest = tail;
+                        }
+                    }
+                }
+            }
+        }
+        let prefix = prefix_end
+            .filter(|end| *end > 0 && *end < fragments.len())
+            .map(|end| fragment_tree(&fragments[..end], &mut texts));
+        let root = if let (Some(prefix), Some(end)) = (&prefix, prefix_end) {
+            let right = fragment_tree(&fragments[end..], &mut texts);
+            keep_fragment(
+                &RequestFragment::Branch {
+                    left: prefix.clone(),
+                    right,
                 },
-                RequestSegment::Attachment { slot } => ChunkedSegment::Attachment {
-                    slot: AttachmentSlot::clone(slot),
-                },
-            })
-            .collect();
+                &mut texts,
+            )
+        } else {
+            fragment_tree(&fragments, &mut texts)
+        };
         (
             Self {
                 fetch_horizon: template.fetch_horizon,
@@ -613,51 +741,54 @@ impl ChunkedRequestTemplate {
                 transport_stream: template.transport_stream(),
                 generation: template.generation,
                 wire_features: template.wire_features.clone(),
-                segments,
+                root,
+                prefix,
             },
             texts,
         )
     }
 
-    /// The template these segments hold, each literal chunk read from
-    /// `text` by its address, validated as a template.
-    ///
-    /// # Errors
-    ///
-    /// [`ProviderBodyError`] when a chunk is missing, a literal is not its
-    /// recorded length, or the segments are not a valid template; the caller
-    /// verified every text against its address.
+    /// Read the exact admitted fragments and slots, without any lowerer.
     pub fn assemble<'a>(
         &self,
         text: impl Fn(&BlobRef) -> Option<&'a str>,
     ) -> Result<lash_sansio::llm::types::RecordedRequestTemplate, ProviderBodyError> {
         use lash_sansio::llm::types::RequestSegment;
-        let mut segments = Vec::with_capacity(self.segments.len());
-        for segment in &self.segments {
-            segments.push(match segment {
-                ChunkedSegment::Literal { bytes, chunks } => {
-                    let mut literal = String::new();
-                    for chunk in chunks {
-                        let stored =
-                            text(&chunk.blob).ok_or_else(|| ProviderBodyError::MissingChunk {
-                                hash: chunk.blob.as_str().to_owned(),
-                            })?;
-                        literal.push_str(stored);
-                    }
-                    let assembled = u64::try_from(literal.len()).unwrap_or(u64::MAX);
-                    if assembled != *bytes {
-                        return Err(ProviderBodyError::Length {
-                            assembled,
-                            recorded: *bytes,
+        let mut stack = vec![self.root.clone()];
+        let mut segments = Vec::new();
+        let mut literal = String::new();
+        while let Some(reference) = stack.pop() {
+            let stored = text(&reference.blob).ok_or_else(|| ProviderBodyError::MissingChunk {
+                hash: reference.blob.as_str().to_owned(),
+            })?;
+            if RequestFragment::reference(stored) != reference {
+                return Err(ProviderBodyError::FragmentMismatch {
+                    hash: reference.blob.as_str().to_owned(),
+                });
+            }
+            match serde_json::from_str::<RequestFragment>(stored).map_err(|error| {
+                ProviderBodyError::Index {
+                    reason: error.to_string(),
+                }
+            })? {
+                RequestFragment::Branch { left, right } => {
+                    stack.push(right);
+                    stack.push(left);
+                }
+                RequestFragment::Literal { text } => literal.push_str(&text),
+                RequestFragment::Attachment { slot } => {
+                    if !literal.is_empty() {
+                        segments.push(RequestSegment::Literal {
+                            text: std::mem::take(&mut literal).into(),
                         });
                     }
-                    RequestSegment::Literal {
-                        text: literal.into(),
-                    }
+                    segments.push(RequestSegment::Attachment { slot });
                 }
-                ChunkedSegment::Attachment { slot } => RequestSegment::Attachment {
-                    slot: Box::new(slot.clone()),
-                },
+            }
+        }
+        if !literal.is_empty() {
+            segments.push(RequestSegment::Literal {
+                text: literal.into(),
             });
         }
         let mut template =

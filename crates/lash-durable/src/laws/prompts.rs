@@ -15,6 +15,7 @@ fn text(name: &str) -> PromptText {
     PromptText {
         hash: format!("hash-{name}"),
         text: format!("text {name}"),
+        children: Vec::new(),
     }
 }
 
@@ -62,6 +63,7 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
             request: format!("request of {run}"),
             snapshot_texts: names.iter().map(|name| text(name)).collect(),
             request_texts: Vec::new(),
+            prefix: None,
         })
     };
     let admit = |run: &TurnId| {
@@ -265,6 +267,7 @@ pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
             request: format!("request of {}", call.call),
             snapshot_texts,
             request_texts,
+            prefix: None,
         }));
         store.commit(tx, LABEL).await?;
     }
@@ -339,6 +342,7 @@ pub async fn settling_a_turns_calls_releases_their_requests_and_keeps_their_snap
             request: format!("request of {}", key.call),
             snapshot_texts: names(snapshot),
             request_texts: names(request),
+            prefix: None,
             call: key,
         })
     };

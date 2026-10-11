@@ -128,6 +128,10 @@ DROP TABLE IF EXISTS lash_prompt_texts CASCADE;
 
 DROP TABLE IF EXISTS lash_prompt_snapshot_texts CASCADE;
 
+DROP TABLE IF EXISTS lash_prompt_text_edges CASCADE;
+
+DROP TABLE IF EXISTS lash_prompt_prefixes CASCADE;
+
 DROP TABLE IF EXISTS lash_turn_phases CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_namespaces CASCADE;

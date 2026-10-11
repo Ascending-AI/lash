@@ -113,6 +113,8 @@ pub const TABLES: &[&str] = &[
     durable::graph::EDGES_TABLE,
     durable::graph::RELEASE_PINS_TABLE,
     durable::prompts::EDGES_TABLE,
+    durable::prompts::INDEX_EDGES_TABLE,
+    durable::prompts::PREFIXES_TABLE,
     durable::prompts::TABLE,
     durable::prompts::TEXTS_TABLE,
     durable::run_records::TABLE,

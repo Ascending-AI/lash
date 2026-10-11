@@ -476,6 +476,7 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
     let text = |hash: &str| PromptText {
         hash: hash.to_owned(),
         text: format!("text of {hash}"),
+        children: Vec::new(),
     };
     let record = |call: PromptCallKey, hashes: &[&str]| {
         DomainWrite::Prompt(PromptWrite::Record {
@@ -484,6 +485,7 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
             call,
             snapshot_texts: hashes.iter().map(|hash| text(hash)).collect(),
             request_texts: Vec::new(),
+            prefix: None,
         })
     };
     let release = |session: &str, run: &str| {

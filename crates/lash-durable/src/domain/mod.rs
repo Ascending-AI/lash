@@ -54,7 +54,9 @@ pub use processes::{
     CancelAnswer, CancelRequest, ProcessActorRow, ProcessStartRows, ProcessWrite, RedriveAnswer,
     RedriveRequest,
 };
-pub use prompts::{ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite};
+pub use prompts::{
+    ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite, request_roots,
+};
 pub use run_records::AdmittedId;
 pub use session_close::{SessionCloseRow, SessionCloseStep, SessionCloseWrite};
 pub use session_mail::{
@@ -347,6 +349,9 @@ pub enum DomainRefusal {
         /// The session.
         session: SessionId,
     },
+    /// A referenced prompt fragment has no supplied or stored body.
+    #[error("prompt fragment {hash} has no body")]
+    PromptFragmentMissing { hash: String },
     /// A prompt record named a call that already has its snapshot.
     #[error("{} in session {} is already admitted", call.call, call.session)]
     PromptCallRecorded {

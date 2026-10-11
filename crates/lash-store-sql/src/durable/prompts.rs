@@ -27,6 +27,10 @@ pub const TEXTS_TABLE: &str = "prompt_texts";
 
 /// The table of edges from a root's part to each text it references.
 pub const EDGES_TABLE: &str = "prompt_snapshot_texts";
+/// Immutable fragment-to-fragment edges.
+pub const INDEX_EDGES_TABLE: &str = "prompt_text_edges";
+/// The one reusable lowered history root owned by each session.
+pub const PREFIXES_TABLE: &str = "prompt_prefixes";
 
 /// The edge part of a text a call's snapshot references.
 pub const SNAPSHOT_PART: &str = "snapshot";
@@ -54,9 +58,23 @@ crate::statements! {
 
         /// The texts call `?3` of owner `?2` in session `?1` references,
         /// each with the part that references it.
-        read_edges = "SELECT part, hash FROM prompt_snapshot_texts
-             WHERE session_id = ?1 AND owner = ?2 AND call = ?3
-             ORDER BY part, hash";
+        read_edges = "WITH RECURSIVE closure AS (
+                 SELECT part, hash FROM prompt_snapshot_texts
+                  WHERE session_id = ?1 AND owner = ?2 AND call = ?3
+                 UNION
+                 SELECT closure.part, edge.child FROM closure
+                   JOIN prompt_text_edges AS edge ON edge.parent = closure.hash
+             ) SELECT part, hash FROM closure ORDER BY part, hash";
+
+        /// Outgoing immutable index edges.
+        read_children = "SELECT child FROM prompt_text_edges WHERE parent = ?1 ORDER BY child";
+
+        /// Sever the session's reusable prefix, returning its former root.
+        release_prefix = "DELETE FROM prompt_prefixes WHERE session_id = ?1 RETURNING hash";
+
+        /// Replace the one reusable prefix of a session.
+        set_prefix = "INSERT INTO prompt_prefixes (session_id, hash) VALUES (?1, ?2)
+             ON CONFLICT (session_id) DO UPDATE SET hash = excluded.hash";
 
         /// The text at content address `?1`.
         read_text = "SELECT text FROM prompt_texts WHERE hash = ?1";

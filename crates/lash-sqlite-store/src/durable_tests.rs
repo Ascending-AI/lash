@@ -182,6 +182,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
     let text = |name: &str| PromptText {
         hash: format!("hash-{name}"),
         text: format!("text {name}"),
+        children: Vec::new(),
     };
     let record = |ordinal: u32, snapshot: &[&str], request: &[&str]| {
         DomainWrite::Prompt(PromptWrite::Record {
@@ -196,6 +197,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
             request: format!("request of call {ordinal}"),
             snapshot_texts: snapshot.iter().map(|name| text(name)).collect(),
             request_texts: request.iter().map(|name| text(name)).collect(),
+            prefix: None,
         })
     };
     let settle = |open: Option<u32>| {
@@ -449,5 +451,250 @@ async fn a_lost_fence_in_a_write_batch_refuses_only_its_own_commit() {
         revision(&lost).await,
         lost_before,
         "the stale commit moved nothing"
+    );
+}
+
+/// PREFIX-DELTA and REQUEST-LIFETIME (FIG-5956): sequential calls keep one
+/// history index across settlements, submit only new fragments and bounded
+/// paths, and retire their request envelopes. Prefix invalidation retires
+/// the shared history too. Changed earlier bytes remain exact.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sequential_calls_submit_only_new_fragments_across_settlement() {
+    use lash_core_execution::plugin::prompt::{admission_record, load_admitted_call};
+    use lash_durable::domain::{ModelCallId, PromptCallKey, PromptWrite};
+    use lash_durable::{
+        ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore, FormatSet, MailTx, NodeId,
+        NodeSpec,
+    };
+    use lash_sansio::llm::types::{
+        LlmRequestScope, ProviderRouteIdentity, RecordedRequestTemplate, ResponseContext,
+        ResponseContract,
+    };
+
+    let (_root, set, _clock) = world(false).await;
+    let store = set.durable_store();
+    let session = lash_sansio::SessionId::from("fragment-session");
+    let actor = ActorKey::session(session.as_str()).unwrap();
+    let formats = FormatSet::new("fragment-index-formats");
+    let mut create = MailTx::new();
+    create.create_actor(actor.clone(), formats.clone());
+    store
+        .commit_mail(create, CommitLabel::new("law.create"))
+        .await
+        .unwrap();
+    let node = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("fragment-owner"),
+            decodes: vec![formats],
+            ttl_millis: 15_000,
+        })
+        .await
+        .unwrap();
+    let epoch = store.claim(&node, 1).await.unwrap()[0].epoch;
+    let route = ProviderRouteIdentity {
+        provider: "fixture".into(),
+        endpoint: "https://fixture.test".into(),
+        model: "model".into(),
+    };
+    let response = ResponseContext::recorded(
+        LlmRequestScope::new("fragment-session", "frame", "fragment-call"),
+        Arc::new(ResponseContract {
+            model: lash_core_execution::testing::test_llm_profile_config(
+                "model",
+                lash_core_execution::testing::test_llm_profile_metadata("model"),
+            ),
+            output_spec: None,
+            tools: Vec::new(),
+        }),
+    );
+    let mut messages = Vec::new();
+    let mut all = std::collections::BTreeSet::new();
+    let mut maximum_nodes = 0;
+    let mut maximum_edges = 0;
+    for ordinal in 1..=128u32 {
+        if ordinal == 65 {
+            messages[0] =
+                "{\"role\":\"user\",\"content\":\"changed prefix: 🦀\\\"\\\\\"}".to_owned();
+        }
+        messages.push(format!(
+            "{{\"role\":\"user\",\"content\":\"{ordinal}:{}\"}}",
+            "x".repeat(2048)
+        ));
+        let wire = format!("{{\"messages\":[{}],\"stream\":true}}", messages.join(","));
+        let template =
+            RecordedRequestTemplate::literal(route.clone(), true, None, wire.as_str()).unwrap();
+        let call = PromptCallKey {
+            session: session.clone(),
+            call: ModelCallId::Turn {
+                run: lash_sansio::TurnId::parse(format!("fragment-turn-{ordinal}")).unwrap(),
+                ordinal: 1,
+            },
+        };
+        let write = admission_record(call.clone(), None, &template, &response, None).unwrap();
+        let (prefix, request_root) = match &write {
+            DomainWrite::Prompt(PromptWrite::Record {
+                prefix, request, ..
+            }) => {
+                let record: lash_core_execution::prompt_sections::AdmittedRequest =
+                    serde_json::from_str(request).unwrap();
+                (
+                    prefix.clone().expect("a history prefix"),
+                    record.body.root.blob.as_str().to_owned(),
+                )
+            }
+            _ => unreachable!(),
+        };
+        let ((), receipt) =
+            lash_core_execution::facade_support::sql::collect("model.start", "sqlite", async {
+                let mut tx = store.begin(&actor, epoch).await.unwrap();
+                tx.write(write);
+                store
+                    .commit(tx, CommitLabel::new("model.start"))
+                    .await
+                    .unwrap();
+            })
+            .await;
+        let nodes: u64 = receipt
+            .shapes
+            .iter()
+            .filter(|(sql, _)| sql.starts_with("insert into") && sql.contains("prompt_texts "))
+            .map(|(_, shape)| shape.rows_returned)
+            .sum();
+        let edges: u64 = receipt
+            .shapes
+            .iter()
+            .filter(|(sql, _)| {
+                sql.starts_with("insert into")
+                    && (sql.contains("prompt_text_edges ")
+                        || sql.contains("prompt_snapshot_texts "))
+            })
+            .map(|(_, shape)| shape.rows_affected)
+            .sum();
+        let bytes: u64 = receipt
+            .shapes
+            .iter()
+            .filter(|(sql, _)| {
+                (sql.starts_with("insert into") && sql.contains("prompt_"))
+                    || (sql.starts_with("select hash from") && sql.contains("prompt_texts "))
+            })
+            .map(|(_, shape)| shape.bound_bytes)
+            .sum();
+        let logarithm = u64::from(ordinal.ilog2() + 1);
+        assert!(
+            nodes > 0 && edges > 0,
+            "the SQL witness counted no new nodes or edges"
+        );
+        assert!(
+            nodes <= 32 + 16 * logarithm,
+            "call {ordinal} installed {nodes} nodes"
+        );
+        assert!(
+            edges <= 64 + 32 * logarithm,
+            "call {ordinal} installed {edges} edges"
+        );
+        assert!(
+            bytes <= 24_576 + 8192 * logarithm,
+            "call {ordinal} bound {bytes} bytes"
+        );
+        maximum_nodes = maximum_nodes.max(nodes);
+        maximum_edges = maximum_edges.max(edges);
+        let reopened = set.reopen().await.unwrap().durable_store();
+        assert_eq!(
+            *load_admitted_call(&reopened, &call)
+                .await
+                .unwrap()
+                .unwrap()
+                .template,
+            template
+        );
+        all.extend(
+            store
+                .prompt_snapshot(&call)
+                .await
+                .unwrap()
+                .unwrap()
+                .request_texts,
+        );
+        let mut tx = store.begin(&actor, epoch).await.unwrap();
+        let ModelCallId::Turn { run, .. } = &call.call else {
+            unreachable!()
+        };
+        tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+            session: session.clone(),
+            run: run.clone(),
+            open: None,
+        }));
+        store
+            .commit(tx, CommitLabel::new("model.done"))
+            .await
+            .unwrap();
+        assert!(load_admitted_call(&store, &call).await.unwrap().is_none());
+        assert!(
+            store
+                .prompt_texts(&[request_root])
+                .await
+                .unwrap()
+                .is_empty(),
+            "settlement retains a request root"
+        );
+        assert_eq!(
+            store.prompt_texts(&[prefix]).await.unwrap().len(),
+            1,
+            "settlement loses the reusable history prefix"
+        );
+    }
+    let mut tx = store.begin(&actor, epoch).await.unwrap();
+    tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
+        session: session.clone(),
+    }));
+    store
+        .commit(tx, CommitLabel::new("pressure.frame"))
+        .await
+        .unwrap();
+    assert!(
+        store
+            .prompt_texts(&all.into_iter().collect::<Vec<_>>())
+            .await
+            .unwrap()
+            .is_empty(),
+        "invalidated history fragments survived"
+    );
+    // Session deletion releases both the new call and the reusable index.
+    let wire = format!("{{\"messages\":[{}],\"stream\":true}}", messages.join(","));
+    let template = RecordedRequestTemplate::literal(route, true, None, wire.as_str()).unwrap();
+    let call = PromptCallKey {
+        session: session.clone(),
+        call: ModelCallId::Turn {
+            run: lash_sansio::TurnId::from("fragment-delete"),
+            ordinal: 1,
+        },
+    };
+    let mut tx = store.begin(&actor, epoch).await.unwrap();
+    tx.write(admission_record(call.clone(), None, &template, &response, None).unwrap());
+    store
+        .commit(tx, CommitLabel::new("model.start"))
+        .await
+        .unwrap();
+    let retained = store
+        .prompt_snapshot(&call)
+        .await
+        .unwrap()
+        .unwrap()
+        .request_texts;
+    let mut tx = store.begin(&actor, epoch).await.unwrap();
+    tx.write(DomainWrite::Prompt(PromptWrite::Release {
+        session,
+        run: None,
+    }));
+    store
+        .commit(tx, CommitLabel::new("session.delete"))
+        .await
+        .unwrap();
+    assert!(
+        store.prompt_texts(&retained).await.unwrap().is_empty(),
+        "session deletion retained a prefix"
+    );
+    eprintln!(
+        "PREFIX-DELTA: 128 sequential calls, max new nodes={maximum_nodes}, max new edges={maximum_edges}, byte-exact after every settlement and changed prefix"
     );
 }

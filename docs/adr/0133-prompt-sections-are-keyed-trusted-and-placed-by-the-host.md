@@ -241,14 +241,35 @@ its session's release.
 A root is keyed by the call's owner-scoped identity (`ModelCallId`): a turn's
 call is its run and ordinal, and an owned call (§8) is its owner's execution
 scope and its stable key there, with no turn required. The root also holds
-the call's request template (§6): its literal text in content-addressed
-chunks of at most 32 KiB beside its section texts, each literal chunked on
-its own, and its attachment slots in order; the call's response context
-(§6): its scope, and its response contract stored by content beside the
-texts; and an owned call's pinned deadline: one `AdmittedRequest` record,
-the root's request part. A slot records its ref, position, acceptance and
-codec, never a delivered value. `load_admitted_call` reads an unsettled
-call's request back with every chunk verified against its address,
+the call's request template (§6): one content-addressed binary fragment
+index over exact literal segments and ordered attachment slots (FIG-5956),
+rather than a list of the full request's chunks. Fragment boundaries follow
+JSON lexical segments and escaped line boundaries within strings; a large
+segment splits on UTF-8 boundaries at 32 KiB
+from its own start. Index branches name two children. The canonical tree
+keeps each completed power-of-two prefix subtree unchanged on append, so a
+new call installs only new fragments and logarithmic index paths. Stores
+probe from roots and stop at a held immutable node, publishing its new edges
+only once. A separate content domain keeps arbitrary audit text from standing
+for an installed index. The response context and owned deadline are still
+recorded beside the index. A slot records its ref, position, acceptance and
+codec, never a delivered value.
+
+A session owns one reusable lowered history prefix through its last message,
+without the request's closing envelope (`prompt_prefixes`). It keeps one copy
+between sequential calls, including across settlement; the next admission
+replaces this root atomically and reclaims unreferenced predecessor paths.
+Frame switches, compaction and configuration commands invalidate it in their
+own commits; session deletion releases it. A changed lowerer or wire contract
+publishes its new exact prefix and retires the previous one at admission.
+Owned calls have no reusable session prefix. Settlement still releases each
+call's own request root, suffix, response and deadline. Immutable index edges
+(`prompt_text_edges`) retain only reachable fragments; severing the last root
+peels unreferenced nodes and their edges in the same transaction. PostgreSQL
+settlement locks the session prefix row until commit, excluding its immutable
+closure from reclamation without submitting the retained history's metadata.
+Snapshots remain independent audit roots with the lifetime described above. `load_admitted_call` reads an unsettled
+call's request back with each fragment and contract chunk verified against its address,
 assembles the template byte for byte, decodes the response contract, and
 calls no renderer or provider builder; `load_prompt_snapshot` reads the
 snapshot back with its section texts, before and after the call settles.

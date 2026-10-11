@@ -305,6 +305,11 @@ table lash_processes
   column written_epoch bigint nullable
   unique (start_key) where start_key is not null
   primary-key (process_id)
+table lash_prompt_prefixes
+  column hash text not-null
+  column session_id text not-null
+  primary-key (session_id)
+  foreign-key (hash) references lash_prompt_texts (hash) on delete no action
 table lash_prompt_snapshot_texts
   column call text not-null
   column hash text not-null
@@ -322,6 +327,12 @@ table lash_prompt_snapshots
   column snapshot text nullable
   column written_epoch bigint not-null
   primary-key (session_id, owner, call)
+table lash_prompt_text_edges
+  column child text not-null
+  column parent text not-null
+  primary-key (parent, child)
+  foreign-key (child) references lash_prompt_texts (hash) on delete no action
+  foreign-key (parent) references lash_prompt_texts (hash) on delete cascade
 table lash_prompt_texts
   column hash text not-null
   column text text not-null

@@ -594,6 +594,9 @@ pub async fn run_phases(
                     head_revision: Some(commit.expected_head.saturating_add(1)),
                 }));
                 if let Some(follow_on) = follow_on {
+                    tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
+                        session: session.clone(),
+                    }));
                     tx.write(DomainWrite::SessionMail(follow_on));
                 }
                 // The turn's scope ends with its commit (L6b): its waits are

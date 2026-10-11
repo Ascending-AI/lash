@@ -41,6 +41,7 @@ use super::{
 };
 use crate::prompt_sections::{
     AdmittedRequest, ChunkedRequestTemplate, ProviderBodyError, RecordedResponseContext,
+    RequestFragment,
 };
 use crate::store::BlobRef;
 
@@ -234,6 +235,21 @@ pub fn admission_record(
         },
         &serde_json::to_string(response.contract.as_ref())?,
     );
+    let fragments: BTreeMap<_, _> = request_texts
+        .iter()
+        .map(|(hash, body)| {
+            let node: RequestFragment = serde_json::from_str(body)?;
+            Ok((hash.clone(), node.children()))
+        })
+        .collect::<Result<_, serde_json::Error>>()?;
+    let prefix = matches!(call.call, lash_durable::domain::ModelCallId::Turn { .. })
+        .then(|| {
+            recorded_body
+                .prefix
+                .as_ref()
+                .map(|prefix| prefix.blob.as_str().to_owned())
+        })
+        .flatten();
     request_texts.extend(contract);
     let request = AdmittedRequest {
         version: PromptSnapshotVersion,
@@ -246,6 +262,7 @@ pub fn admission_record(
             .into_iter()
             .map(|(hash, text)| PromptText {
                 hash: hash.as_str().to_owned(),
+                children: fragments.get(&hash).cloned().unwrap_or_default(),
                 text,
             })
             .collect()
@@ -258,6 +275,7 @@ pub fn admission_record(
         request: serde_json::to_string(&request)?,
         snapshot_texts: prompt.map_or_else(Vec::new, |prompt| stored(prompt.texts.clone())),
         request_texts: stored(request_texts.into_iter().collect()),
+        prefix,
     }))
 }
 
@@ -533,7 +551,9 @@ async fn verified_texts(
 ) -> Result<BTreeMap<BlobRef, String>, AdmittedCallLoadError> {
     let mut texts = BTreeMap::new();
     for stored in reads.prompt_texts(hashes).await? {
-        if PromptTextRef::of(&stored.text).blob.as_str() != stored.hash {
+        if PromptTextRef::of(&stored.text).blob.as_str() != stored.hash
+            && RequestFragment::reference(&stored.text).blob.as_str() != stored.hash
+        {
             return Err(AdmittedCallLoadError::TextMismatch { hash: stored.hash });
         }
         texts.insert(BlobRef(stored.hash), stored.text);

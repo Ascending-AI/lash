@@ -90,6 +90,8 @@ pub struct PromptText {
     pub hash: String,
     /// The exact UTF-8 text.
     pub text: String,
+    /// Outgoing index edges; empty for section text and literal leaves.
+    pub children: Vec<String>,
 }
 
 /// One call's root, as its admission recorded it, while it is retained.
@@ -132,6 +134,13 @@ pub enum PromptWrite {
         snapshot_texts: Vec<PromptText>,
         /// Every distinct text the request references.
         request_texts: Vec<PromptText>,
+        /// The session-owned lowered history prefix, replaced atomically.
+        prefix: Option<String>,
+    },
+    /// Invalidate the reusable history on frame or configuration change.
+    ResetPrefix {
+        /// The session whose lowered history is no longer reusable.
+        session: SessionId,
     },
     /// The settlement of turn `run`'s calls (FIG-5946): release the request
     /// of each of them but `open`, the call this commit admits, with every
@@ -156,4 +165,18 @@ pub enum PromptWrite {
         /// The one turn released, or `None` for every turn of the session.
         run: Option<TurnId>,
     },
+}
+
+/// The roots of a supplied fragment forest. Children are owned by immutable
+/// nodes, rather than relisted as call-to-text edges on every admission.
+pub fn request_roots(texts: &[PromptText]) -> std::collections::BTreeSet<&str> {
+    let children: std::collections::BTreeSet<_> = texts
+        .iter()
+        .flat_map(|text| text.children.iter().map(String::as_str))
+        .collect();
+    texts
+        .iter()
+        .map(|text| text.hash.as_str())
+        .filter(|hash| !children.contains(hash))
+        .collect()
 }

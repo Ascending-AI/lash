@@ -111,6 +111,13 @@ pub(crate) async fn commit_in(
     crate::store::admit_runtime_commit_budget(&commit, metrics).map_err(HeadCommitError::Store)?;
     let encoded = crate::store::encode_session_commit(&commit).map_err(HeadCommitError::Store)?;
     let mut tx = owner.begin().await.map_err(HeadCommitError::Owner)?;
+    if commit.frame_transition.is_some() || commit.applied_commands.is_some() || formats.is_some() {
+        tx.write(DomainWrite::Prompt(
+            lash_durable::domain::PromptWrite::ResetPrefix {
+                session: commit.session_id.clone(),
+            },
+        ));
+    }
     write_session_commit(
         &mut tx,
         &commit.session_id,

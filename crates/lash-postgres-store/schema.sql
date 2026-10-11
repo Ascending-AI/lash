@@ -994,6 +994,18 @@ CREATE TABLE IF NOT EXISTS lash_prompt_snapshot_texts (
 CREATE INDEX IF NOT EXISTS idx_lash_prompt_snapshot_texts_hash
     ON lash_prompt_snapshot_texts (hash);
 
+CREATE TABLE IF NOT EXISTS lash_prompt_text_edges (
+    parent TEXT NOT NULL REFERENCES lash_prompt_texts(hash) ON DELETE CASCADE,
+    child TEXT NOT NULL REFERENCES lash_prompt_texts(hash),
+    PRIMARY KEY (parent, child)
+);
+CREATE INDEX IF NOT EXISTS idx_lash_prompt_text_edges_child ON lash_prompt_text_edges(child);
+CREATE TABLE IF NOT EXISTS lash_prompt_prefixes (
+    session_id TEXT PRIMARY KEY,
+    hash TEXT NOT NULL REFERENCES lash_prompt_texts(hash)
+);
+
+
 -- Turn phase state (V0, FIG-5170; then L3): a 1:1 side table of
 -- lash_session_runs while the turn is unfinished. The run row stays the one
 -- admission authority (ux_lash_session_runs_unfinished); this row carries the
