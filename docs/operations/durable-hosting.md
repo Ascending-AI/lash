@@ -267,6 +267,59 @@ session, and the next build's nodes run it. Call `shutdown` once the old
 build's intake has moved. A node served directly drains when the host starts
 the `Drain` its `NodeServe` holds, and `serve` returns `Stopped::Drained`.
 
+### Host-scheduled maintenance
+
+Serving nodes do not schedule attachment reclamation or terminal-process
+pruning. The host installs those jobs and owns their cadence and retention
+policy. Logical database cleanup and deletion of physical attachment bytes
+are separate operations:
+
+| Maintenance | Caller and lever | Scheduling and retention owner |
+| --- | --- | --- |
+| Attachment referrer cleanup in the database | Lash's store transactions retire edges as their owners and retained records are released; reclamation reconciles abandoned write intents against durable owner state. | The host chooses record retention and deletion. Removing referrers makes bytes eligible; it does not delete blobs. Age alone does not prove a turn or retained process dead. |
+| Physical attachment reclamation | A host job calls `lash::persistence::reclaim_unreferenced_attachments(&root_set, attachment_store, policy)`. The root authority is the deployment's `PostgresStore` or `SqliteStore`, implementing `AttachmentRootSet`, paired with that deployment's blob backend. | The host chooses the schedule and `AttachmentReclamationPolicy`: `grace_period_ms`, `EmptyRootSetPolicy` and optionally the delete-attempt limit. |
+| Terminal-process pruning | A host job calls `core.processes().prune(cutoff_epoch_ms, filter, watermark)`, returning `ProcessPruneReport`. | The host chooses cutoff and selection, and supplies `ProjectionWatermark::UpTo(acknowledged_cursor)` or explicitly `NoProjector`. Retain rows through every outstanding delivery/reconciliation horizon and still-replayable await; persist each start-key binding before pruning. A later await receives `ProcessNoLongerRetained`. |
+
+The attachment backend's **namespace must be exclusive to the deployment
+whose root authority the sweep reads**. For S3, that namespace is the
+configured bucket plus prefix; deployments with distinct exclusive prefixes
+may share one bucket. For a filesystem backend it is the configured directory.
+Every blob the backend enumerates or deletes must belong to that authority.
+An unrelated nonempty root set does not protect another deployment's data;
+the empty-root guard is not an ownership check.
+
+Choose grace to cover both post-terminal retention of uncommitted intents
+and freshness of recently put blobs. The sweep checks durable owner state
+before forgetting an intent and rechecks blob freshness with `head` before
+deleting; grace is host retention policy, not a maximum run or replay time.
+Choose `EmptyRootSetPolicy::Refuse` unless deleting all unreferenced,
+deletion-eligible blobs in this namespace is intended, in which case state
+`AuthorizeDeleteAll` explicitly. An unauthorized destructive empty-root
+sweep returns `MaintenanceRefusal::EmptyRootSetUnauthorized` with a partial
+report.
+
+The built-in database authorities fence deletion through condemnation,
+writer-intent and delete-arming CAS transitions. Each sweep first adopts and
+finishes condemnations left by provably dead passes, then considers new
+candidates. Contended or restoring digests are deferred. A custom authority
+that lacks these transitions reports `AttachmentGcFence::BestEffort`; its
+root rechecks detect a deletion race but cannot prevent it. Use recoverable
+blob deletion for that contract and investigate any
+`deleted_while_referenced` report.
+
+Inspect the report even on `Ok`: `MaintenanceReport::sweep()` classifies
+`failed_ids`, `condemn_deferred_ids` or `stalled_ids` as
+`MaintenanceSweep::Incomplete`. Later host sweeps retry failed and stalled
+deletes under backoff; `AttachmentRootSet::list_condemnations` reports each
+reason, attempt count and last error, and `adopted_count` records adopted
+work. `Err(AttachmentReclamationFailure)` means a refusal or sweep-level
+failure stopped the pass and carries any partial report. Surface these
+results to operators instead of treating a completed call as a complete
+cleanup.
+
+See [reclamation policy, fences and reports](../../crates/lash-core-store/src/attachments.rs)
+and [process pruning](../../crates/lash/src/process_admin.rs).
+
 ## 2. PostgreSQL topology
 
 PostgreSQL 17 and 18 are supported for lash 1.0; 18 is primary. Lash's CI
@@ -1092,6 +1145,36 @@ the plan selects their ordering and placement for each call's purpose.
 Change the recorded plan through `lash::config::SetPromptPlan` in a
 `ConfigTransaction`, applied by the session command lane. A run keeps its
 admitted config snapshot; the transaction changes subsequent admissions.
+
+Submit a config transaction without waiting inside a tool in that same
+session:
+
+```rust,ignore
+let config = session.admin().config();
+let expected_revision = config.revision().await?;
+let submission = config.submit(
+    lash::config::ConfigWrite::new(command_id, expected_revision),
+    lash::config::ConfigTransaction::of(lash::config::SetPromptPlan { plan }),
+).await?;
+// Return this durable status/receipt to the host; the tool must now finish.
+// The host may later settle a Pending receipt from outside this run.
+Ok(submission)
+```
+
+A transaction queued behind an active run cannot settle until that run
+releases the session head, including when it is parked. Awaiting
+`submission.await_outcome(&config)` in a same-session tool creates a cycle:
+the run waits for the tool, while settlement waits for the run. Durable
+submission is the point at which that tool returns; an independent host
+caller can retain the receipt and choose when to await settlement.
+
+Acceptance predicts neither application nor the next revision. An accepted
+command can settle `Stale` (another transaction changed the revision) or
+`Refused` (an owner rejected it). Use the `revision` from an `Applied`
+outcome; do not send work against a predicted `expected_revision + 1`.
+Before preparing a fresh transaction after a stale or refused outcome, read
+`config.revision()` again. A delivery retry reuses the original command id,
+expected revision and content; a revised transaction needs a fresh id.
 
 Composition occurs for each new model-call admission. Core records the
 resolved plan, section text, wrapper outputs, request template and response

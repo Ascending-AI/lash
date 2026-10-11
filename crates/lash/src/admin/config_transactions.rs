@@ -45,6 +45,18 @@ pub enum ConfigSettlement {
 
 impl ConfigSettlement {
     /// Explicitly wait for this transaction's outcome, without a host timeout.
+    ///
+    /// A transaction submitted behind an active run cannot settle until that
+    /// run releases the session head, including while the run is parked. A
+    /// tool in that same session must return after durable submission instead
+    /// of awaiting settlement: the run cannot release the head while waiting
+    /// for its tool to return. Retain the receipt and settle it from outside
+    /// that run.
+    ///
+    /// Acceptance predicts neither application nor the next config revision.
+    /// An accepted transaction can settle as `Stale` or `Refused`; use the
+    /// revision in an `Applied` outcome, or read the current revision before
+    /// preparing a fresh transaction. Do not predict `expected_revision + 1`.
     pub async fn await_outcome(
         self,
         config: &SessionConfigAdmin,

@@ -13,12 +13,24 @@
 //! before the body, the check of the body's outcome, a recovered or replayed
 //! call — reads that recorded answer, never a live provider.
 //!
-//! There is no per-call timeout, duration, budget or idempotent capability:
-//! the declaration refuses those fields when decoding. Crash recovery is
-//! at-least-once under the stable [`ToolCallId`](crate::ToolCallId) and
-//! attempt ordinal, which is the external idempotency key. Retry and cancel
-//! policy are runtime policy, and [`ToolManifest::inline`] stays catalog
-//! policy; neither is part of this declaration.
+//! Execution policy and bounds are separate from this capability declaration,
+//! which refuses timeout, duration, budget and idempotent capability fields
+//! when decoding. The host must supply execution bounds and, for a deferring
+//! tool, separate park bounds on its definition; Lash selects no default or
+//! ceiling. Transport timeouts do not replace these recorded limits. See the
+//! facade's [tool policy](https://github.com/Ascending-AI/lash/blob/main/crates/lash/src/lib.rs#L386)
+//! and [execution bounds](https://github.com/Ascending-AI/lash/blob/main/crates/lash/src/lib.rs#L450).
+//!
+//! Recovery follows recorded policy (ADR 0132 §7): `Once` never restarts a
+//! started attempt with no outcome, settles that ambiguity as `Interrupted`,
+//! and never retries a reported failure. `Repeatable` may repeat only within
+//! its bounds while both recorded and current policies permit it. A permitted
+//! crash rerun keeps the attempt ordinal; a reported-failure retry advances it.
+//! Recipients deduplicate external work using the stable
+//! [`ToolCallId`](crate::ToolCallId), preserved across attempts; Lash promises
+//! no exactly-once external effects. Retry and cancel policy are runtime
+//! policy, and [`ToolManifest::inline`] stays catalog policy; neither is part
+//! of this declaration.
 //!
 //! [`ToolManifest`]: crate::ToolManifest
 //! [`ToolManifest::inline`]: crate::ToolManifest::inline

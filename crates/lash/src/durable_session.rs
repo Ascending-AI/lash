@@ -11,8 +11,9 @@
 //! Reach one of three ways:
 //!
 //! * [`SessionBuilder::durable`](crate::SessionBuilder::durable) —
-//!   `core.session(id).durable().await` — acquires the store through the
-//!   catalog's non-creating seam.
+//!   `core.session(id).durable().await` — constructs a lazy handle, reading
+//!   nothing even for an unknown id. Its first operation needing the store
+//!   resolves through the catalog's non-creating seam.
 //! * [`SessionBuilder::create`](crate::SessionBuilder::create) —
 //!   `core.session(id).create(creation).await` — writes the session's catalog
 //!   entry and initial config head first, then hands back this handle. The
@@ -20,15 +21,18 @@
 //! * [`LashSession::durable`](crate::LashSession::durable) — the open
 //!   session's own Session Binding, reusing its owner-issued store and ports.
 //!
-//! Both produce this one type with one body per operation, so a queue mutation
+//! All three produce this one type with one body per operation, so a queue mutation
 //! behaves identically whichever handle issued it.
 //!
 //! # Acquisition never creates
 //!
 //! A Durable Session resolves an *existing* session: the catalog seam is
 //! [`SessionCatalogStore::lookup_session`](lash_core::store::SessionCatalogStore::lookup_session),
-//! never `admit_session`. Resolution happens at most once per handle (shared by
-//! its clones) and is reused afterwards. Every queue operation therefore
+//! never `admit_session`. Constructing a catalog-backed handle does not resolve
+//! the id or refuse an unknown session. Resolution happens on first use and
+//! at most once per successful acquisition, shared by the handle's clones and
+//! reused afterwards. Absence and failed lookups are not cached. Every queue
+//! operation therefore
 //! requires a session id the store already knows: sending to an id that was
 //! never created fails with [`EmbedError::UnknownSession`], and to a deleted
 //! one with [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted).
@@ -41,7 +45,7 @@
 //! [`EmbedError::UnknownSession`], so a host is not sent looking for a session
 //! that exists.
 //!
-//! The three settled reads are the exception in *reporting*, not in authority:
+//! Settled existence/read helpers are the exception in *reporting*, not in authority:
 //! [`exists`](DurableSession::exists), [`was_deleted`](DurableSession::was_deleted)
 //! and [`read`](DurableSession::read) exist to answer *about* an id, so an
 //! unknown id is their answer (`false`, `false`, `None`), not an error. They

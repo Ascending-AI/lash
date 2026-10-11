@@ -70,7 +70,7 @@
 //! ran it. A host folds it from a session or process feed with
 //! [`WorkflowExecutionOverlayAccumulator`] (or the pure
 //! [`fold_workflow_overlay`]), reads the document the execution names with
-//! [`HostArtifacts::execution_document`](crate::persistence::HostArtifacts::execution_document),
+//! [`HostArtifacts::execution_document`](crate::process::HostArtifacts::execution_document),
 //! gives the reducer its [`WorkflowDocument::overlay_document`], and
 //! settles the overlay with the process's committed end. Labels, kinds
 //! and edges are read from the document, never from the overlay.

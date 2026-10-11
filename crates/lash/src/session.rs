@@ -167,9 +167,13 @@ impl SessionBuilder {
     /// host only needs to read or edit the queue — including beside a live
     /// writer in another process.
     ///
-    /// Acquisition resolves an *existing* store through the catalog's
-    /// non-creating seam, at most once per handle. The session id must already be
-    /// known; see [`DurableSession`] for the typed refusals.
+    /// Handle construction is lazy: it reads nothing and succeeds even for
+    /// an unknown id. The first operation that needs the store resolves it
+    /// through the catalog's non-creating seam. A successful acquisition is
+    /// shared by the handle and its clones; absence and failed lookups are not
+    /// cached. Settled existence/read helpers answer absence, while queue
+    /// operations refuse unknown or deleted sessions. See [`DurableSession`]
+    /// for those answers and typed refusals.
     pub async fn durable(self) -> Result<DurableSession> {
         Ok(self.catalog_durable().await)
     }

@@ -116,11 +116,17 @@ pub enum EmbedError {
     #[error(
         "session `{session_id}` does not exist; only create() creates a session, so create it first with core.session(id).create(creation)"
     )]
-    /// A verb other than [`create`](crate::SessionBuilder::create) named a
-    /// session the catalog has never created. `open()`, `durable()`,
-    /// `open_with_state()`, `observe_with_state()` and every Durable Session
-    /// operation resolve an existing session and write no catalog row
-    /// (FIG-4112).
+    /// An operation requiring an existing session named an id the catalog
+    /// has never created. `open()`, `open_with_state()`, `observe_with_state()`
+    /// and Durable Session queue operations resolve through the non-creating
+    /// catalog seam and write no catalog row (FIG-4112).
+    ///
+    /// [`durable()`](crate::SessionBuilder::durable) constructs a lazy handle
+    /// without a lookup, so it succeeds for an unknown id. Resolution happens
+    /// on use, at most once per successful acquisition shared by its clones.
+    /// Settled existence/read helpers answer absence instead of this error;
+    /// queue operations refuse unknown ids with this error and deleted sessions
+    /// with [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted).
     UnknownSession {
         /// Session identifier with no durable store.
         session_id: SessionId,

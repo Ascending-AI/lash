@@ -377,11 +377,14 @@ impl<'run> AttemptContext<'run> {
     /// Lash's identity for this logical call (ADR 0117): the key a tool
     /// keys its idempotency on.
     ///
-    /// Tools are at-least-once: a crash between a tool's effect and the
-    /// durable record of its outcome runs the call again, and a reported
-    /// failure is retried. Every run of one logical call — a crash replay, a
-    /// retry after a reported failure — sees this same id; every other call
-    /// sees a different one, even when the model's provider repeats its own
+    /// Repetition follows the recorded execution policy (ADR 0132 §7 and
+    /// the [facade tool policy](https://github.com/Ascending-AI/lash/blob/main/crates/lash/src/lib.rs#L386)).
+    /// `Once` never restarts a started attempt whose outcome is missing and
+    /// never retries a reported failure; missing-outcome ambiguity settles as
+    /// `Interrupted`. `Repeatable` may rerun or retry only within its bounds
+    /// while both the recorded and current policies permit repetition.
+    /// Every permitted run of one logical call sees this same id; every other
+    /// call sees a different one, even when the model's provider repeats its own
     /// call id. A service the tool calls deduplicates on it. A tool that
     /// wants a fresh key per attempt combines it with
     /// [`attempt_number`](Self::attempt_number) itself.
@@ -1251,14 +1254,19 @@ impl<'a> ToolCall<'a> {
 ///
 /// # Delivery
 ///
-/// A call is delivered at least once. A crash between a tool's effect and
-/// the durable record of its outcome runs `execute` again, and a reported
-/// failure the retry policy allows is retried. Lash does not deduplicate a
-/// tool's effects for it.
+/// Delivery follows the recorded execution policy (ADR 0132 §7 and the
+/// [facade tool policy](https://github.com/Ascending-AI/lash/blob/main/crates/lash/src/lib.rs#L386)).
+/// `Once` never restarts a started attempt whose outcome is missing and never
+/// retries a reported failure; missing-outcome ambiguity settles as
+/// `Interrupted`. `Repeatable` may rerun an unrecorded attempt or retry a
+/// reported failure only within its bounds, while both the recorded and
+/// current policies permit repetition. Lash makes no exactly-once claim for
+/// external effects: an effect may have happened before its outcome committed.
+/// Lash does not deduplicate those effects for the tool.
 ///
 /// Key idempotency on [`AttemptContext::call_id`]. It is the `ToolCallId`
 /// lash mints when it admits the call (ADR 0117): every run of one logical
-/// call — a crash replay, a retry after a reported failure, a redrive —
+/// call — a permitted crash rerun, retry after a reported failure or redrive —
 /// sees the same id, and every other call sees another one, even when the
 /// model's provider repeats its own call id. The provider's id is never
 /// handed to a tool. [`AttemptContext::attempt_number`] counts the runs
@@ -1269,9 +1277,14 @@ impl<'a> ToolCall<'a> {
 /// The usual patterns: pass the call id as the idempotency key of an
 /// external API that accepts one; record "call id done" in the same
 /// transaction as the side effect; or check for an existing effect keyed by
-/// the call id before making it. There is no idempotent capability and no
-/// per-call timeout: a body that talks to a slow service bounds its own
-/// wait and reports the failure.
+/// the call id before making it. There is no idempotent capability: execution
+/// policy and bounds are separate from the capability declaration. The host
+/// supplies a mandatory [execution bound](https://github.com/Ascending-AI/lash/blob/main/crates/lash/src/lib.rs#L450)
+/// for each body and a separate [park bound](https://github.com/Ascending-AI/lash/blob/main/crates/lash/src/lib.rs#L450)
+/// for a tool that may defer, with no Lash-selected default or ceiling. Lash
+/// records and enforces these limits; transport timeouts remain useful but
+/// do not replace this contract. Cancellation or a limit can end Lash's wait
+/// and drop a body without proving that its external work stopped.
 ///
 /// Effects Lash owns — process starts, cancels and definitions — are not
 /// side effects of the body. A body returns them as

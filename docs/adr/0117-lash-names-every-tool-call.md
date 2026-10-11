@@ -12,10 +12,16 @@ or require a different spelling on another route. Tools need an idempotency
 key that survives an unrecorded-effect crash and a reported-failure retry,
 while distinguishing fresh calls that carry the same provider id.
 
-[ADR 0042](0042-tool-attempts-are-atomic.md) and
-[ADR 0110](0110-the-engine-owns-process-recovery.md) define the at-least-once
-contract. Lash supplies the call identity; the external service supplies
-idempotency in the window between an effect and the durable record of its result.
+[ADR 0110](0110-the-engine-owns-process-recovery.md) §3 and
+[ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §7 define
+recovery by recorded execution policy, as in the decision below. `Once`
+never restarts a started attempt with no outcome and never retries a reported
+failure; missing-outcome ambiguity settles as `Interrupted`. `Repeatable`
+may repeat only within its bounds while both recorded and current policies
+permit repetition. Lash supplies the call identity; the external service
+supplies deduplication across permitted repeats in the window between an
+effect and the durable record of its result. This is no exactly-once promise
+for external effects.
 
 ## Decision
 

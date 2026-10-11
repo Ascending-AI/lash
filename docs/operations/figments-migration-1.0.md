@@ -160,8 +160,168 @@ file, each as a node of its own
 
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |
-| [ ] | `apps/lash-runtime/src/main.rs:669` | `spawn_terminal_process_prune` calls `prune_terminal_process_scopes` on an interval. | That function is gone; prune through the process registry's `prune_terminal_processes`. A terminal process may still have live `Until` children, so prune only what `live_until_descendants` reports ended. | contract change |
+| [ ] | `apps/lash-runtime/src/main.rs:669` | `spawn_terminal_process_prune` calls `prune_terminal_process_scopes` on an interval. | That function is gone; the host schedules `core.processes().prune(cutoff_epoch_ms, filter, watermark)`. Supply the projector's acknowledged `ProjectionWatermark::UpTo` or explicitly `NoProjector`, retain rows through outstanding delivery/reconciliation and await horizons, and persist each start-key binding before pruning. Check `live_until_descendants` when the product needs subtree quiescence. | contract change |
 | [ ] | `apps/control-plane/crates/workflows/src/projector.rs:62` | The workflow projector reads `process_changes` and treats a process terminal as the run's end, linking child processes (`:197`). | A terminal does not mean the subtree stopped. Decide whether a workflow run ends at its process terminal or when `live_until_descendants` is empty ([guide §8](durable-hosting.md#two-non-guarantees)). | decision needed |
+
+### Maintenance ownership on the repin
+
+The repin tree at Figments `d63c4a6ea32554b874fd751c30cbbfd2dbbbbd40`
+already has host maintenance in `apps/lash-runtime/src/substrate.rs` and
+terminal-process pruning in `apps/lash-runtime/src/main.rs`. Keep those host
+jobs; serving a Lash node does not schedule them. Apply the
+[maintenance contract](durable-hosting.md#host-scheduled-maintenance):
+
+| Operation | Host action on the repin |
+| --- | --- |
+| Database attachment referrers | Retire retained records under host retention/deletion policy. Lash's transactions release their referrers; that cleanup does not physically delete attachment blobs. |
+| Physical attachment bytes | Schedule `lash::persistence::reclaim_unreferenced_attachments` with the deployment's root authority and its exclusive blob namespace. Choose `AttachmentReclamationPolicy` grace and empty-root authority explicitly. The namespace can be an exclusive prefix in a shared bucket; it need not be an entire bucket. |
+| Terminal process rows and events | Schedule `core.processes().prune` with the host's cutoff/filter and acknowledged projection watermark (or explicit `NoProjector`). Keep rows long enough for delivery reconciliation and still-replayable awaits; commit returned process bindings before prune can erase start-key deduplication. |
+
+Figments' prefix validation at `substrate.rs:105`, sweep caller at `:189`
+and empty-root refusal at `:223` are host choices. Preserve
+`EmptyRootSetPolicy::Refuse` unless deletion of every unreferenced eligible
+blob in the chosen namespace is intended; only then choose
+`AuthorizeDeleteAll`. Grace covers terminal-owner intent retention and
+recent blob writes, not a presumed maximum execution duration. Pair the
+root authority with the correct namespace even when its roots are nonempty.
+
+The current sweep adopts dead-pass condemnations and uses writer-intent and
+delete-arming fences; it is not a snapshot-only delete. Inspect its `fence`
+and `MaintenanceReport::sweep()` classification: `Ok` can still be
+`Incomplete` with failed, deferred or stalled ids. Later scheduled sweeps
+retry under backoff; `list_condemnations` supplies stalled reasons, attempt
+counts and errors. A refusal or sweep-level failure carries a partial report.
+Report those results operationally. The host also owns the process retention
+floor: Figments' one-hour setting must cover its actual reconciliation and
+projector lag, and does not by itself prove that horizon.
+
+## Removed prompt text and placement
+
+This inventory is recovered from Lash removal commit
+`ed0b3e298ae67cbf4a31b9d09dcb34f267049906` (FIG-5432), comparing its parent
+with its result. The historical sources are `crates/lash-core/src/protocol_copy.rs`,
+`crates/lash-protocol-rlm/src/{prompt_sections.rs,driver.rs,dialect.rs}` and
+`crates/lash-protocol-standard/src/prompt.rs`. These are migration evidence;
+choose which presentation sections to retain in the host under
+[ADR 0133](../adr/0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md).
+They do not belong back in the protocol prompt.
+
+The literal strings below contain no leading/trailing spaces or newline.
+`\n` in composition expressions means one LF byte; code fences show the
+text, not an additional final newline.
+
+| Removed section | Historical default placement and purpose |
+| --- | --- |
+| `rlm_protocol/intro` | `InitialInstructions`, first, before guidance and execution; `Turn` and `Compaction`. |
+| `rlm_protocol/guidance` | `InitialInstructions`, after intro and before execution/declarations; `Turn` and `Compaction`. |
+| `standard_protocol/intro` | `InitialInstructions`, before execution; `Turn` and `Compaction`. |
+| `standard_protocol/guidance` | `InitialInstructions`, after execution; `Turn` and `Compaction`. |
+| `rlm_protocol/final_answer_format` | `CurrentContext`, for `Turn` only, after `finalization` and any `required_output`, before any `context_budget`; omitted when no body is selected. |
+
+Those are registration-order defaults. A host plan could move, order, wrap
+or exclude them. The composer joined non-omitted sections in each placement
+with `\n\n`. RLM placed the late composition after the projected iteration
+and turn-cause prefix in a User message, separated from that prefix by
+`\n\n\n`; it never appended these sections to stored conversation history.
+Compaction offered no tools, so its guidance had only the three fixed bullets.
+
+The removed intro, shared by both protocols, was exactly:
+
+```text
+You are an assistant operating the lash harness.
+```
+
+Guidance was `"## Guidance\n\n" + bullets.join("\n")`, with these
+three fixed bullets in this order:
+
+```text
+- Be concise; no filler, hedging, or performative tone.
+- Act as soon as the next step is clear; do not restate conclusions.
+- Prefer the simplest correct solution.
+```
+
+When an `ask` tool was offered, the following fourth bullet was inserted
+**between the first and second fixed bullets**, with the same single-LF
+separators:
+
+```text
+- Take initiative when the user's intent is clear. Ask only when progress is blocked.
+```
+
+RLM tested the whole offered catalog, including non-inline tools. Standard
+tested the visible catalog: all offered tools without discovery, only inline
+tools when discovery was installed. This tool-name-selected interaction
+policy was removed along with the copy; a host that retains it makes that
+policy choice explicitly.
+
+The answer-format section was exactly
+`"=== FINAL ANSWER FORMAT ===\n\n" + body`: no leading LF and no trailing
+LF. For the historical `Markdown` setting, `body` had these branches. The
+shown `finish(value)` is the TypeScript dialect's then-current
+`finish_statement`; the renderer interpolated the selected dialect's
+spelling inside the backticks.
+
+| Historical termination and schema | Selected body |
+| --- | --- |
+| `Natural`, no schema or a schema whose top-level `type` is exactly `"string"` | A below |
+| `Natural`, any other schema | B below |
+| `FinishRequired`, no schema | C below |
+| `FinishRequired`, any schema | Omit the whole section, including its heading, for every format setting. |
+
+A:
+
+```text
+Write prose-only final answers as nicely formatted Markdown. If you intentionally use `finish(value)`, use a Markdown string for user-facing answers, not a raw record/list/tool-result value.
+```
+
+B:
+
+```text
+Write prose-only final answers as nicely formatted Markdown.
+```
+
+C:
+
+```text
+When finishing, call `finish(value)` with a nicely formatted Markdown string, not a raw record/list/tool-result value.
+```
+
+Creation defaulted the historical format to `Markdown`. The renderer used
+the run's resolved recorded options. An absent format or `RawFinalValue`
+omitted the whole section. `Custom { guidance }` used `guidance.trim()` as
+the body, preserving its internal whitespace, and omitted an empty result;
+the `FinishRequired`-with-schema omission took precedence over Custom too.
+
+Comparing Figments' `crates/figments-lash-runtime-api/src/prompt_text.rs`
+at `d63c4a6ea32554b874fd751c30cbbfd2dbbbbd40` with those historical Lash
+sources: `INTRO` (`:7`), `GUIDANCE_BULLETS` (`:11`),
+`ANSWER_FORMAT_HEADING` (`:24`) and the three answer-format strings (`:27`
+onward) match the removed TypeScript literals byte for byte. The host's
+three-bullet array omits the conditional `ask` bullet; its
+`AnswerTermination` mapping covers the Markdown branches, not the historical
+Custom/Raw choices. Figments' `FigmentsPrompt::answer_format_text` wraps the
+selected nonempty trimmed body with the same heading and `\n\n`. Its keyed
+sections in `apps/lash-runtime/src/figments_prompt.rs` place intro/guidance
+in initial instructions and answer format in current context; its additional
+context section and appended instruction paragraphs are host text, not
+removed protocol literals. The copy's comment cites Lash `38c71e0831`;
+the inventory here uses the actual removal and its parent as authority.
+
+### Completion after the removal
+
+Main later changed completion in
+`52e3c76f7b` (FIG-5823): finish is an **offered control tool**, whose
+`FinishDeclaration::value_schema` types the value for that tool. The
+protocol's finalization section names the finish tools actually offered;
+their input contracts are in the tool catalog. There is no session-wide
+`finish_schema`, separate `required_output` section or protocol
+answer-presentation setting. Termination (`Natural` or `FinishRequired`)
+is fixed at session creation; run options do not change it. A run needing
+a different final value shape offers another finish tool through its tool
+access. A host prompt renderer can inspect
+`PromptInput::session().rlm_config()` and the offered manifests' finish
+controls; it must base its guidance on those current contracts rather than
+reusing the historical schema branches as a runtime API.
 
 ## Runbooks
 

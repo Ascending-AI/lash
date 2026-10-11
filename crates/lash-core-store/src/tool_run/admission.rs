@@ -9,11 +9,21 @@
 //! capacity the round holds. One invalid member admits none. Replay reads
 //! this record; it never consults a changed catalog or selects a new route.
 //!
-//! Binding Q3: there is no per-call timeout, declared duration or budget,
-//! and no idempotent capability. The declaration refuses those fields when
-//! decoding. Crash recovery is at-least-once under a stable
-//! [`ToolCallId`](lash_sansio::ToolCallId) and attempt ordinal, which is the
-//! external idempotency key.
+//! Execution policy and bounds are separate from the capability declaration,
+//! which has no timeout, duration, budget or idempotent capability fields.
+//! The host supplies mandatory execution bounds and separate park bounds for
+//! deferring tools, with no Lash-selected default or ceiling. Transport
+//! timeouts do not replace these recorded limits. See the facade's
+//! [tool policy](https://github.com/Ascending-AI/lash/blob/main/crates/lash/src/lib.rs#L386) and
+//! [execution bounds](https://github.com/Ascending-AI/lash/blob/main/crates/lash/src/lib.rs#L450).
+//!
+//! Recovery follows recorded policy (ADR 0132 §7): `Once` never restarts a
+//! started attempt with no outcome, settles that ambiguity as `Interrupted`,
+//! and never retries a reported failure. `Repeatable` may repeat only within
+//! its bounds while both recorded and current policies permit it. A permitted
+//! crash rerun keeps the attempt ordinal; a reported-failure retry advances it.
+//! The stable [`ToolCallId`](lash_sansio::ToolCallId) lets recipients deduplicate
+//! external work across those attempts; Lash promises no exactly-once external effects.
 
 use std::collections::BTreeSet;
 
