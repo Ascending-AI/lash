@@ -335,6 +335,10 @@ pub(super) fn apply(
                     run: run.clone(),
                 });
             }
+            if let Some(revision) = head_revision {
+                crate::revisions::record_terminal_conn(tx, session, *revision)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+            }
             cached_execute(
                 tx,
                 SQL.delete_phase.sql(),

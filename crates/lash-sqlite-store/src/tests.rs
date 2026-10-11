@@ -1054,10 +1054,10 @@ async fn terminal_window_bytes(store: &SqliteStore) -> i64 {
                      (SELECT coalesce(sum(CASE WHEN terminal_window_revision IS NULL THEN 0 ELSE 8 END
                          + coalesce(length(terminal_window_leaf_node_id), 0)
                          + coalesce(length(terminal_window_checkpoint_ref), 0)
-                         + coalesce(length(terminal_window_head_digest), 0)), 0)
+                         + coalesce(length(terminal_window_config_ref), 0)), 0)
                       FROM session_runs)
-                   + (SELECT coalesce(sum(length(head_digest) + length(CAST(head_json AS BLOB))), 0)
-                      FROM session_run_window_heads)",
+                   + (SELECT coalesce(sum(length(hash) + length(content)), 0)
+                      FROM blobs WHERE hash IN (SELECT terminal_window_config_ref FROM session_runs))",
                 [],
                 |row| row.get(0),
             )
@@ -1153,4 +1153,253 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
         ended,
         "a host collection changed a terminal's window"
     );
+}
+
+/// FIG-5948: unchanged configuration has one content-addressed body even
+/// while every published revision remains available for historical forks.
+#[tokio::test]
+async fn unchanged_config_is_stored_once_across_retained_revisions() {
+    let store = crate::test_support::sqlite_memory_store()
+        .await
+        .expect("store");
+    let session = SessionId::from("shared-revision-config");
+    let mut state = durable_state(&store, &session).await;
+    for _ in 0..8 {
+        let result = store
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
+            .await
+            .expect("publish unchanged config");
+        state.head_revision = result.head_revision;
+    }
+    let head = store
+        .load_session_head_meta(&session)
+        .await
+        .expect("read")
+        .expect("head");
+    let body = serde_json::to_vec(&head.payload()).expect("head document");
+    let reference = BlobRef::for_content(&body);
+    let (revisions, bodies) = store
+        .conn
+        .call(move |conn| {
+            Ok((
+                conn.query_row(
+                    "SELECT count(*) FROM session_revisions WHERE session_id = ?1",
+                    [session.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )?,
+                conn.query_row(
+                    "SELECT count(*) FROM blobs WHERE hash = ?1 AND content = ?2",
+                    params![reference.as_str(), body],
+                    |row| row.get::<_, i64>(0),
+                )?,
+            ))
+        })
+        .await
+        .expect("count durable copies");
+    assert_eq!(revisions, 9, "creation and all eight commits stay retained");
+    assert_eq!(
+        bodies, 1,
+        "all retained revisions must name one config body"
+    );
+}
+
+/// FIG-5948: the same four retained candidates cost one prune statement
+/// and bounded SQL work irrespective of the number of historical runs.
+#[test]
+fn last_turns_pruning_work_and_statement_count_ignore_old_runs() {
+    let mut work = Vec::new();
+    for size in [32_i64, 512] {
+        let conn = Connection::open_in_memory().expect("SQLite");
+        conn.execute_batch(crate::schema::SCHEMA).expect("schema");
+        conn.execute_batch(crate::schema_fragments::SESSION_RUNS_TABLES)
+            .expect("runs schema");
+        conn.execute("INSERT INTO session_meta (session_id, relation_kind, retention_kind, retention_last_turns) VALUES ('prune', 'root', 'last_turns', 2)", []).expect("policy");
+        for revision in 1..=size {
+            conn.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_head_revision) VALUES ('prune', ?1, 'answered', '{\"cause\":\"commands_applied\"}', 0, ?2)", params![format!("run-{revision}"), revision]).expect("old run");
+        }
+        for revision in size - 3..=size {
+            crate::revisions::record_revision_conn(
+                &conn,
+                &SessionId::from("prune"),
+                revision,
+                None,
+                None,
+                "{}",
+            )
+            .expect("retained candidate");
+        }
+        conn.execute("INSERT INTO session_head (session_id, head_revision, terminal_ordinal) VALUES ('prune', ?1, ?1)", [size]).expect("head");
+        for other in 0..size {
+            let unrelated = SessionId::fixture(format!("unrelated-{other}"));
+            crate::revisions::record_revision_conn(&conn, &unrelated, 0, None, None, "{}")
+                .expect("unrelated revision");
+            conn.execute(
+                "INSERT INTO session_head (session_id, head_revision) VALUES (?1, 0)",
+                [unrelated.as_str()],
+            )
+            .expect("unrelated head");
+        }
+        conn.execute(
+            "UPDATE session_revisions SET terminal_ordinal = head_revision WHERE session_id = 'prune'",
+            [],
+        )
+        .expect("ordinals");
+        let mut statement = conn
+            .prepare(
+                crate::session_sql::session_sql()
+                    .revisions
+                    .prune_unretained
+                    .sql(),
+            )
+            .expect("prune statement");
+        let removed = statement
+            .query_map(params![0, "prune"], |_| Ok(()))
+            .expect("prune")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("rows");
+        assert_eq!(removed.len(), 2);
+        let steps = statement.get_status(rusqlite::StatementStatus::VmStep);
+        work.push(steps);
+        eprintln!(
+            "LAST_TURNS runs={size} unrelated_heads={size} prune_statements=1 vm_steps={steps}"
+        );
+    }
+    assert!(
+        work[1] <= work[0] * 2,
+        "old runs must not multiply prune work: {work:?}"
+    );
+}
+
+/// FIG-5948: scalar receipt facts have one authoritative representation;
+/// the original answer survives later head publication and revision release.
+#[tokio::test]
+async fn receipt_replay_uses_scalar_columns_and_preserves_the_original_answer() {
+    let store = crate::test_support::sqlite_memory_store()
+        .await
+        .expect("store");
+    let session = SessionId::from("compact-receipt");
+    let mut state = durable_state(&store, &session).await;
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state);
+    commit.turn_commit = lash_core_execution::store::RuntimeTurnCommitStamp::new(
+        lash_core_execution::store::OperationId::new(
+            lash_core_execution::ExecutionScope::turn(
+                session.clone(),
+                lash_core_execution::TurnId::from("receipt-turn"),
+            ),
+            "final",
+        ),
+    );
+    commit.outcome = Some(lash_core_execution::store::TurnCommitOutcome::Completed);
+    commit.failure_evidence = vec![lash_core_execution::TurnFailureEvidence {
+        partial_output: Some(lash_core_execution::TurnFailurePartialOutput::Complete {
+            text: "original partial output".to_owned(),
+        }),
+        billed_usage: Default::default(),
+        refusal: lash_core_execution::ChargeSafetyRefusalEvidence {
+            denial_reason: lash_core_execution::ChargeSafetyDenialReason::GuaranteeRequired,
+            protocol_position: lash_core_execution::ProtocolPosition::OutputStarted,
+            attempt_number: 1,
+            attempt_count: 1,
+        },
+    }];
+    let original = store
+        .commit_runtime_state(commit.clone())
+        .await
+        .expect("commit");
+    state.head_revision = original.head_revision;
+    let mut later = RuntimeCommit::persisted_state_for_test(&state);
+    later.checkpoint.components.insert(
+        "receipt/later-head".to_owned(),
+        HydratedCheckpointComponent::changed(b"a different retained manifest".to_vec()),
+    );
+    let later = store.commit_runtime_state(later).await.expect("later head");
+    assert_ne!(original.checkpoint_ref, later.checkpoint_ref);
+    let limit = std::num::NonZeroU32::new(10).expect("page limit");
+    let turns_before = store
+        .load_committed_turns(&session, None, limit)
+        .await
+        .expect("turn page");
+    let failures_before = store
+        .load_failure_evidence_page(&session, None, limit)
+        .await
+        .expect("failure page");
+    assert_eq!(turns_before.turns.len(), 1);
+    assert_eq!(failures_before.settlements.len(), 1);
+    store
+        .conn
+        .write(|tx| {
+            crate::revisions::release_unretained_conn(tx, true, None)
+                .map_err(crate::sqlite_conversion_error)?;
+            Ok(())
+        })
+        .await
+        .expect("release old revision");
+    store
+        .gc_unreachable()
+        .await
+        .expect("collect released checkpoint");
+    let original_root = original.checkpoint_ref.clone();
+    let original_blobs = store
+        .conn
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT count(*) FROM blobs WHERE hash = ?1",
+                [original_root.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .await
+        .expect("original manifest presence");
+    assert_eq!(
+        original_blobs, 0,
+        "replay cannot reconstruct the original manifest from a retained root"
+    );
+    let replay = store
+        .commit_runtime_state(commit)
+        .await
+        .expect("replay after prune");
+    assert!(replay.receipt_replayed);
+    assert_eq!(
+        serde_json::to_vec(&original).expect("answer"),
+        serde_json::to_vec(&replay).expect("replayed answer")
+    );
+    let turns_after = store
+        .load_committed_turns(&session, None, limit)
+        .await
+        .expect("turn page after replay");
+    let failures_after = store
+        .load_failure_evidence_page(&session, None, limit)
+        .await
+        .expect("failure page after replay");
+    let turn_facts = |page: lash_core_execution::store::CommittedTurnNodesPage| {
+        serde_json::json!({ "next": page.next, "turns": page.turns.into_iter().map(|turn| serde_json::json!({
+            "turn": turn.turn_id, "cursor": turn.cursor, "at": turn.committed_at_ms,
+            "outcome": turn.outcome, "nodes": turn.nodes,
+        })).collect::<Vec<_>>() })
+    };
+    assert_eq!(turn_facts(turns_before), turn_facts(turns_after));
+    assert_eq!(
+        serde_json::json!({ "settlements": failures_before.settlements, "next": failures_before.next }),
+        serde_json::json!({ "settlements": failures_after.settlements, "next": failures_after.next })
+    );
+    let bodies = store
+        .conn
+        .call(|conn| {
+            conn.prepare("SELECT result_json FROM runtime_turn_commits")?
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
+        .expect("stored receipts");
+    for body in bodies {
+        let facts: serde_json::Value = serde_json::from_str(&body).expect("receipt JSON");
+        assert!(
+            facts.get("committed_at_ms").is_none(),
+            "commit time belongs to its scalar column"
+        );
+        assert!(
+            facts.get("head_revision").is_none(),
+            "revision belongs to its scalar column"
+        );
+    }
 }

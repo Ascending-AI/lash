@@ -37,25 +37,25 @@ crate::statements! {
         /// The receipt session `?1` recorded for operation key `?2`.
         select_receipt = "SELECT turn_commit_hash, result_json, outcome_code,
                         request_identity_hash, identity_encoding_version,
-                        requested_node_count
+                        requested_node_count, committed_at_ms, head_revision
                  FROM runtime_turn_commits
                  WHERE session_id = ?1 AND turn_id = ?2";
 
         /// The first failure-evidence page, with one extra row for `next`.
-        select_failure_settlements = "SELECT committed_at_ms, turn_id, result_json, outcome_code
+        select_failure_settlements = "SELECT committed_at_ms, turn_id, result_json, outcome_code, head_revision
              FROM runtime_turn_commits
              WHERE session_id = ?1 AND failure_evidence
              ORDER BY committed_at_ms, turn_id LIMIT ?2";
 
         /// Resume after the last returned receipt, in stable key order.
-        select_failure_settlements_after = "SELECT committed_at_ms, turn_id, result_json, outcome_code
+        select_failure_settlements_after = "SELECT committed_at_ms, turn_id, result_json, outcome_code, head_revision
              FROM runtime_turn_commits
              WHERE session_id = ?1 AND failure_evidence
                AND (committed_at_ms, turn_id) > (?2, ?3)
              ORDER BY committed_at_ms, turn_id LIMIT ?4";
 
         /// Every receipt session `?1` recorded.
-        select_all_for_session = "SELECT turn_id, result_json, outcome_code FROM runtime_turn_commits WHERE session_id = ?1";
+        select_all_for_session = "SELECT turn_id, result_json, outcome_code, committed_at_ms, head_revision FROM runtime_turn_commits WHERE session_id = ?1";
 
         insert = "INSERT INTO runtime_turn_commits (
                 session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
@@ -78,12 +78,12 @@ crate::statements! {
              WHERE singleton = 1 AND current_seq < 9223372036854775807 RETURNING current_seq";
         insert_session_terminal = "INSERT INTO session_terminal_changes
              (change_seq, session_id, fault_json, recorded_at_ms) VALUES (?1, ?2, ?3, ?4)";
-        changes_after = "SELECT change_seq, session_id, turn_id, payload, outcome_code, recorded_at_ms FROM (
+        changes_after = "SELECT change_seq, session_id, turn_id, payload, outcome_code, recorded_at_ms, head_revision FROM (
              SELECT change_seq, session_id, turn_id, result_json AS payload, outcome_code,
-                    committed_at_ms AS recorded_at_ms
+                    committed_at_ms AS recorded_at_ms, head_revision
              FROM runtime_turn_commits WHERE change_seq > ?1 AND outcome_code IS NOT NULL
              UNION ALL
-             SELECT change_seq, session_id, NULL, fault_json, NULL, recorded_at_ms
+             SELECT change_seq, session_id, NULL, fault_json, NULL, recorded_at_ms, NULL
              FROM session_terminal_changes WHERE change_seq > ?1
              ) AS changes ORDER BY change_seq LIMIT ?2";
         removed_horizon = "SELECT MAX(change_seq) FROM (

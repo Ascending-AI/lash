@@ -156,13 +156,13 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
     async fn observe_raw_value(&self, target: &FenceIntegrityTarget) -> FenceIntegrityObservation {
         match target {
             FenceIntegrityTarget::SessionHeadRevision { session_id } => {
-                let (value, head_json, leaf, checkpoint): (
+                let (value, config_ref, leaf, checkpoint): (
                     i64,
                     String,
                     Option<String>,
                     Option<String>,
                 ) = sqlx::query_as(
-                    "SELECT head.head_revision, revision.head_json, revision.leaf_node_id, revision.checkpoint_ref
+                    "SELECT head.head_revision, revision.config_ref, revision.leaf_node_id, revision.checkpoint_ref
                      FROM lash_session_head AS head JOIN lash_session_revisions AS revision USING (session_id)
                      WHERE head.session_id = $1 ORDER BY revision.head_revision DESC LIMIT 1",
                 )
@@ -172,7 +172,7 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                 .expect("observe Postgres session-head revision");
                 FenceIntegrityObservation {
                     value,
-                    mutation_fingerprint: format!("{head_json}:{leaf:?}:{checkpoint:?}"),
+                    mutation_fingerprint: format!("{config_ref}:{leaf:?}:{checkpoint:?}"),
                 }
             }
         }
@@ -213,8 +213,8 @@ async fn session_head_pointer_requires_a_revision() {
         Some("23503")
     );
     sqlx::query(
-        "INSERT INTO lash_session_revisions (session_id, head_revision, head_json)
-         SELECT session_id, 1, head_json FROM lash_session_revisions
+        "INSERT INTO lash_session_revisions (session_id, head_revision, config_ref)
+         SELECT session_id, 1, config_ref FROM lash_session_revisions
          WHERE session_id = 'head-pointer' AND head_revision = 0",
     )
     .execute(storage.pool())

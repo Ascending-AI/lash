@@ -88,7 +88,7 @@ async fn postgres_persisted_record_decode_classification_head_when_configured() 
 
     let (head_session_id, head_store) = persisted_record_decode_store(&storage, "head").await;
     assert_eq!(
-        sqlx::query("UPDATE lash_session_revisions SET head_json = '{' WHERE session_id = $1 AND head_revision = (SELECT head_revision FROM lash_session_head WHERE session_id = $1)")
+        sqlx::query("UPDATE lash_blobs SET content = '{'::bytea WHERE hash = (SELECT config_ref FROM lash_session_revisions JOIN lash_session_head USING (session_id, head_revision) WHERE session_id = $1)")
             .bind(head_session_id.as_str())
             .execute(storage.pool())
             .await
@@ -1049,7 +1049,7 @@ fn postgres_statement_name(query: &str) -> &'static str {
         {
             "session-admitted-check"
         }
-        q if q.starts_with("SELECT revision.head_json, head.head_revision") => "head-load",
+        q if q.starts_with("SELECT config.content, head.head_revision") => "head-load",
         q if q.starts_with("SELECT head_revision") => "head-lock",
         q if q.starts_with("SELECT node_id FROM lash_graph_nodes") => "graph-nodes-exist",
         q if q.starts_with("SELECT hash FROM lash_blobs") => "blob-lock",
@@ -1059,7 +1059,7 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("INSERT INTO lash_session_meta") => "session-meta-insert",
         q if q.starts_with("INSERT INTO lash_session_head") => "head-upsert",
         q if q.starts_with("INSERT INTO lash_session_revisions") => "revision-insert",
-        q if q.starts_with("DELETE FROM lash_session_revisions") => "revision-release",
+        q if q.starts_with("WITH scoped_heads AS (") => "revision-release",
         q if q.starts_with("SELECT EXISTS") && q.contains("FROM lash_referrer_fences") => {
             "attachment-referrer-fence-check"
         }
@@ -1195,6 +1195,13 @@ async fn postgres_gc_sweep_statement_count_is_dead_set_invariant_when_configured
         .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("seed gc statement-pin checkpoint");
+    // The creation config may differ from the committed state's config. End
+    // its UntilGc hold before measuring a fixture whose blobs are all rooted.
+    let live_root_count = store
+        .gc_unreachable()
+        .await
+        .expect("settle the rooted fixture")
+        .root_count;
     let live_blob_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM lash_blobs")
         .fetch_one(storage.pool())
         .await
@@ -1223,8 +1230,8 @@ async fn postgres_gc_sweep_statement_count_is_dead_set_invariant_when_configured
             "leg {leg}: gc round trips changed with {dead_count} dead blobs",
         );
         assert_eq!(
-            report.root_count, 1,
-            "leg {leg}: the one live session runs the sweep"
+            report.root_count, live_root_count,
+            "leg {leg}: adding dead blobs must not change the rooted fixture"
         );
         assert_eq!(
             report.deleted_blob_count, dead_count,

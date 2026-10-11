@@ -147,20 +147,23 @@ impl GraphTier for Tier {
                 ("DELETE FROM blobs WHERE hash = ?1", vec![hex(&node)])
             }
             ForeignWrite::RevisionRoot {
+                config,
                 session,
                 revision,
                 root: Some(root),
             } => (
                 "INSERT INTO session_revisions
-                     (session_id, head_revision, leaf_node_id, checkpoint_ref, head_json)
-                 VALUES (?1, ?2, NULL, ?3, '{}')",
+                     (session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref)
+                 VALUES (?1, ?2, NULL, ?3, ?4)",
                 vec![
                     text(session.as_str()),
                     Value::Integer(i64::try_from(revision).expect("a small revision")),
+                    if config { Value::Null } else { hex(&root) },
                     hex(&root),
                 ],
             ),
             ForeignWrite::RevisionRoot {
+                config: _,
                 session,
                 revision,
                 root: None,
@@ -204,6 +207,7 @@ impl GraphTier for Tier {
                 vec![text(namespace), text(artifact)],
             ),
             ForeignWrite::TerminalWindow {
+                config,
                 session,
                 run,
                 root: Some(root),
@@ -211,12 +215,18 @@ impl GraphTier for Tier {
                 "INSERT INTO session_runs
                      (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms,
                       terminal_window_revision, terminal_window_checkpoint_ref,
-                      terminal_window_head_digest)
+                      terminal_window_config_ref)
                  VALUES (?1, ?2, 'cancelled', '{\"cause\":\"operator_cancelled\"}', 1,
-                         1, ?3, 'head')",
-                vec![text(session.as_str()), text(run.as_str()), hex(&root)],
+                         1, ?3, ?4)",
+                vec![
+                    text(session.as_str()),
+                    text(run.as_str()),
+                    if config { Value::Null } else { hex(&root) },
+                    hex(&root),
+                ],
             ),
             ForeignWrite::TerminalWindow {
+                config: _,
                 session,
                 run,
                 root: None,
@@ -315,6 +325,7 @@ async fn a_build_catalog_closure_hydrates_whole_within_every_limit() {
         .expect("an install");
     let session = lash_sansio::SessionId::parse("catalog-law").expect("a session id");
     tier.foreign(ForeignWrite::RevisionRoot {
+        config: false,
         session: session.clone(),
         revision: 1,
         root: Some(root),

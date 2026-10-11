@@ -447,6 +447,7 @@ pub(crate) async fn apply_runtime_commit_tx(
                 &commit.session_id,
                 planner.operation_key(),
                 &result_json,
+                (row.get(6), row.get(7)),
                 fleet,
             )?;
             lash_core_execution::store::validate_turn_commit_outcome_code(
@@ -797,7 +798,7 @@ pub(crate) async fn apply_runtime_commit_tx(
                 session_id: receipt.session_id.as_str().to_owned(),
                 turn_id: receipt.operation_key.to_owned(),
                 turn_commit_hash: receipt.turn_commit_hash.to_owned(),
-                result_json: encode_json(receipt.result)?,
+                result_json: receipt.result.encode_result_json()?,
                 outcome_code: receipt
                     .result
                     .outcome

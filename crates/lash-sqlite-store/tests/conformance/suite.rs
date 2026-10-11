@@ -175,8 +175,8 @@ async fn session_head_pointer_requires_a_revision() {
     conn.execute_batch("ROLLBACK")
         .expect("undo invalid pointer");
     conn.execute(
-        "INSERT INTO session_revisions (session_id, head_revision, head_json)
-         SELECT session_id, 1, head_json FROM session_revisions
+        "INSERT INTO session_revisions (session_id, head_revision, config_ref)
+         SELECT session_id, 1, config_ref FROM session_revisions
          WHERE session_id = 'head-pointer' AND head_revision = 0",
         [],
     )
@@ -362,18 +362,18 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
         match target {
             FenceIntegrityTarget::SessionHeadRevision { session_id } => conn
                 .query_row(
-                    "SELECT head.head_revision, revision.head_json, revision.leaf_node_id, revision.checkpoint_ref
+                    "SELECT head.head_revision, revision.config_ref, revision.leaf_node_id, revision.checkpoint_ref
                      FROM session_head AS head JOIN session_revisions AS revision USING (session_id)
                      WHERE head.session_id = ?1 ORDER BY revision.head_revision DESC LIMIT 1",
                     [session_id.as_str()],
                     |row| {
                         let value: i64 = row.get(0)?;
-                        let head_json: String = row.get(1)?;
+                        let config_ref: String = row.get(1)?;
                         let leaf: Option<String> = row.get(2)?;
                         let checkpoint: Option<String> = row.get(3)?;
                         Ok(FenceIntegrityObservation {
                             value,
-                            mutation_fingerprint: format!("{head_json}:{leaf:?}:{checkpoint:?}"),
+                            mutation_fingerprint: format!("{config_ref}:{leaf:?}:{checkpoint:?}"),
                         })
                     },
                 )
@@ -677,8 +677,8 @@ lash_conformance::append_head_switch_tests!({
             conn.execute_batch("PRAGMA foreign_keys = ON; BEGIN IMMEDIATE")
                 .expect("begin branch publication");
             conn.execute(
-                "INSERT INTO session_revisions (session_id, head_revision, leaf_node_id, checkpoint_ref, head_json)
-                 SELECT session_id, head_revision + 1, ?1, checkpoint_ref, head_json
+                "INSERT INTO session_revisions (session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref)
+                 SELECT session_id, head_revision + 1, ?1, checkpoint_ref, config_ref
                  FROM session_head JOIN session_revisions USING (session_id, head_revision)
                  WHERE session_id = 'root'",
                 rusqlite::params![leaf_node_id.as_str()],

@@ -92,7 +92,7 @@ impl From<String> for BlobRef {
     }
 }
 
-/// JSON-owned fields persisted in a revision's `head_json` column.
+/// JSON-owned fields persisted in the content-addressed config named by a revision's `config_ref`.
 ///
 /// Revision and graph/checkpoint references live in dedicated columns and are
 /// deliberately absent from this serializable payload.
@@ -168,7 +168,7 @@ impl SessionHeadMeta {
     /// query to, never by the payload: `session_id` is taken from
     /// `session_id` and the payload's copy is a checked redundancy. A payload
     /// naming a different session is refused as corrupt stored data rather
-    /// than adopted, so a mis-keyed or hand-edited `head_json` can no longer
+    /// than adopted, so a mis-keyed or hand-edited config payload can no longer
     /// rewrite a session's live identity.
     ///
     /// This remains public because external stores assemble rows from their
@@ -188,7 +188,7 @@ impl SessionHeadMeta {
             return Err(StoreError::StoredDataCorrupt {
                 record_kind: "SessionHeadMeta",
                 message: format!(
-                    "head_json names session `{}` but the row is keyed on session `{}`",
+                    "config payload names session `{}` but the row is keyed on session `{}`",
                     payload.session_id.as_str(),
                     session_id.as_str()
                 ),
@@ -205,7 +205,7 @@ impl SessionHeadMeta {
         })
     }
 
-    /// Project the exact value that may be serialized into `head_json`.
+    /// Project the exact value that may be serialized into config payload.
     pub fn payload(&self) -> SessionHeadPayload {
         SessionHeadPayload {
             schema_version: self.schema_version,

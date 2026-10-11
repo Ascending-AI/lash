@@ -217,17 +217,21 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                                 row.get::<_, String>(0)?,
                                 row.get::<_, String>(1)?,
                                 row.get::<_, Option<String>>(2)?,
+                                row.get::<_, i64>(3)?,
+                                row.get::<_, i64>(4)?,
                             ))
                         })
                         .map_err(sqlite_error)?;
                     let mut commits = Vec::new();
                     for row in rows {
-                        let (turn_id, result_json, outcome_code) = row.map_err(sqlite_error)?;
+                        let (turn_id, result_json, outcome_code, committed_at_ms, head_revision) =
+                            row.map_err(sqlite_error)?;
                         let result =
                             lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
                                 &session_id,
                                 &turn_id,
                                 &result_json,
+                                (committed_at_ms, head_revision),
                                 fleet,
                             )?;
                         lash_core_execution::store::validate_turn_commit_outcome_code(

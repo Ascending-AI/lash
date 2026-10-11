@@ -111,14 +111,14 @@ struct RetirableAncestryNode {
 }
 
 async fn retirable_ancestry_node_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     node_id: &str,
 ) -> Result<Option<RetirableAncestryNode>, StoreError> {
     let parent = crate::observed_sql::query_scalar::<_, Option<String>>(
         session_sql().graph_postgres.select_parent_for_update.sql(),
     )
     .bind(node_id)
-    .fetch_optional(crate::observed_sql::executor(&mut **tx))
+    .fetch_optional(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     let Some(parent_node_id) = parent else {
@@ -128,7 +128,7 @@ async fn retirable_ancestry_node_tx(
         session_sql().graph_postgres.exists_reachable.sql(),
     )
     .bind(node_id)
-    .fetch_one(crate::observed_sql::executor(&mut **tx))
+    .fetch_one(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     if reachable {
@@ -141,19 +141,19 @@ async fn retirable_ancestry_node_tx(
 }
 
 async fn retire_ancestry_node_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     witness: RetirableAncestryNode,
 ) -> Result<Option<String>, StoreError> {
     crate::observed_sql::query(session_sql().graph_postgres.retire.sql())
         .bind(&witness.node_id)
-        .execute(crate::observed_sql::executor(&mut **tx))
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
     Ok(witness.parent_node_id)
 }
 
 pub(crate) async fn retire_unreachable_ancestry_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     first_node_id: &str,
 ) -> Result<(), StoreError> {
     let mut node_id = first_node_id.to_string();

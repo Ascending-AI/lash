@@ -40,7 +40,7 @@ crate::statements! {
              WHERE session_id = ?1 AND batch_id = ?2";
 
         /// The applying commit's original receipt, reached through the command tombstone.
-        select_command_completion = "SELECT receipt.turn_id, receipt.result_json
+        select_command_completion = "SELECT receipt.turn_id, receipt.result_json, receipt.committed_at_ms, receipt.head_revision
              FROM queued_work_batches AS batch
              JOIN runtime_turn_commits AS receipt
                ON receipt.session_id = batch.session_id

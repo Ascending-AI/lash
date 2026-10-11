@@ -72,7 +72,7 @@ fn frame_transition(
     }
 }
 
-/// `(head_revision, head_json, checkpoint_ref, leaf_node_id)`, in the order
+/// `(head_revision, config_ref, checkpoint_ref, leaf_node_id)`, in the order
 /// `committed_rows` selects them.
 type SessionHeadRow = (i64, String, Option<String>, Option<String>);
 
@@ -91,7 +91,7 @@ struct AdmittedRows {
 /// admission to get `admitted`.
 async fn committed_rows(storage: &PostgresStorage, session_id: &SessionId) -> AdmittedRows {
     let head = sqlx::query_as(
-        "SELECT head_revision, head_json, checkpoint_ref, leaf_node_id
+        "SELECT head_revision, config_ref, checkpoint_ref, leaf_node_id
          FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1",
     )
     .bind(session_id.as_str())

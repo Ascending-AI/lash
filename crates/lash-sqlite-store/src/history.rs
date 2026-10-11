@@ -261,7 +261,7 @@ fn terminal_head(
     .map_err(sqlite_error)?
     .query_row(params![session.as_str(), run.as_str()], |row| {
         Ok((
-            row.get::<_, String>(0)?,
+            row.get::<_, Option<Vec<u8>>>(0)?,
             row.get::<_, i64>(1)?,
             row.get::<_, Option<String>>(2)?,
             row.get::<_, Option<String>>(3)?,
@@ -273,7 +273,7 @@ fn terminal_head(
     .map(|(head_json, revision, leaf, checkpoint, frame)| {
         crate::codec::assemble_session_head_meta(
             session,
-            Some(&head_json),
+            head_json.as_deref(),
             revision,
             leaf,
             checkpoint,
@@ -993,6 +993,7 @@ fn failure_page(
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?,
+                row.get::<_, i64>(4)?,
             ))
         })
         .map_err(sqlite_error)?;
@@ -1003,11 +1004,12 @@ fn failure_page(
     }
     let mut settlements = Vec::new();
     let mut last = None;
-    for (committed_at_ms, turn_id, result_json, outcome_code) in rows {
+    for (committed_at_ms, turn_id, result_json, outcome_code, head_revision) in rows {
         let receipt = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
             session,
             &turn_id,
             &result_json,
+            (committed_at_ms, head_revision),
             fleet,
         )?;
         lash_core_execution::store::validate_turn_commit_outcome_code(

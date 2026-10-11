@@ -443,6 +443,23 @@ pub struct RuntimeCommitReceipt {
     pub receipt_replayed: bool,
 }
 
+impl RuntimeCommitReceipt {
+    /// Encode only the answer facts not owned by the receipt's scalar columns.
+    /// The original manifest, outcome, leaf and timestamps remain in the answer:
+    /// replay must survive revision pruning and session deletion.
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    pub fn encode_result_json(&self) -> Result<String, StoreError> {
+        let mut value =
+            serde_json::to_value(self).map_err(|error| StoreError::Backend(error.to_string()))?;
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| StoreError::Backend("receipt encoding is not an object".to_owned()))?;
+        object.remove("committed_at_ms");
+        object.remove("head_revision");
+        serde_json::to_string(&value).map_err(|error| StoreError::Backend(error.to_string()))
+    }
+}
+
 /// The durable `result_json` receipt schema this build writes.
 ///
 /// Version 1 is the first stamped encoding. Receipts written before the field
@@ -476,6 +493,8 @@ pub const RUNTIME_COMMIT_RECEIPT_RECORD_KIND: &str = "RuntimeCommitReceipt";
 /// is a refusal, never a skipped row. `turn_id` is the row's operation storage
 /// key, named so a refusal identifies the exact durable record.
 ///
+/// `columns` supplies the authoritative `(committed_at_ms, head_revision)` pair.
+///
 /// This is the no-store form: it answers what a context with no recorded `F`
 /// can admit — this build's newest version alone. Reads on a bound store go
 /// through [`decode_runtime_commit_receipt_for_fleet`].
@@ -483,11 +502,13 @@ pub fn decode_runtime_commit_receipt(
     session_id: &SessionId,
     turn_id: &str,
     json: &str,
+    columns: (i64, i64),
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     decode_runtime_commit_receipt_for_fleet(
         session_id,
         turn_id,
         json,
+        columns,
         super::FleetFormat::current(),
     )
 }
@@ -501,6 +522,7 @@ pub fn decode_runtime_commit_receipt_for_fleet(
     session_id: &SessionId,
     turn_id: &str,
     json: &str,
+    columns: (i64, i64),
     fleet: super::FleetFormat,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     let mut value: serde_json::Value =
@@ -528,6 +550,23 @@ pub fn decode_runtime_commit_receipt_for_fleet(
             &mut value,
         )?;
     }
+    let (committed_at_ms, head_revision) = columns;
+    let corrupt = |message: &str| StoreError::StoredDataCorrupt {
+        record_kind: RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
+        message: message.to_owned(),
+    };
+    let committed_at_ms =
+        u64::try_from(committed_at_ms).map_err(|_| corrupt("negative commit time"))?;
+    let head_revision =
+        u64::try_from(head_revision).map_err(|_| corrupt("negative head revision"))?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| corrupt("receipt is not an object"))?;
+    if object.contains_key("committed_at_ms") || object.contains_key("head_revision") {
+        return Err(corrupt("receipt duplicates authoritative scalar columns"));
+    }
+    object.insert("committed_at_ms".to_owned(), committed_at_ms.into());
+    object.insert("head_revision".to_owned(), head_revision.into());
     serde_json::from_value(value).map_err(|error| StoreError::StoredDataCorrupt {
         record_kind: RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
         message: format!(
@@ -837,13 +876,14 @@ impl TurnChange {
         operation: Option<String>,
         payload: Option<String>,
         outcome_code: Option<String>,
-        recorded_at_ms: i64,
+        recorded: (i64, Option<i64>),
         fleet: super::FleetFormat,
     ) -> Result<Self, StoreError> {
         let corrupt = |message: &str| StoreError::StoredDataCorrupt {
             record_kind: "TurnChange",
             message: message.to_owned(),
         };
+        let (recorded_at_ms, head_revision) = recorded;
         let session_id = SessionId::parse(session_id)?;
         let sequence = u64::try_from(sequence).map_err(|_| corrupt("negative sequence"))?;
         if sequence == 0 {
@@ -857,6 +897,10 @@ impl TurnChange {
                     &session_id,
                     &operation,
                     &payload,
+                    (
+                        recorded_at_ms as i64,
+                        head_revision.ok_or_else(|| corrupt("missing head revision"))?,
+                    ),
                     fleet,
                 )?;
                 validate_turn_commit_outcome_code(&receipt, Some(&code))?;

@@ -140,23 +140,24 @@ impl SqliteStore {
         self.conn
             .call(move |conn| {
                 let outcome = (|| {
-                    let receipt: Option<(String, String)> = conn
+                    let receipt: Option<(String, String, i64, i64)> = conn
                         .query_row(
                             crate::turn_ingress::turn_ingress_sql()
                                 .queued_batches
                                 .select_command_completion
                                 .sql(),
                             params![session_id.as_str(), batch_id],
-                            |row| Ok((row.get(0)?, row.get(1)?)),
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                         )
                         .optional()
                         .map_err(sqlite_error)?;
                     receipt
-                        .map(|(operation_key, json)| {
+                        .map(|(operation_key, json, committed_at_ms, head_revision)| {
                             lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
                                 &session_id,
                                 &operation_key,
                                 &json,
+                                (committed_at_ms, head_revision),
                                 fleet,
                             )
                         })

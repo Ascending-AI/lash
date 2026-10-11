@@ -44,6 +44,7 @@ pub enum ForeignWrite {
     DeleteBlob { node: NodeId },
     /// Point session revision `revision` at `root`, or drop it.
     RevisionRoot {
+        config: bool,
         session: SessionId,
         revision: u64,
         root: Option<NodeId>,
@@ -62,6 +63,7 @@ pub enum ForeignWrite {
     /// Point run `run`'s terminal window's checkpoint at `root`, or drop
     /// the run's row.
     TerminalWindow {
+        config: bool,
         session: SessionId,
         run: TurnId,
         root: Option<NodeId>,
@@ -627,9 +629,11 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             // first, then their rows written directly.
             RootSource::ReadPin
             | RootSource::SessionRevision
+            | RootSource::RevisionConfig
             | RootSource::SessionAdmissionBase
             | RootSource::ArtifactBridge
-            | RootSource::RunTerminalWindow => (None, None),
+            | RootSource::RunTerminalWindow
+            | RootSource::TerminalConfig => (None, None),
         };
         let mut writes: Vec<DomainWrite> = publish.into_iter().collect();
         if writes.is_empty() {
@@ -661,8 +665,12 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                         .map_err(|error| refused("a pin", error))?,
                 );
             }
-            RootSource::SessionRevision => {
+            RootSource::SessionRevision | RootSource::RevisionConfig => {
                 tier.foreign(ForeignWrite::RevisionRoot {
+                    config: matches!(
+                        source,
+                        RootSource::RevisionConfig | RootSource::TerminalConfig
+                    ),
                     session: owner.session.clone(),
                     revision: 1,
                     root: Some(root),
@@ -684,8 +692,12 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 })
                 .await;
             }
-            RootSource::RunTerminalWindow => {
+            RootSource::RunTerminalWindow | RootSource::TerminalConfig => {
                 tier.foreign(ForeignWrite::TerminalWindow {
+                    config: matches!(
+                        source,
+                        RootSource::RevisionConfig | RootSource::TerminalConfig
+                    ),
                     session: owner.session.clone(),
                     run: turn("ended"),
                     root: Some(root),
@@ -698,9 +710,11 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             source,
             RootSource::ReadPin
                 | RootSource::SessionRevision
+                | RootSource::RevisionConfig
                 | RootSource::SessionAdmissionBase
                 | RootSource::ArtifactBridge
                 | RootSource::RunTerminalWindow
+                | RootSource::TerminalConfig
         ) {
             owner_commit(
                 tier,
@@ -738,8 +752,12 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                     .await
                     .map_err(|error| refused("a pin's release", error))?;
             }
-            (RootSource::SessionRevision, ..) => {
+            (RootSource::SessionRevision | RootSource::RevisionConfig, ..) => {
                 tier.foreign(ForeignWrite::RevisionRoot {
+                    config: matches!(
+                        source,
+                        RootSource::RevisionConfig | RootSource::TerminalConfig
+                    ),
                     session: owner.session.clone(),
                     revision: 1,
                     root: None,
@@ -761,8 +779,12 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 })
                 .await;
             }
-            (RootSource::RunTerminalWindow, ..) => {
+            (RootSource::RunTerminalWindow | RootSource::TerminalConfig, ..) => {
                 tier.foreign(ForeignWrite::TerminalWindow {
+                    config: matches!(
+                        source,
+                        RootSource::RevisionConfig | RootSource::TerminalConfig
+                    ),
                     session: owner.session.clone(),
                     run: turn("ended"),
                     root: None,
@@ -959,6 +981,7 @@ pub async fn a_collection_sweeps_only_what_it_proved_unreachable(
 
     let missing_root = leaf(&big("gc-missing-root"));
     tier.foreign(ForeignWrite::RevisionRoot {
+        config: false,
         session: owner.session.clone(),
         revision: 3,
         root: Some(missing_root),
@@ -985,6 +1008,7 @@ pub async fn a_collection_sweeps_only_what_it_proved_unreachable(
     )
     .await?;
     tier.foreign(ForeignWrite::RevisionRoot {
+        config: false,
         session: owner.session.clone(),
         revision: 3,
         root: None,

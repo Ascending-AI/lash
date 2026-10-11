@@ -98,6 +98,7 @@ impl PostgresStore {
                 session_id,
                 &operation_key,
                 &result_json,
+                (row.get(2), row.get(3)),
                 self.fence.fleet(),
             )
         })

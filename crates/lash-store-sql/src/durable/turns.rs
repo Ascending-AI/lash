@@ -71,7 +71,7 @@ crate::statements! {
              SET terminal_kind = ?3, terminal_cause_json = ?4,
                  terminal_head_revision = ?5, terminal_at_ms = ?6,
                  terminal_window_revision = ?7, terminal_window_leaf_node_id = ?8,
-                 terminal_window_checkpoint_ref = ?9, terminal_window_head_digest = ?10
+                 terminal_window_checkpoint_ref = ?9, terminal_window_config_ref = ?10
              WHERE session_id = ?1 AND run = ?2
                AND admission_json IS NOT NULL AND terminal_kind IS NULL
              RETURNING run";

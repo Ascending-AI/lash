@@ -90,7 +90,10 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
                 row.try_get(2).map_err(store_sqlx_error)?,
                 row.try_get(3).map_err(store_sqlx_error)?,
                 row.try_get(4).map_err(store_sqlx_error)?,
-                row.try_get(5).map_err(store_sqlx_error)?,
+                (
+                    row.try_get(5).map_err(store_sqlx_error)?,
+                    row.try_get(6).map_err(store_sqlx_error)?,
+                ),
                 self.fence.fleet(),
             )?);
         }
@@ -329,7 +332,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         // forked in its place.
         let retained = crate::observed_sql::query_as::<
             _,
-            (Option<String>, Option<String>, Option<String>),
+            (Option<String>, Option<String>, Option<Vec<u8>>),
         >(session_sql().revisions_postgres.select_for_share.sql())
         .bind(source_session_id.as_str())
         .bind(sql_revision)

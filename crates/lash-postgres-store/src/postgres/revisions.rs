@@ -10,6 +10,7 @@ use super::*;
 use crate::session_sql::session_sql;
 use lash_core_execution::store_backend_support::TargetResolution;
 use lash_core_execution::{RetainedRevision, Retention, Target};
+use sqlx::PgConnection;
 
 type Tx<'c> = sqlx::Transaction<'c, sqlx::Postgres>;
 
@@ -24,15 +25,58 @@ pub(crate) async fn record_revision_tx(
     checkpoint_ref: Option<&str>,
     head_json: &str,
 ) -> Result<(), StoreError> {
+    let config_ref = BlobRef::for_content(head_json.as_bytes());
+    crate::observed_sql::query(session_sql().revisions.insert_config.sql())
+        .bind(config_ref.as_str())
+        .bind(head_json.as_bytes())
+        .execute(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)?;
     crate::observed_sql::query(session_sql().revisions.insert.sql())
         .bind(session_id.as_str())
         .bind(head_revision)
         .bind(leaf_node_id)
         .bind(checkpoint_ref)
-        .bind(head_json)
+        .bind(config_ref.as_str())
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
+    Ok(())
+}
+
+/// Number a terminal once within its publishing transaction, then apply retention.
+pub(crate) async fn record_terminal_conn(
+    conn: &mut PgConnection,
+    session: &SessionId,
+    revision: u64,
+) -> Result<(), StoreError> {
+    let ordinal: Option<i64> =
+        crate::observed_sql::query_scalar(session_sql().revisions.mark_terminal.sql())
+            .bind(session.as_str())
+            .bind(i64::try_from(revision).map_err(|error| StoreError::Backend(error.to_string()))?)
+            .fetch_optional(crate::observed_sql::executor(&mut *conn))
+            .await
+            .map_err(store_sqlx_error)?;
+    if let Some(ordinal) = ordinal {
+        crate::observed_sql::query(session_sql().revisions.advance_terminal.sql())
+            .bind(session.as_str())
+            .bind(ordinal)
+            .execute(crate::observed_sql::executor(&mut *conn))
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    let retention = crate::observed_sql::query_as::<_, (String, Option<i64>)>(
+        session_sql().meta.select_retention.sql(),
+    )
+    .bind(session.as_str())
+    .fetch_optional(crate::observed_sql::executor(&mut *conn))
+    .await
+    .map_err(store_sqlx_error)?
+    .map(|(kind, turns)| Retention::from_stored(&kind, turns))
+    .transpose()?;
+    if retention.is_some_and(Retention::releases_at_commit) {
+        release_unretained_tx(conn, false, Some(session)).await?;
+    }
     Ok(())
 }
 
@@ -45,14 +89,14 @@ pub(crate) async fn record_revision_tx(
 /// commits, so a release that raced one waits and then retires nothing the
 /// fork now runs.
 pub(crate) async fn release_unretained_tx(
-    tx: &mut Tx<'_>,
+    tx: &mut PgConnection,
     collecting: bool,
     session_id: Option<&SessionId>,
 ) -> Result<usize, StoreError> {
     let released = crate::observed_sql::query(session_sql().revisions.prune_unretained.sql())
         .bind(i64::from(collecting))
         .bind(session_id.map(SessionId::as_str))
-        .fetch_all(crate::observed_sql::executor(&mut **tx))
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
     // Retirement takes node locks in id order across the whole release, the
@@ -168,7 +212,7 @@ struct RevisionRow {
     head_revision: u64,
     leaf_node_id: Option<String>,
     checkpoint_ref: Option<String>,
-    head_json: String,
+    head_json: Option<Vec<u8>>,
 }
 
 impl RevisionRow {
@@ -181,9 +225,19 @@ impl RevisionRow {
         &self,
         fleet: lash_core_execution::FleetFormat,
     ) -> Result<lash_core_execution::PersistedSessionConfig, StoreError> {
+        let config = self
+            .head_json
+            .as_deref()
+            .ok_or_else(|| StoreError::StoredDataCorrupt {
+                record_kind: "SessionHeadMeta",
+                message: "revision names a missing config body".to_owned(),
+            })?;
         let payload: lash_core_execution::store::SessionHeadPayload =
             lash_core_execution::store::decode_versioned_json_record_for_fleet(
-                &self.head_json,
+                std::str::from_utf8(config).map_err(|error| StoreError::StoredDataCorrupt {
+                    record_kind: "SessionHeadMeta",
+                    message: error.to_string(),
+                })?,
                 "SessionHeadMeta",
                 lash_core_execution::surface_format!(
                     lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
@@ -271,7 +325,7 @@ impl PostgresStore {
         let row = match i64::try_from(revision) {
             Ok(sql_revision) => crate::observed_sql::query_as::<
                 _,
-                (Option<String>, Option<String>, String),
+                (Option<String>, Option<String>, Option<Vec<u8>>),
             >(session_sql().revisions.select.sql())
             .bind(session_id.as_str())
             .bind(sql_revision)
@@ -312,14 +366,14 @@ impl PostgresStore {
         let fleet = self.fence.fleet();
         let mut tx = begin_snapshot(&self.pool).await?;
         require_session_tx(&mut tx, session_id).await?;
-        let rows =
-            crate::observed_sql::query_as::<_, (i64, Option<String>, Option<String>, String)>(
-                session_sql().revisions.select_by_session.sql(),
-            )
-            .bind(session_id.as_str())
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(store_sqlx_error)?;
+        let rows = crate::observed_sql::query_as::<
+            _,
+            (i64, Option<String>, Option<String>, Option<Vec<u8>>),
+        >(session_sql().revisions.select_by_session.sql())
+        .bind(session_id.as_str())
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(store_sqlx_error)?;
         let mut stored = Vec::with_capacity(rows.len());
         for (head_revision, leaf_node_id, checkpoint_ref, head_json) in rows {
             stored.push(RevisionRow {

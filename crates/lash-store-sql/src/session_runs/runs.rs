@@ -4,16 +4,12 @@
 //!
 //! A terminal names the session window it ended on by reference: the head
 //! revision, leaf and checkpoint the head published, and the head document
-//! in `session_run_window_heads`, stored once per distinct document of a
+//! in `blobs`, stored once per distinct document of a
 //! session (FIG-5931). The leaf and the checkpoint are roots while the row
 //! lives, so the window reads the same after any collection.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "session_runs";
-
-/// The head documents terminal windows name, once per distinct document of
-/// a session, deleted with the session.
-pub const WINDOW_HEADS_TABLE: &str = "session_run_window_heads";
 
 crate::statements! {
     /// `session_runs` statements both backends issue verbatim.
@@ -50,48 +46,41 @@ crate::statements! {
              SET terminal_kind = ?3, terminal_cause_json = ?4,
                  terminal_head_revision = ?5, terminal_at_ms = ?6,
                  terminal_window_revision = ?7, terminal_window_leaf_node_id = ?8,
-                 terminal_window_checkpoint_ref = ?9, terminal_window_head_digest = ?10
+                 terminal_window_checkpoint_ref = ?9, terminal_window_config_ref = ?10
              WHERE session_id = ?1 AND run = ?2 AND terminal_kind IS NULL";
 
         /// Session `?1`'s published head: its revision, leaf, checkpoint and
         /// head document, what a terminal's window names.
         select_window_head = "SELECT revision.head_revision, revision.leaf_node_id,
-                    revision.checkpoint_ref, revision.head_json
+                    revision.checkpoint_ref, revision.config_ref
              FROM session_head AS head
              JOIN session_revisions AS revision
                ON revision.session_id = head.session_id
               AND revision.head_revision = head.head_revision
              WHERE head.session_id = ?1";
 
-        /// Record session `?1`'s head document `?3` under its digest `?2`
-        /// unless a terminal already named it.
-        insert_window_head = "INSERT INTO session_run_window_heads
-                 (session_id, head_digest, head_json)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT (session_id, head_digest) DO NOTHING";
-
         /// The window run `?2` of session `?1` ended on, in the columns
         /// order of the head's own read (`select_meta`): its
         /// head document, revision, leaf, checkpoint and the frame its leaf
         /// row names. No row when the run has no terminal or its terminal
         /// names no window.
-        select_terminal_window = "SELECT head.head_json, ended.terminal_window_revision,
+        select_terminal_window = "SELECT config.content, ended.terminal_window_revision,
                     ended.terminal_window_leaf_node_id,
                     ended.terminal_window_checkpoint_ref, leaf.frame_node_id
              FROM session_runs AS ended
-             JOIN session_run_window_heads AS head
-               ON head.session_id = ended.session_id
-              AND head.head_digest = ended.terminal_window_head_digest
+             LEFT JOIN blobs AS config ON config.hash = ended.terminal_window_config_ref
              LEFT JOIN graph_nodes AS leaf
                ON leaf.node_id = ended.terminal_window_leaf_node_id
              WHERE ended.session_id = ?1 AND ended.run = ?2
-               AND ended.terminal_kind IS NOT NULL";
+               AND ended.terminal_kind IS NOT NULL AND ended.terminal_window_revision IS NOT NULL";
 
         /// The distinct checkpoints session `?1`'s terminal windows root,
         /// in hash order: what its deletion may reclaim.
         select_session_window_checkpoints = "SELECT DISTINCT terminal_window_checkpoint_ref
              FROM session_runs
              WHERE session_id = ?1 AND terminal_window_checkpoint_ref IS NOT NULL
+             UNION SELECT terminal_window_config_ref FROM session_runs
+                 WHERE session_id = ?1 AND terminal_window_config_ref IS NOT NULL
              ORDER BY terminal_window_checkpoint_ref";
 
         /// The distinct leaves session `?1`'s terminal windows retain: where
@@ -110,9 +99,5 @@ crate::statements! {
         /// Every run of session `?1`: its deletion.
         delete_by_session = "DELETE FROM session_runs WHERE session_id = ?1";
 
-        /// Every head document session `?1`'s terminals named: its deletion,
-        /// after its runs.
-        delete_window_heads_by_session = "DELETE FROM session_run_window_heads
-             WHERE session_id = ?1";
     }
 }

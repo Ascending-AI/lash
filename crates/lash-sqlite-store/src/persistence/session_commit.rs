@@ -287,6 +287,8 @@ type PriorReceiptRow = (
     Option<String>,
     Option<i64>,
     Option<i64>,
+    i64,
+    i64,
 );
 
 impl SqliteStore {
@@ -378,6 +380,8 @@ pub(crate) fn apply_runtime_commit_conn(
                         row.get(3)?,
                         row.get(4)?,
                         row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
                     ))
                 },
             )
@@ -390,6 +394,8 @@ pub(crate) fn apply_runtime_commit_conn(
             stored_identity,
             stored_version,
             stored_requested_node_count,
+            committed_at_ms,
+            head_revision,
         )) = prior
         {
             // One codec owns the unit-shape and integer-range checks.
@@ -405,6 +411,7 @@ pub(crate) fn apply_runtime_commit_conn(
                 &commit.session_id,
                 planner.operation_key(),
                 &result_json,
+                (committed_at_ms, head_revision),
                 fleet,
             )?;
             lash_core_execution::store::validate_turn_commit_outcome_code(
@@ -702,7 +709,7 @@ pub(crate) fn apply_runtime_commit_conn(
     result.turn_cancel_input_outcome = turn_cancel_input_outcome;
     {
         let receipt = plan.receipt_write(&result);
-        let result_json = encode_json(receipt.result)?;
+        let result_json = receipt.result.encode_result_json()?;
         let identity = append_identity_columns(receipt.append_request_identity);
         crate::conn::cached_execute(
             tx,

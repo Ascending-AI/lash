@@ -131,18 +131,21 @@ impl GraphTier for Tier {
                 sqlx::query("DELETE FROM lash_blobs WHERE hash = $1").bind(hex(node))
             }
             ForeignWrite::RevisionRoot {
+                config,
                 session,
                 revision,
                 root: Some(root),
             } => sqlx::query(
                 "INSERT INTO lash_session_revisions
-                     (session_id, head_revision, leaf_node_id, checkpoint_ref, head_json)
-                 VALUES ($1, $2, NULL, $3, '{}')",
+                     (session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref)
+                 VALUES ($1, $2, NULL, $3, $4)",
             )
             .bind(session.as_str().to_owned())
             .bind(i64::try_from(*revision).expect("a small revision"))
+            .bind(if *config { None } else { Some(hex(root)) })
             .bind(hex(root)),
             ForeignWrite::RevisionRoot {
+                config: _,
                 session,
                 revision,
                 root: None,
@@ -188,25 +191,24 @@ impl GraphTier for Tier {
             .bind(namespace.clone())
             .bind(artifact.clone()),
             ForeignWrite::TerminalWindow {
+                config,
                 session,
                 run,
                 root: Some(root),
             } => sqlx::query(
-                "WITH head AS (
-                     INSERT INTO lash_session_run_window_heads (session_id, head_digest, head_json)
-                     VALUES ($1, 'head', '{}')
-                 )
-                 INSERT INTO lash_session_runs
+                "                 INSERT INTO lash_session_runs
                      (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms,
                       terminal_window_revision, terminal_window_checkpoint_ref,
-                      terminal_window_head_digest)
+                      terminal_window_config_ref)
                  VALUES ($1, $2, 'cancelled', '{\"cause\":\"operator_cancelled\"}', 1,
-                         1, $3, 'head')",
+                         1, $3, $4)",
             )
             .bind(session.as_str().to_owned())
             .bind(run.as_str().to_owned())
+            .bind(if *config { None } else { Some(hex(root)) })
             .bind(hex(root)),
             ForeignWrite::TerminalWindow {
+                config: _,
                 session,
                 run,
                 root: None,
@@ -435,6 +437,7 @@ async fn a_build_catalog_closure_hydrates_whole_without_reading_it_back() {
     let session = lash_sansio::SessionId::parse("catalog-law").expect("a session id");
     for (revision, top) in [(1, root), (2, member)] {
         tier.foreign(ForeignWrite::RevisionRoot {
+            config: false,
             session: session.clone(),
             revision,
             root: Some(top),

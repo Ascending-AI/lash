@@ -123,14 +123,14 @@ pub(crate) fn run_terminal_conn(
 
 /// The window a terminal ends on, by reference (FIG-5931): the published
 /// head's revision, leaf and checkpoint, and the digest its head document is
-/// recorded under in `session_run_window_heads`. The leaf and the
+/// recorded under in `blobs`. The leaf and the
 /// checkpoint are roots while the terminal's row lives, so the window reads
 /// the same after any later commit or collection.
 pub(crate) struct TerminalWindowRef {
     revision: i64,
     leaf: Option<String>,
     checkpoint: Option<String>,
-    head_digest: String,
+    config_ref: String,
 }
 
 impl TerminalWindowRef {
@@ -143,7 +143,7 @@ impl TerminalWindowRef {
                 Some(window.revision),
                 window.leaf.as_deref(),
                 window.checkpoint.as_deref(),
-                Some(window.head_digest.as_str()),
+                Some(window.config_ref.as_str()),
             )
         })
     }
@@ -172,21 +172,14 @@ pub(crate) fn terminal_window_ref(
         })
         .optional()
         .map_err(sqlite_error)?;
-    let Some((revision, leaf, checkpoint, head_json)) = head else {
+    let Some((revision, leaf, checkpoint, config_ref)) = head else {
         return Ok(None);
     };
-    let head_digest = lash_core_execution::store::BlobRef::for_content(head_json.as_bytes()).0;
-    crate::conn::cached_execute(
-        tx,
-        sql.insert_window_head.sql(),
-        params![session.as_str(), head_digest, head_json],
-    )
-    .map_err(sqlite_error)?;
     Ok(Some(TerminalWindowRef {
         revision,
         leaf,
         checkpoint,
-        head_digest,
+        config_ref,
     }))
 }
 
@@ -252,6 +245,9 @@ pub(crate) fn write_run_terminal_conn(
             "run `{}` of session `{}` gained terminal evidence inside its own write",
             terminal.run, terminal.session_id
         )));
+    }
+    if let Some(revision) = terminal.head_revision {
+        crate::revisions::record_terminal_conn(tx, &terminal.session_id, revision)?;
     }
     release_run_rows_conn(tx, &terminal.session_id, &terminal.run, terminal.at_ms)
 }
@@ -976,7 +972,6 @@ pub(crate) fn delete_session_runs_conn(
     let sql = session_runs_sql();
     for statement in [
         sql.runs.delete_by_session.sql(),
-        sql.runs.delete_window_heads_by_session.sql(),
         sql.inputs.delete_by_session.sql(),
     ] {
         crate::conn::cached_execute(tx, statement, params![session_id.as_str()])

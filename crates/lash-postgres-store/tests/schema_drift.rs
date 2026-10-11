@@ -113,16 +113,16 @@ async fn a_retyped_column_is_rejected() {
 #[tokio::test]
 async fn a_widened_nullability_is_rejected() {
     assert_mutation_is_rejected(
-        "ALTER TABLE lash_session_revisions ALTER COLUMN head_json DROP NOT NULL",
+        "ALTER TABLE lash_session_revisions ALTER COLUMN config_ref DROP NOT NULL",
         &[
             "COLUMN DRIFT",
-            "lash_session_revisions.head_json: expected text not-null, found text nullable",
+            "lash_session_revisions.config_ref: expected text not-null, found text nullable",
         ],
         |finding| {
             matches!(
                 finding,
                 SchemaFinding::ColumnMismatch { table, expected, .. }
-                    if table == "lash_session_revisions" && expected.name == "head_json"
+                    if table == "lash_session_revisions" && expected.name == "config_ref"
             )
         },
     )

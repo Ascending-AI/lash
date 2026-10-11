@@ -297,8 +297,8 @@ lash_conformance::append_head_switch_tests!({
         move |leaf_node_id: lash_core_execution::NodeId| async move {
             sqlx::query(
                 "WITH recorded AS (
-                     INSERT INTO lash_session_revisions (session_id, head_revision, leaf_node_id, checkpoint_ref, head_json)
-                     SELECT session_id, head_revision + 1, $1, checkpoint_ref, head_json
+                     INSERT INTO lash_session_revisions (session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref)
+                     SELECT session_id, head_revision + 1, $1, checkpoint_ref, config_ref
                      FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
                      WHERE session_id = 'root' RETURNING session_id, head_revision
                  ) UPDATE lash_session_head AS head SET head_revision = recorded.head_revision

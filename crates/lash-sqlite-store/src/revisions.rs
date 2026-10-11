@@ -23,6 +23,13 @@ pub(crate) fn record_revision_conn(
     checkpoint_ref: Option<&str>,
     head_json: &str,
 ) -> Result<(), StoreError> {
+    let config_ref = BlobRef::for_content(head_json.as_bytes());
+    crate::conn::cached_execute(
+        tx,
+        session_sql().revisions.insert_config.sql(),
+        params![config_ref.as_str(), head_json.as_bytes()],
+    )
+    .map_err(sqlite_error)?;
     crate::conn::cached_execute(
         tx,
         session_sql().revisions.insert.sql(),
@@ -31,10 +38,43 @@ pub(crate) fn record_revision_conn(
             head_revision,
             leaf_node_id,
             checkpoint_ref,
-            head_json,
+            config_ref.as_str(),
         ],
     )
     .map_err(sqlite_error)?;
+    Ok(())
+}
+
+/// Number a newly committed terminal once, then release revisions outside its window.
+/// A staged revision becomes terminal in the same publishing transaction; a replay
+/// cannot advance the ordinal again.
+pub(crate) fn record_terminal_conn(
+    tx: &Connection,
+    session: &SessionId,
+    revision: u64,
+) -> Result<(), StoreError> {
+    let ordinal: Option<i64> = tx
+        .query_row(
+            session_sql().revisions.mark_terminal.sql(),
+            params![
+                session.as_str(),
+                i64::try_from(revision).map_err(|error| StoreError::Backend(error.to_string()))?
+            ],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    if let Some(ordinal) = ordinal {
+        crate::conn::cached_execute(
+            tx,
+            session_sql().revisions.advance_terminal.sql(),
+            params![session.as_str(), ordinal],
+        )
+        .map_err(sqlite_error)?;
+    }
+    if retention_conn(tx, session)?.is_some_and(Retention::releases_at_commit) {
+        release_unretained_conn(tx, false, Some(session))?;
+    }
     Ok(())
 }
 
@@ -161,7 +201,7 @@ struct RevisionRow {
     head_revision: u64,
     leaf_node_id: Option<String>,
     checkpoint_ref: Option<String>,
-    head_json: String,
+    head_json: Option<Vec<u8>>,
 }
 
 impl RevisionRow {
@@ -174,9 +214,19 @@ impl RevisionRow {
         &self,
         fleet: lash_core_execution::FleetFormat,
     ) -> Result<lash_core_execution::PersistedSessionConfig, StoreError> {
+        let config = self
+            .head_json
+            .as_deref()
+            .ok_or_else(|| StoreError::StoredDataCorrupt {
+                record_kind: "SessionHeadMeta",
+                message: "revision names a missing config body".to_owned(),
+            })?;
         let payload: lash_core_execution::store::SessionHeadPayload =
             lash_core_execution::store::decode_versioned_json_record_for_fleet(
-                &self.head_json,
+                std::str::from_utf8(config).map_err(|error| StoreError::StoredDataCorrupt {
+                    record_kind: "SessionHeadMeta",
+                    message: error.to_string(),
+                })?,
                 "SessionHeadMeta",
                 lash_core_execution::surface_format!(
                     lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION

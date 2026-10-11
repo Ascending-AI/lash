@@ -397,16 +397,12 @@ impl CommittedTurnReceipt {
             session_id,
             operation_key,
             result_json,
+            (committed_at_ms, head_revision),
             fleet,
         )?;
         super::validate_turn_commit_outcome_code(&receipt, outcome_code)?;
-        let head_revision =
-            u64::try_from(head_revision).map_err(|_| corrupt("negative head revision"))?;
-        if receipt.head_revision != head_revision {
-            return Err(corrupt("head revision column differs from its receipt"));
-        }
-        let committed_at_ms =
-            u64::try_from(committed_at_ms).map_err(|_| corrupt("negative commit time"))?;
+        let head_revision = receipt.head_revision;
+        let committed_at_ms = receipt.committed_at_ms;
         let operation: super::OperationId = serde_json::from_str(operation_key)
             .map_err(|_| corrupt("invalid operation identity"))?;
         let turn_id = match operation.scope {

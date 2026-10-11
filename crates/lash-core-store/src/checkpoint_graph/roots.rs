@@ -45,6 +45,10 @@ pub enum RootSource {
     /// `session_runs.terminal_window_checkpoint_ref`: the checkpoint of the
     /// window a run's terminal names, while the run's row lives (FIG-5931).
     RunTerminalWindow = 11,
+    /// Configuration named by a retained revision.
+    RevisionConfig = 12,
+    /// Configuration named by a retained terminal window.
+    TerminalConfig = 13,
 }
 
 /// Where one source's roots live in a backend's schema.
@@ -58,7 +62,7 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 14] = [
         Self::Exec,
         Self::RunFact,
         Self::EffectAdmission,
@@ -71,6 +75,8 @@ impl RootSource {
         Self::ArtifactBridge,
         Self::ReleasePin,
         Self::RunTerminalWindow,
+        Self::RevisionConfig,
+        Self::TerminalConfig,
     ];
 
     /// The `source` column of the root catalog view.
@@ -89,6 +95,8 @@ impl RootSource {
             Self::ArtifactBridge => "artifact",
             Self::ReleasePin => "release",
             Self::RunTerminalWindow => "terminal_window",
+            Self::RevisionConfig => "revision_config",
+            Self::TerminalConfig => "terminal_config",
         }
     }
 
@@ -111,6 +119,10 @@ impl RootSource {
     #[must_use]
     pub const fn postgres_field(self) -> RootField {
         match self {
+            Self::RevisionConfig => RootField::of("lash_session_revisions", "config_ref", None),
+            Self::TerminalConfig => {
+                RootField::of("lash_session_runs", "terminal_window_config_ref", None)
+            }
             Self::Exec => RootField::of("lash_exec_snapshots", "root_ref", None),
             Self::RunFact => RootField::of("lash_run_records", "record_ref", None),
             Self::EffectAdmission => RootField::of("lash_effect_admissions", "admission_ref", None),
@@ -140,6 +152,8 @@ impl RootSource {
 
     const fn unprefixed(self) -> (&'static str, &'static str, Option<&'static str>) {
         match self {
+            Self::RevisionConfig => ("session_revisions", "config_ref", None),
+            Self::TerminalConfig => ("session_runs", "terminal_window_config_ref", None),
             Self::Exec => ("exec_snapshots", "root_ref", None),
             Self::RunFact => ("run_records", "record_ref", None),
             Self::EffectAdmission => ("effect_admissions", "admission_ref", None),

@@ -116,14 +116,14 @@ pub(crate) async fn run_terminal_conn(
 
 /// The window a terminal ends on, by reference (FIG-5931): the published
 /// head's revision, leaf and checkpoint, and the digest its head document is
-/// recorded under in `lash_session_run_window_heads`. The leaf and the
+/// recorded under in `lash_blobs`. The leaf and the
 /// checkpoint are roots while the terminal's row lives, so the window reads
 /// the same after any later commit or collection.
 pub(crate) struct TerminalWindowRef {
     revision: i64,
     leaf: Option<String>,
     checkpoint: Option<String>,
-    head_digest: String,
+    config_ref: String,
 }
 
 impl TerminalWindowRef {
@@ -136,7 +136,7 @@ impl TerminalWindowRef {
                 Some(window.revision),
                 window.leaf.as_deref(),
                 window.checkpoint.as_deref(),
-                Some(window.head_digest.as_str()),
+                Some(window.config_ref.as_str()),
             )
         })
     }
@@ -158,22 +158,14 @@ pub(crate) async fn terminal_window_ref(
             .fetch_optional(crate::observed_sql::executor(&mut *conn))
             .await
             .map_err(store_sqlx_error)?;
-    let Some((revision, leaf, checkpoint, head_json)) = head else {
+    let Some((revision, leaf, checkpoint, config_ref)) = head else {
         return Ok(None);
     };
-    let head_digest = lash_core_execution::store::BlobRef::for_content(head_json.as_bytes()).0;
-    crate::observed_sql::query(sql.insert_window_head.sql())
-        .bind(session.as_str())
-        .bind(&head_digest)
-        .bind(head_json)
-        .execute(crate::observed_sql::executor(&mut *conn))
-        .await
-        .map_err(store_sqlx_error)?;
     Ok(Some(TerminalWindowRef {
         revision,
         leaf,
         checkpoint,
-        head_digest,
+        config_ref,
     }))
 }
 
@@ -240,6 +232,9 @@ pub(crate) async fn write_run_terminal_conn(
             "run `{}` of session `{}` gained terminal evidence inside its own write",
             terminal.run, terminal.session_id
         )));
+    }
+    if let Some(revision) = terminal.head_revision {
+        crate::revisions::record_terminal_conn(conn, &terminal.session_id, revision).await?;
     }
     release_run_rows_conn(conn, &terminal.session_id, &terminal.run, terminal.at_ms).await
 }
@@ -679,7 +674,7 @@ async fn input_status_conn(
     session_id: &SessionId,
     input: &InputId,
 ) -> Result<lash_core_execution::store::InputStatus, StoreError> {
-    let row = sqlx::query(session_runs_sql().inputs.select_status.sql())
+    let row = crate::observed_sql::query(session_runs_sql().inputs.select_status.sql())
         .bind(session_id.as_str())
         .bind(input.as_str())
         .fetch_one(crate::observed_sql::executor(&mut *conn))
@@ -931,7 +926,6 @@ pub(crate) async fn delete_session_runs_conn(
     let sql = session_runs_sql();
     for statement in [
         sql.runs.delete_by_session.sql(),
-        sql.runs.delete_window_heads_by_session.sql(),
         sql.inputs.delete_by_session.sql(),
     ] {
         crate::observed_sql::query(statement)

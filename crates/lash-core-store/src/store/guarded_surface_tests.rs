@@ -125,7 +125,7 @@ fn restamp_component(bytes: &[u8], version: u32) -> Vec<u8> {
 // --- RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: a turn commit's receipt. ---
 
 fn write_receipt(fleet: FleetFormat) -> Vec<u8> {
-    serde_json::to_vec(&RuntimeCommitReceipt {
+    RuntimeCommitReceipt {
         committed_at_ms: 0,
         schema_version: fleet.writer_version(crate::surface_format!(
             RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
@@ -143,8 +143,10 @@ fn write_receipt(fleet: FleetFormat) -> Vec<u8> {
         command_outcomes: Default::default(),
         work_remaining: true,
         receipt_replayed: false,
-    })
+    }
+    .encode_result_json()
     .expect("encode the receipt")
+    .into_bytes()
 }
 
 fn read_receipt(bytes: &[u8], fleet: FleetFormat) -> Result<String, String> {
@@ -152,6 +154,7 @@ fn read_receipt(bytes: &[u8], fleet: FleetFormat) -> Result<String, String> {
         &SessionId::from("session"),
         "turn",
         text(bytes),
+        (0, 3),
         fleet,
     )
     .map(|receipt| format!("{receipt:?}"))
@@ -318,12 +321,30 @@ fn upcast_preserves_immutable_bytes_and_hashes() {
 #[test]
 fn receipt_replay_is_never_part_of_the_durable_record() {
     let bytes = write_receipt(FleetFormat::current());
-    let mut receipt: RuntimeCommitReceipt = serde_json::from_slice(&bytes).expect("receipt");
+    let mut receipt = super::decode_runtime_commit_receipt(
+        &SessionId::from("session"),
+        "turn",
+        text(&bytes),
+        (0, 3),
+    )
+    .expect("receipt");
     receipt.receipt_replayed = true;
-    assert_eq!(serde_json::to_vec(&receipt).expect("re-encode"), bytes);
+    assert_eq!(
+        receipt
+            .encode_result_json()
+            .expect("re-encode")
+            .into_bytes(),
+        bytes
+    );
     let mut stored: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON");
     stored["receipt_replayed"] = serde_json::json!(true);
-    let decoded: RuntimeCommitReceipt = serde_json::from_value(stored).expect("decode");
+    let decoded = super::decode_runtime_commit_receipt(
+        &SessionId::from("session"),
+        "turn",
+        &stored.to_string(),
+        (0, 3),
+    )
+    .expect("decode");
     assert!(!decoded.receipt_replayed);
 }
 

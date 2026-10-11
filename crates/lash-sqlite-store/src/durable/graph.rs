@@ -118,7 +118,10 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
     UNION ALL SELECT 'artifact', blob_ref FROM artifact_refs
     UNION ALL SELECT 'release', root_ref FROM graph_release_pins
     UNION ALL SELECT 'terminal_window', terminal_window_checkpoint_ref FROM session_runs
-        WHERE terminal_window_checkpoint_ref IS NOT NULL;
+        WHERE terminal_window_checkpoint_ref IS NOT NULL
+    UNION ALL SELECT 'revision_config', config_ref FROM session_revisions
+    UNION ALL SELECT 'terminal_config', terminal_window_config_ref FROM session_runs
+        WHERE terminal_window_config_ref IS NOT NULL;
 ";
 
 lash_store_sql::statements! {

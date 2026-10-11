@@ -659,15 +659,48 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
         .await
         .expect("fork shared checkpoint");
 
+    // Config is owned by each session; the checkpoint closure is shared.
+    // Observe those lifetimes directly instead of assuming every deletion
+    // candidate belongs to the shared checkpoint closure.
+    let config_ref = |head: crate::store::SessionHeadMeta| {
+        crate::BlobRef::for_content(&serde_json::to_vec(&head.payload()).expect("config payload"))
+    };
+    let source_config = config_ref(
+        committed
+            .store
+            .load_session_head_meta(&committed.request.session_id)
+            .await
+            .expect("source head")
+            .expect("source config"),
+    );
+    let fork_config = config_ref(
+        committed
+            .store
+            .load_session_head_meta(&fork_request.session_id)
+            .await
+            .expect("fork head")
+            .expect("fork config"),
+    );
+    assert!(handles.probe.blob_exists(&source_config).await);
+    assert!(handles.probe.blob_exists(&fork_config).await);
+
     let source_report = handles
         .factory
         .delete_session(&committed.request.session_id)
         .await
         .expect("delete source with surviving fork");
-    assert_eq!(source_report.deleted_blob_count, 0);
+    assert!(
+        !handles.probe.blob_exists(&source_config).await,
+        "{backend}: the deleted session releases its config"
+    );
+    assert!(
+        handles.probe.blob_exists(&fork_config).await,
+        "{backend}: the fork owns its config"
+    );
     assert_eq!(
-        source_report.retained_blob_count, source_report.enumerated_blob_count,
-        "{backend}: every source candidate remains referenced by the fork edge"
+        source_report.retained_blob_count + source_report.deleted_blob_count,
+        source_report.enumerated_blob_count,
+        "{backend}: every candidate has a reclaim decision"
     );
     assert_components_exist(
         backend,
@@ -683,6 +716,10 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
         .await
         .expect("delete final checkpoint referrer");
     assert!(fork_report.deleted_blob_count > 0);
+    assert!(
+        !handles.probe.blob_exists(&fork_config).await,
+        "{backend}: the final owner releases its config"
+    );
     assert_components_exist(
         backend,
         handles.probe.as_ref(),

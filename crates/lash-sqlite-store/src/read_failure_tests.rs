@@ -370,7 +370,7 @@ async fn sqlite_persisted_record_decode_classification() {
     let raw = rusqlite::Connection::open(&path).expect("open corruption connection");
     assert_eq!(
         raw.execute(
-            "UPDATE session_revisions SET head_json = '{' WHERE session_id = ?1 AND head_revision = (SELECT head_revision FROM session_head WHERE session_id = ?1)",
+            "UPDATE blobs SET content = CAST('{' AS BLOB) WHERE hash = (SELECT config_ref FROM session_revisions JOIN session_head USING (session_id, head_revision) WHERE session_id = ?1)",
             [head_session_id.as_str()],
         )
         .expect("corrupt head JSON"),
@@ -749,9 +749,10 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         "expected typed StoredDataCorrupt for dangling artifact reference, got {artifact_error:?}"
     );
 
+    raw.execute("INSERT INTO blobs (hash, content, encoding) VALUES ('corrupt-config', CAST('{' AS BLOB), 0)", []).expect("foreign config");
     raw.execute(
-        "INSERT INTO session_revisions (session_id, head_revision, head_json)
-         VALUES ('corrupt', 0, '{')",
+        "INSERT INTO session_revisions (session_id, head_revision, config_ref)
+         VALUES ('corrupt', 0, 'corrupt-config')",
         [],
     )
     .expect("insert malformed head revision");
@@ -772,18 +773,18 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     );
 
     raw.execute(
-        "UPDATE session_revisions
-         SET head_json = ?1, checkpoint_ref = 'missing-checkpoint-manifest'
-         WHERE session_id = 'corrupt' AND head_revision = 0",
+        "UPDATE blobs SET content = ?1 WHERE hash = 'corrupt-config'",
         params![
             encode_json(&SessionHeadPayload {
                 session_id: SessionId::from("corrupt"),
                 ..Default::default()
             })
             .expect("encode session head")
+            .into_bytes()
         ],
     )
     .expect("install dangling checkpoint reference");
+    raw.execute("UPDATE session_revisions SET checkpoint_ref = 'missing-checkpoint-manifest' WHERE session_id = 'corrupt' AND head_revision = 0", []).expect("dangling checkpoint");
     let dangling = store
         .load_session_window(&session_id, WindowSelector::Current)
         .await;
@@ -797,6 +798,24 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         ),
         "a dangling checkpoint manifest must refuse the window read, got {dangling:?}"
     );
+    raw.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_window_revision, terminal_window_config_ref) VALUES ('corrupt', 'missing-config-window', 'answered', '{\"cause\":\"commands_applied\"}', 0, 0, 'missing-config')", []).expect("dangling terminal config");
+    assert_corrupt(
+        store
+            .load_session_window(
+                &session_id,
+                WindowSelector::Terminal(lash_core_execution::TurnId::from(
+                    "missing-config-window",
+                )),
+            )
+            .await,
+        "SessionHeadMeta",
+    );
+    raw.execute(
+        "UPDATE session_revisions SET config_ref = 'missing-config' WHERE session_id = 'corrupt'",
+        [],
+    )
+    .expect("dangling revision config");
+    assert_corrupt(store.revisions(&session_id).await, "SessionHeadMeta");
 }
 
 #[tokio::test]

@@ -21,31 +21,37 @@ pub const TABLE: &str = "session_revisions";
 
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str =
-    "session_id, head_revision, leaf_node_id, checkpoint_ref, head_json";
+    "session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref";
 
 crate::statements! {
     /// `session_revisions` statements both backends issue verbatim.
     pub struct SessionRevisionStatements @ "session_revision" {
+        /// Store config body `?2` once under its content hash `?1`.
+        insert_config = "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)
+             ON CONFLICT (hash) DO NOTHING";
+
         /// Record revision `?2` of session `?1`: leaf `?3`, checkpoint root
-        /// `?4` and the head document `?5` it was published with.
+        /// `?4` and the config reference `?5` it was published with.
         insert = "INSERT INTO session_revisions
-                 (session_id, head_revision, leaf_node_id, checkpoint_ref, head_json)
+                 (session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref)
              VALUES (?1, ?2, ?3, ?4, ?5)";
 
         /// Revision `?2` of session `?1`, if it is retained.
-        select = "SELECT leaf_node_id, checkpoint_ref, head_json
-             FROM session_revisions
-             WHERE session_id = ?1 AND head_revision = ?2";
+        select = "SELECT revision.leaf_node_id, revision.checkpoint_ref, config.content
+             FROM session_revisions AS revision
+             LEFT JOIN blobs AS config ON config.hash = revision.config_ref
+             WHERE revision.session_id = ?1 AND revision.head_revision = ?2";
 
         /// The published pointer of session `?1`: its head.
         select_head_revision = "SELECT head_revision FROM session_head
              WHERE session_id = ?1";
 
         /// Every retained revision of session `?1`, oldest first.
-        select_by_session = "SELECT head_revision, leaf_node_id, checkpoint_ref, head_json
-             FROM session_revisions
-             WHERE session_id = ?1
-             ORDER BY head_revision";
+        select_by_session = "SELECT revision.head_revision, revision.leaf_node_id, revision.checkpoint_ref, config.content
+             FROM session_revisions AS revision
+             LEFT JOIN blobs AS config ON config.hash = revision.config_ref
+             WHERE revision.session_id = ?1
+             ORDER BY revision.head_revision";
 
         /// Every checkpoint root a retained revision publishes.
         select_checkpoint_roots = "SELECT DISTINCT checkpoint_ref FROM session_revisions
@@ -55,6 +61,7 @@ crate::statements! {
         /// publish, in hash order: what its deletion may reclaim.
         select_session_checkpoints = "SELECT DISTINCT checkpoint_ref FROM session_revisions
              WHERE session_id = ?1 AND checkpoint_ref IS NOT NULL
+             UNION SELECT config_ref FROM session_revisions WHERE session_id = ?1
              ORDER BY checkpoint_ref";
 
         /// The distinct leaves session `?1`'s retained revisions publish:
@@ -65,6 +72,15 @@ crate::statements! {
 
         /// Every retained revision of session `?1`: its deletion.
         delete_by_session = "DELETE FROM session_revisions WHERE session_id = ?1";
+
+        /// Number revision `?2` of session `?1` once, from its head counter.
+        mark_terminal = "UPDATE session_revisions SET terminal_ordinal = (
+                 SELECT terminal_ordinal + 1 FROM session_head WHERE session_id = ?1
+             ) WHERE session_id = ?1 AND head_revision = ?2 AND terminal_ordinal IS NULL
+             RETURNING terminal_ordinal";
+
+        /// Publish session `?1`'s terminal counter `?2`.
+        advance_terminal = "UPDATE session_head SET terminal_ordinal = ?2 WHERE session_id = ?1";
 
         /// The retained-revisions relation, stated once: release every
         /// revision of session `?2` (of every session when `?2` is NULL) that
@@ -86,8 +102,34 @@ crate::statements! {
         ///
         /// A pin whose target has not resolved retains nothing yet, and a
         /// run that ended without a commit names no revision.
-        prune_unretained = "DELETE FROM session_revisions AS revision
-             WHERE revision.session_id = COALESCE(?2, revision.session_id)
+        prune_unretained = "WITH scoped_heads AS (
+                 SELECT session_id, head_revision, terminal_ordinal FROM session_head
+                 WHERE session_id = ?2
+                 UNION ALL
+                 SELECT session_id, head_revision, terminal_ordinal FROM session_head
+                 WHERE ?2 IS NULL
+             ), policies AS (
+                 SELECT head.session_id, head.head_revision, head.terminal_ordinal,
+                        COALESCE(meta.retention_kind, 'until_gc') AS kind,
+                        COALESCE(meta.retention_last_turns, 0) AS last_turns
+                 FROM scoped_heads AS head LEFT JOIN session_meta AS meta
+                   ON meta.session_id = head.session_id
+             ), candidates AS (
+                 SELECT revision.session_id, revision.head_revision FROM policies
+                 JOIN session_revisions AS revision ON revision.session_id = policies.session_id
+                 WHERE policies.kind = 'head_only' OR (policies.kind = 'until_gc' AND ?1 = 1)
+                 UNION ALL
+                 SELECT revision.session_id, revision.head_revision FROM policies
+                 JOIN session_revisions AS revision ON revision.session_id = policies.session_id
+                   AND revision.terminal_ordinal IS NULL
+                 WHERE policies.kind = 'last_turns'
+                 UNION ALL
+                 SELECT revision.session_id, revision.head_revision FROM policies
+                 JOIN session_revisions AS revision ON revision.session_id = policies.session_id
+                   AND revision.terminal_ordinal <= policies.terminal_ordinal - policies.last_turns
+                 WHERE policies.kind = 'last_turns'
+             ) DELETE FROM session_revisions AS revision
+             WHERE (revision.session_id, revision.head_revision) IN (SELECT * FROM candidates)
                AND revision.head_revision != (
                    SELECT head.head_revision FROM session_head AS head
                    WHERE head.session_id = revision.session_id
@@ -112,28 +154,6 @@ crate::statements! {
                              WHERE bound.session_id = pin.session_id
                                AND bound.input_id = pin.target_id
                                AND ended.terminal_head_revision = revision.head_revision
-                         ))
-                     )
-               )
-               AND NOT (?1 = 0 AND NOT EXISTS (
-                   SELECT 1 FROM session_meta AS meta
-                   WHERE meta.session_id = revision.session_id
-               ))
-               AND NOT EXISTS (
-                   SELECT 1 FROM session_meta AS meta
-                   WHERE meta.session_id = revision.session_id
-                     AND (
-                         (meta.retention_kind = 'until_gc' AND ?1 = 0)
-                         OR (meta.retention_kind = 'last_turns' AND EXISTS (
-                             SELECT 1 FROM session_runs AS ended
-                             WHERE ended.session_id = revision.session_id
-                               AND ended.terminal_head_revision = revision.head_revision
-                               AND (
-                                   SELECT COUNT(*) FROM session_runs AS newer
-                                   WHERE newer.session_id = ended.session_id
-                                     AND newer.terminal_head_revision
-                                         > ended.terminal_head_revision
-                               ) < meta.retention_last_turns
                          ))
                      )
                )

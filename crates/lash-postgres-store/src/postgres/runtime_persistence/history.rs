@@ -910,6 +910,7 @@ impl SessionHistoryStore for PostgresStore {
                 session_id,
                 &turn_id,
                 &result_json,
+                (row.get(0), row.get(4)),
                 self.fence.fleet(),
             )?;
             lash_core_execution::store::validate_turn_commit_outcome_code(

@@ -274,7 +274,7 @@ mod rollout {
     #[cfg(feature = "synthetic-next")]
     async fn old_sessions(storage: &PostgresStorage, rows: usize) {
         for index in 0..rows {
-            sqlx::query("WITH recorded AS (INSERT INTO lash_session_revisions (session_id, head_revision, head_json) VALUES ($1, 0, '{}') RETURNING session_id, head_revision) INSERT INTO lash_session_head (session_id, head_revision) SELECT session_id, head_revision FROM recorded")
+            sqlx::query("WITH config AS (INSERT INTO lash_blobs (hash, content, encoding) VALUES ('fixture-config', '{}'::bytea, 0) ON CONFLICT (hash) DO NOTHING), recorded AS (INSERT INTO lash_session_revisions (session_id, head_revision, config_ref) VALUES ($1, 0, 'fixture-config') RETURNING session_id, head_revision) INSERT INTO lash_session_head (session_id, head_revision) SELECT session_id, head_revision FROM recorded")
             .bind(format!("old-{index:02}"))
             .execute(storage.pool())
             .await
@@ -309,7 +309,7 @@ mod rollout {
             .await
             .expect("N+1 moves F");
         sqlx::query(
-        "WITH recorded AS (INSERT INTO lash_session_revisions (session_id, head_revision, head_json) VALUES ('old-03-next', 0, '{}') RETURNING session_id, head_revision) INSERT INTO lash_session_head (session_id, head_revision, synthetic_next_note)
+        "WITH config AS (INSERT INTO lash_blobs (hash, content, encoding) VALUES ('fixture-config', '{}'::bytea, 0) ON CONFLICT (hash) DO NOTHING), recorded AS (INSERT INTO lash_session_revisions (session_id, head_revision, config_ref) VALUES ('old-03-next', 0, 'fixture-config') RETURNING session_id, head_revision) INSERT INTO lash_session_head (session_id, head_revision, synthetic_next_note)
          SELECT session_id, head_revision, 'written by N+1' FROM recorded",
     )
     .execute(next.pool())

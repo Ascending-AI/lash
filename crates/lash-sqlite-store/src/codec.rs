@@ -201,7 +201,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
             params![session_id.as_str()],
             |row| {
                 Ok((
-                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<Vec<u8>>>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
@@ -233,7 +233,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
 /// this way.
 pub(crate) fn assemble_session_head_meta(
     session_id: &SessionId,
-    head_json: Option<&str>,
+    head_json: Option<&[u8]>,
     head_revision: i64,
     leaf_node_id: Option<String>,
     checkpoint_ref: Option<String>,
@@ -251,7 +251,8 @@ pub(crate) fn assemble_session_head_meta(
     })?;
     let payload: SessionHeadPayload =
         lash_core_execution::store::decode_versioned_json_record_for_fleet(
-            head_json,
+            std::str::from_utf8(head_json)
+                .map_err(|error| stored_data_corrupt("SessionHeadMeta", error))?,
             "SessionHeadMeta",
             lash_core_execution::surface_format!(
                 lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION

@@ -29,14 +29,15 @@ CREATE TABLE IF NOT EXISTS blobs (
 -- One row per published head revision a session still retains (FIG-4731).
 -- The name of a state is (session_id, head_revision). Membership is the
 -- retained-revisions relation every reclaimer roots what it keeps in. Each
--- row carries the head document its revision was published with: the
--- configuration a fork of it copies.
+-- row names the content-addressed config its revision was published with:
+-- the configuration a fork of it copies.
 CREATE TABLE IF NOT EXISTS session_revisions (
     session_id     TEXT NOT NULL,
     head_revision  INTEGER NOT NULL,
     leaf_node_id   TEXT,
     checkpoint_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
-    head_json      TEXT NOT NULL,
+    config_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    terminal_ordinal INTEGER CONSTRAINT ck_session_revisions_terminal_ordinal CHECK (terminal_ordinal > 0),
     PRIMARY KEY (session_id, head_revision)
 );
 CREATE INDEX IF NOT EXISTS idx_session_revisions_leaf
@@ -44,10 +45,16 @@ CREATE INDEX IF NOT EXISTS idx_session_revisions_leaf
 CREATE INDEX IF NOT EXISTS idx_session_revisions_checkpoint_ref
     ON session_revisions(checkpoint_ref);
 
+CREATE INDEX IF NOT EXISTS idx_session_revisions_config_ref
+    ON session_revisions(config_ref);
+CREATE INDEX IF NOT EXISTS idx_session_revisions_terminal_ordinal
+    ON session_revisions(session_id, terminal_ordinal);
+
 -- The current revision is one pointer; per-revision facts live in revisions.
 CREATE TABLE IF NOT EXISTS session_head (
     session_id TEXT PRIMARY KEY,
     head_revision INTEGER NOT NULL,
+    terminal_ordinal INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_session_head_terminal_ordinal CHECK (terminal_ordinal >= 0),
     FOREIGN KEY (session_id, head_revision)
         REFERENCES session_revisions(session_id, head_revision)
         DEFERRABLE INITIALLY DEFERRED

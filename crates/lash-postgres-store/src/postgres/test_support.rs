@@ -160,7 +160,7 @@ impl StoreTestSupport for PostgresStore {
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        let head_json: String = sqlx::query_scalar(
+        let head_json: Vec<u8> = sqlx::query_scalar(
             crate::session_sql::session_sql()
                 .head_postgres
                 .select_head_json_for_update
@@ -170,7 +170,7 @@ impl StoreTestSupport for PostgresStore {
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        let mut head: serde_json::Value = serde_json::from_str(&head_json).map_err(|error| {
+        let mut head: serde_json::Value = serde_json::from_slice(&head_json).map_err(|error| {
             StoreError::Backend(format!("failed to decode test session head: {error}"))
         })?;
         head["schema_version"] = serde_json::json!(schema_version);
@@ -193,7 +193,7 @@ impl StoreTestSupport for PostgresStore {
         })?;
         sqlx::query(crate::session_sql::session_sql().head.set_head_json.sql())
             .bind(session_id.as_str())
-            .bind(head_json)
+            .bind(head_json.as_bytes())
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -255,6 +255,7 @@ impl StoreTestSupport for PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
+        .bind(b"{not-current-json".as_slice())
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;

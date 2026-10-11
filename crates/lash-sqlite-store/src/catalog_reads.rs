@@ -82,16 +82,23 @@ impl SqliteStore {
                                     row.get::<_, Option<String>>(3)?,
                                     row.get::<_, Option<String>>(4)?,
                                     row.get::<_, i64>(5)?,
+                                    row.get::<_, Option<i64>>(6)?,
                                 ))
                             },
                         )
                         .map_err(sqlite_error)?;
                     let mut changes = Vec::new();
                     for row in rows {
-                        let (seq, session, operation, payload, code, at_ms) =
+                        let (seq, session, operation, payload, code, at_ms, head_revision) =
                             row.map_err(sqlite_error)?;
                         changes.push(lash_core_execution::store::TurnChange::from_stored(
-                            seq, session, operation, payload, code, at_ms, fleet,
+                            seq,
+                            session,
+                            operation,
+                            payload,
+                            code,
+                            (at_ms, head_revision),
+                            fleet,
                         )?);
                     }
                     let next = changes.last().map_or(

@@ -588,7 +588,7 @@ fn decode_session_head_meta_row(
         return Ok(None);
     };
     let head_revision = u64_from_sql("SessionHeadMeta", "head_revision", row.get(1))?;
-    let head_json: Option<String> = row.get(0);
+    let head_json: Option<Vec<u8>> = row.get(0);
     let head_json = head_json.ok_or_else(|| StoreError::StoredDataCorrupt {
         record_kind: "SessionHeadMeta",
         message: "head pointer names a missing revision".to_owned(),
@@ -617,7 +617,10 @@ fn decode_session_head_meta_row(
     let checkpoint_ref: Option<String> = row.get(3);
     let payload: SessionHeadPayload =
         lash_core_execution::store::decode_versioned_json_record_for_fleet(
-            &head_json,
+            std::str::from_utf8(&head_json).map_err(|error| StoreError::StoredDataCorrupt {
+                record_kind: "SessionHeadMeta",
+                message: error.to_string(),
+            })?,
             "SessionHeadMeta",
             lash_core_execution::surface_format!(
                 lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION

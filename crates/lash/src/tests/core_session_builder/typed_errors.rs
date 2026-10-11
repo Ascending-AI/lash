@@ -55,7 +55,7 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
     let raw = rusqlite::Connection::open(&path).expect("raw SQLite connection");
     assert_eq!(
         raw.execute(
-            "UPDATE session_revisions SET head_json = json_remove(head_json, '$.session_id')",
+            "UPDATE blobs SET content = CAST(json_remove(content, '$.session_id') AS BLOB) WHERE hash IN (SELECT config_ref FROM session_revisions)",
             [],
         )
         .expect("remove only the stored identities"),

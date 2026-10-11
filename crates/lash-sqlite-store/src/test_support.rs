@@ -161,7 +161,7 @@ impl StoreTestSupport for SqliteStore {
         let session_id = session_id.clone();
         self.conn
             .write(move |tx| {
-                let head_json: String = tx.query_row(
+                let head_json: Vec<u8> = tx.query_row(
                     crate::session_sql::session_sql()
                         .head_sqlite
                         .select_head_json
@@ -169,7 +169,7 @@ impl StoreTestSupport for SqliteStore {
                     params![session_id.as_str()],
                     |row| row.get(0),
                 )?;
-                let mut head: serde_json::Value = serde_json::from_str(&head_json)
+                let mut head: serde_json::Value = serde_json::from_slice(&head_json)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
                 head["schema_version"] = serde_json::json!(schema_version);
                 let config = head
@@ -189,7 +189,7 @@ impl StoreTestSupport for SqliteStore {
                 crate::conn::cached_execute(
                     tx,
                     crate::session_sql::session_sql().head.set_head_json.sql(),
-                    params![session_id.as_str(), head_json],
+                    params![session_id.as_str(), head_json.as_bytes()],
                 )?;
                 Ok(())
             })
@@ -241,7 +241,7 @@ impl StoreTestSupport for SqliteStore {
                         .head
                         .corrupt_head_json
                         .sql(),
-                    params![session_id.as_str()],
+                    params![session_id.as_str(), b"{not-current-json".as_slice()],
                 )?;
                 Ok(())
             })

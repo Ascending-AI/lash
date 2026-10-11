@@ -44,15 +44,15 @@ async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
         }
         conn.execute_batch(
             "INSERT INTO blobs (hash, content, encoding) VALUES ('checkpoint', X'', 0);
-             INSERT INTO session_run_window_heads (session_id, head_digest, head_json)
-             VALUES ('s', 'head', '{}');",
+             INSERT INTO blobs (hash, content, encoding)
+             VALUES ('head', CAST('{}' AS BLOB), 0);",
         )
         .unwrap();
     } else {
         sqlx::raw_sql(
             "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('checkpoint', ''::bytea, 0);
-             INSERT INTO lash_session_run_window_heads (session_id, head_digest, head_json)
-             VALUES ('s', 'head', '{}');",
+             INSERT INTO lash_blobs (hash, content, encoding)
+             VALUES ('head', '{}'::bytea, 0);",
         )
         .execute(&postgres.as_ref().unwrap().1)
         .await
@@ -86,7 +86,7 @@ async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
             "INSERT INTO {table} (session_id, run, terminal_kind, terminal_cause_json,
                  terminal_at_ms, terminal_head_revision, terminal_window_revision,
                  terminal_window_leaf_node_id, terminal_window_checkpoint_ref,
-                 terminal_window_head_digest)
+                 terminal_window_config_ref)
              VALUES ('s', '{bits}', {kind}, {cause}, {time}, {head_revision},
                  {window_revision}, {leaf}, {checkpoint}, {head})"
         );

@@ -477,7 +477,7 @@ mod walk {
         raw.execute_batch("PRAGMA foreign_keys = OFF")
             .expect("write foreign data");
         raw.execute(
-            "INSERT INTO session_revisions (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
+            "INSERT INTO session_revisions (session_id, config_ref, head_revision, leaf_node_id, checkpoint_ref)
              VALUES ('orphaned', '{}', 0, NULL, 'missing-checkpoint-manifest')",
             [],
         ).expect("record the fixture revision");
@@ -518,11 +518,15 @@ mod walk {
             rusqlite::params![b"bare blob body".to_vec()],
         )
         .expect("install a bare checkpoint blob");
-        raw.execute(
-            "INSERT INTO session_revisions (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
-             VALUES ('bare-checkpoint-session', '{}', 0, NULL, 'bare-checkpoint')",
-            [],
-        ).expect("record the fixture revision");
+        crate::revisions::record_revision_conn(
+            &raw,
+            &lash_core_execution::SessionId::from("bare-checkpoint-session"),
+            0,
+            None,
+            Some("bare-checkpoint"),
+            "{}",
+        )
+        .expect("record the fixture revision");
         raw.execute("INSERT INTO session_head (session_id, head_revision) VALUES ('bare-checkpoint-session', 0)", [])
             .expect("install a session pointing at the bare blob");
         drop(raw);
@@ -574,11 +578,15 @@ mod walk {
         drop(store);
 
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
-        raw.execute(
-            "INSERT INTO session_revisions (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
-             VALUES ('published', '{}', 0, NULL, ?1)",
-            rusqlite::params![stored.checkpoint_ref.as_str()],
-        ).expect("record the fixture revision");
+        crate::revisions::record_revision_conn(
+            &raw,
+            &lash_core_execution::SessionId::from("published"),
+            0,
+            None,
+            Some(stored.checkpoint_ref.as_str()),
+            "{}",
+        )
+        .expect("record the fixture revision");
         raw.execute(
             "INSERT INTO session_head (session_id, head_revision) VALUES ('published', 0)",
             [],
@@ -658,11 +666,15 @@ mod walk {
         drop(store);
 
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
-        raw.execute(
-            "INSERT INTO session_revisions (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
-             VALUES ('stateless', '{}', 0, NULL, ?1)",
-            rusqlite::params![stored.checkpoint_ref.as_str()],
-        ).expect("record the fixture revision");
+        crate::revisions::record_revision_conn(
+            &raw,
+            &lash_core_execution::SessionId::from("stateless"),
+            0,
+            None,
+            Some(stored.checkpoint_ref.as_str()),
+            "{}",
+        )
+        .expect("record the fixture revision");
         raw.execute(
             "INSERT INTO session_head (session_id, head_revision) VALUES ('stateless', 0)",
             [],

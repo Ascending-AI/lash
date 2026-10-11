@@ -151,9 +151,10 @@ lash_store_sql::statements! {
 
         /// The stored head document of `?1`, for a test that wants to read or
         /// rewrite it behind the store's back.
-        select_head_json = "SELECT revision.head_json FROM session_head AS head
+        select_head_json = "SELECT config.content FROM session_head AS head
              JOIN session_revisions AS revision
                ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+             LEFT JOIN blobs AS config ON config.hash = revision.config_ref
              WHERE head.session_id = ?1";
     }
 }

@@ -240,6 +240,11 @@ pub(super) async fn apply(
                     run: run.clone(),
                 });
             }
+            if let Some(revision) = head_revision {
+                crate::revisions::record_terminal_conn(tx, session, *revision)
+                    .await
+                    .map_err(|error| encoding(&error))?;
+            }
             crate::observed_sql::query(SQL.delete_phase.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
