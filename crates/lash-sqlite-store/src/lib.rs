@@ -182,6 +182,9 @@ pub struct SqliteStore {
     next_reader: AtomicU64,
     decoded_graph_node_bodies: Arc<AtomicU64>,
     decoded_turn_receipt_bodies: Arc<AtomicU64>,
+    /// The windows this store decoded, which its later reads extend
+    /// (FIG-5930).
+    windows: Arc<lash_core_execution::store_backend_support::WindowCache>,
     clock: Arc<dyn lash_core_execution::Clock>,
     options: StoreOptions,
     commit_count: AtomicU64,

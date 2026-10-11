@@ -210,6 +210,65 @@ impl SessionGraph {
         Some(dropped)
     }
 
+    /// This store-read window continued by `nodes`, the rows past its leaf
+    /// up to `leaf_node_id` in ascending generation (FIG-5930): the graph
+    /// [`Self::from_window`] builds from the whole window, sharing this one's
+    /// records and derived caches, so the rows below the old leaf are never
+    /// decoded again.
+    ///
+    /// `None` when `nodes` does not continue this window's one chain to
+    /// `leaf_node_id` under [`Self::from_window`]'s rules: a node that opens a
+    /// frame, a parent other than the node before it, an id the window
+    /// already holds, or a last node that is not the leaf. The store then
+    /// reads the whole window, which reports what is wrong with it.
+    pub fn extend_window(
+        &self,
+        nodes: Vec<SessionNodeRecord>,
+        leaf_node_id: &NodeId,
+    ) -> Option<Self> {
+        self.anchor()?;
+        let resident = self.try_cache().ok()?;
+        let mut added = HashSet::with_capacity(nodes.len());
+        let mut previous = self.leaf_node_id.as_ref()?;
+        for node in &nodes {
+            if node.frame_open().is_some()
+                || node.parent_node_id.as_ref() != Some(previous)
+                || resident.by_id.get(node.node_id.as_str()).is_some()
+                || !added.insert(node.node_id.as_str())
+            {
+                return None;
+            }
+            previous = &node.node_id;
+        }
+        if previous != leaf_node_id {
+            return None;
+        }
+        let mut graph = self.clone();
+        graph.append_prebuilt_nodes(nodes);
+        Some(graph)
+    }
+
+    /// The first `len` nodes of this store-read window, ending at
+    /// `leaf_node_id`: the window an earlier leaf on the same frame reads
+    /// (FIG-5930). `None` when the node at that position is not the leaf.
+    pub fn window_prefix(
+        &self,
+        len: usize,
+        leaf_node_id: &NodeId,
+    ) -> Option<Result<Self, crate::StoreError>> {
+        let anchor = self.anchor()?.clone();
+        if len == 0 || self.nodes.get(len - 1).map(|node| &node.node_id) != Some(leaf_node_id) {
+            return None;
+        }
+        let mut nodes = self.nodes.clone();
+        nodes.truncate(len);
+        Some(Self::from_shared_anchored_nodes(
+            nodes,
+            Some(leaf_node_id.clone()),
+            Some(anchor),
+        ))
+    }
+
     /// The window anchor of a store-read graph, `None` for a graph built in
     /// memory with no store.
     pub fn anchor(&self) -> Option<&WindowAnchor> {

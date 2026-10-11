@@ -191,6 +191,62 @@ pub async fn history_window_is_frame_bounded(store: Arc<dyn ConformanceDeploymen
     }
 }
 
+/// The current window and the graph-node bodies its read decoded.
+async fn decoded_window(
+    store: &dyn ConformanceDeployment,
+    session_id: &SessionId,
+) -> (crate::store::SessionWindowRead, u64) {
+    let before = store.decoded_row_counts_for_testing().graph_node_bodies;
+    let read = window(store, session_id).await;
+    let decoded = store.decoded_row_counts_for_testing().graph_node_bodies - before;
+    (read, decoded)
+}
+
+fn window_ids(read: &crate::store::SessionWindowRead) -> Vec<NodeId> {
+    read.window
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect()
+}
+
+/// A window read after an append decodes only the appended rows
+/// (FIG-5930). The store keeps the window it read and reads only the rows
+/// past its leaf, so a persistent session's reads are bounded by what it
+/// appends, not by its depth. The extended window is the frame's whole
+/// chain, a read with nothing appended decodes nothing, and a new frame is
+/// read whole.
+pub async fn history_window_reads_only_appended_rows(store: Arc<dyn ConformanceDeployment>) {
+    let store = store.as_ref();
+    let mut state = state("history-window-appended-rows");
+    admit(store, &state.session_id).await;
+    state.ensure_agent_frame_initialized();
+    append_nodes(&mut state, 40);
+    commit(store, &mut state).await;
+    let (first, decoded) = decoded_window(store, &state.session_id).await;
+    assert_eq!(decoded, first.window.nodes.len() as u64);
+    for added in [1, 3, 7] {
+        append_nodes(&mut state, added);
+        commit(store, &mut state).await;
+        let (read, decoded) = decoded_window(store, &state.session_id).await;
+        assert_eq!(decoded, added as u64, "an append of {added} nodes");
+        assert_eq!(
+            window_ids(&read),
+            active_tail(&state, read.window.nodes.len()),
+            "the extended window is the frame's chain"
+        );
+        let (again, decoded) = decoded_window(store, &state.session_id).await;
+        assert_eq!(decoded, 0, "a read with nothing appended");
+        assert_eq!(window_ids(&again), window_ids(&read));
+    }
+    let frame = open_frame(&mut state, "history-appended-rows-next");
+    append_nodes(&mut state, 2);
+    commit(store, &mut state).await;
+    let (read, decoded) = decoded_window(store, &state.session_id).await;
+    assert_eq!(read.current_frame_node_id, Some(frame));
+    assert_eq!(decoded, 3, "a new frame is read whole");
+}
+
 /// Node and byte limits take exact prefixes, and a cursor remains pinned after an append.
 pub async fn history_pages_are_bounded_and_pinned(store: Arc<dyn ConformanceDeployment>) {
     let mut state = state("history-pages");

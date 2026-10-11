@@ -961,6 +961,14 @@ mod session_history {
     }
 
     #[tokio::test]
+    async fn window_reads_only_appended_rows() {
+        let Some((_lock, store, _storage)) = catalog().await else {
+            return;
+        };
+        lash_conformance::history_window_reads_only_appended_rows(store).await;
+    }
+
+    #[tokio::test]
     async fn pages_are_bounded_and_pinned() {
         let Some((_lock, store, _storage)) = catalog().await else {
             return;

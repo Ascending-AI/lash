@@ -145,6 +145,9 @@ pub struct PostgresStorage {
     /// Where every handle's producer commits hand the actor they woke, after
     /// the commit: the store set's wake sink.
     wakes: lash_durable::runner::WakeSink,
+    /// The windows this storage's handles decoded, which their later reads
+    /// extend (FIG-5930).
+    windows: Arc<lash_core_execution::store_backend_support::WindowCache>,
 }
 
 #[derive(Clone)]
@@ -159,6 +162,7 @@ pub struct PostgresStore {
     /// The storage's wake sink, which this store's producer commits deliver
     /// to.
     wakes: lash_durable::runner::WakeSink,
+    windows: Arc<lash_core_execution::store_backend_support::WindowCache>,
     clock: Arc<dyn lash_core_execution::Clock>,
     #[cfg(any(test, feature = "testing"))]
     decoded_graph_node_bodies: Arc<std::sync::atomic::AtomicU64>,
@@ -375,6 +379,7 @@ impl PostgresStorage {
             observer,
             catalog_id: catalog_id.into(),
             wakes: lash_durable::runner::WakeSink::default(),
+            windows: Arc::default(),
         })
     }
 
@@ -490,6 +495,7 @@ impl PostgresStorage {
             observer: StoreObserver::default(),
             catalog_id: catalog_id.into(),
             wakes: lash_durable::runner::WakeSink::default(),
+            windows: Arc::default(),
         })
     }
 
@@ -717,6 +723,7 @@ impl PostgresStorage {
             catalog_id: Arc::clone(&self.catalog_id),
             fence: self.fence.clone(),
             wakes: self.wakes.clone(),
+            windows: Arc::clone(&self.windows),
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),

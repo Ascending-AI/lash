@@ -21,6 +21,7 @@ impl StoreTestSupport for SqliteStore {
         node_id: &lash_core_execution::NodeId,
         corruption: GraphRowCorruption,
     ) -> Result<(), StoreError> {
+        self.windows.forget_all();
         let node_id = node_id.clone();
         self.conn
             .write(move |tx| {
@@ -106,6 +107,7 @@ impl StoreTestSupport for SqliteStore {
         session_id: &SessionId,
         ancestor_node_id: &lash_core_execution::NodeId,
     ) -> Result<(), StoreError> {
+        self.windows.forget_all();
         let session_id = session_id.clone();
         let ancestor_node_id = ancestor_node_id.clone();
         self.conn

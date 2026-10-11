@@ -20,6 +20,7 @@ impl StoreTestSupport for PostgresStore {
         node_id: &lash_core_execution::NodeId,
         corruption: GraphRowCorruption,
     ) -> Result<(), StoreError> {
+        self.windows.forget_all();
         let result = match corruption {
             GraphRowCorruption::DeleteRow => {
                 sqlx::query("DELETE FROM lash_graph_nodes WHERE node_id = $1")
@@ -106,6 +107,7 @@ impl StoreTestSupport for PostgresStore {
         session_id: &SessionId,
         ancestor_node_id: &lash_core_execution::NodeId,
     ) -> Result<(), StoreError> {
+        self.windows.forget_all();
         let result = sqlx::query(
             "INSERT INTO lash_fork_lineage
              (session_id, ancestor_session_id, fork_node_id, fork_generation)

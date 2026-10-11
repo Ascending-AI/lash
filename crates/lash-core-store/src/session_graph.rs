@@ -1004,7 +1004,7 @@ impl SessionGraph {
         clippy::expect_used,
         reason = "the `OnceLock` was just set above, and nothing clears it behind a shared borrow"
     )]
-    fn try_cache(&self) -> Result<&SessionGraphCache, crate::StoreError> {
+    pub(crate) fn try_cache(&self) -> Result<&SessionGraphCache, crate::StoreError> {
         if let Some(cache) = self.cache.get() {
             return Ok(cache);
         }
@@ -1042,7 +1042,7 @@ impl SessionGraph {
         clippy::expect_used,
         reason = "the node was pushed onto `data.nodes` on the line above, so the vector is non-empty"
     )]
-    fn append_prebuilt_nodes(&mut self, nodes: Vec<SessionNodeRecord>) {
+    pub(crate) fn append_prebuilt_nodes(&mut self, nodes: Vec<SessionNodeRecord>) {
         if nodes.is_empty() {
             return;
         }

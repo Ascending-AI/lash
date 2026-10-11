@@ -18,6 +18,12 @@ async fn window_is_frame_bounded() {
 }
 
 #[tokio::test]
+async fn window_reads_only_appended_rows() {
+    let (_backend, store) = catalog().await;
+    lash_conformance::history_window_reads_only_appended_rows(store).await;
+}
+
+#[tokio::test]
 async fn pages_are_bounded_and_pinned() {
     let (_backend, store) = catalog().await;
     lash_conformance::history_pages_are_bounded_and_pinned(store).await;

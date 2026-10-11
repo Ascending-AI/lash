@@ -425,6 +425,7 @@ mod facade_construction;
 mod facade_turn;
 mod fixtures;
 mod generation_policy;
+mod history_hydration;
 use fixtures::{LongTextTools, SurfacePluginFactory};
 pub(crate) mod harness;
 mod node_drain;

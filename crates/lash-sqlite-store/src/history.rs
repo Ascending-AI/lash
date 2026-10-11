@@ -6,7 +6,8 @@ use lash_core_execution::store::{
     WindowSelector,
 };
 use lash_core_execution::store_backend_support::{
-    HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode,
+    HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode, WindowCache, WindowFrame,
+    WindowReuse,
 };
 use std::num::NonZeroU32;
 use std::sync::atomic::Ordering;
@@ -283,12 +284,142 @@ fn terminal_head(
     .transpose()
 }
 
+/// The rows of `frame`'s window from `from` to `to` generation, decoded,
+/// with the stored body bytes they carried.
+fn window_nodes(
+    conn: &Connection,
+    session: &SessionId,
+    frame: &Header,
+    from: i64,
+    to: i64,
+    fleet: lash_core_execution::FleetFormat,
+    decoded: &AtomicU64,
+) -> Result<(Vec<lash_core_execution::SessionNodeRecord>, u64), StoreError> {
+    let mut stmt = conn
+        .prepare_cached(session_sql::session_sql().graph_sqlite.window_rows.sql())
+        .map_err(sqlite_error)?;
+    let rows = stmt
+        .query_map(params![session.as_str(), from, to], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })
+        .map_err(sqlite_error)?;
+    let mut nodes = Vec::new();
+    let mut total = 0;
+    for row in rows {
+        let (id, parent, body, generation, pointer, bytes) = row.map_err(sqlite_error)?;
+        if generation != from + i64::try_from(nodes.len()).unwrap_or(i64::MAX) {
+            return Err(corrupt("SessionGraph", format!("generation gap at `{id}`")));
+        }
+        if pointer != frame.id {
+            return Err(StoreError::InvalidWindowAnchor {
+                frame_node_id: frame.id.clone().try_into()?,
+                violation: lash_core_execution::store::WindowAnchorViolation::ForeignFramePointer,
+            });
+        }
+        let bytes = nonnegative("SessionGraph", "body_bytes", bytes)?;
+        if bytes != body.len() as u64 {
+            return Err(corrupt(
+                "SessionGraph",
+                format!("body_bytes differs at `{id}`"),
+            ));
+        }
+        nodes.push(
+            lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
+                id, parent, &body, fleet,
+            )
+            .map_err(|error| corrupt("SessionGraph node", error.to_string()))?,
+        );
+        decoded.fetch_add(1, Ordering::Relaxed);
+        total += bytes;
+    }
+    Ok((nodes, total))
+}
+
+/// The graph of `frame`'s window up to `last`, the leaf. A window this store
+/// read before on the same frame is reused, and only the rows past its leaf
+/// are read (FIG-5930); rows that do not continue it are read again with the
+/// whole window, which reports what is wrong with them.
+fn window_graph(
+    conn: &Connection,
+    session: &SessionId,
+    frame: &Header,
+    last: &Header,
+    fleet: lash_core_execution::FleetFormat,
+    decoded: &AtomicU64,
+    windows: &WindowCache,
+) -> Result<lash_core_execution::SessionGraph, StoreError> {
+    let leaf: lash_core_execution::NodeId = last.id.clone().try_into()?;
+    let leaf_generation = nonnegative("SessionGraph", "generation", last.generation)?;
+    let read_under = WindowFrame {
+        frame_node_id: &frame.id,
+        generation: nonnegative("SessionGraph", "generation", frame.generation)?,
+        external_parent: frame.parent.as_deref(),
+    };
+    match windows.reuse(session, read_under, &leaf, leaf_generation)? {
+        WindowReuse::Whole(graph) => return Ok(graph),
+        WindowReuse::Extend {
+            window,
+            from_generation,
+            bytes,
+        } => {
+            let from = i64::try_from(from_generation).unwrap_or(i64::MAX);
+            if let Ok((nodes, added)) =
+                window_nodes(conn, session, frame, from, last.generation, fleet, decoded)
+                && let Some(graph) = window.extend_window(nodes, &leaf)
+            {
+                windows.remember(session, &graph, leaf_generation, bytes + added);
+                return Ok(graph);
+            }
+        }
+        WindowReuse::Miss => {}
+    }
+    let (nodes, bytes) = window_nodes(
+        conn,
+        session,
+        frame,
+        frame.generation,
+        last.generation,
+        fleet,
+        decoded,
+    )?;
+    let previous = match frame.parent.as_deref() {
+        Some(parent) => {
+            let row = visible_header(conn, session, parent)?
+                .filter(|h| !h.tombstoned)
+                .ok_or_else(|| corrupt("SessionGraph", "frame parent is missing"))?;
+            Some(
+                lash_core_execution::FrameNodeId::new(row.frame)
+                    .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
+            )
+        }
+        None => None,
+    };
+    let anchor = lash_core_execution::session_graph::WindowAnchor {
+        frame_node_id: lash_core_execution::FrameNodeId::new(frame.id.clone())
+            .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
+        generation: read_under.generation,
+        external_parent: frame.parent.clone().map(TryInto::try_into).transpose()?,
+        previous_frame_node_id: previous,
+    };
+    let graph = lash_core_execution::SessionGraph::from_window(nodes, leaf, anchor)?;
+    windows.remember(session, &graph, leaf_generation, bytes);
+    Ok(graph)
+}
+
 pub(crate) fn window(
     conn: &Connection,
     session: &SessionId,
     selector: WindowSelector,
     fleet: lash_core_execution::FleetFormat,
     decoded: &AtomicU64,
+    windows: &WindowCache,
     chunk_size: usize,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
     live(conn, session)?;
@@ -365,71 +496,7 @@ pub(crate) fn window(
         if frame.generation < 0 || frame.generation > last.generation {
             return Err(corrupt("SessionGraph", "frame generation exceeds leaf"));
         }
-        let mut stmt = conn
-            .prepare_cached(session_sql::session_sql().graph_sqlite.window_rows.sql())
-            .map_err(sqlite_error)?;
-        let rows = stmt
-            .query_map(
-                params![session.as_str(), frame.generation, last.generation],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, i64>(5)?,
-                    ))
-                },
-            )
-            .map_err(sqlite_error)?;
-        let mut nodes = Vec::new();
-        for row in rows {
-            let (id, parent, body, generation, pointer, bytes) = row.map_err(sqlite_error)?;
-            if generation != frame.generation + i64::try_from(nodes.len()).unwrap_or(i64::MAX) {
-                return Err(corrupt("SessionGraph", format!("generation gap at `{id}`")));
-            }
-            if pointer != frame.id {
-                return Err(StoreError::InvalidWindowAnchor {
-                    frame_node_id: frame.id.clone().try_into()?,
-                    violation:
-                        lash_core_execution::store::WindowAnchorViolation::ForeignFramePointer,
-                });
-            }
-            if nonnegative("SessionGraph", "body_bytes", bytes)? != body.len() as u64 {
-                return Err(corrupt(
-                    "SessionGraph",
-                    format!("body_bytes differs at `{id}`"),
-                ));
-            }
-            nodes.push(
-                lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
-                    id, parent, &body, fleet,
-                )
-                .map_err(|error| corrupt("SessionGraph node", error.to_string()))?,
-            );
-            decoded.fetch_add(1, Ordering::Relaxed);
-        }
-        let previous = match frame.parent.as_deref() {
-            Some(parent) => {
-                let row = visible_header(conn, session, parent)?
-                    .filter(|h| !h.tombstoned)
-                    .ok_or_else(|| corrupt("SessionGraph", "frame parent is missing"))?;
-                Some(
-                    lash_core_execution::FrameNodeId::new(row.frame)
-                        .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
-                )
-            }
-            None => None,
-        };
-        let anchor = lash_core_execution::session_graph::WindowAnchor {
-            frame_node_id: lash_core_execution::FrameNodeId::new(frame.id.clone())
-                .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
-            generation: nonnegative("SessionGraph", "generation", frame.generation)?,
-            external_parent: frame.parent.map(TryInto::try_into).transpose()?,
-            previous_frame_node_id: previous,
-        };
-        let graph = lash_core_execution::SessionGraph::from_window(nodes, leaf, anchor)?;
+        let graph = window_graph(conn, session, &frame, &last, fleet, decoded, windows)?;
         if meta.current_frame_node_id.as_ref().map(|id| id.as_str()) != Some(frame.id.as_str()) {
             config = graph
                 .nodes
@@ -462,11 +529,12 @@ impl SessionHistoryStore for SqliteStore {
         let session = session_id.clone();
         let fleet = self.conn.fleet();
         let decoded = Arc::clone(&self.decoded_graph_node_bodies);
+        let windows = Arc::clone(&self.windows);
         let chunk_size = self.conn.operational.checkpoint_ref_chunk.get();
         self.read_connection()
             .read(move |conn| {
                 Ok(window(
-                    conn, &session, selector, fleet, &decoded, chunk_size,
+                    conn, &session, selector, fleet, &decoded, &windows, chunk_size,
                 ))
             })
             .await
