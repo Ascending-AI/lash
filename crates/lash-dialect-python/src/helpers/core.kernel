@@ -58,6 +58,7 @@ use map.len
 use map.contains
 use map.keys
 use map.copy
+use record.keys
 use set.len
 use set.contains
 use set.keys
@@ -1179,6 +1180,40 @@ body {
     }
     set out[pair[0]] = pair[1]
   }
+  return out
+}
+
+# A tool's reply as Python reads it, as `json.loads` gives it: the JSON
+# reaches the machine with every object a record, and an object is a dict
+# here, at every depth.
+function py.reply(value: Any) -> Any
+kernel 1
+charge sum(4, deep(value))
+body {
+  let go = absent
+  set go = fn(v) {
+    let k = kind(v)
+    if same(k, "record") {
+      let out = map{}
+      let keys = record.keys(v)
+      for key in keys {
+        let item = v[key]
+        let converted = apply go(item)
+        set out[key] = converted
+      }
+      return out
+    }
+    if same(k, "list") {
+      let out = []
+      for item in v {
+        let converted = apply go(item)
+        set out[list.len(out)] = converted
+      }
+      return out
+    }
+    return v
+  }
+  let out = apply go(value)
   return out
 }
 

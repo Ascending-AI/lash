@@ -24,11 +24,19 @@ integer of any size, a `float` a float, a `str` text, a `list`, `dict`,
 closure, a task a task handle and an exception an error value whose kind is
 the class name. A dict keyed by tuples is a map keyed by tuples.
 
+A tool's reply reads as `json.loads` gives it. Its JSON reaches the machine
+with every object a kernel record; the helper `py.reply` makes each object,
+at every depth, a dict with the object's keys in their order, and keeps
+each array a list. So indexing, `in`, `len`, `get`, `keys`, `items`,
+`values`, iteration and truthiness behave as on any dict, and an empty
+object is false. This holds however the reply is awaited: directly, through
+a task or through `asyncio.gather`.
+
 Where Python's meaning is the kernel's, the lowerer emits the kernel form:
 `==` is `eq`, `is` is `same`, `//` and `%` on integers are `div_floor` and
-`rem_floor`, `await tool(x)` is one `perform`, an awaited coroutine call is
-an ordinary call, `asyncio.create_task` is `spawn`, and `asyncio.sleep(0)`
-is `yield`. Where it is not, the lowerer calls a helper: the functions
+`rem_floor`, `await tool(x)` is one `perform`, whose reply `py.reply`
+reads, an awaited coroutine call is an ordinary call, `asyncio.create_task`
+is `spawn`, and `asyncio.sleep(0)` is `yield`. Where it is not, the lowerer calls a helper: the functions
 named `py.*`, written in kernel text under `src/helpers/` and installed
 with `define_helpers`. Truthiness, operators on values whose kind is not
 known when lowering, subscripts with negative indices and slices, the

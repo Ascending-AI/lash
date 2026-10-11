@@ -319,8 +319,11 @@ impl Lowerer<'_> {
                         self.emit(Stmt::Finish {
                             value: Expr::Literal(Literal::Null),
                         });
+                        return Ok(result);
                     }
-                    return Ok(result);
+                    // The reply reads as `json.loads` gives it: an object
+                    // is a dict.
+                    return self.invoke("py.reply", &[result], Ty::Unknown);
                 }
                 if SUPPORTED.contains(&id) {
                     return self.builtin(id, call);
@@ -561,7 +564,7 @@ impl Lowerer<'_> {
             return self.invoke("py.await", &[value], Ty::Unknown);
         };
         // An awaited coroutine call is an ordinary call, and an awaited
-        // tool call is one `perform`.
+        // tool call is one `perform` and the reading of its reply.
         let direct = match call.func.as_ref() {
             PyExpr::Name(name) => {
                 self.effect(call).is_some()
@@ -814,8 +817,12 @@ impl Lowerer<'_> {
                 }
             }
         };
+        let reply = matches!(action, Action::Perform { .. });
         let body = self.block(|this| {
-            let result = this.let_rhs(Rhs::Action(action), Ty::Unknown);
+            let mut result = this.let_rhs(Rhs::Action(action), Ty::Unknown);
+            if reply {
+                result = this.invoke("py.reply", &[result], Ty::Unknown)?;
+            }
             this.emit(Stmt::Return { value: result.expr });
             Ok(())
         })?;

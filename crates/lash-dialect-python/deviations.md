@@ -5,6 +5,10 @@ than CPython 3.12. Each has a law of the same name in
 `src/tests/deviations.rs`. A program outside the subset is refused, which
 is not a deviation; the README lists those.
 
+A tool's reply is not a deviation: a JSON object arrives as a dict and an
+array as a list, at every depth, as `json.loads` gives them (README, "What
+runs where"; laws in `src/tests/replies.rs`).
+
 | Law | The dialect | CPython | Why |
 | --- | --- | --- | --- |
 | `bool_is_not_an_integer` | `True == 1` is false, `True + 1` raises `TypeError`, and `True` and `1` are two dict keys. `int(True)`, `isinstance(True, int)` and a bool under a format specification are as in Python. | A bool is the integer 1 or 0. | A kernel bool is not a number (`K-NUM-001`); making it one would put a helper call in every comparison. |
