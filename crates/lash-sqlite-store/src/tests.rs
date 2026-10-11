@@ -100,16 +100,59 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
         &lash_core_execution::Target::Input(input),
     )
     .expect("pin");
+    let retained_revisions = || {
+        connection
+            .prepare("SELECT head_revision FROM session_revisions WHERE session_id = 'session' ORDER BY head_revision")
+            .expect("retained revisions")
+            .query_map([], |row| row.get::<_, i64>(0))
+            .expect("read revisions")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("revision rows")
+    };
     assert_eq!(
         crate::revisions::release_unretained_conn(&connection, true, Some(&session))
             .expect("collect"),
         0
     );
+    assert_eq!(
+        retained_revisions(),
+        vec![1, 2],
+        "the input pin retains revision 1"
+    );
     connection.execute("DELETE FROM pins", []).expect("unpin");
+    assert_eq!(
+        retained_revisions(),
+        vec![1, 2],
+        "unpin alone does not release a revision"
+    );
+    // FIG-5949 counts peeled blobs, not released revisions. Revision 1 is
+    // released here, but its config body is still rooted by head revision 2.
     assert_eq!(
         crate::revisions::release_unretained_conn(&connection, true, Some(&session))
             .expect("collect unpinned"),
-        1
+        0
+    );
+    assert_eq!(
+        retained_revisions(),
+        vec![2],
+        "collection releases the unpinned revision"
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT config.content FROM session_revisions AS revision
+                 JOIN blobs AS config ON config.hash = revision.config_ref
+                 WHERE revision.session_id = 'session' AND revision.head_revision = 2",
+                [],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .expect("the head retains the shared config"),
+        b"{}"
+    );
+    assert_eq!(
+        crate::revisions::release_unretained_conn(&connection, true, Some(&session))
+            .expect("collect again"),
+        0
     );
     assert_eq!(
         connection
