@@ -155,8 +155,11 @@ const fn errno(code: i32) -> u32 {
 /// A heap-profiled build (`dhat-heap`) admits what its profile flush needs
 /// and nothing more (FIG-5876, measured by tracing the flush): `openat` to
 /// read `/proc/self/maps` and the executable it symbolizes against and to
-/// write the profile, and `statx` and `lseek`, with which the standard
-/// library sizes a file it reads. The production build admits none of them.
+/// write the profile, and `statx`, `fstat` and `lseek`, with which the runtime
+/// sizes a file it reads. Opening `/proc/self/maps` also lets
+/// `pthread_getattr_np` query this process's stack limit when stacker first
+/// initializes, so profiling admits that read-only `prlimit64` query.
+/// The production build admits none of them.
 fn syscall_filter(pid: u32) -> Option<Vec<libc::sock_filter>> {
     let own_process = [load(arg(0)), unless_equal(pid, 1), ret(ALLOW), ret(KILL)];
     // Memory may be writable or executable, never both at once (W^X).
@@ -192,6 +195,27 @@ fn syscall_filter(pid: u32) -> Option<Vec<libc::sock_filter>> {
         ret(ALLOW),
         ret(KILL),
     ];
+    #[cfg(feature = "dhat-heap")]
+    let profiled_limits = [
+        load(arg(1)),
+        unless_equal(libc::RLIMIT_STACK, 8),
+        load(arg(0)),
+        unless_equal(0, 5),
+        // A null new-limit pointer: observe the stack ceiling, never change it.
+        load(arg(2)),
+        unless_equal(0, 3),
+        load(arg(2) + 4),
+        unless_equal(0, 1),
+        ret(ALLOW),
+        ret(KILL),
+    ]
+    .into_iter()
+    .chain(cpu_ceiling)
+    .collect::<Vec<_>>();
+    #[cfg(feature = "dhat-heap")]
+    let limits = profiled_limits.as_slice();
+    #[cfg(not(feature = "dhat-heap"))]
+    let limits = &cpu_ceiling[..];
     let allow = [ret(ALLOW)];
     let eacces = [ret(errno(libc::EACCES))];
     let enosys = [ret(errno(libc::ENOSYS))];
@@ -224,7 +248,7 @@ fn syscall_filter(pid: u32) -> Option<Vec<libc::sock_filter>> {
         (libc::SYS_clock_nanosleep, &allow),
         (libc::SYS_nanosleep, &allow),
         (libc::SYS_getrandom, &allow),
-        (libc::SYS_prlimit64, &cpu_ceiling),
+        (libc::SYS_prlimit64, limits),
         // Threads: the parser's stack, and their ends.
         (libc::SYS_clone, &new_thread),
         (libc::SYS_clone3, &enosys),
@@ -246,7 +270,11 @@ fn syscall_filter(pid: u32) -> Option<Vec<libc::sock_filter>> {
         (libc::SYS_tgkill, &own_process),
     ];
     if profiled {
-        rules.extend([(libc::SYS_statx, &allow[..]), (libc::SYS_lseek, &allow[..])]);
+        rules.extend([
+            (libc::SYS_statx, &allow[..]),
+            (libc::SYS_fstat, &allow[..]),
+            (libc::SYS_lseek, &allow[..]),
+        ]);
     }
     let mut filter = vec![
         load(ARCH),

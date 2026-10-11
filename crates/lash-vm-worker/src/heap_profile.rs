@@ -4,6 +4,13 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::time::Instant;
 
+// Profiling is an opt-in development feature, including optimized developer
+// builds. Release stamping must never ship the profiling syscall policy.
+const _: () = assert!(
+    matches!(env!("CARGO_PKG_VERSION").as_bytes(), b"0.0.0-dev"),
+    "dhat-heap is only available in development packages"
+);
+
 struct Window {
     profiler: dhat::Profiler,
     path: PathBuf,

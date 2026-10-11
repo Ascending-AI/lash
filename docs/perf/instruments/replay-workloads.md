@@ -35,6 +35,31 @@ A turn must make exactly its scripted model calls. A cell that fails, a tool
 that is refused or a turn that ends early stops the run and quotes the
 request that left the script, so a broken script never measures silently.
 
+### Heap profiling
+
+The opt-in `dhat-heap` build profiles each re-executed Python worker from
+bootstrap through its first clean reset. For a receipt at `replay-receipt.json`,
+profiles land at
+`replay-receipt.worker-heaps/py-codemode/vm-worker-<pid>.dhat.json`, with a
+matching `.receipt.json` recording the process and window. PID names keep
+workers' profiles separate; a worker killed before its reset promises no
+profile. The shipped TypeScript helper is profiled only when explicitly
+built with `dhat-heap` and given `--heap-profile-dir`.
+
+DHAT measurements cover host and worker heaps in separate process profiles,
+never a combined heap. Host profiles from the harness's explicit DHAT
+windows cover only host Rust allocations; worker profiles cover the kernel
+VM and its worker embedding. Replay's counted allocation metrics remain
+host-only even in a `dhat-heap` build.
+
+Profiled workers retain confinement. The feature adds `fstat` alongside the
+existing profile file calls and a read-only
+`prlimit64(0, RLIMIT_STACK, NULL, ...)` query that stacker's `pthread_getattr_np`
+probe needs after opening `/proc/self/maps`.
+Default builds retain their original allowlist. A compile-time guard rejects
+`dhat-heap` in stamped release packages; optimized `0.0.0-dev` profiling
+builds remain available.
+
 | Workload | Shape |
 |---|---|
 | `chat-short` (W1) | 20 standard turns, each a native lookup then a text answer |

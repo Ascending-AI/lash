@@ -34,12 +34,23 @@ pub fn python_worker_entry() -> Result<bool, lash::vm::PoolError> {
 /// The worker service for `protocol`'s cells, with its run deadlines off the
 /// clock: a replay measures the cell, not a deadline. TypeScript runs on
 /// the shipped worker (`LASH_VM_WORKER` in tests); Python on this binary.
-pub(crate) fn service(python: bool) -> anyhow::Result<lash::vm::WorkerService> {
+pub(crate) fn service(
+    python: bool,
+    _profile_dir: &std::path::Path,
+) -> anyhow::Result<lash::vm::WorkerService> {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config = lash::vm::WorkerService::default().config().clone();
     if python {
         config.entry = lash::vm::WorkerEntry::reexec()
             .map_err(|error| anyhow::anyhow!("locate this binary for Python workers: {error}"))?;
+        #[cfg(feature = "dhat-heap")]
+        config.entry.args.extend([
+            "--heap-profile-dir".to_owned(),
+            _profile_dir
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("worker heap-profile path must be UTF-8"))?
+                .to_owned(),
+        ]);
     }
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;

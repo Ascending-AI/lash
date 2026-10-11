@@ -30,6 +30,8 @@ pub struct RunOptions {
     pub store: StoreChoice,
     /// Run only the first this many turns of each session.
     pub turns: Option<usize>,
+    /// Separate Python-worker heap profiles beside the replay receipt.
+    pub worker_profile_dir: std::path::PathBuf,
 }
 
 /// What a store set must outlive.
@@ -177,7 +179,12 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .collect();
     let book = Arc::new(book);
     let workers = (workload.protocol != Protocol::Standard)
-        .then(|| super::workers::service(workload.protocol == Protocol::Python))
+        .then(|| {
+            super::workers::service(
+                workload.protocol == Protocol::Python,
+                &options.worker_profile_dir,
+            )
+        })
         .transpose()?;
     let core = build_core(workload, &backend, Arc::clone(&book), workers.as_ref())?;
     let cleanup = lash::testing::quiesce_artifact_cleanup(&core).await;

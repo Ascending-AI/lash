@@ -89,6 +89,7 @@ async fn run_workloads(
         let options = RunOptions {
             store: store.clone(),
             turns: *turns,
+            worker_profile_dir: out.with_extension("worker-heaps").join(&workload.name),
         };
         eprintln!(
             "replay: {} ({} turns x {} session(s))",
