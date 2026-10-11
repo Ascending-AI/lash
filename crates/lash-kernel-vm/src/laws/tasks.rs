@@ -981,6 +981,33 @@ fn deliver_refuses_what_no_wait_can_take() {
     // A sleep of zero is still a wait (`K-EFF-010`).
     assert_eq!(result(embedder.run_to_end(&[])), text("a"));
     assert_eq!(embedder.asked(), ["a", "sleep"]);
+
+    // Spawn runs the worker to its wait before main prints. At that slice
+    // the wait exists, but no park has handed it to the embedder yet.
+    let mut early = Embedder::with(
+        r#"
+fn worker() { let r = perform echo("w") as Any return r }
+main {
+  let h = spawn call worker()
+  print "requested"
+  let r = join h
+  return r
+}"#,
+        Setup {
+            slice: 0,
+            ..Setup::default()
+        },
+    );
+    while early.world.printed.is_empty() {
+        assert_eq!(early.run(), Step::Slice);
+    }
+    assert!(early.requests.is_empty(), "no park has handed out the wait");
+    assert_eq!(
+        early.machine.deliver(WaitId(0), done()),
+        Err(DeliverError::UnknownWait { wait: WaitId(0) })
+    );
+    // Refusal leaves the actual reply available after the park.
+    assert_eq!(result(early.run_to_end(&["w"])), text("w"));
 }
 
 /// `K-MACH-002`, `K-MACH-005`, `K-MACH-006`: a slice return changes no
@@ -1053,4 +1080,47 @@ main {{
     at_park.world.cancel = true;
     assert_eq!(at_park.run(), Step::Ended(End::Cancelled));
     assert_eq!(at_park.world.printed, []);
+}
+
+/// A list join cancelled while it waits has raised, so
+/// its members are passed and the run's end cancels them (`K-TASK-016`,
+/// `K-TASK-017`, `K-TASK-018`).
+#[test]
+fn a_cancelled_list_join_passes_its_members() {
+    let mut embedder = Embedder::new(
+        r#"
+fn waits() { do perform echo("w") as Any }
+fn joiner(h) { let hs = [h] do join all hs }
+main {
+  let w = spawn call waits()
+  let j = spawn call joiner(w)
+  do cancel j
+  try { do join j } catch e { }
+  return 1
+}"#,
+    );
+    assert_eq!(result(embedder.run_to_end(&[])), int(1));
+}
+
+/// `K-TASK-016`, `K-TASK-018`: at a park an unobserved failed task and a
+/// live task not passed through a list join are both outstanding.
+#[test]
+fn a_park_lists_an_unobserved_failed_task_as_outstanding() {
+    let mut embedder = Embedder::new(
+        r#"
+fn broken() { throw "broken" }
+fn waits() { do perform echo("w") as Any }
+main {
+  let failed = spawn call broken()
+  let live = spawn call waits()
+  do perform echo("main") as Any
+}"#,
+    );
+    let Step::Parked(park) = embedder.run() else {
+        panic!("main and the live child must park on their effects");
+    };
+    let failed = spawned(TaskIdentity::Main, main_site([0, 0]), 0);
+    let live = spawned(TaskIdentity::Main, main_site([1, 0]), 0);
+    assert_eq!(park.outstanding, [failed, live.clone()]);
+    assert_eq!(park.live, [live]);
 }

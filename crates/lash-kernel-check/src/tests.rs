@@ -935,3 +935,60 @@ fn a_library_body_derives_a_view_in_its_own_unit() {
     assert_eq!(sites[0].kind, SiteKind::Call);
     assert_eq!(sites[0].site, Site::new(unit, [0, 0]));
 }
+
+/// A record variable's fields may change after its `let`,
+/// so only its kind is known (`K-ADM-005`).
+#[test]
+fn a_record_field_written_after_its_let_is_not_typed_by_it() {
+    let library = library();
+    let environment = environment(&library);
+    let text = format!(
+        "kernel 1\nnumbers float\nuse num.neg = @{}\n\nmain {{\n  let r = {{a: \"t\"}}\n  \
+         set r.a = 1\n  let x = r.a\n  let n = num.neg(x)\n}}\n",
+        library.neg
+    );
+    admit(&document(&text), &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
+}
+
+/// An effect whose result may lack a field does not serve
+/// one whose result requires it (`K-ADM-002`).
+#[test]
+fn an_optional_result_field_does_not_serve_a_required_one() {
+    let library = library();
+    let mut environment = Environment::new(&library.catalog);
+    let wanted = "kernel 1\nnumbers float\neffect get() -> Record{x: Int}\nmain { let r = perform get() as Record{x: Int} }\n";
+    let offered = "kernel 1\nnumbers float\neffect get() -> Record{x?: Int}\nmain { let r = perform get() as Record{x?: Int} }\n";
+    // The empty record is allowed by the provided result, but cannot
+    // satisfy the required x in the expected result.
+    let provided = document(offered).manifest.effects[&effect("get")].clone();
+    let expected = document(wanted).manifest.effects[&effect("get")].clone();
+    environment.effects.insert(effect("get"), provided.clone());
+    assert_eq!(
+        refusals(wanted, &environment),
+        [Refused {
+            site: None,
+            reason: RefusalReason::EffectSignature {
+                effect: effect("get"),
+                expected,
+                provided,
+            },
+        }]
+    );
+}
+
+/// Records that agree once an optional field is absent
+/// share a value (`K-ADM-006`).
+#[test]
+fn records_that_differ_only_in_optional_fields_share_a_value() {
+    // The empty record inhabits both types: neither requires x, even
+    // though an x that is present cannot be both Int and Text.
+    let library = library();
+    let mut environment = Environment::new(&library.catalog);
+    let text = "kernel 1\nnumbers float\neffect count() -> Record{x?: Int}\nmain { let c = perform count() as Record{x?: Text} }\n";
+    let doc = document(text);
+    environment.effects.insert(
+        effect("count"),
+        doc.manifest.effects[&effect("count")].clone(),
+    );
+    admit(&doc, &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
+}

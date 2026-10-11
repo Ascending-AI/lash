@@ -475,3 +475,54 @@ fn a_helper_is_charged_its_body_and_not_its_formula() {
     };
     assert_eq!(charged("1"), charged("100000"));
 }
+
+/// A run exactly at each bound passes none of them, and
+/// one more request than a park may hold passes that bound (`K-BND-001`,
+/// `K-BND-002`, `K-TASK-010`).
+#[test]
+fn a_run_exactly_at_its_bounds_passes_none() {
+    let text = r#"
+fn c() { return 1 }
+fn b() { let r = call c() return r }
+fn a() { let r = call b() return r }
+fn w(tag) { let r = perform echo(tag) as Any return r }
+main {
+  let d = call a()
+  let x = spawn call w("x")
+  let y = spawn call w("y")
+  let hs = [x, y]
+  let rs = join all hs
+  return (d, rs)
+}"#;
+    let bounds = Bounds {
+        call_depth: 3,
+        requests_per_park: 2,
+        join_members: 2,
+        ..ROOMY
+    };
+    let mut embedder = Embedder::with(
+        text,
+        Setup {
+            bounds,
+            ..Setup::default()
+        },
+    );
+    let end = embedder.run_to_end(&["x", "y"]);
+    assert_eq!(
+        result(end),
+        lash_kernel_doc::Datum::Tuple(vec![
+            int(1),
+            lash_kernel_doc::Datum::List(vec![
+                super::embedder::text("x"),
+                super::embedder::text("y"),
+            ]),
+        ])
+    );
+    assert_eq!(
+        passes(
+            "do spawn call waits(\"a\") do spawn call waits(\"b\") do spawn call waits(\"c\")",
+            bounds
+        ),
+        exceeded(Bound::RequestsPerPark, 2)
+    );
+}
