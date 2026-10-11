@@ -458,3 +458,45 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
         vec![(3, OutcomeWire::Elapsed)]
     );
 }
+
+/// Workflow admission's local names preserve the wrapper and every checker
+/// error; hosts never need to parse a payload or display message for the code.
+#[test]
+fn workflow_admission_refusals_have_stable_local_codes() {
+    use super::workflow::WorkflowAdmissionRefusal;
+    let document = lash_kernel_doc::parse_document(
+        "kernel 1\nnumbers float\neffect fetch(url: Text) -> Any\neffect store(key: Text) -> Any\n\nmain {\n  let a = perform fetch(\"u\") as Any\n  let b = perform store(\"k\") as Any\n}\n",
+    ).expect("document");
+    let functions = BTreeMap::new();
+    let refusal =
+        lash_kernel_check::admit(&document, &lash_kernel_check::Environment::new(&functions))
+            .expect_err("both effects are missing");
+    let document_refusal = WorkflowAdmissionRefusal::Document(refusal);
+    assert_eq!(document_refusal.code(), "document");
+    let WorkflowAdmissionRefusal::Document(refusal) = document_refusal else {
+        panic!("the wrapper retains the checker refusal");
+    };
+    assert_eq!(refusal.errors.len(), 2);
+    assert_eq!(
+        refusal
+            .errors
+            .iter()
+            .map(|error| error.reason.code())
+            .collect::<Vec<_>>(),
+        ["missing_effect", "missing_effect"]
+    );
+    assert_eq!(
+        WorkflowAdmissionRefusal::NoSuchEntry {
+            entry: lash_kernel_doc::Name::new("missing"),
+        }
+        .code(),
+        "no_such_entry"
+    );
+    assert_eq!(
+        WorkflowAdmissionRefusal::Boundary {
+            message: "catalog cannot be stated as effects".into()
+        }
+        .code(),
+        "boundary"
+    );
+}

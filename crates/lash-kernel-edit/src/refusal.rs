@@ -110,6 +110,34 @@ pub enum EditDiagnosticKind {
     Refused(RefusalReason),
 }
 
+impl EditDiagnosticKind {
+    /// A stable local snake_case name for this top-level alternative.
+    /// Existing names keep their meaning; new alternatives add names. These
+    /// are not HTTP statuses, and old clients may not recognize future names.
+    /// For `Refused`, inspect the nested `RefusalReason::code()` for the checker reason.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::StaleBase { .. } => "stale_base",
+            Self::NoSuchNode => "no_such_node",
+            Self::WrongNode { .. } => "wrong_node",
+            Self::NotInBlock => "not_in_block",
+            Self::IntoItself => "into_itself",
+            Self::NoCondition => "no_condition",
+            Self::NotATry => "not_a_try",
+            Self::NoSuchArgument { .. } => "no_such_argument",
+            Self::NoSuchBinding { .. } => "no_such_binding",
+            Self::RenameCollides { .. } => "rename_collides",
+            Self::FunctionExists { .. } => "function_exists",
+            Self::NoSuchFunction { .. } => "no_such_function",
+            Self::EntryExists { .. } => "entry_exists",
+            Self::NoSuchEntry { .. } => "no_such_entry",
+            Self::FunctionNotCalled { .. } => "function_not_called",
+            Self::Invalid(_) => "invalid",
+            Self::Refused(_) => "refused",
+        }
+    }
+}
+
 impl From<Invalid> for EditRefusal {
     fn from(invalid: Invalid) -> Self {
         Self {

@@ -50,6 +50,14 @@ impl DataRetention {
     ///   (2,048 events per process for 120 seconds, 8 MiB per process, 4,096
     ///   processes, 64 MiB).
     ///
+    /// Unbounded puts can retain blobs that a bounded byte read refuses:
+    /// [`AttachmentReadPolicy`](crate::persistence::AttachmentReadPolicy) is independent of put admission.
+    /// Provider delivery also depends on its accepted form, request overhead,
+    /// repeated occurrences and the configured budgets. Admission does not
+    /// promise that every stored blob can be sent. Byte-oriented hosts may
+    /// choose coordinated put/read caps, but a per-blob read cap at least as
+    /// large as the put cap alone does not guarantee provider delivery.
+    ///
     /// No measurement backs these values. The retained-output limit alone
     /// is sized against something: the standard renderer's 16,000-character
     /// cut stays inline under it.

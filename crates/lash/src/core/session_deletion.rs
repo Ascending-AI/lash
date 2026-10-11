@@ -5,7 +5,7 @@ use lash_core::SessionId;
 use lash_core::store::SessionLookup;
 
 /// Where a state-based wait for a requested session deletion ended.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SessionDeleteCompletion {
     /// The session's close wrote its tombstone. The session id cannot be
     /// reused.

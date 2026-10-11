@@ -66,4 +66,9 @@ fn process_change_subscription_signature_is_public(
     hub.subscribe(process_id)
 }
 
-fn main() {}
+fn main() {
+    fn local_serde<T: serde::Serialize + serde::de::DeserializeOwned>() {}
+    local_serde::<lash::ChangePage<lash::process::ObservedProcessChange, ProcessChangeCursor>>();
+    local_serde::<ProcessEventsRead>();
+    let _: Option<lash::process::ProcessRosterTokenError> = None;
+}

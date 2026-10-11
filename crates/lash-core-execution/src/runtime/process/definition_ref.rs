@@ -429,7 +429,7 @@ mod tests {
 }
 
 /// Whether a host is checking a supplied subset or all required start arguments.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ArgsMode {
     Partial,
     Complete,

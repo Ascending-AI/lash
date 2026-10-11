@@ -176,6 +176,14 @@ impl AttachmentPolicy {
     /// [`OutputRetentionPolicy::STANDARD`](lash_sansio::OutputRetentionPolicy::STANDARD)
     /// (64 KiB inline, a 4 KiB witness).
     ///
+    /// Unbounded puts can retain blobs that a bounded byte read refuses:
+    /// [`AttachmentReadPolicy`](AttachmentReadPolicy) is independent of put admission.
+    /// Provider delivery also depends on its accepted form, request overhead,
+    /// repeated occurrences and the configured budgets. Admission does not
+    /// promise that every stored blob can be sent. Byte-oriented hosts may
+    /// choose coordinated put/read caps, but a per-blob read cap at least as
+    /// large as the put cap alone does not guarantee provider delivery.
+    ///
     /// No measurement backs the read budgets or the upload expiry. The
     /// retained-output limit is sized so the standard renderer's 16,000
     /// character cut stays inline.

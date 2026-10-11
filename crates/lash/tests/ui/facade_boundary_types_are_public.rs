@@ -339,6 +339,10 @@ fn schema_dialect_types_are_nameable() {
 }
 
 fn main() {
+    fn local_serde<T: serde::Serialize + serde::de::DeserializeOwned>() {}
+    local_serde::<lash::CancelReceipt>();
+    local_serde::<lash::SessionDeleteCompletion>();
+    local_serde::<lash::process::ArgsMode>();
     let _ = assert_store_object;
     let _ = schema_dialect_types_are_nameable;
     let _ = head_ownership_refusal_is_public;

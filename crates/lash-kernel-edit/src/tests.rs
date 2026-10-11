@@ -1068,6 +1068,7 @@ fn a_transaction_applies_whole_against_its_base_or_not_at_all() {
             },
         }]
     );
+    assert_eq!(refusal.diagnostics[0].kind.code(), "stale_base");
     assert_eq!(draft.document(), &held);
 
     // The draft's own correspondence composes the transactions since it

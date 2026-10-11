@@ -51,7 +51,7 @@ impl ProcessHistoryContinuation {
 }
 
 /// One durable event page and where the next read continues.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ProcessEventsRead {
     pub outcome: lash_core::facade_support::ObservedProcessEventReadOutcome,
     /// After the last event this page returned; after the released prefix

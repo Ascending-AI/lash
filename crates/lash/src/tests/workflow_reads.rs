@@ -138,7 +138,16 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
     }
     ids.sort();
     let processes = core.processes();
-    let filter = lash_core::ProcessListFilter::default();
+    let filter = lash_core::ProcessListFilter {
+        created_at_start_ms: Some(0),
+        created_at_end_ms: Some(u64::MAX),
+        retired_since_ms: Some(1),
+        ..lash_core::ProcessListFilter::default()
+    };
+    let transported = |cursor: lash_core::ProcessRosterCursor| {
+        lash_core::ProcessRosterCursor::from_token(&cursor.to_token())
+            .expect("transported position")
+    };
     let bound = std::num::NonZeroUsize::new(1).expect("bound");
     let first = processes
         .list(&filter, bound, None)
@@ -146,7 +155,19 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
         .expect("first page");
     assert_eq!(first.processes.len(), 1);
     let fence = first.change_cursor;
-    let stale_continuation = first.continuation.clone();
+    let stale_continuation = first.continuation.clone().map(transported);
+    let changed_filter = lash_core::ProcessListFilter {
+        retired_since_ms: Some(2),
+        ..filter.clone()
+    };
+    assert!(matches!(
+        processes
+            .list(&changed_filter, bound, stale_continuation.clone())
+            .await,
+        Err(EmbedError::Plugin(
+            lash_core::PluginError::ProcessRosterFilterMismatch { .. }
+        ))
+    ));
     let other_store = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("another store");
@@ -167,7 +188,7 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
         .map(|row| row.process_id)
         .collect();
     let second = processes
-        .list(&filter, bound, first.continuation)
+        .list(&filter, bound, first.continuation.map(transported))
         .await
         .expect("second page");
     assert_eq!(second.change_cursor, fence);
@@ -222,7 +243,7 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
     let mut continuation = second.continuation;
     while let Some(cursor) = continuation {
         let page = processes
-            .list(&filter, bound, Some(cursor))
+            .list(&filter, bound, Some(transported(cursor)))
             .await
             .expect("continue scan");
         assert_eq!(page.change_cursor, fence);
@@ -277,7 +298,9 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
         ))
     ));
     assert!(matches!(
-        processes.list(&filter, bound, stale_continuation).await,
+        processes
+            .list(&filter, bound, stale_continuation.map(transported))
+            .await,
         Err(EmbedError::Plugin(
             lash_core::PluginError::ProcessChangeCursorPruned { .. }
         ))

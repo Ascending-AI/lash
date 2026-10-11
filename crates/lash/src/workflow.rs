@@ -203,7 +203,7 @@ pub enum WorkflowDocumentRead {
 }
 
 /// What a workflow read found no longer retained.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum WorkflowUnavailable {
     /// No row is retained under the process id.
     Process { process_id: ProcessId },

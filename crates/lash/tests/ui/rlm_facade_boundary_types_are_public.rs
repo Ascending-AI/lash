@@ -9,6 +9,8 @@ fn rlm_core_type_is_nameable(core: lash::LashCore) {
 }
 
 fn main() {
+    fn local_serde<T: serde::Serialize + serde::de::DeserializeOwned>() {}
+    local_serde::<lash::workflow::WorkflowUnavailable>();
     let _ = rlm_tool_types_are_nameable;
     let _ = rlm_core_type_is_nameable;
 }

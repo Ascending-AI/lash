@@ -1316,7 +1316,7 @@ impl std::future::IntoFuture for CancelBuilder {
 }
 
 /// What a cancel did.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum CancelReceipt {
     /// The atomic request withdrew queued work before a run applied it.

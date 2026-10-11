@@ -642,6 +642,15 @@ main {{
         .map(|refused| refused.reason)
         .collect();
     assert_eq!(reasons, expected);
+    assert_eq!(
+        reasons.iter().map(RefusalReason::code).collect::<Vec<_>>(),
+        [
+            "missing_effect",
+            "effect_signature",
+            "missing_function",
+            "missing_function"
+        ],
+    );
 }
 
 /// `K-ADM-002`: a provided signature serves when it takes what the document

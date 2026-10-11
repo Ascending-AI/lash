@@ -3,7 +3,7 @@
 /// A bounded durable read. Apply `changes` before persisting `next`. A
 /// retained feed exposes its oldest readable cursor through `retained_after`;
 /// a backend that does not expose its horizon returns `None`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChangePage<Change, Cursor> {
     pub changes: Vec<Change>,
     pub next: Cursor,

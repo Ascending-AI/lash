@@ -127,6 +127,28 @@ pub enum RefusalReason {
     },
 }
 
+impl RefusalReason {
+    /// A stable local snake_case name for this top-level alternative.
+    /// Existing names keep their meaning; new alternatives add names. These
+    /// are not HTTP statuses, and old clients may not recognize future names.
+    /// The code names the reason independently of its payload or display text.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Invalid(_) => "invalid",
+            Self::MissingEffect { .. } => "missing_effect",
+            Self::EffectSignature { .. } => "effect_signature",
+            Self::MissingFunction { .. } => "missing_function",
+            Self::UnboundVariable { .. } => "unbound_variable",
+            Self::ArgumentType { .. } => "argument_type",
+            Self::PerformResult { .. } => "perform_result",
+            Self::EffectNotPerformed { .. } => "effect_not_performed",
+            Self::FunctionNotReached { .. } => "function_not_reached",
+            Self::FunctionNotListed { .. } => "function_not_listed",
+            Self::FunctionName { .. } => "function_name",
+        }
+    }
+}
+
 pub(crate) fn refused(site: Option<&Site>, reason: RefusalReason) -> Refused {
     Refused {
         site: site.cloned(),

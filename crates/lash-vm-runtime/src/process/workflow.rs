@@ -238,6 +238,20 @@ pub enum WorkflowAdmissionRefusal {
     Boundary { message: String },
 }
 
+impl WorkflowAdmissionRefusal {
+    /// A stable local snake_case name for this top-level alternative.
+    /// Existing names keep their meaning; new alternatives add names. These
+    /// are not HTTP statuses, and old clients may not recognize future names.
+    /// For `Document`, inspect each nested `RefusalReason::code()`; multiple errors retain their detail.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Document(_) => "document",
+            Self::NoSuchEntry { .. } => "no_such_entry",
+            Self::Boundary { .. } => "boundary",
+        }
+    }
+}
+
 impl std::fmt::Display for WorkflowAdmissionRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
