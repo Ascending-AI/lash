@@ -38,7 +38,7 @@ use crate::{SessionId, TurnInput};
 use lash_core::testing::runtime_helpers::LayeredStores;
 use lash_core::testing::{Call, Op, Phase, Script, StoreOp};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// How long a send to a session that cannot open may take to answer. The
 /// bound turns a sender left waiting into a failure.
@@ -476,6 +476,96 @@ mod sweep {
     const ID: &str = "store-fault-sweep";
     const WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 
+    // Bound silence between durable milestones, not a whole sequence of
+    // admissions, answers and fault recovery. The probe only reads evidence;
+    // polling itself is not progress and cannot keep a stuck cell alive.
+    async fn wait_for_progress<T>(
+        work: impl std::future::Future<Output = T>,
+        mut progress: impl FnMut() -> usize,
+    ) -> std::result::Result<T, String> {
+        let mut seen = progress();
+        let mut deadline = tokio::time::Instant::now() + WITHIN;
+        let mut probe = tokio::time::interval(std::time::Duration::from_millis(10));
+        probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut work = std::pin::pin!(work);
+        loop {
+            tokio::select! {
+                biased;
+                answer = &mut work => return Ok(answer),
+                () = tokio::time::sleep_until(deadline) => {
+                    let current = progress();
+                    if current == seen {
+                        return Err(format!("no progress within {WITHIN:?}"));
+                    }
+                    seen = current;
+                    deadline = tokio::time::Instant::now() + WITHIN;
+                }
+                _ = probe.tick() => {
+                    let current = progress();
+                    if current != seen {
+                        seen = current;
+                        deadline = tokio::time::Instant::now() + WITHIN;
+                    }
+                }
+            }
+        }
+    }
+
+    // The finitely armed transient replies and their first recovered return
+    // are progress. Subsequent background reads of the same operation are not.
+    fn fault_progress(script: &Script, start: usize, cell: Option<Cell>) -> usize {
+        let Some(cell) = cell else { return 0 };
+        let trace = script.trace();
+        let mut failed = 0;
+        let mut recovered = false;
+        for call in &trace[start..] {
+            if call.op != cell.op {
+                continue;
+            }
+            match call.outcome {
+                lash_core::testing::Outcome::Failed(lash_core::testing::FaultKind::Transient) => {
+                    failed += 1;
+                }
+                lash_core::testing::Outcome::Returned if failed > 0 => recovered = true,
+                _ => {}
+            }
+        }
+        failed + usize::from(recovered)
+    }
+
+    /// FIG-5941: each admission/answer gets the unchanged liveness budget,
+    /// and a sequence that stops making progress still fails within it.
+    #[tokio::test(start_paused = true)]
+    async fn a_fault_sweep_bounds_stalled_progress_instead_of_total_elapsed_time() {
+        let completed = AtomicUsize::new(0);
+        let work = async {
+            for _ in 0..3 {
+                tokio::time::sleep(WITHIN - std::time::Duration::from_secs(1)).await;
+                completed.fetch_add(1, Ordering::SeqCst);
+            }
+        };
+        wait_for_progress(work, || completed.load(Ordering::SeqCst))
+            .await
+            .expect("each admission/answer progressed within the same 10 s bound");
+        let start = tokio::time::Instant::now();
+        let stuck = async {
+            tokio::time::sleep(WITHIN - std::time::Duration::from_secs(1)).await;
+            completed.fetch_add(1, Ordering::SeqCst);
+            std::future::pending::<()>().await;
+        };
+        assert!(
+            wait_for_progress(stuck, || completed.load(Ordering::SeqCst))
+                .await
+                .is_err(),
+            "a stalled step must fail even after earlier progress"
+        );
+        assert_eq!(
+            start.elapsed(),
+            std::time::Duration::from_secs(9) + WITHIN,
+            "a stall gets exactly the unchanged budget after the last progress"
+        );
+    }
+
     async fn finish_serving(
         core: &LashCore,
         script: &Script,
@@ -536,7 +626,7 @@ mod sweep {
         let serving = core_over(&engine_stores, true);
         head_read.reached(1).await;
         assert_eq!(
-            answers(&durable, handles)
+            answers(&durable, handles, &AtomicUsize::new(0))
                 .await
                 .expect("the published answer"),
             Answer::Success(vec!["echo: first".into()])
@@ -701,6 +791,7 @@ mod sweep {
     async fn answers(
         durable: &crate::DurableSession,
         handles: Vec<crate::SendHandle>,
+        progress: &AtomicUsize,
     ) -> Result<Answer> {
         let mut answers = Vec::new();
         for mut handle in handles {
@@ -714,6 +805,7 @@ mod sweep {
                     result => break result?,
                 }
             };
+            progress.fetch_add(1, Ordering::SeqCst);
             if !output.is_success() {
                 return Ok(Answer::Stopped {
                     status: format!("{:?}", output.result.outcome),
@@ -862,33 +954,45 @@ mod sweep {
             gate.open_all();
         }
         let mut child = None;
-        let work = async {
+        let completed = AtomicUsize::new(0);
+        let work = Box::pin(async {
             if matches!(scenario, Scenario::Child) {
                 let process = start_child(&serving).await?;
                 child = Some(process.to_string());
+                completed.fetch_add(1, Ordering::SeqCst);
                 return child_answer(&serving, &process).await;
             }
             let handles = match accepted {
                 Some(handles) => handles,
-                None => submit(&durable, false).await?,
+                None => {
+                    let handles = submit(&durable, false).await?;
+                    completed.fetch_add(1, Ordering::SeqCst);
+                    handles
+                }
             };
-            let first = answers(&durable, handles).await?;
+            let first = answers(&durable, handles, &completed).await?;
             let Answer::Success(mut output) = first else {
                 return Ok(first);
             };
             if matches!(scenario, Scenario::Admission) {
-                let batch = answers(&durable, submit(&durable, true).await?).await?;
+                let handles = submit(&durable, true).await?;
+                completed.fetch_add(1, Ordering::SeqCst);
+                let batch = answers(&durable, handles, &completed).await?;
                 let Answer::Success(batch) = batch else {
                     return Ok(batch);
                 };
                 output.extend(batch);
             }
             Ok::<_, EmbedError>(Answer::Success(output))
-        };
-        let answer = match tokio::time::timeout(WITHIN, work).await {
+        });
+        let answer = match wait_for_progress(work, || {
+            completed.load(Ordering::SeqCst) + fault_progress(&script, start, cell)
+        })
+        .await
+        {
             Ok(Ok(answer)) => Ok(answer),
             Ok(Err(error)) => Ok(refused(error)),
-            Err(_) => Err(format!("no answer within {WITHIN:?}")),
+            Err(error) => Err(error),
         };
         // Finish the session's background work before inspecting the
         // durable result. A sticky fault that wedges the actor is
