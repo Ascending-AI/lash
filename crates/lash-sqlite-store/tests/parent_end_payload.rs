@@ -11,10 +11,13 @@ use std::sync::Arc;
 use lash_core_execution::ProcessRegistry;
 use lash_sqlite_store::SqliteProcessRegistry;
 
-fn turn_scope(session: &str, turn: &str) -> lash_core_execution::ScopeId {
-    lash_core_execution::ScopeId::turn(
+/// A turn scope keeps no ledger row: its close is its run's terminal. A
+/// session operation's close is still its typed ledger row, so the
+/// refusals are proved on one.
+fn operation_scope(session: &str, operation: &str) -> lash_core_execution::ScopeId {
+    lash_core_execution::ScopeId::session_operation(
         lash_sansio::SessionId::fixture(session),
-        lash_core_execution::TurnId::fixture(turn),
+        operation,
     )
 }
 
@@ -44,10 +47,14 @@ async fn a_parent_scope_row_is_refused_as_malformed() {
             .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
 
-    let scope = turn_scope("v2-session", "v2-turn");
+    let scope = operation_scope("v2-session", "v2-operation");
     let payload = serde_json::json!({
         "version": lash_core_execution::SCOPE_STORAGE_PAYLOAD_VERSION,
-        "scope": {"kind": "turn", "session_id": "v2-session", "turn_id": "v2-turn"},
+        "scope": {
+            "kind": "session_operation",
+            "session_id": "v2-session",
+            "operation_id": "v2-operation",
+        },
     })
     .to_string();
     inject(
@@ -76,7 +83,7 @@ async fn an_unsupported_payload_version_is_refused() {
             .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
 
-    let scope = turn_scope("version-session", "version-turn");
+    let scope = operation_scope("version-session", "version-operation");
     let payload = serde_json::json!({
         "version": lash_core_execution::SCOPE_STORAGE_PAYLOAD_VERSION + 1,
         "scope": serde_json::to_value(&scope).expect("scope json"),
@@ -110,13 +117,13 @@ async fn a_payload_that_disagrees_with_its_projection_is_refused() {
             .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
 
-    let scope = turn_scope("mismatch-session", "mismatch-turn");
+    let scope = operation_scope("mismatch-session", "mismatch-operation");
     let payload = scope
         .storage_payload(lash_core_execution::FleetFormat::current())
         .expect("encode the payload");
-    // The payload names one turn; the projection names another. A reader that
+    // The payload names one operation; the projection names another. A reader that
     // trusted either side alone would resurrect the wrong scope.
-    let other = turn_scope("mismatch-session", "other-turn");
+    let other = operation_scope("mismatch-session", "other-operation");
     inject(
         dir.path(),
         other.storage_kind(),
