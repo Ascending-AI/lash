@@ -57876,6 +57876,7 @@
       ],
       "dependencies": [
         "async-trait",
+        "chrono",
         "futures-util",
         "insta",
         "lash-dialect-python",

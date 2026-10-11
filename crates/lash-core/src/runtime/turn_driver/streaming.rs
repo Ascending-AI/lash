@@ -343,7 +343,7 @@ impl RuntimeTurnDriver<'_> {
             {
                 DrivePollOutcome::Cancelled => {
                     llm_task.abort();
-                    let _ = (&mut llm_task).await;
+                    let terminal = (&mut llm_task).await;
                     llm_task_abort.disarm();
                     let stop_error = self
                         .model_stop_error
@@ -376,17 +376,23 @@ impl RuntimeTurnDriver<'_> {
                     } else {
                         crate::AttemptOutcome::Interrupted
                     };
-                    call_record = Some(completion_sideband.terminal_call_record(
-                        call_id.clone(),
-                        outcome,
-                        &failure,
-                        true,
-                        observed_stream_protocol_position(
-                            *stream_state.text_streamed,
-                            stream_state.stream_accumulator,
-                            stream_state.stream_evidence,
+                    // A completed task may already have sealed its timeout.
+                    // Cancelling it cannot invent another dispatched attempt.
+                    call_record = Some(match terminal {
+                        Ok(Ok(completion)) => completion.call_record,
+                        Ok(Err(failure)) => *failure.call_record,
+                        Err(_) => completion_sideband.terminal_call_record(
+                            call_id.clone(),
+                            outcome,
+                            &failure,
+                            true,
+                            observed_stream_protocol_position(
+                                *stream_state.text_streamed,
+                                stream_state.stream_accumulator,
+                                stream_state.stream_evidence,
+                            ),
                         ),
-                    ));
+                    });
                     break Err(crate::runtime::effect::llm_call_error_from_transport(
                         failure,
                     ));
@@ -621,6 +627,34 @@ impl RuntimeTurnDriver<'_> {
                 }
             }
         };
+
+        // The provider's total timer cannot see the stream the runtime
+        // consumed. Whichever timer won, retain that attempt's observed
+        // response position without lowering evidence the provider recorded.
+        if let Err(error) = &result
+            && error.code == Some(TurnFailureCode::ModelTotalExceeded.into())
+            && let Some(attempt) = call_record
+                .as_mut()
+                .and_then(|record| record.attempts.last_mut())
+            && attempt.error.as_ref().and_then(|error| error.code.as_ref())
+                == Some(&TurnFailureCode::ModelTotalExceeded.into())
+        {
+            match observed_stream_protocol_position(
+                text_streamed,
+                &stream_accumulator,
+                &stream_evidence,
+            ) {
+                crate::ProtocolPosition::OutputStarted => {
+                    attempt.protocol_position = crate::ProtocolPosition::OutputStarted;
+                }
+                crate::ProtocolPosition::ResponseObserved
+                    if attempt.protocol_position == crate::ProtocolPosition::NoResponse =>
+                {
+                    attempt.protocol_position = crate::ProtocolPosition::ResponseObserved;
+                }
+                _ => {}
+            }
+        }
 
         // A stream or hook failure may stop the body before the provider
         // returns. Stop that task before reading its sideband, preserving a

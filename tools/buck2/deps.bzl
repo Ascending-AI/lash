@@ -1217,6 +1217,7 @@ PACKAGE_DEPS = {
     "lash-runtime": {
         "build": {},
         "dev": {
+            "chrono": "//third-party/rust:p0048",
             "insta": "//third-party/rust:p0170",
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",

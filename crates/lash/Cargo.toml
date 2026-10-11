@@ -125,6 +125,7 @@ synthetic-next = [
 ]
 
 [dev-dependencies]
+chrono.workspace = true
 # The dev-dependencies' testing client is paired with a testing worker when
 # the `worker` feature links one (FIG-4409).
 lash-vm-worker = { workspace = true, features = ["testing"] }

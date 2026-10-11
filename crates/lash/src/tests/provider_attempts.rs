@@ -1074,8 +1074,77 @@ async fn an_unsent_model_call_reports_its_failure_without_a_dispatched_attempt()
 
 /// Expiring a dispatched call preserves its interrupted attempt and observed
 /// response position instead of recording it as a call that was never sent.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(start_paused = true)]
 async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_failure() {
+    const PARTIAL: &str = "partial before deadline";
+    #[derive(Debug)]
+    struct PausedClock(tokio::time::Instant);
+
+    #[async_trait]
+    impl lash_core::Clock for PausedClock {
+        fn now(&self) -> std::time::Instant {
+            tokio::time::Instant::now().into_std()
+        }
+
+        fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+            chrono::DateTime::from(
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(1) + self.0.elapsed(),
+            )
+        }
+
+        async fn sleep(&self, duration: std::time::Duration) {
+            tokio::time::sleep(duration).await;
+        }
+
+        async fn sleep_until(&self, deadline: std::time::Instant) {
+            if deadline > tokio::time::Instant::now().into_std() {
+                tokio::time::sleep_until(deadline.into()).await;
+            }
+        }
+    }
+
+    // SQLite work runs outside Tokio. Keep the runtime runnable so its paused
+    // clock cannot auto-advance while we wait for stores or live activity.
+    let hold_time = tokio::spawn(async {
+        loop {
+            tokio::task::yield_now().await;
+        }
+    });
+    let clock = Arc::new(PausedClock(tokio::time::Instant::now()));
+    let output_started = Arc::new(tokio::sync::Notify::new());
+    let committed = Arc::new(tokio::sync::Notify::new());
+    let replay = crate::observe::InMemoryLiveReplayStore::with_clock(
+        crate::observe::InMemoryLiveReplayStoreConfig::standard(),
+        clock.clone(),
+    )
+    .with_before_notification_gate_for_testing({
+        let output_started = Arc::clone(&output_started);
+        let committed = Arc::clone(&committed);
+        move |events| {
+            if events.iter().any(|event| {
+                matches!(
+                    &event.payload,
+                    lash_core::SessionObservationEventPayload::TurnActivity(activity)
+                        if matches!(
+                            &activity.event,
+                            TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                                kind: StreamBlockKind::AssistantText, text, ..
+                            }) if text.as_str() == PARTIAL
+                        )
+                )
+            }) {
+                output_started.notify_one();
+            }
+            if events.iter().any(|event| {
+                matches!(
+                    event.payload,
+                    lash_core::SessionObservationEventPayload::Committed { .. }
+                )
+            }) {
+                committed.notify_one();
+            }
+        }
+    });
     let model = crate::testing::TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
@@ -1086,7 +1155,7 @@ async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_fai
                 .send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
                     kind: StreamBlockKind::AssistantText,
                     block: StreamBlockIdentity::new("text:0", 0),
-                    text: "partial before deadline".to_string(),
+                    text: PARTIAL.to_string(),
                 }));
             std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
         })
@@ -1104,24 +1173,42 @@ async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_fai
         ..crate::ExecutionBudgetsConfig::recommended()
     })
     .expect("valid budgets");
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        sqlite_memory_store_backend().await,
-    ))
-    .execution_budgets(budgets)
-    .serve_test_llm_profile(model, mock_llm_profile_spec())
-    .build(crate::testing::runtime_lease_owner())
-    .expect("standard core");
+    let backend = store_backend_with_clock(clock.clone()).await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .live_replay_store(Arc::new(replay))
+        .execution_budgets(budgets)
+        .serve_test_llm_profile(model, mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("standard core");
     let session = created(&core, "live-model-deadline-report").await;
-    let output = session
+    let held = session
         .send(TurnInput::text("expire the call"))
-        .output()
         .await
-        .expect("the deadline settles the turn");
+        .expect("accepted");
+    // Wake the admitted actor through the engine rather than advancing the
+    // claim poll's timer, which would also spend the model's deadline.
+    let mut wake = lash_core::durable_port::MailTx::new();
+    wake.wake(
+        lash_core::durable_port::ActorKey::session("live-model-deadline-report")
+            .expect("session actor key"),
+    );
+    backend
+        .commit_mail(wake, lash_core::durable_port::CommitLabel::MAIL_SESSION)
+        .await
+        .expect("wake the session actor");
+    // Sending the delta only queues it. Expire the call after the runtime
+    // consumed it and published the partial to the turn's live stream.
+    output_started.notified().await;
+    // Cross the unchanged two-second deadline by one timer-resolution tick.
+    // Keep time frozen again while SQLite commits the resulting terminal.
+    tokio::time::advance(std::time::Duration::from_millis(2_001)).await;
+    committed.notified().await;
+    let output = held.output().await.expect("the deadline settles the turn");
     let [call] = output.result.llm_calls.as_slice() else {
         panic!("one interrupted call");
     };
     let [attempt] = call.attempts.as_slice() else {
-        panic!("one interrupted attempt");
+        panic!("one interrupted attempt: {:?}", call.attempts);
     };
     assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Interrupted);
     assert!(attempt.retry_budget_consumed);
@@ -1140,4 +1227,6 @@ async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_fai
             .iter()
             .any(|issue| issue.code == Some(lash_core::TurnFailureCode::ModelTotalExceeded.into()))
     );
+    core.shutdown().await.expect("shutdown");
+    hold_time.abort();
 }
