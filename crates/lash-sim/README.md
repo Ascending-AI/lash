@@ -29,16 +29,15 @@ the replay evidence. The `run` command has two modes:
 Every turn and every effect boundary of a generated world runs where a
 deployment runs it: on lash's durable engine (`backend::SimEngine`), over a
 SQLite memory store set, seeded by the workload's seed. The engine is built
-through `lash::durable::DurableBackendBuilder`, which I0 (FIG-5194) assembles;
-until then a world that runs a turn stops at the builder. A failed run records
-its full history.
+through `lash::durable::DurableBackendBuilder`; the core serves its own node,
+which drives the turns the world sends. A failed run records its full history.
 
 Count-based runs partition deterministically with `--shard <i>/<n>`: shard
 `i/n` owns every seed index where `index % n == i - 1`, so the union of all
 shards covers the configured seed space exactly once. The summary records
 `mode`, `shard`, and `configured_seeds`.
 
-A generated run executes Code mode cells in the `lash-vm-worker` helper. `kiln run`
+A generated run executes code mode cells in the `lash-vm-worker` helper. `kiln run`
 builds and materializes the matching worker and supplies its path at runtime.
 An explicit `LASH_VM_WORKER` in the caller's environment takes precedence.
 

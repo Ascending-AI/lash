@@ -10,6 +10,9 @@ use lash_kernel_doc::{
 use super::{decode_number, int, parse_json, register_text_json, stringify_json};
 use crate::tests::Room;
 
+#[path = "trim_tests.rs"]
+mod trim_set;
+
 #[derive(Default)]
 struct Heap(BTreeMap<ObjectId, Object>, Room);
 
@@ -1265,6 +1268,19 @@ fn dump(heap: &Heap, value: &Value) -> lash_kernel_doc::Datum {
     }
 }
 
+fn scalar(datum: &lash_kernel_doc::Datum) -> bool {
+    use lash_kernel_doc::Datum;
+    !matches!(
+        datum,
+        Datum::Tuple(_)
+            | Datum::List(_)
+            | Datum::Map(_)
+            | Datum::Set(_)
+            | Datum::Record(_)
+            | Datum::Error(_)
+    )
+}
+
 fn deep(datum: &lash_kernel_doc::Datum) -> u64 {
     use lash_kernel_doc::Datum;
     match datum {
@@ -1650,6 +1666,12 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
     ] {
         cases.push(("K-LTXT-006", unicode(name), vec![t(input)], Ok(t(expected))));
     }
+    cases.push((
+        "K-LTXT-011",
+        "text.trim_set".to_owned(),
+        vec![t("aa😀aaa"), t("a"), Datum::Bool(true), Datum::Bool(true)],
+        Ok(t("😀")),
+    ));
     let mut registry = FunctionRegistry::new();
     register_text_json(&mut registry).unwrap();
     let mut exercised = std::collections::BTreeSet::new();
@@ -1672,11 +1694,16 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             heap: &mut heap,
             counter: &mut counter,
         });
-        let (outcome, result_size) = match (actual, expected) {
+        let (outcome, result_size, result_scalar) = match (actual, expected) {
             (Ok(value), Ok(expected)) => {
                 let actual = dump(&heap, &value);
                 assert_eq!(actual, expected, "{name}");
-                (serde_json::json!({"returned":actual}), deep(&actual))
+                let scalar = scalar(&actual);
+                (
+                    serde_json::json!({"returned":actual}),
+                    deep(&actual),
+                    scalar,
+                )
             }
             (Err(NativeError::Raised(error)), Err(kind)) => {
                 assert_eq!(error.kind, kind, "{name}");
@@ -1685,9 +1712,18 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
                     message: error.message,
                     data: dump(&heap, &error.data),
                 };
-                (serde_json::json!({"raised":error}), 0)
+                (serde_json::json!({"raised":error}), 0, true)
             }
             (actual, expected) => panic!("{name}: {actual:?} != {expected:?}"),
+        };
+        let param = |name: &lash_kernel_doc::Name| {
+            registered
+                .definition
+                .signature
+                .params
+                .iter()
+                .position(|p| p.name == *name)
+                .and_then(|index| args.get(index))
         };
         let charged = registered
             .definition
@@ -1695,30 +1731,28 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             .evaluate(&mut |operand, measure| match (operand, measure) {
                 (Operand::Result, Measure::Magnitude) => result_magnitude,
                 (Operand::Result, Measure::DeepSize) => result_size,
+                // A value holding no other value has its deep size as size.
+                (Operand::Result, Measure::Size) if result_scalar => result_size,
                 // An omitted optional argument measures nothing.
-                (Operand::Param(name), Measure::DeepSize) => registered
-                    .definition
-                    .signature
-                    .params
-                    .iter()
-                    .position(|p| p.name == *name)
-                    .and_then(|index| args.get(index))
-                    .map_or(0, deep),
+                (Operand::Param(name), Measure::DeepSize) => param(name).map_or(0, deep),
+                (Operand::Param(name), Measure::Size) if param(name).is_none_or(scalar) => {
+                    param(name).map_or(0, deep)
+                }
                 _ => panic!("unexpected native corpus measure: {operand:?} {measure:?}"),
             });
-        assert_eq!(
-            charged,
-            if name == "json.classify" {
-                1 + result_magnitude
+        let expected_charge = if name == "json.classify" {
+            1 + result_magnitude
+        } else if name == "text.trim_set" {
+            8 + (1 + deep(&args[0])) * (1 + deep(&args[1])) + result_size
+        } else {
+            (if name == "format.decimal_parts" {
+                65
             } else {
-                (if name == "format.decimal_parts" {
-                    65
-                } else {
-                    1
-                }) + args.iter().map(deep).sum::<u64>()
-                    + result_size
-            }
-        );
+                1
+            }) + args.iter().map(deep).sum::<u64>()
+                + result_size
+        };
+        assert_eq!(charged, expected_charge);
         assert_eq!(counter.spent(), 0);
         // A second call on the same implementation and heap must agree, and
         // neither call may change any input object (K-LIB-006, K-LIB-007).

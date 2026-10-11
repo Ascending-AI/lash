@@ -471,7 +471,6 @@ async fn fixed_script_timeout_proofs_preserve_timeout_envelopes() {
 }
 
 #[test]
-#[ignore = "FIG-5350: a generated workload has no world to run on the durable runtime"]
 fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
     let tmp = tempfile::tempdir().expect("tempdir");
 
@@ -509,6 +508,7 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
     assert_eq!(report.seed_salt.as_deref(), Some("search-test-salt"));
     assert_eq!(report.seed_source, "salted_exploration");
     assert_eq!(report.counts.generated_seeds, owned);
+    assert_eq!(report.counts.reached_seeds, owned);
     assert_eq!(
         report.counts.real_observation_oracles + report.counts.model_property_oracles,
         report.counts.oracle_passes + report.counts.oracle_failures
@@ -546,7 +546,6 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
 }
 
 #[test]
-#[ignore = "FIG-5350: a generated workload has no world to run on the durable runtime"]
 fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
     let tmp = tempfile::tempdir().expect("tempdir");
 
@@ -576,6 +575,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
 
     assert_eq!(report.profile, "fast-random");
     assert_eq!(report.counts.generated_seeds, seeds);
+    assert_eq!(report.counts.reached_seeds, seeds);
     assert_eq!(report.counts.replay_reports, seeds);
     assert_eq!(report.counts.minimized_replays, seeds);
     for replay in &report.replay_reports {
@@ -659,8 +659,9 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
             "scenario packages must not share identical generated transition fact graphs"
         );
     }
-    assert_eq!(report.generated_backend_regression_fixtures.len(), 6);
-    assert_eq!(report.counts.generated_backend_regression_fixtures, 6);
+    // Host-owned triggers have no generated core regression fixture.
+    assert_eq!(report.generated_backend_regression_fixtures.len(), 5);
+    assert_eq!(report.counts.generated_backend_regression_fixtures, 5);
     let backend_regression_ids = report
         .generated_backend_regression_fixtures
         .iter()
@@ -919,12 +920,6 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         report
             .provider_transport_exclusions
             .iter()
-            .any(|exclusion| exclusion.path.contains("codex/oauth.rs"))
-    );
-    assert!(
-        report
-            .provider_transport_exclusions
-            .iter()
             .any(
                 |exclusion| exclusion.path == "crates/lash-provider-openai/src/codex.rs"
                     && exclusion.replacement_lane.contains("websocket")
@@ -990,11 +985,11 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
             .as_array()
             .unwrap()
             .len(),
-        6
+        5
     );
     assert_eq!(
         summary["counts"]["generated_backend_regression_fixtures"],
-        6
+        5
     );
     assert!(
         summary["model_only_boundary_reviews"]

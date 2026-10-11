@@ -26,6 +26,7 @@ mod printer_corpus;
 mod process;
 mod remaining_builtins;
 mod step_structure;
+mod trim;
 mod typed;
 
 /// The real library and extension definitions, before the dialect helpers.

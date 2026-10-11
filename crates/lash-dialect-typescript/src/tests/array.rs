@@ -593,3 +593,179 @@ fn huge_array_likes_are_refused_before_a_walk_and_to_spliced_reads_what_it_keeps
         await finish(kept.length === 3 && kept[0] === 'a' && kept[1] === 1 && kept[2] === 2);",
     );
 }
+
+/// FIG-5874: admission preserves the generic result, error and observable
+/// coercion/park order. Charges intentionally change: the admitted branch
+/// pays its executed guard plus the native formula, never the generic loop.
+#[test]
+fn guarded_search_and_join_match_generic_array_semantics() {
+    // SC8's Smith builds dialect-neutral complete programs, rather than JS
+    // primitives/coercion hooks. Generate this bounded JS-value matrix here.
+    let primitives = [
+        "absent", "null", "true", "false", "0.0", "-0.0", "nan", "inf", "-inf", "1.5", "\"a\"",
+        "\"😀\"",
+    ];
+    let starts = [
+        "", ", absent", ", nan", ", -0.0", ", -inf", ", inf", ", -2.9", ", 1.9", ", 99.0",
+    ];
+    for seed in 0..24 {
+        let elements = (0..seed % 7)
+            .map(|i| {
+                if (seed + i) % 5 == 0 {
+                    "()"
+                } else {
+                    primitives[(seed * 7 + i * 3) % primitives.len()]
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        for method in ["includes", "indexOf", "lastIndexOf"] {
+            let needle = primitives[seed % primitives.len()];
+            let setup = format!(
+                "let xs = [{elements}] let args = [{needle}{}]",
+                starts[seed % starts.len()]
+            );
+            assert_array_paths(method, &setup);
+        }
+    }
+    for method in ["includes", "indexOf", "lastIndexOf"] {
+        for start in starts {
+            for needle in ["nan", "absent", "0.0", "-0.0"] {
+                assert_array_paths(
+                    method,
+                    &format!("let xs = [(), absent, nan, -0.0, 0.0] let args = [{needle}{start}]"),
+                );
+            }
+        }
+        for setup in [
+            "let xs = {\"0\": 1.0, length: 1.0} let args = [1.0]",
+            "let xs = null let args = []",
+            "let xs = [1.0, 2.0] let args = [absent, {valueOf: fn(this, args) { print \"from\" set xs[0] = () do perform echo(2.0) as Any return 0.0 }}]",
+            "let xs = [] let args = [null, {valueOf: fn(this, args) { throw \"not reached\" }}]",
+            "let object = {x: 1.0} let xs = [object, {x: 1.0}] let args = [object]",
+            "let xs = [1.0] let args = [1.0, {valueOf: fn(this, args) { print \"throw\" throw \"bad start\" }}]",
+        ] {
+            assert_array_paths(method, setup);
+        }
+    }
+    for setup in [
+        "let xs = [] let args = []",
+        "let xs = [\"a\"] let args = [absent]",
+        "let xs = [\"\", \"😀\", \"é\"] let args = [\"|\"]",
+        "let xs = [\"a\", \"b\"] let args = []",
+        "let xs = [\"a\", (), null, absent, 3.0] let args = [\"|\"]",
+        "let xs = [\"a\", \"b\"] let args = [{toString: fn(this, args) { print \"separator\" do perform echo(1.0) as Any set xs[0] = \"changed\" return \"|\" }}]",
+        "let xs = [{toString: fn(this, args) { print \"element\" throw \"bad element\" }}] let args = [{toString: fn(this, args) { print \"separator first\" return \"|\" }}]",
+        "let xs = {\"0\": \"a\", length: 2.0} let args = []",
+        "let xs = null let args = []",
+    ] {
+        assert_array_paths("join", setup);
+    }
+}
+
+fn assert_array_paths(method: &str, setup: &str) {
+    let fast = observe_array_path(method, setup, false);
+    let generic = observe_array_path(method, setup, true);
+    assert_eq!(
+        (&fast.0, &fast.1),
+        (&generic.0, &generic.1),
+        "{method}: {setup}"
+    );
+    // A second execution is not needed for determinism: each implementation
+    // is checked against the same generated input and host script.
+    assert!(fast.2 > 0 && generic.2 > 0);
+}
+
+#[derive(Default)]
+struct ArrayPathHost {
+    events: Vec<String>,
+}
+
+impl Host for ArrayPathHost {
+    fn clock(&mut self) -> Timestamp {
+        Timestamp {
+            nanoseconds: Integer::from(0),
+        }
+    }
+    fn random(&mut self) -> u64 {
+        0
+    }
+    fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
+        Err(ErrorDatum {
+            kind: "no_projection".into(),
+            message: "array laws have no projection".into(),
+            data: Datum::Null,
+        })
+    }
+    fn print(&mut self, value: &Datum) {
+        self.events.push(format!("print:{value:?}"));
+    }
+    fn cancel_requested(&mut self) -> bool {
+        false
+    }
+}
+
+fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<String>, u64) {
+    let registry = super::machine::registry();
+    let mut source = String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any\n");
+    for (id, function) in registry.iter() {
+        source.push_str(&format!("use {} = @{id}\n", function.definition.name));
+    }
+    let prefix = if generic { "generic_" } else { "" };
+    source.push_str(&format!(
+        "main {{ {setup} let answer = invoke ts.array.{prefix}{method}(xs, args) return answer }}"
+    ));
+    let document =
+        lash_kernel_doc::parse_document(&source).unwrap_or_else(|error| panic!("{error}\n{setup}"));
+    let mut machine = KernelMachine::start(
+        Program {
+            document: Arc::new(document),
+            library: kernel().prepared.clone(),
+        },
+        Bounds {
+            charge: 100_000_000,
+            memory: 16 << 20,
+            call_depth: 200,
+            live_tasks: 100,
+            requests_per_park: 100,
+            join_members: 100,
+        },
+        Start {
+            target: Target::Main,
+            args: vec![],
+            bindings: Bindings::default(),
+        },
+    )
+    .unwrap();
+    let mut host = ArrayPathHost::default();
+    loop {
+        match machine.run(&mut host, u64::MAX).unwrap() {
+            Step::Ended(end) => {
+                let answer = match end {
+                    End::Finished(done) => format!("ok:{:?}", done.result),
+                    End::Error(error) => format!("error:{error:?}"),
+                    other => panic!("{other:?}"),
+                };
+                return (answer, host.events, machine.meters().charged);
+            }
+            Step::Parked(park) => {
+                host.events.push("park".into());
+                for request in park.requests {
+                    match request {
+                        Request::Effect(effect) => {
+                            host.events
+                                .push(format!("effect:{}:{:?}", effect.effect, effect.args));
+                            machine
+                                .deliver(effect.wait, Outcome::Completed(effect.args[0].clone()))
+                                .unwrap();
+                        }
+                        Request::Sleep(sleep) => {
+                            machine.deliver(sleep.wait, Outcome::Elapsed).unwrap();
+                        }
+                    }
+                }
+            }
+            Step::Slice => unreachable!("unbounded slice"),
+        }
+    }
+}

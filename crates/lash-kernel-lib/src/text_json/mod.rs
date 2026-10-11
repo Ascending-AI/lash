@@ -40,7 +40,8 @@ impl NativeFunction for Native {
 /// The native text, bytes, JSON and format definitions, ready to register.
 ///
 /// Definitions charge one plus the deep sizes of their arguments and result;
-/// `format.decimal_parts` adds 64 units for bounded binary64 conversion.
+/// `format.decimal_parts` adds 64 units for bounded binary64 conversion;
+/// `text.trim_set` bounds its membership scan with an input/set size product.
 /// `json.classify` instead charges one plus the work encoded in its result,
 /// so an early refusal never prices the unvisited input.
 /// Unicode-dependent names include the pinned Unicode data version.

@@ -5,7 +5,13 @@ How the engineering skills should consume this repo's domain documentation when 
 ## Before exploring, read these
 
 - **`CONTEXT.md`** at the repo root: the ubiquitous-language glossary (Host Application, Execution Mode, Runtime Scenario, Pending Turn Input, Queued Work, and the rest).
-- **`docs/adr/`**: read the ADRs that touch the area you're about to work in.
+- **Current contracts** for the area: code mode uses `docs/kernel/semantics.md`
+  and its companion rule documents; host integration uses
+  `docs/operations/durable-hosting.md`.
+- **`docs/adr/`**: read the ADRs still in force for the area you're about to
+  work in; follow replacement links on superseded decisions. Apply the
+  [source-authority precedence](way-of-working.md#source-authority) when sources
+  disagree.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill creates them lazily when terms or decisions actually get resolved.
 
@@ -17,8 +23,8 @@ Single-context (this repo):
 /
 ├── CONTEXT.md
 ├── docs/adr/
-│   ├── 0026-model-capability-is-host-supplied-data.md
-│   ├── 0045-services-are-stateless-substrates-own-continuation.md
+│   ├── 0137-the-host-owns-events-routing-and-scheduling.md
+│   ├── 0139-the-lash-vm-is-a-dialect-free-kernel.md
 │   └── …
 └── crates/ · examples/ · runbooks/
 ```
@@ -31,8 +37,8 @@ If the concept you need isn't in the glossary yet, that's a signal: either you'r
 
 ## Flag ADR conflicts
 
-If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
+If your output contradicts an ADR still in force, surface it explicitly rather than silently overriding:
 
-> _Contradicts ADR-0045 (services are stateless, substrates own continuation), but worth reopening because…_
+> _Contradicts ADR-0137 (the host owns events, routing and scheduling), but worth reopening because…_
 
 ADR numbers are unique. Cite an ADR by full filename when a reference needs the slug ([way-of-working.md](way-of-working.md) has the numbering rules).

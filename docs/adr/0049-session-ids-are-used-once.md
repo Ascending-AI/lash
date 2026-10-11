@@ -61,7 +61,10 @@ never reuses a pruned process id.
 Deleting a session is final for its id. Reset creates a new id rather than
 reopening a deleted lifetime. Tombstones, retained graph and wait revocation
 must keep a consistent lifecycle; independently wiping identity evidence can
-violate non-reuse. Adding another incarnation field is rejected because every
+violate non-reuse. The deletion evidence is that fence only: graph reclaim
+selects tombstoned nodes with no live session metadata, which exists before a
+session's first node commits and goes only with its deletion (FIG-1519).
+Adding another incarnation field is rejected because every
 session-keyed identity can rely on the same permanent admission fence.
 
 Fork creation and observer publication cross transaction domains. A fork
