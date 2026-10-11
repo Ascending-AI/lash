@@ -160,6 +160,18 @@ impl WorkerPool {
     }
 }
 
+// DHAT traces every bootstrap allocation while staging the helper registry
+// and compiling the warm library. Remote measurements reached 9.9 s against
+// the standard 5 s silence window. A profiling build declares four windows
+// (20 s with standard bounds); serving exchanges still use one window.
+const STARTUP_SILENCE_WINDOWS: u32 = if cfg!(feature = "dhat-heap") { 4 } else { 1 };
+
+#[cfg(feature = "dhat-heap")]
+const _: () = assert!(
+    matches!(env!("CARGO_PKG_VERSION").as_bytes(), b"0.0.0-dev"),
+    "dhat-heap is only available in development packages"
+);
+
 impl Pool {
     fn unqueue(&self, state: &mut State, queued: bool, bytes: usize, started: Instant) {
         if queued {
@@ -191,14 +203,20 @@ impl Pool {
             state.queued_bytes,
         );
     }
+    fn startup_watchdog(&self) -> Duration {
+        self.config
+            .protocol
+            .no_response_watchdog
+            .saturating_mul(STARTUP_SILENCE_WINDOWS)
+    }
     fn spawn_ready(&self) -> Result<Worker, PoolError> {
-        self.spawn_ready_until(Instant::now() + self.config.protocol.no_response_watchdog)
+        self.spawn_ready_until(Instant::now() + self.startup_watchdog())
     }
     fn spawn_ready_until(&self, deadline: Instant) -> Result<Worker, PoolError> {
         let started = Instant::now();
         let mut worker = Worker::spawn(&self.config)?;
         worker.measurements = Some(self.measurements.clone());
-        let deadline = deadline.min(Instant::now() + self.config.protocol.no_response_watchdog);
+        let deadline = deadline.min(Instant::now() + self.startup_watchdog());
         // Bootstrap silence starts before exec, not at the first socket read.
         let frame = worker
             .receive(deadline)

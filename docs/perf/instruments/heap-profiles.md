@@ -36,7 +36,13 @@ empty-environment check through
 the **first clean reset**, and flushes before `ResetDone`. The pool kills and
 reaps retired workers, so waiting for process-exit destructors would lose the
 profile. Abruptly failed workers do not promise a profile. The profiled worker
-serves under the same confinement as any other; its seccomp filter also admits
+serves under the same confinement as any other. Its feature forwards
+`lash-vm-client/dhat-heap`, which declares four configured silence windows for
+startup (20 seconds at standard bounds). Heap tracing of registry assembly and
+library compilation took up to 9.9 seconds on the remote pool; both stay before
+Ready so the first turn runs a warm library. Default builds and serving-worker
+silence keep one window (5 seconds at standard bounds), and checkout still
+bounds a newly spawned checkout. Its seccomp filter also admits
 `openat`, `statx`, `fstat` and `lseek`, which file reading and the flush need,
 and the production build admits none of them
 (`a_heap_profiled_worker_writes_its_profile_under_confinement_across_a_reset`).

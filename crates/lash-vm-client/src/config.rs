@@ -146,6 +146,9 @@ impl PoolConfig {
     /// run bounds are 50 million charge units, 64 MiB, 1,024 nested calls,
     /// 1,024 live tasks, 256 requests a park and 1,024 members a join;
     /// deadlines use `Deadlines::standard`; restarts allow eight per 60 seconds;
+    /// startup uses one protocol silence window, or four with the development
+    /// `dhat-heap` feature (20 s at standard bounds). Serving-worker silence
+    /// and checkout deadlines keep their configured bounds;
     /// working policy uses `WorkerTuning::standard`; confinement uses
     /// `WorkerConfinement::standard`. FIG-4157/4162 measured
     /// synthetic workloads, not optimal concurrency or arbitrary guest spend.

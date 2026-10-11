@@ -30,7 +30,11 @@ fn main() {
     }
     if matches!(
         mode,
-        "protocol_below" | "protocol_above" | "opposite_generation" | "crate_version"
+        "protocol_below"
+            | "protocol_above"
+            | "opposite_generation"
+            | "crate_version"
+            | "bootstrap_delayed"
     ) {
         use lash_vm_protocol::*;
         use std::io::Write;
@@ -45,6 +49,11 @@ fn main() {
             reason = "fixture consumes the socket passed by its owning launcher"
         )]
         let mut pipe = unsafe { std::os::unix::net::UnixStream::from_raw_fd(socket) };
+        if mode == "bootstrap_delayed" {
+            // Arrive after the law's one-second live silence window, but
+            // within the profiled build's separate startup allowance.
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
         let protocol_version = match mode {
             "protocol_below" => MIN_SUPPORTED_WORKER_PROTOCOL_VERSION - 1,
             "protocol_above" => WORKER_PROTOCOL_VERSION + 1,

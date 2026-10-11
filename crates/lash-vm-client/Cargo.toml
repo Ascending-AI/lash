@@ -15,6 +15,8 @@ name = "lash_vm_client"
 doctest = false
 
 [features]
+# Development heap tracing needs a longer Ready handshake, not a longer live watchdog.
+dhat-heap = []
 synthetic-next = [
     "lash-vm-protocol/synthetic-next",
     "lash-vm-broker/synthetic-next",

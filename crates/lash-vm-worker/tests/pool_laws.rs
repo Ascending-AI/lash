@@ -1088,3 +1088,32 @@ fn workers_refuse_another_protocol_before_guest_admission() {
         );
     }
 }
+
+/// FIG-6008: allocation tracing can put Ready beyond a serving worker's
+/// silence window. Only profiled builds admit that longer bootstrap; the
+/// configured live silence window remains the parent's working policy.
+#[test]
+fn bootstrap_uses_the_builds_allowance_without_extending_live_silence() {
+    HOST_DIALECTS.set("typescript,python");
+    let mut config = config("bootstrap_delayed");
+    let silence = std::time::Duration::from_secs(1);
+    config.protocol.no_response_watchdog = silence;
+    let result = WorkerPool::new(config);
+    #[cfg(feature = "dhat-heap")]
+    {
+        let pool = result.expect("Ready fits the profiled build's startup allowance");
+        assert_eq!(pool.config().protocol.no_response_watchdog, silence);
+    }
+    #[cfg(not(feature = "dhat-heap"))]
+    {
+        let error = result
+            .err()
+            .expect("default builds keep one silence window");
+        let PoolError::Infrastructure(InfrastructureOutcome::WorkerUnresponsive { silent_ms }) =
+            error
+        else {
+            panic!("a typed startup silence verdict: {error:?}");
+        };
+        assert!(silent_ms >= 1_000, "the default startup watchdog waited");
+    }
+}

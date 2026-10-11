@@ -31,7 +31,7 @@ dialect-typescript = [
     "lash-vm-releases/dialect-typescript",
 ]
 dialect-python = ["dep:lash-dialect-python", "lash-vm-releases/dialect-python"]
-dhat-heap = ["dep:dhat"]
+dhat-heap = ["dep:dhat", "lash-vm-client/dhat-heap"]
 synthetic-next = [
     "lash-vm-protocol/synthetic-next",
     "lash-vm-client/synthetic-next",
