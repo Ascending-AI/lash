@@ -122,11 +122,13 @@ pub async fn the_graph_gate_orders_collection_against_every_guarded_transaction(
     );
     ensure!(after, "a hydration ran beside a collection");
 
-    // A guarded transaction holds the gate: another commit shares it, and
-    // a collection waits for it.
+    // A guarded transaction holds the gate: another commit shares it.
+    // Test sharing before queuing a collection: an exclusive waiter can
+    // legitimately block a later shared acquisition. ActorTx's begin read
+    // makes that ordering possible even when its future is polled first.
     let held = gate.hold(false).await;
     let released = AtomicBool::new(false);
-    let (shared, collected, ()) = tokio::join!(
+    let (shared, ()) = tokio::join!(
         async {
             let mut more = staging();
             let root = value(&mut more, &[&big("gate-shared")], &[]);
@@ -140,6 +142,20 @@ pub async fn the_graph_gate_orders_collection_against_every_guarded_transaction(
             (answer, released.load(Ordering::SeqCst))
         },
         async {
+            tokio::time::sleep(GATE_HOLD).await;
+            released.store(true, Ordering::SeqCst);
+            held.release().await;
+        },
+    );
+    let (answer, after) = shared;
+    answer.map_err(|error| refused("a commit beside a shared holder", error))?;
+    ensure!(!after, "a commit waited for another guarded transaction");
+
+    // A collection waits for a guarded transaction's shared gate.
+    let held = gate.hold(false).await;
+    let released = AtomicBool::new(false);
+    let (collected, ()) = tokio::join!(
+        async {
             let answer = tier.collect(CollectionLimits::UNBOUNDED).await;
             (answer, released.load(Ordering::SeqCst))
         },
@@ -149,9 +165,6 @@ pub async fn the_graph_gate_orders_collection_against_every_guarded_transaction(
             held.release().await;
         },
     );
-    let (answer, after) = shared;
-    answer.map_err(|error| refused("a commit beside a shared holder", error))?;
-    ensure!(!after, "a commit waited for another guarded transaction");
     let (answer, after) = collected;
     let report = answer.map_err(|error| refused("the gated collection", error))?;
     ensure!(after, "a collection ran beside a guarded transaction");
