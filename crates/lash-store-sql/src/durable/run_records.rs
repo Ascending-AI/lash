@@ -34,6 +34,11 @@ crate::statements! {
         /// Delete owner `?1`'s facts of every run before `?2`.
         prune = "DELETE FROM run_records WHERE owner_key = ?1 AND run_seq < ?2";
 
+        /// Only owner `?1`'s run `?2`, in ordinal order.
+        read_of = "SELECT run_seq, ordinal, kind, call_id, record_ref, written_epoch
+             FROM run_records WHERE owner_key = ?1 AND run_seq = ?2
+             ORDER BY ordinal";
+
         /// Every fact of owner `?1`, by run and ordinal.
         read = "SELECT run_seq, ordinal, kind, call_id, record_ref, written_epoch
              FROM run_records WHERE owner_key = ?1

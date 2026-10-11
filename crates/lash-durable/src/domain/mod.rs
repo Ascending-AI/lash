@@ -466,6 +466,10 @@ pub trait DurableReads: Send + Sync {
     /// node they reach, in one protected read.
     async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError>;
 
+    /// Only `run`'s facts of `owner`, in ordinal order, with their shared
+    /// graph closure and one aggregate decode budget in one protected read.
+    async fn run_facts_of(&self, owner: &OwnerKey, run: RunSeq) -> Result<RunFacts, DurableError>;
+
     /// L7: the root of `exec`.
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError>;
 

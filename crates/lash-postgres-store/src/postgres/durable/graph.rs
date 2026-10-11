@@ -36,6 +36,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
+use futures_util::TryStreamExt;
+
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, DecodeDimension, DecodeLimits, GraphRefusal, InstalledGraphMeasurement, NodeId,
     NodeSource, RootSource, StoredNode, check_envelope,
@@ -95,11 +97,11 @@ lash_store_sql::statements! {
         insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
              SELECT parent, child FROM UNNEST(?1::text[], ?2::text[]) AS staged(parent, child)";
 
-        /// Every blob root `?1` reaches along stored edges, the root
+        /// Every blob the roots `?1` reach along stored edges, the roots
         /// included, with its encoding and bytes: one read of a whole
         /// graph, whose child tables a walk still checks.
         walk_reach = "WITH RECURSIVE reach AS (
-                 SELECT CAST(?1 AS TEXT) AS hash
+                 SELECT UNNEST(?1::text[]) AS hash
                  UNION
                  SELECT edge.child_hash FROM blob_edges AS edge
                  JOIN reach ON edge.parent_hash = reach.hash
@@ -108,22 +110,21 @@ lash_store_sql::statements! {
              FROM blobs JOIN reach ON blobs.hash = reach.hash";
 
         /// [`Self::walk_reach`] without any opaque blob's bytes but the
-        /// root's: what a reader of the graph alone reads.
+        /// roots' bytes: what a reader of the graph alone reads.
         walk_reach_graph = "WITH RECURSIVE reach AS (
-                 SELECT CAST(?1 AS TEXT) AS hash
+                 SELECT UNNEST(?1::text[]) AS hash
                  UNION
                  SELECT edge.child_hash FROM blob_edges AS edge
                  JOIN reach ON edge.parent_hash = reach.hash
              )
              SELECT blobs.hash, blobs.encoding,
-                    CASE WHEN blobs.encoding = 1 OR blobs.hash = ?1 THEN blobs.content END
+                    CASE WHEN blobs.encoding = 1 OR blobs.hash = ANY(?1::text[]) THEN blobs.content END
              FROM blobs JOIN reach ON blobs.hash = reach.hash";
 
-        /// One level of a walk: the encoding of every blob in `?1`, with the
-        /// bytes of each graph node and of root `?2`, never an opaque
-        /// child's.
+        /// One level of a walk: every blob in `?1`. A graph-only walk
+        /// (`?3`) omits opaque children's bytes, but includes roots `?2`.
         walk_level = "SELECT hash, encoding,
-                    CASE WHEN encoding = 1 OR hash = ?2 THEN content END
+                    CASE WHEN NOT ?3::boolean OR encoding = 1 OR hash = ANY(?2::text[]) THEN content END
              FROM blobs WHERE hash = ANY(?1::text[])";
 
         /// How many edges lead from a parent in `?1` to a child not in it:
@@ -385,7 +386,7 @@ pub(super) async fn walk(
     root: NodeId,
     limits: &DecodeLimits,
 ) -> Answer<BTreeMap<NodeId, HydratedNode>> {
-    walk_within(tx, root, limits, None).await
+    walk_within(tx, &[root], limits, None).await
 }
 
 /// The graph nodes reachable from `root`, without reading any opaque blob
@@ -420,96 +421,96 @@ pub(crate) async fn graph_closure(
     limits: &DecodeLimits,
 ) -> Answer<GraphClosure> {
     let mut opaque = BTreeSet::new();
-    let nodes = walk_within(tx, root, limits, Some(&mut opaque)).await?;
+    let nodes = walk_within(tx, &[root], limits, Some(&mut opaque)).await?;
     Ok(GraphClosure { nodes, opaque })
 }
 
 async fn walk_within(
     tx: &mut PgConnection,
-    root: NodeId,
+    roots: &[NodeId],
     limits: &DecodeLimits,
     mut skipped: Option<&mut BTreeSet<NodeId>>,
 ) -> Answer<BTreeMap<NodeId, HydratedNode>> {
-    // The root's whole reach is read along its stored edges in one
-    // statement; every node's children are still taken from its own child
-    // table, and a child the edges did not reach is read a level at a time.
-    let root_hex = root.to_hex();
+    if roots.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    // One recursive query seeds every selected fact root. Bound the
+    // retained closure as rows arrive, before buffering its material.
+    let roots_hex: Vec<_> = roots.iter().map(NodeId::to_hex).collect();
     let reach = if skipped.is_some() {
         SQL.postgres.walk_reach_graph.sql()
     } else {
         SQL.postgres.walk_reach.sql()
     };
-    let rows: Vec<(String, i16, Option<Vec<u8>>)> = crate::observed_sql::query_as(reach)
-        .bind(&root_hex)
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)?;
     let mut found = BTreeMap::new();
-    for (hash, encoding, bytes) in rows {
-        found.insert(hash, (encoding_of(encoding)?, bytes));
+    let mut total = 0_u64;
+    let mut count = 0_u64;
+    {
+        let mut rows = crate::observed_sql::query_as::<_, (String, i16, Option<Vec<u8>>)>(reach)
+            .bind(&roots_hex)
+            .fetch(crate::observed_sql::executor(&mut *tx));
+        while let Some((hash, encoding, bytes)) = rows.try_next().await.map_err(db)? {
+            let id = node_of(&hash)?;
+            let encoding = encoding_of(encoding)?;
+            if let Some(bytes) = &bytes {
+                charge_node(limits, &mut count, &mut total, bytes.len())?;
+            }
+            found.insert(id, (encoding, bytes));
+        }
     }
     let mut nodes = BTreeMap::new();
-    let mut level = BTreeSet::from([root]);
-    let mut total = 0_u64;
-    while !level.is_empty() {
-        let unread: Vec<String> = level
+    let mut level = BTreeSet::new();
+    let mut pending_roots = roots.iter();
+    let mut visited = BTreeSet::new();
+    loop {
+        if level.is_empty() {
+            // Preserve fact-order refusal precedence while sharing the
+            // closure, visited set and materialization budget across roots.
+            let Some(root) = pending_roots.find(|id| !visited.contains(*id)) else {
+                break;
+            };
+            level.insert(*root);
+        }
+        let unread: Vec<_> = level
             .iter()
+            .filter(|id| !found.contains_key(id))
             .map(NodeId::to_hex)
-            .filter(|hash| !found.contains_key(hash))
             .collect();
         if !unread.is_empty() {
-            let rows: Vec<(String, i16, Option<Vec<u8>>)> =
-                crate::observed_sql::query_as(SQL.postgres.walk_level.sql())
-                    .bind(&unread)
-                    .bind(&root_hex)
-                    .fetch_all(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(db)?;
-            for (hash, encoding, bytes) in rows {
-                found.insert(hash, (encoding_of(encoding)?, bytes));
+            // A malformed edge table must not hide a child named in the
+            // checked envelope. Read the missing level within the same budget.
+            let mut rows = crate::observed_sql::query_as::<_, (String, i16, Option<Vec<u8>>)>(
+                SQL.postgres.walk_level.sql(),
+            )
+            .bind(&unread)
+            .bind(&roots_hex)
+            .bind(skipped.is_some())
+            .fetch(crate::observed_sql::executor(&mut *tx));
+            while let Some((hash, encoding, bytes)) = rows.try_next().await.map_err(db)? {
+                let id = node_of(&hash)?;
+                let encoding = encoding_of(encoding)?;
+                if let Some(bytes) = &bytes {
+                    charge_node(limits, &mut count, &mut total, bytes.len())?;
+                }
+                found.insert(id, (encoding, bytes));
             }
         }
         let mut next = BTreeSet::new();
         for id in level {
-            let hash = id.to_hex();
-            let Some((encoding, _)) = found.get(&hash) else {
+            if !visited.insert(id) {
+                continue;
+            }
+            let Some((encoding, bytes)) = found.remove(&id) else {
                 return Err(GraphRefusal::MissingNode(id));
             };
-            // A reader of the graph alone records an opaque blob as opaque
-            // and reads nothing of it; another parent may name it again.
-            if *encoding == BlobEncoding::Opaque
-                && id != root
+            if encoding == BlobEncoding::Opaque
+                && !roots.contains(&id)
                 && let Some(skipped) = skipped.as_deref_mut()
             {
                 skipped.insert(id);
                 continue;
             }
-            let Some((encoding, bytes)) = found.remove(&hash) else {
-                return Err(GraphRefusal::MissingNode(id));
-            };
-            let bytes = match bytes {
-                Some(bytes) => bytes,
-                None => match stored_blob(tx, &id.to_hex()).await? {
-                    Some((bytes, _)) => bytes,
-                    None => return Err(GraphRefusal::MissingNode(id)),
-                },
-            };
-            let count = nodes.len() as u64 + 1;
-            total = total.saturating_add(bytes.len() as u64);
-            if count > limits.nodes {
-                return Err(GraphRefusal::DecodeLimit {
-                    dimension: DecodeDimension::Nodes,
-                    actual: count,
-                    limit: limits.nodes,
-                });
-            }
-            if total > limits.total_bytes {
-                return Err(GraphRefusal::DecodeLimit {
-                    dimension: DecodeDimension::TotalBytes,
-                    actual: total,
-                    limit: limits.total_bytes,
-                });
-            }
+            let bytes = bytes.ok_or(GraphRefusal::MissingNode(id))?;
             if encoding == BlobEncoding::Graph {
                 next.extend(check_envelope(&bytes, id, limits)?.children.iter());
             }
@@ -521,10 +522,33 @@ async fn walk_within(
                 },
             );
         }
-        next.retain(|id| !nodes.contains_key(id));
+        next.retain(|id| !visited.contains(id));
         level = next;
     }
     Ok(nodes)
+}
+
+fn charge_node(
+    limits: &DecodeLimits,
+    count: &mut u64,
+    total: &mut u64,
+    bytes: usize,
+) -> Answer<()> {
+    *count = count.saturating_add(1);
+    *total = total.saturating_add(bytes as u64);
+    for (dimension, actual, limit) in [
+        (DecodeDimension::Nodes, *count, limits.nodes),
+        (DecodeDimension::TotalBytes, *total, limits.total_bytes),
+    ] {
+        if actual > limit {
+            return Err(GraphRefusal::DecodeLimit {
+                dimension,
+                actual,
+                limit,
+            });
+        }
+    }
+    Ok(())
 }
 
 pub(super) async fn hydrate_in(
@@ -1095,11 +1119,12 @@ impl PostgresDurableStore {
     pub(super) async fn read_run_facts(
         &self,
         owner: &lash_durable::domain::OwnerKey,
+        run: Option<lash_durable::domain::RunSeq>,
     ) -> Result<lash_durable::domain::RunFacts, DurableError> {
         let label = GRAPH_READ;
         self.within(label.capacity(), async {
             let (mut tx, _) = self.open(label).await?;
-            let rows = match super::run_records::read(&mut tx, owner).await {
+            let rows = match super::run_records::read(&mut tx, owner, run).await {
                 Ok(rows) => rows,
                 Err(error) => {
                     let _ = tx.rollback().await;
@@ -1107,19 +1132,14 @@ impl PostgresDurableStore {
                 }
             };
             let outcome = async {
-                let mut nodes = BTreeMap::new();
-                for row in &rows {
-                    if !nodes.contains_key(&row.record) {
-                        nodes.extend(
-                            walk(
-                                &mut tx,
-                                row.record,
-                                &lash_durable::domain::graph::OWNER_READ_LIMITS,
-                            )
-                            .await?,
-                        );
-                    }
-                }
+                let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
+                let nodes = walk_within(
+                    &mut tx,
+                    &roots,
+                    &lash_durable::domain::graph::OWNER_READ_LIMITS,
+                    None,
+                )
+                .await?;
                 Ok(Settled::Rollback(nodes))
             }
             .await;
@@ -1261,3 +1281,175 @@ pub(crate) const OWNER_ROW_NOWAIT: &str =
 #[cfg(test)]
 #[path = "../graph_store_tests.rs"]
 mod graph_store_tests;
+
+#[cfg(test)]
+mod run_fact_tests {
+    use super::*;
+    use lash_core_store::checkpoint_graph::{
+        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
+    };
+    use lash_durable::DurableReads;
+    use lash_durable::domain::{OwnerKey, RunSeq};
+
+    /// RUN-READ: the fact walk reads all selected roots and their shared
+    /// descendants in one PostgreSQL round trip, for either read shape.
+    #[tokio::test]
+    async fn a_run_scoped_fact_walk_takes_one_round_trip() {
+        let url = crate::postgres_test_support::database_url().expect("hermetic PostgreSQL");
+        let database = crate::testing::IsolatedDatabase::create(&url).await;
+        let storage = crate::testing::connect(database.url())
+            .await
+            .expect("store");
+        let store = storage.durable_store();
+        let owner = OwnerKey::Turn("fact-walk-session".into(), "fact-walk-turn".into());
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let mut body = TokenWriter::new();
+        body.text("shared");
+        let shared = staging
+            .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(body.as_bytes()))
+            .expect("shared");
+        let mut roots = Vec::new();
+        for run in 1..=8 {
+            for ordinal in 0..2 {
+                let mut body = TokenWriter::new();
+                body.seq(2);
+                body.text(&format!("round {run} fact {ordinal}"));
+                body.child(shared.child_ref());
+                let root = staging
+                    .encode(NodeKind::ROUND_FACT, TypedBody::logical(body.as_bytes()))
+                    .expect("fact");
+                roots.push((run, ordinal, root));
+            }
+        }
+        let mut connection = store.reader().await.expect("connection");
+        install_staged(&mut connection, staging.nodes())
+            .await
+            .expect("install");
+        for (run, ordinal, root) in roots {
+            sqlx::query(SQL.facts.append.sql())
+                .bind(owner.stored())
+                .bind(run as i64)
+                .bind(ordinal as i64)
+                .bind("admit")
+                .bind(Option::<String>::None)
+                .bind(root.to_hex())
+                .bind(1_i64)
+                .execute(&mut *connection)
+                .await
+                .expect("fact row");
+        }
+        drop(connection);
+        for run in [Some(RunSeq(8)), None] {
+            let work = async {
+                match run {
+                    Some(run) => store.run_facts_of(&owner, run).await,
+                    None => store.run_facts(&owner).await,
+                }
+            };
+            let (answer, receipt) =
+                lash_core_execution::facade_support::sql::collect("fact-walk", "postgres", work)
+                    .await;
+            let facts = answer.expect("read");
+            let expected_rows = if run.is_some() { 2 } else { 16 };
+            assert_eq!(facts.rows.len(), expected_rows);
+            assert_eq!(facts.nodes.len(), expected_rows + 1);
+            let walks: Vec<_> = receipt
+                .shapes
+                .iter()
+                .filter(|(sql, _)| sql.starts_with("with recursive reach"))
+                .collect();
+            assert_eq!(
+                walks.len(),
+                1,
+                "one recursive fact walk: {:?}",
+                receipt.shapes
+            );
+            assert_eq!(walks[0].1.statements, 1, "one round trip for the fact walk");
+            assert_eq!(walks[0].1.rows_returned, (expected_rows + 1) as u64);
+            eprintln!(
+                "{run:?}: fact-walk round_trips=1 rows={} nodes={}",
+                facts.rows.len(),
+                facts.nodes.len()
+            );
+            if let Some(run) = run {
+                assert!(facts.rows.iter().all(|row| row.run == run));
+                let mut connection = store.reader().await.expect("connection");
+                let roots: Vec<_> = facts.rows.iter().map(|row| row.record).collect();
+                let total: u64 = facts
+                    .nodes
+                    .values()
+                    .map(|node| node.bytes.len() as u64)
+                    .sum();
+                let mut limits = DecodeLimits::within_total(total);
+                limits.nodes = 3;
+                assert_eq!(
+                    walk_within(&mut connection, &roots, &limits, None)
+                        .await
+                        .expect("exact budget"),
+                    facts.nodes
+                );
+                limits.nodes = 2;
+                assert!(matches!(
+                    walk_within(&mut connection, &roots, &limits, None).await,
+                    Err(GraphRefusal::DecodeLimit {
+                        dimension: DecodeDimension::Nodes,
+                        actual: 3,
+                        limit: 2
+                    })
+                ));
+                limits.nodes = 3;
+                limits.total_bytes = total - 1;
+                assert!(matches!(
+                    walk_within(&mut connection, &roots, &limits, None).await,
+                    Err(GraphRefusal::DecodeLimit {
+                        dimension: DecodeDimension::TotalBytes,
+                        ..
+                    })
+                ));
+            }
+        }
+        // A missing stored edge must not hide an opaque child named by
+        // the envelope. Its fallback read shares the materialization budget.
+        let opaque = NodeId([0x88; 32]);
+        let opaque_bytes = b"opaque child";
+        let mut connection = store.reader().await.expect("connection");
+        sqlx::query("INSERT INTO lash_blobs (hash, content, encoding) VALUES ($1, $2, 0)")
+            .bind(opaque.to_hex())
+            .bind(opaque_bytes.as_slice())
+            .execute(&mut *connection)
+            .await
+            .expect("opaque child");
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let mut body = TokenWriter::new();
+        body.child(opaque.child_ref());
+        let root = staging
+            .encode(NodeKind::ROUND_FACT, TypedBody::logical(body.as_bytes()))
+            .expect("root");
+        install_staged(&mut connection, staging.nodes())
+            .await
+            .expect("install");
+        sqlx::query("DELETE FROM lash_blob_edges WHERE parent_hash = $1")
+            .bind(root.to_hex())
+            .execute(&mut *connection)
+            .await
+            .expect("missing stored edge");
+        let total =
+            staging.get(&root).expect("root").bytes.len() as u64 + opaque_bytes.len() as u64;
+        let mut limits = DecodeLimits::within_total(total);
+        limits.nodes = 2;
+        let nodes = walk(&mut connection, root, &limits)
+            .await
+            .expect("envelope child is hydrated");
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[&opaque].bytes.as_ref(), opaque_bytes);
+        limits.nodes = 1;
+        assert!(matches!(
+            walk(&mut connection, root, &limits).await,
+            Err(GraphRefusal::DecodeLimit {
+                dimension: DecodeDimension::Nodes,
+                actual: 2,
+                limit: 1
+            })
+        ));
+    }
+}

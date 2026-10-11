@@ -160,7 +160,7 @@ pub(super) async fn run(
         return Ok(RoundExit::Answered(None));
     }
     let reads = cx.durable_reads()?;
-    let rows = reads.run_facts(&owner).await?.of_run(run);
+    let rows = reads.run_facts_of(&owner, run).await?;
     let waits = round::PinnedWaits::read(reads, &rows).await?;
     let folded = round::fold(&rows, &policies, &waits).map_err(exec)?;
     // Each member's attempt reads the turn's accepted stop before its answer

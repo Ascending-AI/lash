@@ -350,7 +350,16 @@ pub(super) fn walk(
     root: NodeId,
     limits: &DecodeLimits,
 ) -> GraphAnswer<BTreeMap<NodeId, HydratedNode>> {
-    walk_within(tx, root, limits, None)
+    walk_roots(tx, &[root], limits)
+}
+
+/// All selected roots share one visited set and one decode budget.
+pub(super) fn walk_roots(
+    tx: &Connection,
+    roots: &[NodeId],
+    limits: &DecodeLimits,
+) -> GraphAnswer<BTreeMap<NodeId, HydratedNode>> {
+    walk_within(tx, roots, limits, None)
 }
 
 /// The graph nodes reachable from `root`, without reading any opaque blob
@@ -385,7 +394,7 @@ pub(crate) fn graph_closure(
     limits: &DecodeLimits,
 ) -> GraphAnswer<GraphClosure> {
     let mut opaque = BTreeSet::new();
-    Ok(walk_within(tx, root, limits, Some(&mut opaque))?
+    Ok(walk_within(tx, &[root], limits, Some(&mut opaque))?
         .map(|nodes| GraphClosure { nodes, opaque }))
 }
 
@@ -403,24 +412,35 @@ pub(crate) fn install_staged(
     Ok(install(tx, &checked)?.map(|_| ()))
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static WALK_COUNTS: std::cell::RefCell<(u64, BTreeMap<NodeId, u64>)> = const { std::cell::RefCell::new((0, BTreeMap::new())) };
+}
+
 fn walk_within(
     tx: &Connection,
-    root: NodeId,
+    roots: &[NodeId],
     limits: &DecodeLimits,
     mut skipped: Option<&mut BTreeSet<NodeId>>,
 ) -> GraphAnswer<BTreeMap<NodeId, HydratedNode>> {
+    #[cfg(test)]
+    WALK_COUNTS.with_borrow_mut(|counts| counts.0 += 1);
     let mut nodes = BTreeMap::new();
-    let mut stack = vec![root];
+    // Visit roots in fact order, as the individual walks did.
+    let mut stack: Vec<_> = roots.iter().rev().copied().collect();
+    let mut visited = BTreeSet::new();
     let mut total = 0_u64;
     while let Some(id) = stack.pop() {
-        if nodes.contains_key(&id) {
+        if !visited.insert(id) {
             continue;
         }
+        #[cfg(test)]
+        WALK_COUNTS.with_borrow_mut(|counts| *counts.1.entry(id).or_default() += 1);
         // A stored node's edges keep every child it names stored, and the
         // child's own edges keep its children: a member of the build's
         // catalog a stored node reaches is stored with all it reaches. Its
         // bytes are the build's under their digests, so none is read back.
-        if id != root
+        if !roots.contains(&id)
             && let Some(closure) = immutable_closure(id)
         {
             for node in closure.nodes() {
@@ -438,6 +458,12 @@ fn walk_within(
                         limit: limits.node_bytes,
                     }));
                 }
+                visited.insert(node.id);
+                #[cfg(test)]
+                if node.id != id {
+                    WALK_COUNTS
+                        .with_borrow_mut(|counts| *counts.1.entry(node.id).or_default() += 1);
+                }
                 nodes.insert(
                     node.id,
                     HydratedNode {
@@ -451,7 +477,7 @@ fn walk_within(
         // A reader of the graph alone records an opaque blob as opaque and
         // reads nothing of it.
         if let Some(skipped) = skipped.as_deref_mut()
-            && id != root
+            && !roots.contains(&id)
         {
             match stored_encoding(tx, &id)? {
                 Ok(Some(BlobEncoding::Opaque)) => {

@@ -658,6 +658,14 @@ impl DurableReads for FaultStore {
         self.read(self.inner.run_facts(owner)).await
     }
 
+    async fn run_facts_of(
+        &self,
+        owner: &OwnerKey,
+        run: lash_durable::domain::RunSeq,
+    ) -> Result<RunFacts, DurableError> {
+        self.read(self.inner.run_facts_of(owner, run)).await
+    }
+
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         self.read(self.inner.exec_root(exec)).await
     }

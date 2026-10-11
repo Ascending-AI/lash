@@ -236,7 +236,7 @@ async fn load(
     run: RunSeq,
 ) -> Result<(RunFacts, PinnedWaits), RoundError> {
     let reads = cx.durable_reads()?;
-    let rows = reads.run_facts(owner).await?.of_run(run);
+    let rows = reads.run_facts_of(owner, run).await?;
     let waits = PinnedWaits::read(reads, &rows).await?;
     Ok((rows, waits))
 }

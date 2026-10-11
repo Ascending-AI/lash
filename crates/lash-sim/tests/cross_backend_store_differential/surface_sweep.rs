@@ -36,6 +36,7 @@ pub(super) struct SurfaceScratch {
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SurfaceMethod {
     LoadSession,
+    RunFactsOf,
     ListPendingTurnInputs,
     /// [`IngressStore::pending_turn_input`]: the keyed point read of the
     /// case's next-turn input (`known`), or of an id no case enqueues
@@ -170,6 +171,7 @@ impl SurfaceMethod {
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::LoadSession => "surface:load_session",
+            Self::RunFactsOf => "surface:run_facts_of",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
             Self::PendingTurnInput { known: true } => "surface:pending_turn_input",
             Self::PendingTurnInput { known: false } => "surface:pending_turn_input_unknown",
@@ -349,6 +351,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             },
             StoreOperation::EnqueueNextTurnInput,
             StoreOperation::EnqueueAdmittableQueuedWork,
+            surface(SurfaceMethod::RunFactsOf),
             surface(SurfaceMethod::ReadSessionStateVersion),
             surface(SurfaceMethod::AdmitSessionState),
             surface(SurfaceMethod::LoadKnownNode),
@@ -552,6 +555,19 @@ impl BackendRunner {
         let store = self.store();
         let session_id = self.session_id.clone();
         let answer = match method {
+            SurfaceMethod::RunFactsOf => {
+                let owner = lash_core::durable_port::domain::OwnerKey::Turn(
+                    session_id.clone(),
+                    SURFACE_RUN_ID.into(),
+                );
+                let facts = self
+                    .lifecycle_backend
+                    .durable()
+                    .run_facts_of(&owner, lash_core::durable_port::domain::RunSeq(1))
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                format!("rows={} nodes={}", facts.rows.len(), facts.nodes.len())
+            }
             SurfaceMethod::LoadSession => {
                 format!(
                     "present={}",

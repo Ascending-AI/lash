@@ -25,7 +25,6 @@ use std::sync::{Arc, LazyLock};
 
 use lash_core_execution::Clock;
 use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal};
-use lash_durable::domain::graph::OWNER_READ_LIMITS;
 use lash_durable::domain::graph_commit::{check_graph, measure_owner_commit};
 use lash_durable::domain::{
     ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow,
@@ -1351,24 +1350,18 @@ impl DurableReads for SqliteDurableStore {
 
     async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
         let owner = owner.clone();
-        self.read(move |tx| {
-            let rows = match run_records::read(tx, &owner)? {
-                Ok(rows) => rows,
-                Err(error) => return Ok(Err(error)),
-            };
-            let mut nodes = std::collections::BTreeMap::new();
-            for row in &rows {
-                if nodes.contains_key(&row.record) {
-                    continue;
-                }
-                match graph::walk(tx, row.record, &OWNER_READ_LIMITS)? {
-                    Ok(reached) => nodes.extend(reached),
-                    Err(refusal) => return Ok(Err(DurableError::from(refusal))),
-                }
-            }
-            Ok(Ok(RunFacts { rows, nodes }))
-        })
-        .await
+        self.read(move |tx| run_records::facts(tx, &owner, None))
+            .await
+    }
+
+    async fn run_facts_of(
+        &self,
+        owner: &OwnerKey,
+        run: lash_durable::domain::RunSeq,
+    ) -> Result<RunFacts, DurableError> {
+        let owner = owner.clone();
+        self.read(move |tx| run_records::facts(tx, &owner, Some(run)))
+            .await
     }
 
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {

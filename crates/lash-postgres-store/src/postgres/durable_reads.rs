@@ -44,7 +44,15 @@ impl DurableReads for PostgresDurableStore {
     }
 
     async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
-        self.read_run_facts(owner).await
+        self.read_run_facts(owner, None).await
+    }
+
+    async fn run_facts_of(
+        &self,
+        owner: &OwnerKey,
+        run: lash_durable::domain::RunSeq,
+    ) -> Result<RunFacts, DurableError> {
+        self.read_run_facts(owner, Some(run)).await
     }
 
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {

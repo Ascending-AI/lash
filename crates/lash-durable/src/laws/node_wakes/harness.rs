@@ -390,6 +390,14 @@ impl DurableReads for CountingStore {
         self.inner.run_facts(owner).await
     }
 
+    async fn run_facts_of(
+        &self,
+        owner: &domain::OwnerKey,
+        run: domain::RunSeq,
+    ) -> Result<domain::RunFacts, DurableError> {
+        self.inner.run_facts_of(owner, run).await
+    }
+
     async fn exec_root(
         &self,
         exec: &domain::ExecKey,

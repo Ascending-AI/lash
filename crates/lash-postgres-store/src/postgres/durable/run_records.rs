@@ -114,9 +114,18 @@ pub(super) async fn apply(
 pub(super) async fn read(
     tx: &mut PgConnection,
     owner: &OwnerKey,
+    run: Option<RunSeq>,
 ) -> Result<Vec<RunFactRow>, DurableError> {
-    let rows = crate::observed_sql::query(SQL.read.sql())
-        .bind(owner.stored())
+    let mut query = crate::observed_sql::query(if run.is_some() {
+        SQL.read_of.sql()
+    } else {
+        SQL.read.sql()
+    })
+    .bind(owner.stored());
+    if let Some(run) = run {
+        query = query.bind(integer::<i64>(run.0)?);
+    }
+    let rows = query
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;

@@ -52,6 +52,14 @@ impl DurableReads for CloseDuringRead {
         self.inner.run_facts(owner).await
     }
 
+    async fn run_facts_of(
+        &self,
+        owner: &OwnerKey,
+        run: crate::durable::domain::RunSeq,
+    ) -> Result<RunFacts, DurableError> {
+        self.inner.run_facts_of(owner, run).await
+    }
+
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         self.inner.exec_root(exec).await
     }
