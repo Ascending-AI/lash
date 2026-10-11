@@ -121,7 +121,7 @@ impl Lowerer<'_> {
     }
 
     /// `if condition {} else { break }`.
-    fn exit_unless(&mut self, condition: Expr) {
+    pub(super) fn exit_unless(&mut self, condition: Expr) {
         if condition == truth() {
             return;
         }
@@ -427,13 +427,15 @@ impl Lowerer<'_> {
         let first = update.map(|_| self.let_expr(truth(), Ty::Bool));
         // The head's variable and the pass's copy of it, by source name.
         let mut copies: Vec<(String, Name, Name)> = Vec::new();
-        let outer_names: Vec<(String, Name)> = per_pass
-            .iter()
-            .filter_map(|name| {
-                let kernel = self.binding_mut(name)?.1.kernel.clone();
-                Some((name.clone(), kernel))
-            })
-            .collect();
+        let mut outer_names = Vec::new();
+        for name in &per_pass {
+            let Some((_, binding)) = self.binding_mut(name) else {
+                unreachable!("the head declared `{name}` before its environment was copied");
+            };
+            let kernel = binding.kernel.clone();
+            let carry = self.let_expr(Expr::Variable(kernel), Ty::Unknown);
+            outer_names.push((name.clone(), variable_of(&carry)));
+        }
         let copy_back = |copies: &[(String, Name, Name)]| -> Vec<Stmt> {
             copies
                 .iter()

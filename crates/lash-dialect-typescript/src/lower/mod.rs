@@ -71,6 +71,7 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.arguments",
     "ts.await",
     "ts.assign",
+    "ts.array.iterator",
     "ts.bit_and",
     "ts.bit_not",
     "ts.bit_or",
@@ -114,6 +115,7 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.to_boolean",
     "ts.to_number",
     "ts.to_string",
+    "ts.to_property_key",
     "ts.typeof",
     "ts.ushr",
 ];

@@ -270,3 +270,57 @@ fn promise_instanceof_preserves_its_operand_through_printing() {
     assert_eq!(recorded.lines(), ["true false"]);
     assert_eq!(recorded.end, "ok");
 }
+
+/// FIG-5905: the source computes the recorded Node result.
+#[test]
+fn promise_aggregates_follow_reaction_order() {
+    let case = witness("promise_aggregates_follow_reaction_order");
+    assert_eq!(run(&case.source, &case.deliveries), case.node);
+}
+
+/// FIG-5905: the source computes the recorded Node result.
+#[test]
+fn for_initializer_closure_keeps_its_binding() {
+    let case = witness("for_initializer_closure_keeps_its_binding");
+    assert_eq!(run(&case.source, &case.deliveries), case.node);
+}
+
+/// FIG-5905: the source computes the recorded Node result.
+#[test]
+fn computed_rest_excludes_canonical_keys() {
+    let case = witness("computed_rest_excludes_canonical_keys");
+    assert_eq!(run(&case.source, &case.deliveries), case.node);
+}
+
+/// FIG-5905: the source computes the recorded Node result.
+#[test]
+fn array_from_steps_growing_collections() {
+    let case = witness("array_from_steps_growing_collections");
+    assert_eq!(run(&case.source, &case.deliveries), case.node);
+}
+
+/// FIG-5905: the source computes the recorded Node result.
+#[test]
+fn destructuring_steps_live_iterators() {
+    let case = witness("destructuring_steps_live_iterators");
+    assert_eq!(
+        run(&case.source, &case.deliveries),
+        case.node,
+        "{}",
+        super::main_text(&case.source)
+    );
+}
+
+/// FIG-5905: the source computes the recorded Node result.
+#[test]
+fn error_conversion_reads_current_properties() {
+    let case = witness("error_conversion_reads_current_properties");
+    assert_eq!(run(&case.source, &case.deliveries), case.node);
+}
+
+/// FIG-5905: the source computes the recorded Node result.
+#[test]
+fn null_base_assignment_precedes_key_conversion() {
+    let case = witness("null_base_assignment_precedes_key_conversion");
+    assert_eq!(run(&case.source, &case.deliveries), case.node);
+}

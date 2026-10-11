@@ -434,7 +434,21 @@ body {
       throw error.new("type_error", "Cannot convert object to primitive value", null)
     }
     if same(k, "error") {
-      return text.concat(value.kind, text.concat(": ", value.message))
+      # Error coercion reads the guest's current fields, just as the method
+      # does. Recurse through this conversion closure for object fields.
+      let name = invoke ts.exotic.get(value, "name")
+      if same(name, absent) { set name = "Error" } else {
+        let primitive = apply convert(name, "string")
+        set name = invoke ts.primitive_to_string(primitive)
+      }
+      let message = invoke ts.exotic.get(value, "message")
+      if same(message, absent) { set message = "" } else {
+        let primitive = apply convert(message, "string")
+        set message = invoke ts.primitive_to_string(primitive)
+      }
+      if same(name, "") { return message }
+      if same(message, "") { return name }
+      return text.concat(name, text.concat(": ", message))
     }
     if same(k, "closure") {
       if same(kind(value), "tuple") {
@@ -1282,8 +1296,7 @@ body {
   }
   let nullish = invoke ts.is_nullish(target)
   if nullish {
-    let name = invoke ts.to_property_key(key)
-    throw error.new("type_error", text.concat("Cannot set properties of undefined or null (setting '", text.concat(name, "')")), null)
+    throw error.new("type_error", "Cannot set properties of undefined or null", null)
   }
   let written = invoke ts.exotic.set(target, key, value)
   return written

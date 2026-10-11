@@ -57,21 +57,37 @@ impl Lowerer<'_> {
                 self.destructure(target, value, mode)
             }
             ast::Pattern::Array { elements, rest } => {
-                let items = self.invoke("ts.iterate", &[value], Ty::Unknown)?;
-                #[expect(clippy::cast_precision_loss, reason = "a pattern's element count")]
-                let count = Operand::number(elements.len() as f64);
-                if elements.iter().any(Option::is_some) {
-                    let padded =
-                        self.invoke("ts.pad", &[items.clone(), count.clone()], Ty::Unknown)?;
-                    for (index, element) in elements.iter().enumerate() {
-                        let Some(element) = element else { continue };
-                        let item = self.let_expr(Self::element(&padded, index), Ty::Unknown);
-                        let item = self.invoke("ts.hole_value", &[item], Ty::Unknown)?;
+                let iterator = self.invoke("ts.array.iterator", &[value], Ty::Unknown)?;
+                let next = self.invoke(
+                    "ts.get",
+                    &[iterator.clone(), Operand::text("next")],
+                    Ty::Unknown,
+                )?;
+                let next = self.invoke("ts.callable", &[next], Ty::Unknown)?;
+                let exhausted = self.let_expr(Operand::bool(false).expr(), Ty::Bool);
+                for element in elements {
+                    let item = self.iterator_value(&iterator, &next, &exhausted)?;
+                    if let Some(element) = element {
                         self.destructure(element, item, mode)?;
                     }
                 }
                 if let Some(rest) = rest {
-                    let tail = self.invoke("ts.rest", &[items, count], Ty::Unknown)?;
+                    let tail = self.let_expr(Expr::List(Vec::new()), Ty::Unknown);
+                    let body = self.block(|this| {
+                        let item = this.iterator_value(&iterator, &next, &exhausted)?;
+                        let onward = this.native("bool.not", vec![exhausted.expr()])?;
+                        this.exit_unless(onward);
+                        let index = this.native("list.len", vec![tail.expr()])?;
+                        this.store(
+                            Place::Member(lash_kernel_doc::Member::Index {
+                                target: tail.expr(),
+                                index,
+                            }),
+                            item,
+                        );
+                        Ok(())
+                    })?;
+                    self.emit_while(Operand::bool(true).expr(), body);
                     self.destructure(rest, tail, mode)?;
                 }
                 Ok(())
@@ -90,7 +106,7 @@ impl Lowerer<'_> {
                         ast::PropertyKey::Static(name) => Key::Static(name.clone()),
                         ast::PropertyKey::Computed(key) => {
                             let key = self.lower_expr(key)?;
-                            Key::Computed(self.pin(key))
+                            Key::Computed(self.invoke("ts.to_property_key", &[key], Ty::Text)?)
                         }
                     };
                     taken.push(key.operand().expr());
@@ -105,6 +121,48 @@ impl Lowerer<'_> {
                 Ok(())
             }
         }
+    }
+
+    /// IteratorStepValue retains exhaustion across defaults and elisions.
+    fn iterator_value(
+        &mut self,
+        iterator: &Operand,
+        next: &Operand,
+        exhausted: &Operand,
+    ) -> Lowering<Operand> {
+        let value = self.let_expr(Operand::undefined().expr(), Ty::Unknown);
+        let step = self.block(|this| {
+            let args = this.let_expr(Expr::List(Vec::new()), Ty::Unknown);
+            let step = this.emit_action(
+                lash_kernel_doc::Action::Call {
+                    callee: lash_kernel_doc::Callee::Value(super::statements::variable_of(next)),
+                    args: vec![iterator.atom.clone(), args.atom],
+                },
+                Ty::Unknown,
+            );
+            let done = this.invoke(
+                "ts.get",
+                &[step.clone(), Operand::text("done")],
+                Ty::Unknown,
+            )?;
+            let done = this.invoke("ts.to_boolean", &[done], Ty::Bool)?;
+            this.store(
+                Place::Variable(super::statements::variable_of(exhausted)),
+                done,
+            );
+            let read = this.block(|this| {
+                let item = this.invoke("ts.get", &[step, Operand::text("value")], Ty::Unknown)?;
+                this.store(
+                    Place::Variable(super::statements::variable_of(&value)),
+                    item,
+                );
+                Ok(())
+            })?;
+            this.emit_if(exhausted.expr(), Buf::default(), read);
+            Ok(())
+        })?;
+        self.emit_if(exhausted.expr(), Buf::default(), step);
+        Ok(value)
     }
 
     /// `value`, or the default's value when `value` is `undefined`. The

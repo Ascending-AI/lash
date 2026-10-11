@@ -2,6 +2,120 @@
  "node": "v25.2.1",
  "cases": [
   {
+   "name": "promise_aggregates_follow_reaction_order",
+   "source": "\nconsole.log(await Promise.race([Promise.resolve(0).then(x => x + 1), Promise.resolve(2)]));\nconsole.log(await Promise.any([Promise.resolve(0).then(x => x + 1), Promise.resolve(2)]));\nconsole.log(await Promise.race([Promise.resolve(1), Promise.resolve(2)]));\nconsole.log(await Promise.any([Promise.resolve(1), Promise.resolve(2)]));\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "2",
+      "2",
+      "1",
+      "1"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "for_initializer_closure_keeps_its_binding",
+   "source": "\nconst fns = [];\nfor (let i = 0, read = () => i; i < 3; i++) fns.push(() => read());\nconsole.log(fns.map(f => f()));\nconst passes = [];\nfor (let j = 0; j < 3; j++) { if (j === 1) continue; passes.push(() => j); }\nconsole.log(passes.map(f => f()));\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "[0,0,0]",
+      "[0,2]"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "computed_rest_excludes_canonical_keys",
+   "source": "\nconst object = {1: 11, b: 22};\nconst {[1]: picked, ...rest} = object;\nconsole.log(picked, Object.keys(rest));\nlet calls = 0;\nconst key = {toString() { calls++; return \"1\"; }};\nconst {[key]: other, ...remaining} = object;\nconsole.log(other, Object.keys(remaining), calls);\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "11 [\"b\"]",
+      "11 [\"b\"] 1"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "array_from_steps_growing_collections",
+   "source": "\nconst map = new Map([[1, 1]]);\nconsole.log(Array.from(map, entry => { if (entry[0] === 1) map.set(2, 2); return entry[1]; }));\nconst set = new Set([1]);\nconsole.log(Array.from(set, item => { if (item === 1) set.add(2); return item; }));\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "[1,2]",
+      "[1,2]"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "destructuring_steps_live_iterators",
+   "source": "\nconst growing = [undefined];\nconst [a = (() => { growing.push(8); return 1; })(), b, ...tail] = growing;\nconsole.log([a, b, tail]);\nconst shrinking = [undefined, 8, 9];\nconst [c = (() => { shrinking.length = 0; return 1; })(), d, ...rest] = shrinking;\nconsole.log([c, d, rest]);\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "[1,8,[]]",
+      "[1,null,[]]"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "error_conversion_reads_current_properties",
+   "source": "\nconst error = new Error(\"old\");\nerror.name = \"Changed\"; error.message = \"new\";\nconsole.log(String(error), `${error}`, error.toString());\nconst typed = new TypeError(\"m\"); typed.name = \"Custom\";\nconsole.log(String(typed), `${typed}`);\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "Changed: new Changed: new Changed: new",
+      "Custom: m Custom: m"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "null_base_assignment_precedes_key_conversion",
+   "source": "\nfor (const base of [null, undefined]) {\n  let order = \"\";\n  const key = {toString() { order += \"k\"; return \"x\"; }};\n  const value = () => { order += \"v\"; return 1; };\n  try { base[key] = value(); } catch (error) { order += \"E\"; }\n  console.log(order);\n}\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "vE",
+      "vE"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
    "name": "fan_out_shares_a_counter",
    "source": "\nlet counter = 0;\nconst step = async (name) => {\n  const first = await echo(name + \"1\");\n  counter = counter + 1;\n  console.log(`${name} first ${first} ${counter}`);\n  const second = await echo(name + \"2\");\n  counter = counter * 2;\n  console.log(`${name} second ${second} ${counter}`);\n  return first + second;\n};\nconst all = await Promise.all([step(\"a\"), step(\"b\"), step(\"c\")]);\nconsole.log(`done ${all[0]} ${all[1]} ${all[2]} ${counter}`);\n",
    "deliveries": [

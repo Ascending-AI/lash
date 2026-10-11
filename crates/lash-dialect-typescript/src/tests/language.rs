@@ -15,27 +15,6 @@ fn a_function_without_a_return_gives_undefined() {
     );
 }
 
-/// Each pass of a `for` whose head declares with `let` has its own binding
-/// when the body makes a function, and `continue` carries the pass's value
-/// to the next one.
-#[test]
-fn a_closure_made_in_a_for_loop_captures_that_pass() {
-    let text = main_text(
-        "var fns = []; for (let i = 0; i < 3; i++) { if (i === 1) continue; fns.push(() => i); }",
-    );
-    for expected in [
-        "let i_1 = 0.0",
-        "  let i_2 = i_1",
-        "    set i_2 = num.add(t3, 1.0)",
-        "  let t5 = num.lt(i_2, 3.0)",
-        "    set i_1 = i_2\n    continue",
-        "    return i_2",
-        "  set i_1 = i_2\n}",
-    ] {
-        assert!(text.contains(expected), "missing `{expected}` in\n{text}");
-    }
-}
-
 /// A `switch` is a loop of one pass, so a `continue` inside it first leaves
 /// that loop and then continues the loop the source means.
 #[test]

@@ -10,6 +10,87 @@
 // in `src/tests/async_fn.rs` run the same cases on the kernel machine.
 export const cases = [
   {
+    name: "promise_aggregates_follow_reaction_order",
+    source: `
+console.log(await Promise.race([Promise.resolve(0).then(x => x + 1), Promise.resolve(2)]));
+console.log(await Promise.any([Promise.resolve(0).then(x => x + 1), Promise.resolve(2)]));
+console.log(await Promise.race([Promise.resolve(1), Promise.resolve(2)]));
+console.log(await Promise.any([Promise.resolve(1), Promise.resolve(2)]));
+`,
+    deliveries: [],
+  },
+  {
+    name: "for_initializer_closure_keeps_its_binding",
+    source: `
+const fns = [];
+for (let i = 0, read = () => i; i < 3; i++) fns.push(() => read());
+console.log(fns.map(f => f()));
+const passes = [];
+for (let j = 0; j < 3; j++) { if (j === 1) continue; passes.push(() => j); }
+console.log(passes.map(f => f()));
+`,
+    deliveries: [],
+  },
+  {
+    name: "computed_rest_excludes_canonical_keys",
+    source: `
+const object = {1: 11, b: 22};
+const {[1]: picked, ...rest} = object;
+console.log(picked, Object.keys(rest));
+let calls = 0;
+const key = {toString() { calls++; return "1"; }};
+const {[key]: other, ...remaining} = object;
+console.log(other, Object.keys(remaining), calls);
+`,
+    deliveries: [],
+  },
+  {
+    name: "array_from_steps_growing_collections",
+    source: `
+const map = new Map([[1, 1]]);
+console.log(Array.from(map, entry => { if (entry[0] === 1) map.set(2, 2); return entry[1]; }));
+const set = new Set([1]);
+console.log(Array.from(set, item => { if (item === 1) set.add(2); return item; }));
+`,
+    deliveries: [],
+  },
+  {
+    name: "destructuring_steps_live_iterators",
+    source: `
+const growing = [undefined];
+const [a = (() => { growing.push(8); return 1; })(), b, ...tail] = growing;
+console.log([a, b, tail]);
+const shrinking = [undefined, 8, 9];
+const [c = (() => { shrinking.length = 0; return 1; })(), d, ...rest] = shrinking;
+console.log([c, d, rest]);
+`,
+    deliveries: [],
+  },
+  {
+    name: "error_conversion_reads_current_properties",
+    source: `
+const error = new Error("old");
+error.name = "Changed"; error.message = "new";
+console.log(String(error), \`\${error}\`, error.toString());
+const typed = new TypeError("m"); typed.name = "Custom";
+console.log(String(typed), \`\${typed}\`);
+`,
+    deliveries: [],
+  },
+  {
+    name: "null_base_assignment_precedes_key_conversion",
+    source: `
+for (const base of [null, undefined]) {
+  let order = "";
+  const key = {toString() { order += "k"; return "x"; }};
+  const value = () => { order += "v"; return 1; };
+  try { base[key] = value(); } catch (error) { order += "E"; }
+  console.log(order);
+}
+`,
+    deliveries: [],
+  },
+  {
     name: "fan_out_shares_a_counter",
     source: `
 let counter = 0;

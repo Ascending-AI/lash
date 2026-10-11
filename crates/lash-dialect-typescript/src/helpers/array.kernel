@@ -38,6 +38,7 @@ use ts.strict_equals
 use ts.is_nullish
 use ts.receiver
 use ts.iterate
+use ts.map.value
 use ts.array.set
 use ts.array.remove
 use ts.array.argument
@@ -1654,6 +1655,21 @@ body {
     if same(k, other) { set iterable = true }
   }
   let index = 0.0
+  let keyed = same(k, "map")
+  if same(k, "set") { set keyed = true }
+  if keyed {
+    for key in source {
+      let value = invoke ts.map.value(key)
+      if same(k, "map") { set value = [value, source[key]] }
+      if mapped {
+        let passed = [value, num.to_float(index)]
+        set value = apply mapping(context, passed)
+      }
+      set output[list.len(output)] = value
+      set index = num.add(index, 1)
+    }
+    return output
+  }
   if iterable {
     let iterator = invoke ts.array.iterator(source)
     let next = iterator.next

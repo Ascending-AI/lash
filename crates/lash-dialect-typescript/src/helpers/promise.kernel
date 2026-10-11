@@ -36,6 +36,7 @@ use ts.promise.callable
 use ts.promise.then
 use ts.promise.members
 use ts.promise.decided
+use ts.promise.reactions
 
 # Whether a value is a promise, a record branded "Promise", read without
 # spelling its receiver. `instanceof Promise` asks this too.
@@ -367,6 +368,30 @@ body {
   return promise
 }
 
+# One task per reaction, registered in member order. A settled member queues
+# its reaction now; a pending member queues it when that member settles.
+function ts.promise.reactions(items: Any) -> Any
+kernel 1
+charge sum(8, size(items))
+body {
+  let elements = invoke ts.iterate(items)
+  let tasks = []
+  let originals = []
+  for element in elements {
+    let member = element
+    let promise = invoke ts.promise.is(member)
+    if promise {} else { set member = invoke ts.promise.settled(element, false) }
+    let react = fn(this, args) {
+      let value = invoke ts.await(member)
+      return value
+    }
+    let task = spawn apply react(absent, absent)
+    set tasks[list.len(tasks)] = task
+    set originals[list.len(originals)] = member.task
+  }
+  return {tasks: tasks, originals: originals}
+}
+
 # `Promise.race(items)`: `join race` (`K-TASK-013`).
 function ts.promise.race(this: Any, args: List(Any)) -> Any
 kernel 1
@@ -374,16 +399,18 @@ charge 48
 body {
   let padded = invoke ts.pad(args, 1.0)
   let items = padded[0]
-  let members = invoke ts.promise.members(items)
+  let members = invoke ts.promise.reactions(items)
   let tasks = members.tasks
-  let states = members.states
-  let decided = invoke ts.promise.decided(states, "race")
+  let originals = members.originals
   let wait = fn(this, args) {
-    if decided {
-      do yield
+    try {
+      let value = join race tasks
+      return value
+    } finally {
+      # A reaction has ended, so its source has ended too. This join cannot
+      # wait: it retains ownership of losing source tasks until run end.
+      try { do join race originals } catch observed {}
     }
-    let value = join race tasks
-    return value
   }
   let promise = invoke ts.promise.start(wait, absent, absent)
   return promise
@@ -398,18 +425,14 @@ charge 48
 body {
   let padded = invoke ts.pad(args, 1.0)
   let items = padded[0]
-  let members = invoke ts.promise.members(items)
+  let members = invoke ts.promise.reactions(items)
   let tasks = members.tasks
-  let states = members.states
-  let decided = invoke ts.promise.decided(states, "any")
+  let originals = members.originals
   let wait = fn(this, args) {
     if eq(list.len(tasks), 0) {
       let arguments = [[], "All promises were rejected"]
       let error = invoke ts.error.new_AggregateError(absent, arguments)
       throw error
-    }
-    if decided {
-      do yield
     }
     try {
       let value = join any tasks
@@ -424,6 +447,8 @@ body {
         }
       }
       throw reason
+    } finally {
+      try { do join race originals } catch observed {}
     }
   }
   let promise = invoke ts.promise.start(wait, absent, absent)
