@@ -797,3 +797,43 @@ fn tool_result_attachments_are_counted_and_distinctly_identified() {
         vec![&first, &second]
     );
 }
+
+/// Sharing a sequence retains an immutable snapshot: append, rewrite and
+/// replacement affect only the writer, including after materialization.
+/// The flat serialized value remains the message list (FIG-5962).
+#[test]
+fn shared_sequence_mutation_preserves_snapshots_and_wire_values() {
+    let first = witness_message("m0", "one");
+    let second = witness_message("m1", "two");
+    let expected = vec![first.clone(), second.clone()];
+    let sequences = [
+        MessageSequence::from_owned(expected.clone()),
+        MessageSequence::from_base(AppendVec::from(expected.clone())),
+        MessageSequence::from_base_and_delta(AppendVec::from(vec![first]), vec![second]),
+    ];
+    let expected_bytes = serde_json::to_vec(&expected).unwrap();
+    for original in sequences {
+        let _flattened = original.shared();
+        let mut writer = original.clone();
+        let retained = writer.clone();
+        writer.push(witness_message("m2", "three"));
+        assert_eq!(writer.len(), 3);
+        assert_eq!(writer.shared().as_slice()[2].id, "m2");
+        writer.extend(vec![witness_message("m3", "four")]);
+        assert_eq!(writer.len(), 4);
+        assert_eq!(writer.shared().as_slice()[3].id, "m3");
+        let appended = writer.clone();
+        let appended_bytes = serde_json::to_vec(&appended).unwrap();
+        writer.make_mut()[0] = witness_message("m0", "rewritten");
+        assert_eq!(
+            writer.shared().as_slice()[0].parts[0].content(),
+            "rewritten"
+        );
+        writer.replace(vec![witness_message("replacement", "new history")]);
+        assert_eq!(writer.len(), 1);
+        assert_eq!(writer.shared().as_slice()[0].id, "replacement");
+        assert_eq!(serde_json::to_vec(&original).unwrap(), expected_bytes);
+        assert_eq!(serde_json::to_vec(&retained).unwrap(), expected_bytes);
+        assert_eq!(serde_json::to_vec(&appended).unwrap(), appended_bytes);
+    }
+}

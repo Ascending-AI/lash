@@ -1089,3 +1089,7 @@ impl RuntimeTurnDriver<'static> {
             .map_err(|error| TurnError::Exec(format!("the tool surface did not install: {error}")))
     }
 }
+
+#[cfg(test)]
+#[path = "sequence_sharing_law.rs"]
+mod sequence_sharing_law;
