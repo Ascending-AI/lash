@@ -31,6 +31,13 @@ crate::statements! {
     /// `artifact_cleanup_obligations` record statements both backends issue
     /// verbatim.
     pub struct CleanupObligationStatements @ "artifact_cleanup" {
+        /// Ended frames whose settlement gate may have just ended. Frame
+        /// carries already committed with the successor's head.
+        select_frame_cleanups = "SELECT referrer_kind, referrer_id, cleanup_json
+             FROM artifact_cleanup_obligations WHERE referrer_kind = 'frame_environment'
+               AND cleanup_json LIKE ?1 ESCAPE '\\'
+             ORDER BY referrer_id";
+
         /// Insert referrer `?1`/`?2`'s cleanup `?3` as obligation `?4`, due at `?5`,
         /// unless the referrer already has a row. The caller reads the
         /// affected-row count.

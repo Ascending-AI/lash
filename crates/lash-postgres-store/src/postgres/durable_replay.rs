@@ -299,6 +299,9 @@ pub(super) async fn apply_owner(
         now,
         fleet,
     };
+    crate::obligation_ledger::lock_ending_executions_tx(tx, write.domain())
+        .await
+        .map_err(store_failure)?;
     for domain in write.domain() {
         apply_domain(tx, &committing, domain).await?;
     }

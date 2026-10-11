@@ -34,6 +34,14 @@ lash_store_sql::statements! {
     /// The turn statements only PostgreSQL issues: `UNNEST` records a run's
     /// namespace writes as one list.
     struct PostgresTurnStatements @ "durable_turn_postgres" {
+        /// A terminal's phase, namespaces and answered cancel share one end.
+        delete_terminal_state = "WITH phase AS (
+                 DELETE FROM turn_phases WHERE session_id = ?1 AND run = ?2
+             ), namespaces AS (
+                 DELETE FROM turn_namespaces WHERE session_id = ?1 AND run = ?2
+             )
+             DELETE FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2";
+
         /// Record each plugin `?3[i]`'s namespace entry `?4[i]` for run `?2`
         /// of session `?1` with values root `?5[i]`, as the neutral
         /// `upsert_namespace` does one: `?6[i]` retains the held root.
@@ -336,26 +344,21 @@ pub(super) async fn apply(
                     .await
                     .map_err(|error| encoding(&error))?;
             }
-            crate::observed_sql::query(SQL.delete_phase.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            crate::observed_sql::query(SQL.delete_namespaces.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
             super::session_mail::settle_held(&mut *tx, session, run, commit.now.0).await?;
+            crate::obligation_ledger::end_execution_tx(
+                tx,
+                &lash_sansio::ExecutionScope::turn(session.clone(), run.clone()),
+                integer(commit.now.0)?,
+            )
+            .await
+            .map_err(super::store_failure)?;
             // The cells the turn stopped in are never resumed, and the
             // turn's cancel request is answered by its terminal: neither has
             // a reader left. The turn's own facts stay as its ledger.
             super::snapshots::retire_under(&mut *tx, &ExecKey::turn_cells(session, run))
                 .await
                 .map_err(sqlx_failure)?;
-            crate::observed_sql::query(SQL.delete_cancel.sql())
+            crate::observed_sql::query(POSTGRES_SQL.delete_terminal_state.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .execute(crate::observed_sql::executor(&mut *tx))

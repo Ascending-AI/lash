@@ -167,7 +167,13 @@ prune records an end in its own transaction.
 An end hook writes `Ended` beside the durable fact that ends the referrer.
 An `Ended` plan replaces a guard; a guard cannot replace an existing plan.
 When the end shares the artifact database, arming it also writes the fence
-in that transaction. A first guarded acquisition writes its guard before
+in that transaction. An ungated, empty-carry end of a frame, process record,
+execution or host pin applies the database-owned share immediately: it severs
+those edges and uses the existing last-referrer reclamation path. Starts still
+need the retained-record rescue (§3.3), and a gated end retains its edges until
+its gate settles. The obligation remains until independent engine stores and
+attachment bytes acknowledge their shares; the publication fence is permanent.
+A first guarded acquisition writes its guard before
 committing the edge. Guard resolution asks the relevant durable authority,
 so a publication whose start never commits still has an
 end path (`crates/lash-sqlite-store/src/obligation_ledger.rs:578-598`,
@@ -177,8 +183,8 @@ end path (`crates/lash-sqlite-store/src/obligation_ledger.rs:578-598`,
 #### 2.5 The one executor
 
 `ArtifactCleanupRelay` uses `StoreSet::artifact_cleanup()` and the
-`ArtifactCleanup` obligation kind. It is the executor that severs edges
-outside an end hook's transaction
+`ArtifactCleanup` obligation kind. It delivers the shares that cannot finish
+inside an end hook's transaction, and guarded crash-orphaned preparations
 (`crates/lash-core-execution/src/backend.rs:204`,
 `crates/lash-core/src/runtime/artifact_cleanup.rs:190-215`). Its delivery:
 
@@ -203,9 +209,19 @@ settlement is in
 `crates/lash-store-sql/src/artifact/cleanup_obligations.rs`.
 `NotYet` defers at the relay's maximum backoff with attempts reset.
 Every execution kind uses this deferral: awaited and command runs,
-processes, and session operations. Settlement permits cleanup when the next due
-pass reaches the row; it does not shorten the recorded delay. Retaining
-artifacts for the full deferral avoids a separate settlement fast path.
+processes, and session operations. A turn or process terminal and an operation
+scope close sever the execution's database-owned edges in the owner's transaction. The same commit severs the
+SQL share of empty-carry frame ends gated on that execution. PostgreSQL takes
+the ending executions' referrer locks before the head write, and locks all
+local referrers before all affected artifacts in key order. Its local end
+uses one static, generated volatile database function across the four SQL
+namespaces, including public empty-carry ends. Empty holders do no namespace
+mutation. Separate queries after each advisory-lock wait see newly committed
+publisher edges; a single statement's earlier snapshot would miss them.
+The helper's canonical pairs and cleanup plans are decoded before the owner's
+transaction commits. Other stores'
+acknowledgements and guards with no local terminal still follow the recorded
+due time; settlement does not shorten that delay.
 `NotBefore` defers at the earlier of its known due instant and that backoff.
 A missing carry stalls as refused, an undecodable row stalls as undecodable,
 and store faults retry the delivery. A retry repeats every store
@@ -376,9 +392,10 @@ selection and host delivery retention.
 #### 3.5 `host_pin`: host release
 
 Host publication acquires the pin's edges. `HostArtifacts::release` arms
-its empty-carry end and fence in one core transaction. An unreleased pin
-keeps its edges indefinitely; release is eventual reclamation through the
-relay, not synchronous reclamation
+its empty-carry end and fence in one core transaction, severs the SQL-owned
+edges and reclaims their last-reader bytes in that transaction. An unreleased
+pin keeps its edges indefinitely. Independent engine stores acknowledge release
+through the relay
 (`crates/lash/src/artifacts.rs:156-165`,
 `crates/lash-sqlite-store/src/obligation_ledger.rs:595-598,726-739`).
 
@@ -473,8 +490,10 @@ The switching commit fences the source frame. A recomputed uncommitted
 stretch can still publish under its execution edge; RLM treats a fenced frame
 acquisition as an ended frame and continues. The old frame's cleanup waits for
 the switching execution to settle, while prepared engine edges and atomically
-committed SQL edges protect the successor. Severing at the switch would break
-a resumed execution that still reads the source's artifacts
+committed SQL edges protect the successor. Its SQL share is severed with the
+gate's terminal, while independent stores acknowledge through the relay.
+Severing before settlement would break a resumed execution that still reads
+the source's artifacts
 (`crates/lash-protocol-rlm/src/executor/mod.rs:993-1006`,
 `crates/lash-core/src/runtime/artifact_cleanup.rs:630-645`, §3.1).
 
@@ -638,8 +657,11 @@ Prune and a late start rescue respect fences
 An unsettled execution keeps its gate's artifacts
 (`crates/lash-core/src/runtime/artifact_cleanup_tests.rs`). For awaited
 and command runs, processes, and session operations, a deferred cleanup
-retains its artifacts while the execution is unsettled and releases after
-settlement once the deferral expires, on SQLite memory/file and PostgreSQL.
+retains its artifacts while the execution is unsettled. The turn-retirement
+laws additionally pin immediate SQL edge retirement on commit and cancel;
+`first_commit_may_end_its_own_appended_frame_open` pins a gated frame's SQL
+share at gate settlement. External shares release when their deferral expires,
+on SQLite memory/file and PostgreSQL.
 The former definition-carry crash-matrix case is retired. Its cleanup-clock
 and lapsed-claim bounds are not established by the unit citations above.
 
@@ -680,14 +702,17 @@ resume it or record under it (§2.5).
 ## Consequences
 
 Exact edges determine artifact availability; a definition id, process
-completion or scope cancellation cannot infer its lifetime. Reclamation
-is eventual because settlement gates and durable cleanup obligations retain
-source edges until the relevant authorities settle them (§2.5, §3).
+completion or scope cancellation cannot infer its lifetime. Local SQL edges
+and last-reader bytes die with ungated empty-carry ends and
+execution terminals. Settlement gates retain source edges only while their
+execution can resume. Guarded crash orphans, start rescue and independent
+stores still need the durable cleanup relay (§2.5, §3).
 
 Every ended referrer has a permanent fence. Host pins need explicit release;
 overwritten globals retain their frame edges until frame end. Waiting
-guards poll at the maximum backoff; execution settlement leaves them to
-the next due pass. End facts still arm or nudge their own referrers.
+guards poll at the maximum backoff for work the owner commit cannot finish.
+End facts still arm or nudge their own referrers; the remaining obligation
+owns external acknowledgements, not a delay in retiring local execution edges.
 Store faults
 retry, and refused or undecodable obligations remain visible as stalled
 work (§2.3-2.5, §3.1, §3.5) under

@@ -181,6 +181,23 @@ impl World {
 /// and no cancel request, only wait tombstones, and its ledger. Answers the
 /// ledger's RoundFact nodes.
 fn assert_retired(world: &World, session: &str, run: &str) -> Vec<String> {
+    let journal = lash_core::ExecutionScope::turn(
+        crate::SessionId::fixture(session),
+        crate::TurnId::fixture(run),
+    )
+    .journal_identity()
+    .expect("the turn journal identity");
+    let edges = lash_sqlite_store::testing::read_rows_for_testing(
+        &world.stores,
+        "SELECT referrer_id FROM artifact_referrer_edges WHERE referrer_kind = 'execution'",
+    )
+    .expect("the execution edges read");
+    assert!(
+        edges
+            .iter()
+            .all(|row| row.iter().all(|(_, id)| id.as_str() != Some(journal.key()))),
+        "the turn's terminal left its artifact edges: {edges:#?}"
+    );
     let cells = world.rows(&format!(" c/{session}/{run}/"));
     assert!(
         cells.is_empty(),

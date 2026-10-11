@@ -722,6 +722,25 @@ async fn postgres_ended_cleanup_arms_a_fence_before_delivery() {
     )
     .await
     .expect("arm ended cleanup");
+    let edges: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_artifact_referrer_edges WHERE artifact_ref = $1",
+    )
+    .bind(artifact_ref)
+    .fetch_one(storage.pool())
+    .await
+    .expect("read ended pin edges");
+    assert_eq!(
+        edges, 0,
+        "the end transaction severs local edges before relay delivery"
+    );
+    assert!(
+        store
+            .get_module_artifact(artifact_ref)
+            .await
+            .expect("read ended pin bytes")
+            .is_none(),
+        "the same transaction reclaims bytes with no other referrer"
+    );
     assert!(matches!(
         store
             .publish_module_artifact(&claim, artifact_ref, b"bytes")

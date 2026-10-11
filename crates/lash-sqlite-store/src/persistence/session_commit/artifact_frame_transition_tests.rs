@@ -41,8 +41,10 @@ fn first_commit_may_end_its_own_appended_frame_open() {
     );
 
     let mut conn = rusqlite::Connection::open_in_memory().expect("open SQLite");
-    conn.execute_batch(crate::schema::SCHEMA)
-        .expect("create durable core");
+    for statement in crate::schema::provisioning_statements() {
+        conn.execute_batch(statement)
+            .expect("provision the complete durable store");
+    }
     let ended = FrameEnvironmentId::new(session.clone(), first);
     let ended_referrer = ArtifactReferrer::FrameEnvironment(ended.clone());
     conn.execute(
@@ -97,6 +99,28 @@ fn first_commit_may_end_its_own_appended_frame_open() {
         )
         .expect("cleanup obligation");
     assert_eq!(count, 1);
+    let edges = || {
+        conn.query_row("SELECT COUNT(*) FROM artifact_referrer_edges", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .expect("frame edges")
+    };
+    assert_eq!(
+        edges(),
+        1,
+        "an unsettled switching execution still holds the source frame"
+    );
+    crate::obligation_ledger::end_execution_tx(
+        &conn,
+        &lash_sansio::ExecutionScope::runtime_operation("first-turn-switch"),
+        124,
+    )
+    .expect("settle the switching execution");
+    assert_eq!(
+        edges(),
+        0,
+        "the gate's settlement retires the source's edges without a due pass"
+    );
 }
 
 #[test]

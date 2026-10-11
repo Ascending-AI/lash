@@ -370,6 +370,12 @@ const TURN_COMMIT_ROUND_TRIPS: u64 = 42;
 /// its scope's end, stays within its round-trip budget.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_turn_commit_stays_within_its_round_trip_budget() {
+    turn_commit_round_trips(false).await;
+    turn_commit_round_trips(true).await;
+}
+
+async fn turn_commit_round_trips(holds_artifacts: bool) {
+    use lash_core_execution::ModuleArtifactStore as _;
     use lash_core_execution::store::SessionHistoryStore as _;
     let Some(owned) = owned("round-trips-turn-commit").await else {
         return;
@@ -383,6 +389,46 @@ async fn a_turn_commit_stays_within_its_round_trip_budget() {
         .commit(tx, CommitLabel::TURN_ADMIT)
         .await
         .expect("admit the turn");
+    let journal = lash_sansio::ExecutionScope::turn(owned.session.clone(), run.clone())
+        .journal_identity()
+        .expect("turn journal");
+    let artifacts = owned.storage.lash_vm_artifact_store();
+    let claim = lash_core_execution::ReferrerClaim::guarded(
+        lash_core_execution::ReferrerGuard::Journal(journal.clone()),
+    );
+    if holds_artifacts {
+        artifacts
+            .publish_module_artifact(&claim, "round-trips-module", b"module")
+            .await
+            .expect("the execution's artifact");
+        let frame = lash_core_execution::FrameEnvironmentId::new(
+            owned.session.clone(),
+            lash_core_execution::FrameNodeId::new("round-trips-old-frame").expect("frame"),
+        );
+        let frame_claim = lash_core_execution::ReferrerClaim::guarded(
+            lash_core_execution::ReferrerGuard::Frame {
+                frame: frame.clone(),
+                creator: journal.clone(),
+            },
+        );
+        artifacts
+            .acquire_module_artifact(&frame_claim, "round-trips-module")
+            .await
+            .expect("the source frame's artifact");
+        owned
+            .storage
+            .artifact_cleanup()
+            .arm_cleanup(
+                &lash_core_execution::ArtifactCleanup::ended(
+                    lash_core_execution::ArtifactReferrer::FrameEnvironment(frame),
+                    Vec::new(),
+                    Some(journal),
+                ),
+                1,
+            )
+            .await
+            .expect("the frame waits for the turn to settle");
+    }
     let factory = owned.storage.store();
     let mut state = lash_core_execution::store::window_state(
         factory
@@ -458,6 +504,31 @@ async fn a_turn_commit_stays_within_its_round_trip_budget() {
             .expect("commit the turn")
     })
     .await;
-    within("turn.commit", trips, TURN_COMMIT_ROUND_TRIPS);
+    within(
+        if holds_artifacts {
+            "turn.commit with execution and gated-frame edges"
+        } else {
+            "turn.commit without artifact edges"
+        },
+        trips,
+        TURN_COMMIT_ROUND_TRIPS,
+    );
+    assert_eq!(
+        artifacts
+            .get_module_artifact("round-trips-module")
+            .await
+            .expect("read artifact"),
+        None,
+        "the terminal reclaims the execution and gated frame's last-reader bytes"
+    );
+    assert!(
+        matches!(
+            artifacts
+                .publish_module_artifact(&claim, "late-module", b"module")
+                .await,
+            Err(lash_core_execution::ArtifactStoreError::ReferrerEnded { .. })
+        ),
+        "empty and non-empty executions both keep their publication fence"
+    );
     assert!(store.turn(&owned.session).await.expect("read").is_none());
 }

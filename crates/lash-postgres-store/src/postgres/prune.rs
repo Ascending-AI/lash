@@ -13,14 +13,25 @@ pub(super) async fn prune_process_rows_tx(
     let cleanup_due_at_ms = u64::try_from(pruned_at_ms)
         .map_err(|_| PluginError::Session("process prune time cannot be negative".into()))?;
 
+    // Local ends now take artifact locks. Lock every referrer in the batch
+    // first, so a publisher holding a later record cannot wait on an artifact
+    // already locked by an earlier end while prune waits on its referrer.
+    let mut referrers = process_ids
+        .iter()
+        .map(|process| ArtifactReferrer::ProcessRecord(process.clone()))
+        .collect::<Vec<_>>();
+    referrers.sort_by_key(|referrer| referrer.canonical_id());
+    referrers.dedup();
+    for referrer in &referrers {
+        crate::artifact_store::lock_referrer_tx(tx, referrer)
+            .await
+            .map_err(plugin_sqlx_error)?;
+    }
     for process_id in process_ids {
         crate::durable::retire_process_rows(tx, process_id)
             .await
             .map_err(plugin_sqlx_error)?;
         let referrer = ArtifactReferrer::ProcessRecord(process_id.clone());
-        crate::artifact_store::lock_referrer_tx(tx, &referrer)
-            .await
-            .map_err(plugin_sqlx_error)?;
         crate::observed_sql::query(
             crate::artifact_store::artifact_sql()
                 .fences

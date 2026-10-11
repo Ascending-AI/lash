@@ -448,7 +448,8 @@ pub(crate) fn arm_cleanup_tx(
         .to_json()
         .map_err(|error| StoreError::Backend(error.to_string()))?;
     let due = sql_i64("artifact cleanup due instant", now_ms)?;
-    match CleanupUpsert::decide(existing.as_ref(), cleanup) {
+    let decision = CleanupUpsert::decide(existing.as_ref(), cleanup);
+    match decision {
         CleanupUpsert::Insert => {
             tx.execute(
                 CLEANUPS.insert_if_absent.sql(),
@@ -469,7 +470,75 @@ pub(crate) fn arm_cleanup_tx(
         crate::artifact_store::fence_artifact_referrer_tx(tx, &cleanup.referrer(), now_ms)
             .map_err(sqlite_error)?;
     }
+    if let ArtifactCleanup::Ended {
+        referrer,
+        carries,
+        gate: None,
+    } = cleanup
+        && decision != CleanupUpsert::Keep
+        && carries.is_empty()
+        && referrer.kind().holds_artifacts()
+        && !matches!(referrer, ArtifactReferrer::Start(_))
+    {
+        crate::SqliteStore::end_local_referrer_tx(tx, referrer, now_ms).map_err(sqlite_error)?;
+    }
     Ok(id)
+}
+
+/// The terminal commit is the last reader of its execution's SQL artifacts.
+/// Gated frame ends can sever their SQL share in that same commit. Permanent
+/// fences and obligations remain for late publishers and independent stores.
+pub(crate) fn end_execution_tx(
+    tx: &rusqlite::Connection,
+    scope: &lash_sansio::ExecutionScope,
+    now_ms: u64,
+) -> Result<(), StoreError> {
+    let journal = scope
+        .journal_identity()
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    crate::SqliteStore::end_local_referrer_tx(
+        tx,
+        &ArtifactReferrer::Execution(journal.clone()),
+        now_ms,
+    )
+    .map_err(sqlite_error)?;
+    let encoded = serde_json::to_string(journal.key())
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    let escaped = encoded
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let pattern = format!("%\"gate\":{escaped}%");
+    let rows = tx
+        .prepare_cached(CLEANUPS.select_frame_cleanups.sql())
+        .map_err(sqlite_error)?
+        .query_map([pattern], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(sqlite_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(sqlite_error)?;
+    for (kind, id, body) in rows {
+        let referrer = ArtifactReferrer::decode(&kind, &id)
+            .map_err(|error| error.into_store_error("artifact cleanup"))?;
+        let cleanup = ArtifactCleanup::from_json(&body, &referrer)?;
+        if let ArtifactCleanup::Ended {
+            carries,
+            gate: Some(gate),
+            ..
+        } = cleanup
+            && gate == journal
+            && carries.is_empty()
+        {
+            crate::SqliteStore::end_local_referrer_tx(tx, &referrer, now_ms)
+                .map_err(sqlite_error)?;
+        }
+    }
+    Ok(())
 }
 
 /// The artifact cleanup ledger: the cleanup table's obligations, each

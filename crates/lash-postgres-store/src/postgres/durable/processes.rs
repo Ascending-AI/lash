@@ -295,6 +295,13 @@ pub(super) async fn apply(
             )
             .await
             .map_err(|error| registry_failure(&error))?;
+            crate::obligation_ledger::end_execution_tx(
+                tx,
+                &lash_sansio::ExecutionScope::process(process.clone()),
+                millis(commit.now)?,
+            )
+            .await
+            .map_err(super::store_failure)?;
             if ended {
                 set_cursor(tx, process, Some(""), commit.epoch).await?;
             }
@@ -332,6 +339,15 @@ async fn close_scope(
     commit: &Committing<'_>,
     scope: &ScopeKey,
 ) -> Result<(), DurableError> {
+    if let ScopeKey::Operation(session, operation) = scope {
+        crate::obligation_ledger::end_execution_tx(
+            tx,
+            &lash_sansio::ExecutionScope::session_operation(session.clone(), operation.clone()),
+            millis(commit.now)?,
+        )
+        .await
+        .map_err(super::store_failure)?;
+    }
     let Some(closed) = scope_id(scope) else {
         return Ok(());
     };

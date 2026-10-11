@@ -129,7 +129,77 @@ pub(crate) async fn arm_cleanup_tx(
         .await
         .map_err(store_sqlx_error)?;
     }
+    if let ArtifactCleanup::Ended {
+        referrer,
+        carries,
+        gate: None,
+    } = cleanup
+        && decision != CleanupUpsert::Keep
+        && carries.is_empty()
+        && referrer.kind().holds_artifacts()
+        && !matches!(referrer, ArtifactReferrer::Start(_))
+    {
+        crate::PostgresLashVmArtifactStore::end_local_referrer_tx(conn, referrer, now_ms).await?;
+    }
     Ok(id)
+}
+
+/// Take terminal executions' referrer locks before a head commit takes
+/// frame and artifact locks. Publication follows the same referrer-first
+/// order, so a publisher cannot hold an execution lock while the terminal
+/// holds the artifact it needs.
+pub(crate) async fn lock_ending_executions_tx(
+    tx: &mut sqlx::PgConnection,
+    writes: &[lash_durable::DomainWrite],
+) -> Result<(), StoreError> {
+    use lash_durable::{
+        DomainWrite,
+        domain::{ProcessWrite, ScopeKey, TurnWrite},
+    };
+    let mut referrers = Vec::new();
+    for write in writes {
+        let scope = match write {
+            DomainWrite::Turn(TurnWrite::Terminal { session, run, .. }) => {
+                lash_sansio::ExecutionScope::turn(session.clone(), run.clone())
+            }
+            DomainWrite::Process(ProcessWrite::Terminal { process, .. }) => {
+                lash_sansio::ExecutionScope::process(process.clone())
+            }
+            DomainWrite::Process(ProcessWrite::ScopeClosed {
+                scope: ScopeKey::Operation(session, operation),
+            }) => {
+                lash_sansio::ExecutionScope::session_operation(session.clone(), operation.clone())
+            }
+            _ => continue,
+        };
+        let journal = scope
+            .journal_identity()
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        referrers.push(ArtifactReferrer::Execution(journal));
+    }
+    referrers.sort_by_key(|referrer| referrer.canonical_id());
+    referrers.dedup();
+    for referrer in referrers {
+        crate::artifact_store::lock_referrer_tx(tx, &referrer)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    Ok(())
+}
+
+/// End an execution's local edges with its terminal, including the SQL
+/// share of frame ends gated on that execution. External acknowledgements
+/// remain owed through the existing ledger.
+pub(crate) async fn end_execution_tx(
+    tx: &mut sqlx::PgConnection,
+    scope: &lash_sansio::ExecutionScope,
+    now_ms: u64,
+) -> Result<(), StoreError> {
+    let journal = scope
+        .journal_identity()
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    crate::PostgresLashVmArtifactStore::end_local_execution_tx(tx, &journal, now_ms).await?;
+    Ok(())
 }
 
 /// The key columns of `kind` read from `row` starting at column `first`.

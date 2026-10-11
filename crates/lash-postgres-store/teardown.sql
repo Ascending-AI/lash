@@ -147,3 +147,5 @@ DROP VIEW IF EXISTS lash_graph_root_catalog CASCADE;
 DROP TABLE IF EXISTS lash_owner_commit_latches CASCADE;
 
 DROP FUNCTION IF EXISTS lash_owner_commit CASCADE;
+
+DROP FUNCTION IF EXISTS lash_artifact_end_local CASCADE;

@@ -427,45 +427,111 @@ impl SqliteStore {
                 "cleanup carries an artifact for a different store".into(),
             ));
         }
-        self.conn.write(move |tx| {
-            let refs: Vec<String> = {
-                let mut stmt = tx.prepare_cached(artifact_sql().edges.select_referrer_edges_in_namespace.sql())?;
-                stmt.query_map(params![namespace, cleanup.referrer.kind().as_str(), cleanup.referrer.canonical_id()],
-                    |row| {
-                        let artifact_ref = row.get(1)?;
-                        let kind: String = row.get(2)?;
-                        let id: String = row.get(3)?;
-                        decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
-                        Ok(artifact_ref)
-                    })?.collect::<rusqlite::Result<_>>()?
-            };
-            if refs.is_empty() && artifact_fenced_tx(tx, &cleanup.referrer)? {
-                return Ok(());
+        self.conn
+            .write(move |tx| Self::end_namespaced_tx(tx, namespace, &cleanup, now_ms))
+            .await
+            .map_err(artifact_sqlite_error)
+    }
+
+    /// Fence, carry, sever and reclaim in the owner's existing transaction.
+    pub(crate) fn end_namespaced_tx(
+        tx: &rusqlite::Connection,
+        namespace: &str,
+        cleanup: &ResolvedArtifactCleanup,
+        now_ms: u64,
+    ) -> rusqlite::Result<()> {
+        let refs: Vec<String> = {
+            let mut stmt = tx.prepare_cached(
+                artifact_sql()
+                    .edges
+                    .select_referrer_edges_in_namespace
+                    .sql(),
+            )?;
+            stmt.query_map(
+                params![
+                    namespace,
+                    cleanup.referrer.kind().as_str(),
+                    cleanup.referrer.canonical_id()
+                ],
+                |row| {
+                    let artifact_ref = row.get(1)?;
+                    let kind: String = row.get(2)?;
+                    let id: String = row.get(3)?;
+                    decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
+                    Ok(artifact_ref)
+                },
+            )?
+            .collect::<rusqlite::Result<_>>()?
+        };
+        if refs.is_empty() && artifact_fenced_tx(tx, &cleanup.referrer)? {
+            return Ok(());
+        }
+        fence_artifact_referrer_tx(tx, &cleanup.referrer, now_ms)?;
+        let mut carries = cleanup.carries.clone();
+        carries.sort_by(|left, right| left.artifact.artifact_ref.cmp(&right.artifact.artifact_ref));
+        for carry in &carries {
+            if artifact_fenced_tx(tx, &carry.to)? {
+                continue;
             }
-            fence_artifact_referrer_tx(tx, &cleanup.referrer, now_ms)?;
-            let mut carries = cleanup.carries.clone();
-            carries.sort_by(|left, right| left.artifact.artifact_ref.cmp(&right.artifact.artifact_ref));
-            for carry in &carries {
-                if artifact_fenced_tx(tx, &carry.to)? { continue; }
-                let artifact_ref = &carry.artifact.artifact_ref;
-                let exists: bool = tx.query_row(
+            let artifact_ref = &carry.artifact.artifact_ref;
+            let exists: bool = tx.query_row(
                     "SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)",
                     params![namespace, artifact_ref], |row| row.get(0))?;
-                if !exists {
-                    return Err(artifact_failure(ArtifactStoreError::CarryArtifactMissing {
-                        artifact_ref: artifact_ref.clone(), to: carry.to.clone(),
-                    }));
-                }
-                crate::conn::cached_execute(tx, artifact_sql().edges.insert_edge.sql(),
-                    params![namespace, artifact_ref, carry.to.kind().as_str(), carry.to.canonical_id()])?;
+            if !exists {
+                return Err(artifact_failure(ArtifactStoreError::CarryArtifactMissing {
+                    artifact_ref: artifact_ref.clone(),
+                    to: carry.to.clone(),
+                }));
             }
-            crate::conn::cached_execute(tx, artifact_sql().edges.delete_referrer_edges_in_namespace.sql(),
-                params![namespace, cleanup.referrer.kind().as_str(), cleanup.referrer.canonical_id()])?;
-            for artifact_ref in refs {
-                Self::reclaim_unreferenced_artifact_tx(tx, namespace, &artifact_ref)?;
-            }
-            Ok(())
-        }).await.map_err(artifact_sqlite_error)
+            crate::conn::cached_execute(
+                tx,
+                artifact_sql().edges.insert_edge.sql(),
+                params![
+                    namespace,
+                    artifact_ref,
+                    carry.to.kind().as_str(),
+                    carry.to.canonical_id()
+                ],
+            )?;
+        }
+        crate::conn::cached_execute(
+            tx,
+            artifact_sql()
+                .edges
+                .delete_referrer_edges_in_namespace
+                .sql(),
+            params![
+                namespace,
+                cleanup.referrer.kind().as_str(),
+                cleanup.referrer.canonical_id()
+            ],
+        )?;
+        for artifact_ref in refs {
+            Self::reclaim_unreferenced_artifact_tx(tx, namespace, &artifact_ref)?;
+        }
+        Ok(())
+    }
+
+    /// The database-owned share of an end. The obligation remains until
+    /// independent engine stores and attachment bytes acknowledge it.
+    pub(crate) fn end_local_referrer_tx(
+        tx: &rusqlite::Connection,
+        referrer: &ArtifactReferrer,
+        now_ms: u64,
+    ) -> rusqlite::Result<()> {
+        let cleanup = ResolvedArtifactCleanup {
+            referrer: referrer.clone(),
+            carries: Vec::new(),
+        };
+        for namespace in [
+            MODULE_ARTIFACT_NAMESPACE,
+            PROCESS_ENV_NAMESPACE,
+            PROCESS_DEFINITION_NAMESPACE,
+            TURN_PRELUDE_NAMESPACE,
+        ] {
+            Self::end_namespaced_tx(tx, namespace, &cleanup, now_ms)?;
+        }
+        Ok(())
     }
 
     /// Hold one definition closure under the claim in one transaction: the
@@ -1015,6 +1081,36 @@ mod tests {
             ))
         }).await.expect("read edge and guard");
         assert_eq!((edges, obligations), (1, 1));
+        use lash_core_execution::store::ArtifactCleanupLedger as _;
+        let ledger = crate::obligation_ledger::SqliteArtifactCleanupLedger::new(store.conn.clone());
+        ledger
+            .arm_cleanup(
+                &lash_core_execution::ArtifactCleanup::ended(claim.referrer(), Vec::new(), None),
+                1,
+            )
+            .await
+            .expect("end the guarded reader");
+        assert_eq!(
+            edge_count(&store, "guarded-module").await,
+            0,
+            "the end transaction retires its local edge without a due pass"
+        );
+        assert_eq!(
+            store
+                .get_module_artifact("guarded-module")
+                .await
+                .expect("read"),
+            None
+        );
+        assert!(
+            matches!(
+                store
+                    .publish_module_artifact(&claim, "guarded-module", b"guarded")
+                    .await,
+                Err(ArtifactStoreError::ReferrerEnded { .. })
+            ),
+            "the end retains its publication fence"
+        );
     }
 
     #[tokio::test]

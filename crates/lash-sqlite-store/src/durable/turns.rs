@@ -348,6 +348,12 @@ pub(super) fn apply(
                 rusqlite::params![session.as_str(), run.as_str()],
             )?;
             super::session_mail::settle_held(tx, session, run, commit.now.0)?;
+            crate::obligation_ledger::end_execution_tx(
+                tx,
+                &lash_sansio::ExecutionScope::turn(session.clone(), run.clone()),
+                integer(commit.now.0)?,
+            )
+            .map_err(crate::sqlite_conversion_error)?;
             // The cells the turn stopped in are never resumed, and the
             // turn's cancel request is answered by its terminal: neither has
             // a reader left. The turn's own facts stay as its ledger.

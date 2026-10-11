@@ -14,6 +14,7 @@ use crate::*;
 
 lash_store_sql::statements! {
     pub(crate) struct ReferrerPostgresStatements @ "artifact_referrer_edge" {
+        end_local = "SELECT lash_artifact_end_local(?1, ?2, ?3, ?4, ?5, ?6)";
         delete_unreferenced = "DELETE FROM lash_vm_artifacts AS artifact
              WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ?2
                AND NOT EXISTS (SELECT 1 FROM artifact_referrer_edges AS edge
@@ -61,6 +62,12 @@ pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
 pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
+
+#[path = "artifact_store/local_end.rs"]
+mod local_end;
+
+#[cfg(test)]
+pub(crate) use local_end::function_ddl as local_end_function_ddl;
 
 #[path = "artifact_store/tool_material.rs"]
 mod tool_material;
@@ -172,7 +179,7 @@ pub(crate) async fn acquire_process_env_tx(
 }
 
 async fn lock_artifact_tx(
-    tx: &mut Transaction<'_, Postgres>,
+    tx: &mut sqlx::PgConnection,
     namespace: &str,
     artifact_ref: &str,
 ) -> Result<(), ArtifactStoreError> {
@@ -183,20 +190,20 @@ async fn lock_artifact_tx(
             .sql(),
     )
     .bind(key)
-    .execute(crate::observed_sql::executor(&mut **tx))
+    .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(backend)?;
     Ok(())
 }
 
 async fn is_fenced_tx(
-    tx: &mut Transaction<'_, Postgres>,
+    tx: &mut sqlx::PgConnection,
     referrer: &ArtifactReferrer,
 ) -> Result<bool, ArtifactStoreError> {
     crate::observed_sql::query_scalar(artifact_sql().fences.select_is_fenced.sql())
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .fetch_one(crate::observed_sql::executor(&mut **tx))
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(backend)
 }
@@ -430,12 +437,24 @@ impl PostgresLashVmArtifactStore {
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(ArtifactStoreError::from)?;
-        Self::end_namespaced_tx(&mut tx, namespace, cleanup, self.clock.timestamp_ms()).await?;
+        if cleanup.carries.is_empty() {
+            local_end::end(
+                &mut tx,
+                &cleanup.referrer,
+                None,
+                self.clock.timestamp_ms(),
+                &[namespace],
+            )
+            .await
+            .map_err(ArtifactStoreError::from)?;
+        } else {
+            Self::end_namespaced_tx(&mut tx, namespace, cleanup, self.clock.timestamp_ms()).await?;
+        }
         tx.commit().await.map_err(backend)
     }
 
     pub(crate) async fn end_namespaced_tx(
-        tx: &mut Transaction<'_, Postgres>,
+        tx: &mut sqlx::PgConnection,
         namespace: &str,
         cleanup: &ResolvedArtifactCleanup,
         now_ms: u64,
@@ -473,7 +492,7 @@ impl PostgresLashVmArtifactStore {
         .bind(namespace)
         .bind(cleanup.referrer.kind().as_str())
         .bind(cleanup.referrer.canonical_id())
-        .fetch_all(crate::observed_sql::executor(&mut **tx))
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(backend)?;
         let source_refs: BTreeSet<String> = edges
@@ -500,7 +519,7 @@ impl PostgresLashVmArtifactStore {
             .bind(cleanup.referrer.kind().as_str())
             .bind(cleanup.referrer.canonical_id())
             .bind(crate::support::clamp_epoch_ms(now_ms))
-            .execute(crate::observed_sql::executor(&mut **tx))
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(backend)?;
         for carry in &cleanup.carries {
@@ -512,7 +531,7 @@ impl PostgresLashVmArtifactStore {
                 crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
                     .bind(namespace)
                     .bind(artifact_ref)
-                    .fetch_one(crate::observed_sql::executor(&mut **tx))
+                    .fetch_one(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(backend)?;
             if !exists {
@@ -526,7 +545,7 @@ impl PostgresLashVmArtifactStore {
                 .bind(artifact_ref)
                 .bind(carry.to.kind().as_str())
                 .bind(carry.to.canonical_id())
-                .execute(crate::observed_sql::executor(&mut **tx))
+                .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(backend)?;
         }
@@ -539,7 +558,7 @@ impl PostgresLashVmArtifactStore {
         .bind(namespace)
         .bind(cleanup.referrer.kind().as_str())
         .bind(cleanup.referrer.canonical_id())
-        .execute(crate::observed_sql::executor(&mut **tx))
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(backend)?;
         for artifact_ref in &source_refs {
@@ -547,7 +566,7 @@ impl PostgresLashVmArtifactStore {
             let rows = crate::observed_sql::query(artifact_sql().edges.select_artifact_edges.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
-                .fetch_all(crate::observed_sql::executor(&mut **tx))
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(backend)?;
             let referrers = rows
@@ -580,8 +599,33 @@ impl PostgresLashVmArtifactStore {
         Ok(())
     }
 
+    /// Retire the database-owned share in the owner's transaction. The
+    /// ledger still owes acknowledgements from independent stores.
+    pub(crate) async fn end_local_referrer_tx(
+        tx: &mut sqlx::PgConnection,
+        referrer: &ArtifactReferrer,
+        now_ms: u64,
+    ) -> Result<(), StoreError> {
+        local_end::end(tx, referrer, None, now_ms, &local_end::NAMESPACES).await
+    }
+
+    pub(crate) async fn end_local_execution_tx(
+        tx: &mut sqlx::PgConnection,
+        journal: &lash_sansio::EffectJournalIdentity,
+        now_ms: u64,
+    ) -> Result<(), StoreError> {
+        local_end::end(
+            tx,
+            &ArtifactReferrer::Execution(journal.clone()),
+            Some(journal),
+            now_ms,
+            &local_end::NAMESPACES,
+        )
+        .await
+    }
+
     async fn delete_unreferenced_artifact_tx(
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut sqlx::PgConnection,
         namespace: &str,
         artifact_ref: &str,
         referrers: &lash_core_execution::store::CompleteArtifactReferrers,
@@ -592,7 +636,7 @@ impl PostgresLashVmArtifactStore {
         crate::observed_sql::query(artifact_sql().postgres.delete_unreferenced.sql())
             .bind(namespace)
             .bind(artifact_ref)
-            .execute(crate::observed_sql::executor(&mut **tx))
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(backend)?;
         Ok(())

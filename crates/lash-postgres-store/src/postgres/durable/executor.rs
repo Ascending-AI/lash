@@ -544,7 +544,7 @@ BEGIN
 END
 $lash_owner_commit$;
 "
-    )
+    ) + &crate::artifact_store::local_end_function_ddl()
 }
 
 /// The call's arguments for `tx`, unless the commit takes the

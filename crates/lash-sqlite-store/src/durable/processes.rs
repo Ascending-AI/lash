@@ -283,6 +283,12 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                 Ok(ended) => ended,
                 Err(error) => return Ok(Err(registry_failure(&error))),
             };
+            crate::obligation_ledger::end_execution_tx(
+                tx,
+                &lash_sansio::ExecutionScope::process(process.clone()),
+                millis(commit.now)?,
+            )
+            .map_err(crate::sqlite_conversion_error)?;
             if ended {
                 cached_execute(
                     tx,
@@ -326,6 +332,14 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
 /// so a child that committed first is read here, and any later one is
 /// refused. A turn or operation scope with one left is recorded as ending.
 fn close_scope(tx: &Connection, commit: &Committing<'_>, scope: &ScopeKey) -> Answer<()> {
+    if let ScopeKey::Operation(session, operation) = scope {
+        crate::obligation_ledger::end_execution_tx(
+            tx,
+            &lash_sansio::ExecutionScope::session_operation(session.clone(), operation.clone()),
+            millis(commit.now)?,
+        )
+        .map_err(crate::sqlite_conversion_error)?;
+    }
     let Some(closed) = scope_id(scope) else {
         return Ok(Ok(()));
     };
