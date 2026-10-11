@@ -595,6 +595,25 @@ impl CommitFault {
         Some(Ok(connection))
     }
 
+    /// Take the fault at a one-call commit on `connection`, the first
+    /// time: a connection lost before the commit ends its session now, and
+    /// the call meets a dead connection; `true` when the call's answer is
+    /// to be lost after it commits.
+    pub(crate) async fn take_call(&self, connection: &mut sqlx::PgConnection) -> bool {
+        if !self.armed.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            return false;
+        }
+        match self.lost {
+            LostCommit::BeforeCommit => {
+                let _ = sqlx::query("SELECT pg_terminate_backend(pg_backend_pid())")
+                    .execute(connection)
+                    .await;
+                false
+            }
+            LostCommit::AfterCommit => true,
+        }
+    }
+
     /// `COMMIT` `tx`, losing its connection the first time.
     pub(crate) async fn commit(
         &self,

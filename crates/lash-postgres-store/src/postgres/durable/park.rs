@@ -4,7 +4,20 @@ use lash_durable::domain::{RedriveAnswer, RedriveRequest};
 use lash_durable::{DurableError, DurableInstant, Woken};
 use sqlx::PgConnection;
 
+use super::steps::{Entry, Shape, Step, Ty, Value};
 use super::{SQL, sqlx_failure, wake_within};
+
+/// The park's statement an owner commit runs as a step.
+pub(super) static SET_PARK: Entry =
+    Entry::new(|| &SQL.park.set_park, &[Ty::Text, Ty::Text], Shape::Exec);
+
+/// Actor `actor`'s park, set to `reason` (cleared when `None`), as a step.
+pub(super) fn step(actor: &str, reason: &Option<String>) -> Step {
+    Step::any(
+        &SET_PARK,
+        vec![Value::text(actor), Value::Text(reason.clone())],
+    )
+}
 
 pub(super) async fn set(
     tx: &mut PgConnection,

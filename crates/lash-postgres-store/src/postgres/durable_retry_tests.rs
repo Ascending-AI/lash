@@ -600,6 +600,129 @@ async fn a_lost_commit_whose_outcome_cannot_be_read_is_never_run_again() {
     );
 }
 
+/// Claim `target` and give it up idle through `store`: the owner commit is
+/// one call (FIG-5936). Answers the commit and the revision before it.
+async fn give_up(
+    plain: &PostgresDurableStore,
+    store: &PostgresDurableStore,
+    target: &ActorKey,
+) -> (Result<StateRevision, DurableError>, StateRevision) {
+    create(plain, target).await;
+    let lease = node(plain).await;
+    let claimed = plain.claim(&lease, 1).await.expect("claim the actor");
+    assert_eq!(claimed.len(), 1, "the owner claims its actor");
+    assert_eq!(&claimed[0].actor, target, "the owner claims its actor");
+    let before = revision(plain, target).await;
+    let mut tx = store
+        .begin(&claimed[0].actor, claimed[0].epoch)
+        .await
+        .expect("open the owner's transaction");
+    tx.give_up(Release::Idle);
+    let committed = store
+        .commit(tx, CommitLabel::ROUND_OUTCOME)
+        .await
+        .map(|commit| commit.revision);
+    (committed, before)
+}
+
+async fn revision(store: &PostgresDurableStore, target: &ActorKey) -> StateRevision {
+    store
+        .actor(target)
+        .await
+        .expect("read the actor")
+        .expect("the actor exists")
+        .revision
+}
+
+/// A one-call owner commit whose connection is lost is reconciled by its
+/// token (FIG-5936): a call that committed answers its recorded receipt
+/// without running again, and one that never reached the server runs again
+/// and commits. Either way the owner's write lands exactly once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_one_call_owner_commit_lost_in_flight_is_reconciled_to_one_effect() {
+    let Some((_database, storage)) = storage(
+        "a_one_call_owner_commit_lost_in_flight_is_reconciled_to_one_effect",
+        &crate::testing::fixture_config(),
+    )
+    .await
+    else {
+        return;
+    };
+    let plain = storage.durable_store();
+    for lost in [LostCommit::BeforeCommit, LostCommit::AfterCommit] {
+        let target = actor(&format!("call-lost-{lost:?}").to_lowercase());
+        let fault = CommitFault::new(lost);
+        let store = storage
+            .durable_store()
+            .with_commit_fault_for_testing(fault.clone());
+        let (committed, before) = give_up(&plain, &store, &target).await;
+        assert!(fault.taken(), "{lost:?}: the call's connection was lost");
+        let committed = match committed {
+            Ok(committed) => committed,
+            Err(error) => panic!("{lost:?}: the lost call was not reconciled: {error}"),
+        };
+        let after = revision(&plain, &target).await;
+        assert_eq!(
+            after,
+            StateRevision(before.0 + 1),
+            "{lost:?}: it landed once"
+        );
+        assert_eq!(
+            committed, after,
+            "{lost:?}: the answer is the commit's receipt"
+        );
+    }
+}
+
+/// A one-call owner commit that landed, whose answer was lost and whose
+/// token no read could settle within the policy's attempts, is unknown
+/// (FIG-5936): it answers `Unavailable` and never runs again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_one_call_owner_commit_whose_outcome_cannot_be_read_is_never_run_again() {
+    let mut config = crate::testing::fixture_config();
+    config.retry.durable = RetryPolicy {
+        attempts: 3,
+        initial_delay: Duration::from_millis(10),
+        max_delay: Duration::from_millis(10),
+        jitter: false,
+    };
+    let Some((_database, storage)) = storage(
+        "a_one_call_owner_commit_whose_outcome_cannot_be_read_is_never_run_again",
+        &config,
+    )
+    .await
+    else {
+        return;
+    };
+    let plain = storage.durable_store();
+    let target = actor("call-outcome-hidden");
+    let fault = CommitFault::hiding_outcome(LostCommit::AfterCommit);
+    let store = storage
+        .durable_store()
+        .with_commit_fault_for_testing(fault.clone());
+    let (committed, before) = give_up(&plain, &store, &target).await;
+    assert!(
+        matches!(
+            committed,
+            Err(DurableError::Store(StoreFailure {
+                kind: StoreFailureKind::Unavailable,
+                ..
+            }))
+        ),
+        "a call whose outcome is unknown answers that it is: {committed:?}"
+    );
+    assert_eq!(
+        fault.outcome_reads(),
+        3,
+        "every read the policy allows was spent on the lost call's token"
+    );
+    assert_eq!(
+        revision(&plain, &target).await,
+        StateRevision(before.0 + 1),
+        "the call that landed was not run again"
+    );
+}
+
 /// A commit that stays contended stops retrying at its operation's
 /// deadline, with the contention, however many attempts its policy allows.
 /// Freeze the operation's monotonic timer during off-clock PostgreSQL work.

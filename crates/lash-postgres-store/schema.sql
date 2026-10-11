@@ -1173,3 +1173,383 @@ CREATE OR REPLACE VIEW lash_graph_root_catalog AS
     UNION ALL SELECT 'revision_config', config_ref FROM lash_session_revisions
     UNION ALL SELECT 'terminal_config', terminal_window_config_ref FROM lash_session_runs
         WHERE terminal_window_config_ref IS NOT NULL;
+
+-- One-call owner commits (FIG-5936): each call's answer, recorded under its
+-- token as the call's last write. A call whose answer was lost is reconciled
+-- by its token: a row with an answer is a call that committed, and the
+-- reconciler's own row, with none, refuses a call that never reached its
+-- record. Each call sweeps a few rows older than fifteen minutes.
+CREATE TABLE IF NOT EXISTS lash_owner_commit_latches (
+    token TEXT COLLATE "C" PRIMARY KEY,
+    created_ms BIGINT NOT NULL,
+    answer JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_lash_owner_commit_latches_created ON lash_owner_commit_latches (created_ms);
+
+-- The one-call owner commit (FIG-5936), generated from this build's
+-- statements by `durable/executor.rs`. Regenerate it with the executor's
+-- LASH_REGENERATE=1 test, never by hand.
+-- BEGIN GENERATED lash_owner_commit
+CREATE OR REPLACE FUNCTION lash_owner_commit(
+    p_registry TEXT, p_actor TEXT, p_epoch BIGINT, p_session TEXT,
+    p_fleet_low INTEGER, p_fleet_high INTEGER, p_token TEXT,
+    p_lock_timeout TEXT, p_statement_ms BIGINT,
+    p_named TEXT[], p_roots TEXT[], p_digests BYTEA[], p_contents BYTEA[],
+    p_parents BYTEA[], p_children BYTEA[], p_steps JSONB,
+    p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT)
+RETURNS TABLE (o_revision BIGINT, o_now BIGINT, o_fleet INTEGER, o_state TEXT,
+    o_installed BIGINT, o_cancel_turn TEXT, o_cancel_request TEXT, o_cancel_origin TEXT,
+    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT)
+LANGUAGE plpgsql
+AS $lash_owner_commit$
+#variable_conflict use_column
+DECLARE
+    v_fleet INTEGER;
+    v_now BIGINT;
+    v_xact TEXT;
+    v_rev BIGINT;
+    v_cancel_turn TEXT;
+    v_cancel_request TEXT;
+    v_cancel_origin TEXT;
+    v_cancel_reason TEXT;
+    v_cancel_disposition TEXT;
+    v_cancel_mode TEXT;
+    v_clock BIGINT;
+    v_inserted TEXT[] := '{}';
+    v_parents BYTEA[];
+    v_children BYTEA[];
+    v_installed BIGINT := 0;
+    v_rows BIGINT;
+    v_index INTEGER := 0;
+    v_step JSONB;
+    v_p JSONB;
+    v_state TEXT := 'owned';
+BEGIN
+    -- Generated from this build's statements (registry a591bdaf9fcab11c); a call
+    -- built from others is refused, as is any isolation but read committed.
+    IF p_registry IS DISTINCT FROM 'a591bdaf9fcab11c'
+        OR current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
+    END IF;
+    IF p_lock_timeout IS NOT NULL THEN
+        PERFORM set_config('lock_timeout', p_lock_timeout, true);
+    END IF;
+    PERFORM pg_advisory_xact_lock_shared(5494764590268039504::bigint);
+    PERFORM pg_advisory_xact_lock_shared(715425, 0);
+    WITH fenced AS (
+                 UPDATE lash_actors SET state_revision = state_revision + 1
+                 WHERE actor_key = (p_actor) AND epoch = (p_epoch) AND state = 'owned'
+                 RETURNING state_revision
+             )
+             SELECT (SELECT format_version FROM lash_fleet_format WHERE singleton = TRUE),
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+                    pg_current_xact_id()::text,
+                    f.state_revision,
+                    c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode
+             FROM (SELECT 1) AS one
+             LEFT JOIN fenced f ON TRUE
+             LEFT JOIN lash_session_runs r ON r.session_id = (p_session) AND f.state_revision IS NOT NULL
+                 AND r.admission_json IS NOT NULL AND r.terminal_kind IS NULL
+             LEFT JOIN lash_turn_phases p ON p.session_id = r.session_id AND p.run = r.run
+             LEFT JOIN lash_turn_cancel_requests c ON c.session_id = p.session_id
+                 AND c.turn_id = p.run
+    INTO v_fleet, v_clock, v_xact, v_rev, v_cancel_turn, v_cancel_request, v_cancel_origin,
+        v_cancel_reason, v_cancel_disposition, v_cancel_mode;
+    v_now := COALESCE(p_now, v_clock);
+    IF v_fleet IS NULL OR v_fleet < p_fleet_low OR v_fleet > p_fleet_high THEN
+        RAISE EXCEPTION 'lash_owner_commit: the writer fence refused' USING ERRCODE = 'LX002';
+    END IF;
+    IF v_rev IS NULL THEN
+        RAISE EXCEPTION 'lash_owner_commit: the owner fence refused' USING ERRCODE = 'LX003';
+    END IF;
+    IF cardinality(p_named) > 0 THEN
+        PERFORM hash, encoding, CASE WHEN hash = ANY((p_named)::text[]) THEN NULL ELSE content END
+             FROM lash_blobs
+             WHERE hash = ANY((p_named)::text[])
+                OR hash = ANY(ARRAY(SELECT encode(digest, 'hex') FROM UNNEST((p_digests)::bytea[]) AS digest))
+             ORDER BY hash FOR KEY SHARE;
+        SELECT count(*) FROM unnest((p_named)::text[]) AS named(hash)
+             LEFT JOIN lash_blobs AS stored ON stored.hash = named.hash
+             WHERE stored.hash IS NULL
+                OR (named.hash = ANY((p_roots)::text[]) AND stored.encoding <> 1) INTO v_rows;
+        IF v_rows > 0 THEN
+            RAISE EXCEPTION 'lash_owner_commit: the graph refused' USING ERRCODE = 'LX004';
+        END IF;
+    END IF;
+    IF cardinality(p_digests) > 0 THEN
+        WITH inserted AS (INSERT INTO lash_blobs (hash, content, encoding)
+             SELECT encode(staged.digest, 'hex'), staged.content, 1
+             FROM UNNEST((p_digests)::bytea[], (p_contents)::bytea[]) AS staged(digest, content)
+             ORDER BY staged.digest
+             ON CONFLICT (hash) DO NOTHING
+             RETURNING hash)
+        SELECT COALESCE(array_agg(hash), '{}') INTO v_inserted FROM inserted;
+        SELECT count(*)
+             FROM unnest((p_digests)::bytea[], (p_contents)::bytea[]) AS staged(digest, content)
+             LEFT JOIN lash_blobs AS stored ON stored.hash = encode(staged.digest, 'hex')
+             WHERE NOT (encode(staged.digest, 'hex') = ANY((v_inserted)::text[]))
+               AND (stored.hash IS NULL OR stored.encoding <> 1
+                    OR stored.content <> staged.content) INTO v_rows;
+        IF v_rows > 0 THEN
+            RAISE EXCEPTION 'lash_owner_commit: the graph refused' USING ERRCODE = 'LX004';
+        END IF;
+        SELECT COALESCE(array_agg(staged.parent), '{}'), COALESCE(array_agg(staged.child), '{}')
+        INTO v_parents, v_children
+        FROM unnest(p_parents, p_children) AS staged(parent, child)
+        WHERE encode(staged.parent, 'hex') = ANY(v_inserted);
+        IF cardinality(v_parents) > 0 THEN
+            INSERT INTO lash_blob_edges (parent_hash, child_hash)
+             SELECT encode(parent, 'hex'), encode(child, 'hex')
+             FROM UNNEST((v_parents)::bytea[], (v_children)::bytea[]) AS staged(parent, child);
+        END IF;
+        SELECT COALESCE(sum(octet_length(staged.content)), 0)::bigint
+             FROM unnest((p_digests)::bytea[], (p_contents)::bytea[]) AS staged(digest, content)
+             WHERE encode(staged.digest, 'hex') = ANY((v_inserted)::text[]) INTO v_installed;
+    END IF;
+    FOR v_step IN SELECT value FROM jsonb_array_elements(p_steps) LOOP
+        v_p := v_step->'p';
+        CASE v_step->>'s'
+        WHEN 'durable_run_record.append' THEN
+            WITH answered AS (INSERT INTO lash_run_records
+                 (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
+             SELECT (v_p->>0), ((v_p->>1)::BIGINT), ((v_p->>2)::BIGINT), (v_p->>3), (v_p->>4), (v_p->>5), ((v_p->>6)::BIGINT)
+             WHERE ((v_p->>2)::BIGINT) = 0 OR EXISTS (
+                 SELECT 1 FROM lash_run_records
+                 WHERE owner_key = (v_p->>0) AND run_seq = ((v_p->>1)::BIGINT) AND ordinal = ((v_p->>2)::BIGINT) - 1)
+             ON CONFLICT DO NOTHING
+             RETURNING ordinal)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_run_record.prune' THEN
+            DELETE FROM lash_run_records WHERE owner_key = (v_p->>0) AND run_seq < ((v_p->>1)::BIGINT);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        WHEN 'durable_snapshot.put_first' THEN
+            WITH answered AS (INSERT INTO lash_exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch)
+             SELECT (v_p->>0), 1, (v_p->>1), (decode(v_p->>2, 'hex')), ((v_p->>3)::BIGINT)
+             WHERE NOT EXISTS (SELECT 1 FROM lash_exec_snapshots WHERE exec_key = (v_p->>0))
+             RETURNING rev)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_snapshot.put_next' THEN
+            WITH answered AS (UPDATE lash_exec_snapshots
+             SET rev = rev + 1, root_ref = (v_p->>2), commit_id = (decode(v_p->>3, 'hex')), written_epoch = ((v_p->>4)::BIGINT)
+             WHERE exec_key = (v_p->>0) AND rev = ((v_p->>1)::BIGINT) AND root_ref = (v_p->>5)
+             RETURNING rev)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_snapshot.retire' THEN
+            WITH answered AS (DELETE FROM lash_exec_snapshots WHERE exec_key = (v_p->>0) AND root_ref = (v_p->>1)
+             RETURNING exec_key)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_snapshot.clear' THEN
+            DELETE FROM lash_exec_snapshots WHERE exec_key = (v_p->>0);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        WHEN 'durable_turn.admit_run' THEN
+            WITH answered AS (INSERT INTO lash_session_runs (session_id, run, admission_json)
+             SELECT (v_p->>0), (v_p->>1), (v_p->>2)
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM lash_session_runs
+                 WHERE session_id = (v_p->>0) AND admission_json IS NOT NULL
+                   AND terminal_kind IS NULL)
+             RETURNING run)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_turn.insert_phase' THEN
+            INSERT INTO lash_turn_phases
+                 (session_id, run, phase, phase_arg, iteration, checkpoint_ref,
+                  model_request_ref, model_deadline_ms, turn_deadline_ms, written_epoch)
+             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), ((v_p->>3)::BIGINT), ((v_p->>4)::BIGINT), (v_p->>5), (v_p->>6), ((v_p->>7)::BIGINT), ((v_p->>8)::BIGINT), ((v_p->>9)::BIGINT));
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        WHEN 'durable_turn.advance_phase' THEN
+            WITH answered AS (UPDATE lash_turn_phases
+             SET phase = (v_p->>2), phase_arg = ((v_p->>3)::BIGINT), iteration = ((v_p->>4)::BIGINT), checkpoint_ref = (v_p->>5),
+                 model_request_ref = (v_p->>6), model_deadline_ms = ((v_p->>7)::BIGINT), written_epoch = ((v_p->>8)::BIGINT),
+                 model_calls = COALESCE(((v_p->>9)::BIGINT), model_calls), model_stream_from = (v_p->>10)
+             WHERE session_id = (v_p->>0) AND run = (v_p->>1)
+             RETURNING run)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_turn.trace_exported' THEN
+            WITH answered AS (UPDATE lash_turn_phases
+             SET trace_exported = TRUE, written_epoch = ((v_p->>2)::BIGINT)
+             WHERE session_id = (v_p->>0) AND run = (v_p->>1)
+             RETURNING run)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_turn.open_named_run' THEN
+            SELECT count(*) INTO v_rows FROM (SELECT run FROM lash_session_runs
+             WHERE session_id = (v_p->>0) AND run = (v_p->>1)
+               AND admission_json IS NOT NULL AND terminal_kind IS NULL) AS answered;
+        WHEN 'durable_turn_postgres.upsert_namespaces' THEN
+            INSERT INTO lash_turn_namespaces
+                 (session_id, run, plugin, entry, graph_root_ref)
+             SELECT (v_p->>0), (v_p->>1), written.plugin, written.entry, written.root
+             FROM UNNEST((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->2) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->3) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->4) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[], (ARRAY(SELECT element::BOOLEAN FROM jsonb_array_elements_text(v_p->5) WITH ORDINALITY AS listed(element, position) ORDER BY position))::boolean[])
+                 AS written(plugin, entry, root, held)
+             ON CONFLICT (session_id, run, plugin)
+             DO UPDATE SET entry = excluded.entry,
+                 graph_root_ref = CASE
+                     WHEN (SELECT written.held FROM UNNEST((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->2) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[], (ARRAY(SELECT element::BOOLEAN FROM jsonb_array_elements_text(v_p->5) WITH ORDINALITY AS listed(element, position) ORDER BY position))::boolean[])
+                               AS written(plugin, held)
+                           WHERE written.plugin = excluded.plugin)
+                     THEN lash_turn_namespaces.graph_root_ref
+                     ELSE excluded.graph_root_ref END;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        WHEN 'durable_turn.working_set' THEN
+            WITH answered AS (UPDATE lash_turn_phases SET working_execution_ref = (v_p->>2), written_epoch = ((v_p->>4)::BIGINT)
+             WHERE session_id = (v_p->>0) AND run = (v_p->>1)
+               AND working_execution_ref IS NOT DISTINCT FROM (v_p->>3)
+             RETURNING run)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_session_mail_postgres.bind_inputs' THEN
+            WITH answered AS (UPDATE lash_pending_turn_inputs AS input
+             SET admitted_run = (v_p->>2), admitted_by = (v_p->>2)
+             FROM UNNEST((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[]) AS named(input_id)
+             WHERE input.session_id = (v_p->>0) AND input.input_id = named.input_id
+               AND (input.admitted_run IS NULL OR input.admitted_run = (v_p->>2))
+               AND input.state IN ('deferred_next_turn', 'pending_active')
+             RETURNING input.input_id)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_session_mail_postgres.record_run_inputs' THEN
+            INSERT INTO lash_session_run_inputs (session_id, input_id, run)
+             SELECT (v_p->>0), named.input_id, (v_p->>2) FROM UNNEST((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[]) AS named(input_id)
+             ON CONFLICT (session_id, input_id) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        WHEN 'durable_session_mail_postgres.bind_batches' THEN
+            WITH answered AS (UPDATE lash_queued_work_batches AS batch
+             SET admitted_run = (v_p->>2), admitted_by = (v_p->>2)
+             FROM UNNEST((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[]) AS named(batch_id)
+             WHERE batch.session_id = (v_p->>0) AND batch.batch_id = named.batch_id
+               AND (batch.admitted_run IS NULL OR batch.admitted_run = (v_p->>2))
+               AND batch.terminal_cause IS NULL
+             RETURNING batch.batch_id)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_prompt.insert_snapshot' THEN
+            WITH answered AS (INSERT INTO lash_prompt_snapshots
+                 (session_id, owner, call, snapshot, request, written_epoch)
+             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (v_p->>4), ((v_p->>5)::BIGINT))
+             ON CONFLICT (session_id, owner, call) DO NOTHING
+             RETURNING call)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'postgres_connection.lock_xact_shared_by_text_batch_seeded' THEN
+            SELECT count(*) INTO v_rows FROM (SELECT pg_advisory_xact_lock_shared(hashtextextended(ordered.text_key, ((v_p->>1)::BIGINT)))
+             FROM (
+                 SELECT DISTINCT text_key
+                 FROM unnest((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->0) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) AS target(text_key)
+                 ORDER BY text_key
+             ) AS ordered) AS answered;
+        WHEN 'durable_prompt_postgres.unsent_absent' THEN
+            SELECT count(*) INTO v_rows FROM (SELECT batch.hash
+             FROM unnest((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->0) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) AS batch(hash, text)
+             WHERE batch.text IS NULL
+               AND NOT EXISTS (SELECT 1 FROM lash_prompt_texts AS stored WHERE stored.hash = batch.hash)) AS answered;
+        WHEN 'durable_prompt_postgres.insert_sent_texts' THEN
+            INSERT INTO lash_prompt_texts (hash, text)
+             SELECT hash, text FROM unnest((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->0) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) AS batch(hash, text)
+             WHERE batch.text IS NOT NULL
+             ON CONFLICT (hash) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        WHEN 'durable_prompt_postgres.insert_edges' THEN
+            INSERT INTO lash_prompt_snapshot_texts (session_id, owner, call, part, hash)
+             SELECT (v_p->>0), (v_p->>1), (v_p->>2), part, hash
+               FROM unnest((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->3) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->4) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) AS batch(part, hash);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        WHEN 'durable_graph.admission_put' THEN
+            WITH answered AS (INSERT INTO lash_effect_admissions
+                 (exec_key, effect_id, owner_key, run_seq, member_ordinal, admission_ref,
+                  written_epoch)
+             VALUES ((v_p->>0), (decode(v_p->>1, 'hex')), (v_p->>2), ((v_p->>3)::BIGINT), ((v_p->>4)::BIGINT), (v_p->>5), ((v_p->>6)::BIGINT))
+             ON CONFLICT (exec_key, effect_id) DO NOTHING
+             RETURNING exec_key)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_graph.admission_remove' THEN
+            WITH answered AS (DELETE FROM lash_effect_admissions
+             WHERE exec_key = (v_p->>0) AND effect_id = (decode(v_p->>1, 'hex')) AND admission_ref = (v_p->>2)
+             RETURNING exec_key)
+            SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_run_record.delete_owner' THEN
+            DELETE FROM lash_run_records WHERE owner_key = (v_p->>0);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        WHEN 'durable_graph.admissions_clear' THEN
+            DELETE FROM lash_effect_admissions WHERE exec_key = (v_p->>0);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        WHEN 'durable_actor_park.set_park' THEN
+            UPDATE lash_actors
+             SET failed_activations = CASE WHEN CAST((v_p->>1) AS TEXT) IS NULL AND park_json IS NOT NULL
+                                           THEN 0 ELSE failed_activations END,
+                 park_json = (v_p->>1)
+             WHERE actor_key = (v_p->>0);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+        ELSE
+            RAISE EXCEPTION 'lash_owner_commit: no step %', v_step->>'s' USING ERRCODE = 'LX000';
+        END CASE;
+        IF v_step ? 'n' AND v_rows <> (v_step->>'n')::BIGINT THEN
+            RAISE EXCEPTION 'lash_owner_commit: step % refused', v_index USING ERRCODE = 'LX001';
+        END IF;
+        IF p_statement_ms IS NOT NULL
+            AND clock_timestamp() - statement_timestamp() > p_statement_ms * INTERVAL '1 millisecond' THEN
+            RAISE EXCEPTION 'canceling statement due to statement timeout' USING ERRCODE = '57014';
+        END IF;
+        v_index := v_index + 1;
+    END LOOP;
+    IF p_formats IS NOT NULL THEN
+        UPDATE lash_actors SET formats = (p_formats) WHERE actor_key = (p_actor);
+    END IF;
+    IF p_ack IS NOT NULL THEN
+        WITH acked AS (
+                 UPDATE lash_actors SET acked_seq = (p_ack) WHERE actor_key = (p_actor) AND acked_seq < (p_ack)
+             )
+             DELETE FROM lash_actor_mail WHERE actor_key = (p_actor) AND seq <= (p_ack);
+    END IF;
+    CASE p_release
+    WHEN 'parked' THEN
+        WITH pending AS (
+                 SELECT EXISTS (
+                     SELECT 1 FROM lash_actor_mail m, lash_actors p
+                     WHERE p.actor_key = (p_actor) AND m.actor_key = (p_actor) AND m.seq > p.acked_seq
+                       AND m.kind = ('cancel')
+                 ) AS mail
+             )
+             UPDATE lash_actors AS a
+             SET state = CASE WHEN NOT pending.mail THEN 'parked'
+                              WHEN a.mail_seq > a.acked_seq THEN 'ready'
+                              ELSE 'idle' END,
+                 ready_at_ms = CASE WHEN pending.mail AND a.mail_seq > a.acked_seq
+                                    THEN CAST((v_now) AS BIGINT) ELSE NULL END,
+                 next_due_ms = NULL,
+                 epoch = a.epoch + 1, owner_node = NULL, owner_boot = NULL
+             FROM pending
+             WHERE a.actor_key = (p_actor)
+             RETURNING a.state
+        INTO v_state;
+    WHEN 'terminal' THEN
+        DELETE FROM lash_actor_mail WHERE actor_key = (p_actor);
+        UPDATE lash_actors
+             SET state = 'terminal', ready_at_ms = NULL, next_due_ms = NULL,
+                 acked_seq = mail_seq, epoch = epoch + 1,
+                 owner_node = NULL, owner_boot = NULL
+             WHERE actor_key = (p_actor)
+             RETURNING state
+        INTO v_state;
+    WHEN 'idle', 'waiting', 'ready' THEN
+        UPDATE lash_actors
+             SET state = CASE WHEN mail_seq > acked_seq OR CAST((p_release) AS TEXT) = 'ready'
+                              THEN 'ready' ELSE CAST((p_release) AS TEXT) END,
+                 ready_at_ms = CASE WHEN mail_seq > acked_seq OR CAST((p_release) AS TEXT) = 'ready'
+                                    THEN CAST((v_now) AS BIGINT) ELSE NULL END,
+                 next_due_ms = CASE WHEN mail_seq > acked_seq OR CAST((p_release) AS TEXT) = 'ready'
+                                    THEN NULL ELSE CAST((p_due) AS BIGINT) END,
+                 epoch = epoch + 1, owner_node = NULL, owner_boot = NULL
+             WHERE actor_key = (p_actor)
+             RETURNING state
+        INTO v_state;
+    ELSE
+        NULL;
+    END CASE;
+    INSERT INTO lash_owner_commit_latches (token, created_ms, answer)
+             VALUES ((p_token), (v_clock), (jsonb_build_object('revision', v_rev, 'state', v_state, 'cancel', jsonb_build_array(v_cancel_turn, v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode))));
+    DELETE FROM lash_owner_commit_latches WHERE token IN (
+                 SELECT token FROM lash_owner_commit_latches WHERE created_ms < (v_clock - 900000)
+                 ORDER BY created_ms
+                 LIMIT 16
+                 FOR UPDATE SKIP LOCKED
+             );
+    RETURN QUERY SELECT v_rev, v_now, v_fleet, v_state, v_installed, v_cancel_turn,
+        v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode;
+END
+$lash_owner_commit$;
+-- END GENERATED lash_owner_commit

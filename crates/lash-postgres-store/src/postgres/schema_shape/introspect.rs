@@ -248,7 +248,7 @@ pub(crate) async fn verify_schema_shape(
         .findings
         .extend(read_shadow_findings(connection, &installation, &search_path, &table_names).await?);
     let resolved = resolve_tables(connection, &installation, &table_names).await?;
-    let found = read_live_shape(connection, &resolved).await?;
+    let found = read_live_shape(connection, &installation, &resolved).await?;
     report.findings.extend(expected.diff(&found));
     report.findings.extend(
         read_seed_row_findings(connection, &installation, &resolved, &expected, &found).await?,
@@ -344,6 +344,7 @@ pub(crate) async fn resolve_tables(
 
 pub(crate) async fn read_live_shape(
     connection: &mut PgConnection,
+    installation: &Installation,
     resolved: &BTreeMap<String, ResolvedTable>,
 ) -> Result<SchemaShape, StoreError> {
     let oids: Vec<i64> = resolved.values().map(|table| table.oid).collect();
@@ -356,6 +357,26 @@ pub(crate) async fn read_live_shape(
         shape.tables.insert(name.clone(), TableShape::default());
     }
     let table_of = |oid: i64| by_oid.get(&oid).copied();
+
+    // Every lash function in the installation, by its identity arguments and
+    // result: what a call binds and decodes.
+    let function_rows = crate::observed_sql::query(
+        "SELECT function.proname::text AS name,
+                '(' || pg_catalog.pg_get_function_identity_arguments(function.oid) || ') -> '
+                    || pg_catalog.pg_get_function_result(function.oid) AS signature
+         FROM pg_catalog.pg_proc AS function
+         WHERE function.pronamespace::bigint = $1
+           AND function.proname LIKE 'lash\\_%'",
+    )
+    .bind(installation.namespace_oid())
+    .fetch_all(crate::observed_sql::executor(&mut *connection))
+    .await
+    .map_err(store_sqlx_error)?;
+    for row in function_rows {
+        shape
+            .functions
+            .insert(row.get("name"), row.get("signature"));
+    }
 
     // Nullability comes from `pg_attribute.attnotnull`. PostgreSQL 18 also
     // materializes NOT NULL as `pg_constraint` rows with `contype = 'n'`;

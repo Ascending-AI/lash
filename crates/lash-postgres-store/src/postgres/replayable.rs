@@ -65,7 +65,7 @@ impl RetryPolicy {
 
     /// The pause before retry `retry`, or `None` when it would end at or
     /// past `deadline`.
-    fn pause_within(&self, retry: u32, deadline: Option<Instant>) -> Option<Duration> {
+    pub(crate) fn pause_within(&self, retry: u32, deadline: Option<Instant>) -> Option<Duration> {
         let pause = self.pause(retry);
         match deadline {
             Some(deadline) if Instant::now() + pause >= deadline => None,

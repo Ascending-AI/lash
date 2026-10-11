@@ -274,7 +274,8 @@ mod tests {
                     rusqlite::params![root.to_hex(), staging.nodes()[&root].bytes.as_ref()],
                 )
                 .expect("root blob");
-                conn.execute(
+                // The append is conditional and answers the ordinal it wrote.
+                conn.query_row(
                     SQL.append.sql(),
                     rusqlite::params![
                         owner.stored(),
@@ -285,6 +286,7 @@ mod tests {
                         root.to_hex(),
                         1
                     ],
+                    |_| Ok(()),
                 )
                 .expect("fact row");
             }

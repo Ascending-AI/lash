@@ -48,14 +48,15 @@ use lash_durable::domain::graph::{
 use lash_durable::domain::graph_commit::{
     CheckedGraph, CollectionLimits, EDGE_ROW_LOGICAL_BYTES, GraphCollection, blob_row_logical_bytes,
 };
-use lash_durable::{CommitLabel, DurableError, StoreFailure, StoreFailureKind};
-use lash_store_sql::Dialect;
+use lash_durable::{CommitLabel, DurableError, Epoch, StoreFailure, StoreFailureKind};
 use lash_store_sql::durable::graph::GraphStatements;
 use lash_store_sql::durable::run_records::RunRecordStatements;
 use lash_store_sql::durable::snapshots::SnapshotStatements;
 use lash_store_sql::durable::turns::TurnStatements;
+use lash_store_sql::{Dialect, Rendered};
 use sqlx::{PgConnection, Row};
 
+use super::steps::{self, Entry, Shape, Step, Ty, Value};
 use super::{Committing, PostgresDurableStore, Tx, integer, sqlx_failure};
 use crate::guarded_tx::begin_collecting;
 
@@ -176,6 +177,19 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
         postgres: GraphPostgresStatements::render(dialect),
     }
 });
+
+/// The install's statements the one-call commit runs.
+pub(super) fn lock_nodes() -> &'static Rendered {
+    &SQL.postgres.lock_nodes
+}
+
+pub(super) fn insert_nodes() -> &'static Rendered {
+    &SQL.postgres.insert_nodes
+}
+
+pub(super) fn insert_edges() -> &'static Rendered {
+    &SQL.postgres.insert_edges
+}
 
 /// A hydration or a graph row read: a guarded transaction that writes
 /// nothing, for the gate it holds.
@@ -629,6 +643,78 @@ fn graph_refused(refusal: GraphRefusal) -> DurableError {
     DurableError::Graph(refusal)
 }
 
+/// The effect-admission statements an owner commit runs as steps.
+pub(super) static ADMISSION_PUT: Entry = Entry::new(
+    || &SQL.graph.admission_put,
+    &[
+        Ty::Text,
+        Ty::Bytes,
+        Ty::Text,
+        Ty::Int,
+        Ty::Int,
+        Ty::Text,
+        Ty::Int,
+    ],
+    Shape::Returning,
+);
+pub(super) static ADMISSION_REMOVE: Entry = Entry::new(
+    || &SQL.graph.admission_remove,
+    &[Ty::Text, Ty::Bytes, Ty::Text],
+    Shape::Returning,
+);
+
+/// `write`'s step program at `epoch`: an admission's insert, which must be
+/// the effect's first, or its lookup's guarded removal.
+pub(super) fn admission_steps(
+    epoch: Epoch,
+    write: &EffectAdmissionWrite,
+) -> Result<Vec<Step>, DurableError> {
+    Ok(match write {
+        EffectAdmissionWrite::Put {
+            exec,
+            effect,
+            member,
+            admission,
+        } => vec![Step::one(
+            &ADMISSION_PUT,
+            vec![
+                Value::text(exec.stored()),
+                Value::Bytes(Some(effect.0.to_vec())),
+                Value::Text(member.as_ref().map(|member| member.owner.stored())),
+                Value::Int(
+                    member
+                        .as_ref()
+                        .map(|member| integer::<i64>(member.run.0))
+                        .transpose()?,
+                ),
+                Value::Int(
+                    member
+                        .as_ref()
+                        .map(|member| integer::<i64>(member.member))
+                        .transpose()?,
+                ),
+                Value::text(admission.to_hex()),
+                Value::int(epoch.0),
+            ],
+        )],
+        EffectAdmissionWrite::Remove {
+            exec,
+            effect,
+            expected,
+        } => vec![Step::one(
+            &ADMISSION_REMOVE,
+            vec![
+                Value::text(exec.stored()),
+                Value::Bytes(Some(effect.0.to_vec())),
+                Value::text(expected.to_hex()),
+            ],
+        )],
+    })
+}
+
+pub(super) static CLEAR_ADMISSIONS: Entry =
+    Entry::new(|| &SQL.graph.admissions_clear, &[Ty::Text], Shape::Exec);
+
 /// Applies an admission write. A second admission of one effect, or the
 /// removal of a lookup that is not the expected one, refuses the commit.
 pub(super) async fn apply_admission(
@@ -636,56 +722,10 @@ pub(super) async fn apply_admission(
     commit: &Committing<'_>,
     write: &EffectAdmissionWrite,
 ) -> Result<(), DurableError> {
-    let applied = match write {
-        EffectAdmissionWrite::Put {
-            exec,
-            effect,
-            member,
-            admission,
-        } => {
-            matched(
-                tx,
-                crate::observed_sql::query(SQL.graph.admission_put.sql())
-                    .bind(exec.stored())
-                    .bind(effect.0.to_vec())
-                    .bind(member.as_ref().map(|member| member.owner.stored()))
-                    .bind(
-                        member
-                            .as_ref()
-                            .map(|member| integer::<i64>(member.run.0))
-                            .transpose()?,
-                    )
-                    .bind(
-                        member
-                            .as_ref()
-                            .map(|member| integer::<i64>(member.member))
-                            .transpose()?,
-                    )
-                    .bind(admission.to_hex())
-                    .bind(commit.epoch.0),
-            )
-            .await
-        }
-        EffectAdmissionWrite::Remove {
-            exec,
-            effect,
-            expected,
-        } => {
-            matched(
-                tx,
-                crate::observed_sql::query(SQL.graph.admission_remove.sql())
-                    .bind(exec.stored())
-                    .bind(effect.0.to_vec())
-                    .bind(expected.to_hex()),
-            )
-            .await
-        }
-    }
-    .map_err(graph_refused)?;
-    if applied {
-        Ok(())
-    } else {
-        Err(graph_refused(GraphRefusal::RevisionConflict))
+    let program = admission_steps(commit.epoch, write)?;
+    match steps::run(tx, &program).await? {
+        None => Ok(()),
+        Some(_) => Err(graph_refused(GraphRefusal::RevisionConflict)),
     }
 }
 
@@ -1111,15 +1151,6 @@ pub(crate) const OWNER_ROW_NOWAIT: &str =
 #[cfg(test)]
 #[path = "../graph_store_tests.rs"]
 mod graph_store_tests;
-
-/// Drop every admission of the execution stored as `key`.
-pub(super) async fn clear_admissions(tx: &mut PgConnection, key: &str) -> Result<(), sqlx::Error> {
-    crate::observed_sql::query(SQL.graph.admissions_clear.sql())
-        .bind(key)
-        .execute(crate::observed_sql::executor(tx))
-        .await
-        .map(drop)
-}
 
 /// Drop every admission whose execution key starts with `key`.
 pub(super) async fn clear_admissions_under(

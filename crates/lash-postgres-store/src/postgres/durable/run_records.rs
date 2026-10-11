@@ -16,17 +16,33 @@ use lash_store_sql::Dialect;
 use lash_store_sql::durable::run_records::RunRecordStatements;
 use sqlx::{PgConnection, Row};
 
+use super::steps::{self, Entry, Shape, Step, Ty, Value};
 use super::{Committing, corrupt, integer, node_ref, sqlx_failure};
 
 static SQL: LazyLock<RunRecordStatements> =
     LazyLock::new(|| RunRecordStatements::render(Dialect::postgres()));
 
-pub(super) async fn apply(
-    tx: &mut PgConnection,
-    commit: &Committing<'_>,
-    write: &RunFactWrite,
-) -> Result<(), DurableError> {
-    match write {
+/// The run-fact statements an owner commit runs as steps.
+pub(super) static APPEND: Entry = Entry::new(
+    || &SQL.append,
+    &[
+        Ty::Text,
+        Ty::Int,
+        Ty::Int,
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Int,
+    ],
+    Shape::Returning,
+);
+pub(super) static DELETE_OWNER: Entry = Entry::new(|| &SQL.delete_owner, &[Ty::Text], Shape::Exec);
+pub(super) static PRUNE: Entry = Entry::new(|| &SQL.prune, &[Ty::Text, Ty::Int], Shape::Exec);
+
+/// `write`'s step program at `epoch`: an append is one conditional insert
+/// that must answer its row, a prune one delete.
+pub(super) fn steps(epoch: Epoch, write: &RunFactWrite) -> Result<Option<Vec<Step>>, DurableError> {
+    Ok(Some(match write {
         RunFactWrite::Append {
             owner,
             run,
@@ -34,34 +50,50 @@ pub(super) async fn apply(
             kind,
             call,
             record,
+        } => vec![Step::one(
+            &APPEND,
+            vec![
+                Value::text(owner.stored()),
+                Value::int(integer::<i64>(run.0)?),
+                Value::int(integer::<i64>(ordinal.0)?),
+                Value::text(kind.as_str()),
+                Value::Text(call.as_ref().map(|call| call.as_str().to_owned())),
+                Value::text(record.to_hex()),
+                Value::int(epoch.0),
+            ],
+        )],
+        RunFactWrite::Prune { owner, before } => vec![Step::any(
+            &PRUNE,
+            vec![
+                Value::text(owner.stored()),
+                Value::int(integer::<i64>(before.0)?),
+            ],
+        )],
+    }))
+}
+
+pub(super) async fn apply(
+    tx: &mut PgConnection,
+    commit: &Committing<'_>,
+    write: &RunFactWrite,
+) -> Result<(), DurableError> {
+    let program = steps(commit.epoch, write)?.unwrap_or_default();
+    if steps::run(tx, &program).await?.is_none() {
+        return Ok(());
+    }
+    match write {
+        RunFactWrite::Append {
+            owner,
+            run,
+            ordinal,
+            kind,
+            call,
+            ..
         } => {
-            let owner_key = owner.stored();
-            let appended: Option<i64> = crate::observed_sql::query_scalar(SQL.append.sql())
-                .bind(&owner_key)
-                .bind(integer::<i64>(run.0)?)
-                .bind(integer::<i64>(ordinal.0)?)
-                .bind(kind.as_str())
-                .bind(call.as_ref().map(ToolCallId::as_str))
-                .bind(record.to_hex())
-                .bind(commit.epoch.0)
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            if appended.is_some() {
-                return Ok(());
-            }
             let call = call.as_ref().filter(|_| *kind == RunFactKind::XOutcome);
             Err(refused(tx, owner, *run, *ordinal, call).await?)
         }
-        RunFactWrite::Prune { owner, before } => {
-            crate::observed_sql::query(SQL.prune.sql())
-                .bind(owner.stored())
-                .bind(integer::<i64>(before.0)?)
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            Ok(())
-        }
+        RunFactWrite::Prune { .. } => Err(corrupt("run fact prune", "refused a delete")),
     }
 }
 

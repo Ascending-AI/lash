@@ -168,6 +168,16 @@ bound on the whole operation, admission and checkout included; an operation
 past it fails unavailable (its commit's outcome unknown), and a lock wait past
 `lock_timeout` fails contended.
 
+An owner commit whose writes are all step programs is one call to
+`lash_owner_commit`, a function `schema.sql` declares, generated from the
+build's statements (FIG-5936). The call is its own transaction, so no
+`BEGIN` carries the profile: it sets `lock_timeout` itself and checks the
+statement limit between its steps; the role's session-default
+`statement_timeout` bounds the whole call. A call whose answer is lost is
+settled by its token in `lash_owner_commit_latches`, whose rows each call
+sweeps after fifteen minutes. A commit the function refuses, and every other
+commit, runs as an explicit guarded transaction.
+
 Validation: `lock < statement <= operation` where both are limits; every
 runtime profile has an operation deadline; `roles.renewal.acquire_timeout <
 guards.renewal.operation_deadline < node.lease.heartbeat_every`, and

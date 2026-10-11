@@ -7,14 +7,15 @@
 //! was lost is reconciled from the transaction's recorded outcome
 //! ([`crate::replayable`]), never run again blind.
 
+use lash_durable::domain::DomainWrite;
 use lash_durable::{
-    ActorCommit, ActorTx, CommitCapacity, CommitLabel, DurableError, DurableInstant, MailCommit,
-    MailTx, StoreFailure, StoreFailureKind,
+    ActorCommit, ActorState, ActorTx, CommitCapacity, CommitLabel, DurableError, DurableInstant,
+    MailCommit, MailTx, Release, StoreFailure, StoreFailureKind,
 };
 
 use super::{
-    PostgresDurableStore, SQL, Tx, apply_mail, apply_owner, get, group_members, sqlx_failure,
-    store_failure,
+    Committing, PostgresDurableStore, SQL, Tx, actor_state, apply_domain, apply_mail, executor,
+    fenced, get, graph, group_members, sqlx_failure, store_failure,
 };
 use crate::guarded_tx::begin_durable;
 use crate::replayable::{Attempt, Settle, Uncommitted, XactId};
@@ -22,7 +23,7 @@ use crate::replayable::{Attempt, Settle, Uncommitted, XactId};
 /// A refusal as a replayable commit attempt's failure: contention rolled
 /// the attempt back, and anything else (an ownership fence included) is the
 /// commit's answer.
-fn attempt(error: DurableError) -> Attempt<DurableError> {
+pub(super) fn attempt(error: DurableError) -> Attempt<DurableError> {
     if matches!(
         &error,
         DurableError::Store(StoreFailure {
@@ -64,7 +65,15 @@ impl PostgresDurableStore {
                                 });
                             }
                             let tx = &tx;
+                            let call = executor::Call::of(tx, &self.pools.held_texts);
+                            let call = &call;
                             self.replay(label, deadline, || async move {
+                                if let Some(call) = call
+                                    && let Some(commit) =
+                                        self.call_owner(label, tx, call, deadline).await?
+                                {
+                                    return Ok(commit);
+                                }
                                 let (mut guarded, now, fence) =
                                     self.open_replayable(label, Some(tx)).await?;
                                 let outcome = Box::pin(apply_owner(
@@ -79,6 +88,7 @@ impl PostgresDurableStore {
                                 self.settle(label, guarded, outcome, deadline).await
                             })
                             .await
+                            .inspect(|_| self.pools.held_texts.note(tx))
                         },
                     ))
                     .await
@@ -247,6 +257,118 @@ impl PostgresDurableStore {
             }
         }
     }
+}
+
+/// Apply the owner's `write` after its ownership fence, which the commit's
+/// first statement ran ([`super::PostgresDurableStatements::owner_envelope`]):
+/// `fence` is what it read under the fence, `None` when the epoch was not
+/// current.
+pub(super) async fn apply_owner(
+    tx: &mut Tx,
+    write: &ActorTx,
+    fence: Option<FenceRead>,
+    now: DurableInstant,
+    fleet: lash_core_execution::FleetFormat,
+    checkpoint_ref_chunk: usize,
+) -> Result<ActorCommit, DurableError> {
+    let actor = write.actor().as_str();
+    let Some(fence) = fence else {
+        return Err(fenced(tx, write.actor(), write.epoch()).await?);
+    };
+    let publications: Vec<_> = write
+        .domain()
+        .iter()
+        .flat_map(DomainWrite::publications)
+        .collect();
+    if !write.graph().is_empty() || !write.reads().is_empty() || !publications.is_empty() {
+        let checked = lash_durable::domain::graph_commit::check_graph(
+            write.graph(),
+            write.reads(),
+            &publications,
+        )?;
+        if let Some(budget) = write.budget() {
+            lash_durable::domain::graph_commit::measure_owner_commit(write.graph(), write.domain())
+                .and_then(|measured| budget.admit(&measured))?;
+        }
+        graph::install(tx, &checked).await?;
+    }
+    let committing = Committing {
+        checkpoint_ref_chunk,
+        actor: write.actor(),
+        epoch: write.epoch(),
+        now,
+        fleet,
+    };
+    for domain in write.domain() {
+        apply_domain(tx, &committing, domain).await?;
+    }
+    if let Some(formats) = write.formats() {
+        crate::observed_sql::query(SQL.actor.stamp_formats.sql())
+            .bind(actor)
+            .bind(formats.as_str())
+            .execute(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(sqlx_failure)?;
+    }
+    if let Some(through) = write.ack() {
+        crate::observed_sql::query(SQL.postgres.ack_through.sql())
+            .bind(actor)
+            .bind(through.0)
+            .execute(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(sqlx_failure)?;
+    }
+    let state = match write.release() {
+        None => ActorState::Owned,
+        Some(Release::Parked) => {
+            // A cancel that arrived since the owner's read is not lost to the
+            // park: the actor goes ready instead, its park kept, and its
+            // claimer ends it engine-free.
+            let stored: String =
+                crate::observed_sql::query_scalar(SQL.postgres.park_unless_pending.sql())
+                    .bind(actor)
+                    .bind(now.0)
+                    .bind(lash_durable::domain::CANCEL_MAIL)
+                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+            actor_state(&stored)?
+        }
+        Some(Release::Terminal) => {
+            crate::observed_sql::query(SQL.mail.delete_all.sql())
+                .bind(actor)
+                .execute(crate::observed_sql::executor(&mut ***tx))
+                .await
+                .map_err(sqlx_failure)?;
+            let stored: String = crate::observed_sql::query_scalar(SQL.actor.end.sql())
+                .bind(actor)
+                .fetch_one(crate::observed_sql::executor(&mut ***tx))
+                .await
+                .map_err(sqlx_failure)?;
+            actor_state(&stored)?
+        }
+        Some(rest) => {
+            let (state, due) = match rest {
+                Release::Waiting { next_due } => ("waiting", next_due.map(|due| due.0)),
+                Release::Ready => ("ready", None),
+                _ => ("idle", None),
+            };
+            let stored: String = crate::observed_sql::query_scalar(SQL.actor.release.sql())
+                .bind(actor)
+                .bind(state)
+                .bind(due)
+                .bind(now.0)
+                .fetch_one(crate::observed_sql::executor(&mut ***tx))
+                .await
+                .map_err(sqlx_failure)?;
+            actor_state(&stored)?
+        }
+    };
+    Ok(ActorCommit {
+        revision: fence.revision,
+        state,
+        turn_cancel: fence.turn_cancel,
+    })
 }
 
 /// What an owner commit's fence read: the state revision it bumped and,

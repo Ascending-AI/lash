@@ -35,7 +35,8 @@ use lash_store_sql::Dialect;
 use lash_store_sql::durable::prompts::{PromptStatements, REQUEST_PART, SNAPSHOT_PART};
 use sqlx::PgConnection;
 
-use super::{Committing, get, sqlx_failure};
+use super::steps::{Entry, Shape, Step, Ty, Value};
+use super::{Committing, HeldTexts, get, sqlx_failure};
 use crate::connection_sql::connection_sql;
 
 static SQL: LazyLock<PromptStatements> =
@@ -54,6 +55,20 @@ lash_store_sql::statements! {
         /// bytes, so a conflict is the same text.
         insert_texts = "INSERT INTO prompt_texts (hash, text)
              SELECT hash, text FROM unnest(?1::TEXT[], ?2::TEXT[]) AS batch(hash, text)
+             ON CONFLICT (hash) DO NOTHING";
+
+        /// Of the addresses `?1`, every one sent without its body (`?2[i]`
+        /// null) that is not stored: a one-call record's texts are locked
+        /// first, so one it finds stays until it commits.
+        unsent_absent = "SELECT batch.hash
+             FROM unnest(?1::TEXT[], ?2::TEXT[]) AS batch(hash, text)
+             WHERE batch.text IS NULL
+               AND NOT EXISTS (SELECT 1 FROM prompt_texts AS stored WHERE stored.hash = batch.hash)";
+
+        /// [`Self::insert_texts`] of the texts sent with their bodies.
+        insert_sent_texts = "INSERT INTO prompt_texts (hash, text)
+             SELECT hash, text FROM unnest(?1::TEXT[], ?2::TEXT[]) AS batch(hash, text)
+             WHERE batch.text IS NOT NULL
              ON CONFLICT (hash) DO NOTHING";
 
         /// Root text `?5[i]` under part `?4[i]` of call `?3` of owner `?2`
@@ -139,6 +154,125 @@ lash_store_sql::statements! {
 #[cfg(test)]
 pub(crate) static LAW_SQL: LazyLock<PromptLawStatements> =
     LazyLock::new(|| PromptLawStatements::render(Dialect::postgres()));
+
+/// The prompt statements an owner commit runs as steps.
+pub(super) static INSERT_SNAPSHOT: Entry = Entry::new(
+    || &SQL.insert_snapshot,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Int],
+    Shape::Returning,
+);
+pub(super) static LOCK_TEXTS: Entry = Entry::new(
+    || &connection_sql().lock_xact_shared_by_text_batch_seeded,
+    &[Ty::Texts, Ty::Int],
+    Shape::Select,
+);
+pub(super) static UNSENT_ABSENT: Entry = Entry::new(
+    || &POSTGRES_SQL.unsent_absent,
+    &[Ty::Texts, Ty::Texts],
+    Shape::Select,
+);
+pub(super) static INSERT_SENT_TEXTS: Entry = Entry::new(
+    || &POSTGRES_SQL.insert_sent_texts,
+    &[Ty::Texts, Ty::Texts],
+    Shape::Exec,
+);
+pub(super) static INSERT_EDGES: Entry = Entry::new(
+    || &POSTGRES_SQL.insert_edges,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Texts, Ty::Texts],
+    Shape::Exec,
+);
+
+/// `write`'s one-call step program at `epoch`: a record's root, which must
+/// be the call's first, then its distinct texts, locked shared in text
+/// order, the bodies stored that `held` does not name, and its edges. A text
+/// sent without its body that the store does not hold refuses the call, and
+/// the record runs in the explicit form, which reads what the store holds.
+/// A settlement or a release has none: what it reclaims is read.
+pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Option<Vec<Step>> {
+    let PromptWrite::Record {
+        call,
+        snapshot,
+        request,
+        snapshot_texts,
+        request_texts,
+        prefix,
+    } = write
+    else {
+        return None;
+    };
+    // The direct path publishes fragment children and replaces or releases a
+    // turn's session prefix. This step program only represents leaf texts
+    // without a prefix transition, so keep those writes on the direct path.
+    if prefix.is_some()
+        || matches!(&call.call, ModelCallId::Turn { .. })
+        || snapshot_texts
+            .iter()
+            .chain(request_texts)
+            .any(|text| !text.children.is_empty())
+    {
+        return None;
+    }
+    let mut program = vec![Step::one(
+        &INSERT_SNAPSHOT,
+        vec![
+            Value::text(call.session.as_str()),
+            Value::text(call.call.owner_column()),
+            Value::text(call.call.call_column()),
+            Value::Text(snapshot.clone()),
+            Value::text(request.clone()),
+            Value::int(epoch.0),
+        ],
+    )];
+    // The first text under each address stands for it.
+    let mut distinct = BTreeMap::new();
+    for text in snapshot_texts.iter().chain(request_texts) {
+        distinct
+            .entry(text.hash.as_str())
+            .or_insert(text.text.as_str());
+    }
+    if distinct.is_empty() {
+        return Some(program);
+    }
+    let hashes: Vec<Option<String>> = distinct
+        .keys()
+        .map(|hash| Some((*hash).to_owned()))
+        .collect();
+    let bodies: Vec<Option<String>> = distinct
+        .iter()
+        .map(|(hash, text)| (!held.contains(hash)).then(|| (*text).to_owned()))
+        .collect();
+    let (parts, edges): (Vec<Option<String>>, Vec<Option<String>>) =
+        edges(snapshot_texts, request_texts)
+            .into_iter()
+            .map(|(part, hash)| (Some(part.to_owned()), Some(hash.to_owned())))
+            .unzip();
+    program.extend([
+        Step::any(
+            &LOCK_TEXTS,
+            vec![Value::Texts(hashes.clone()), Value::int(TEXT_LOCK_SEED)],
+        ),
+        Step::new(
+            &UNSENT_ABSENT,
+            vec![Value::Texts(hashes.clone()), Value::Texts(bodies.clone())],
+            Some(0),
+        ),
+        Step::any(
+            &INSERT_SENT_TEXTS,
+            vec![Value::Texts(hashes), Value::Texts(bodies)],
+        ),
+        Step::any(
+            &INSERT_EDGES,
+            vec![
+                Value::text(call.session.as_str()),
+                Value::text(call.call.owner_column()),
+                Value::text(call.call.call_column()),
+                Value::Texts(parts),
+                Value::Texts(edges),
+            ],
+        ),
+    ]);
+    Some(program)
+}
 
 pub(super) async fn apply(
     tx: &mut PgConnection,

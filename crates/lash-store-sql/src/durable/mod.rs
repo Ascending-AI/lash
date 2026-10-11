@@ -39,6 +39,10 @@ pub const NODES_TABLE: &str = "nodes";
 /// The actor table's unprefixed name.
 pub const ACTORS_TABLE: &str = "actors";
 
+/// PostgreSQL's one-call owner commits' recorded answers (FIG-5936): the
+/// table only that backend's executor names.
+pub const OWNER_COMMIT_LATCHES_TABLE: &str = "owner_commit_latches";
+
 /// The mailbox table's unprefixed name.
 pub const MAIL_TABLE: &str = "actor_mail";
 

@@ -1456,13 +1456,10 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
                     assert!(cost.lock_statement_elapsed > Duration::ZERO);
                     assert!(cost.returned_bytes > 0);
                     assert_eq!(cost.group_commit_members, [2, 0][index]);
-                    // The envelope is three statements (FIG-5275): the
-                    // fenced `BEGIN`, one statement reading the fence, the
-                    // clock, the transaction id and the epoch fence, and
-                    // `COMMIT`. The grouped outcomes' facts are graph nodes,
-                    // installed in one statement (FIG-5894), and each fact
-                    // is one conditional append (FIG-5936).
-                    assert_eq!(cost.sql_statements, [6, 4][index]);
+                    // Each commit is one call (FIG-5936): its envelope, the
+                    // grouped outcomes' graph nodes and their facts' appends
+                    // all run in it.
+                    assert_eq!(cost.sql_statements, [1, 1][index]);
                     eprintln!("{label}: {cost:?}");
                 }
             });

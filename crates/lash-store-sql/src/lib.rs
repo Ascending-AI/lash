@@ -108,6 +108,7 @@ pub const TABLES: &[&str] = &[
     durable::ACTORS_TABLE,
     durable::MAIL_TABLE,
     durable::NODES_TABLE,
+    durable::OWNER_COMMIT_LATCHES_TABLE,
     durable::graph::ADMISSIONS_TABLE,
     durable::graph::CATALOG_VIEW,
     durable::graph::EDGES_TABLE,

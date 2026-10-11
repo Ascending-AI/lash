@@ -24,6 +24,7 @@ use lash_store_sql::Dialect;
 use lash_store_sql::durable::turns::TurnStatements;
 use sqlx::{PgConnection, Row};
 
+use super::steps::{self, Entry, Shape, Step, Ty, Value};
 use super::{Committing, corrupt, integer, node_ref, sqlx_failure};
 
 static SQL: LazyLock<TurnStatements> =
@@ -67,46 +68,104 @@ fn encoding(error: &lash_core_execution::StoreError) -> DurableError {
     })
 }
 
-pub(super) async fn apply(
-    tx: &mut PgConnection,
-    commit: &Committing<'_>,
-    write: &TurnWrite,
-) -> Result<(), DurableError> {
-    match write {
+/// The turn statements an owner commit runs as steps.
+pub(super) static ADMIT_RUN: Entry = Entry::new(
+    || &SQL.admit_run,
+    &[Ty::Text, Ty::Text, Ty::Text],
+    Shape::Returning,
+);
+pub(super) static INSERT_PHASE: Entry = Entry::new(
+    || &SQL.insert_phase,
+    &[
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Int,
+        Ty::Int,
+        Ty::Text,
+        Ty::Text,
+        Ty::Int,
+        Ty::Int,
+        Ty::Int,
+    ],
+    Shape::Exec,
+);
+pub(super) static ADVANCE_PHASE: Entry = Entry::new(
+    || &SQL.advance_phase,
+    &[
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Int,
+        Ty::Int,
+        Ty::Text,
+        Ty::Text,
+        Ty::Int,
+        Ty::Int,
+        Ty::Int,
+        Ty::Text,
+    ],
+    Shape::Returning,
+);
+pub(super) static TRACE_EXPORTED: Entry = Entry::new(
+    || &SQL.trace_exported,
+    &[Ty::Text, Ty::Text, Ty::Int],
+    Shape::Returning,
+);
+pub(super) static OPEN_NAMED_RUN: Entry =
+    Entry::new(|| &SQL.open_named_run, &[Ty::Text, Ty::Text], Shape::Select);
+pub(super) static UPSERT_NAMESPACES: Entry = Entry::new(
+    || &POSTGRES_SQL.upsert_namespaces,
+    &[
+        Ty::Text,
+        Ty::Text,
+        Ty::Texts,
+        Ty::Texts,
+        Ty::Texts,
+        Ty::Bools,
+    ],
+    Shape::Exec,
+);
+pub(super) static WORKING_SET: Entry = Entry::new(
+    || &SQL.working_set,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Int],
+    Shape::Returning,
+);
+
+/// `write`'s step program at `epoch`: each write is guarded on its turn,
+/// the admission on the session having none open. A terminal has none: its
+/// session window and its inputs' settlement are read.
+pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>, DurableError> {
+    let turn = |session: &SessionId, run: &TurnId| {
+        vec![Value::text(session.as_str()), Value::text(run.as_str())]
+    };
+    Ok(Some(match write {
         TurnWrite::Admit {
             session,
             run,
             admission,
             turn_deadline,
         } => {
-            let admitted: Option<String> = crate::observed_sql::query_scalar(SQL.admit_run.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .bind(admission.to_stored().map_err(|error| encoding(&error))?)
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            if admitted.is_none() {
-                return refuse(DomainRefusal::OpenTurnExists {
-                    session: session.clone(),
-                });
-            }
             let (phase, argument) = UnfinishedPhase::Admitted.stored();
-            crate::observed_sql::query(SQL.insert_phase.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .bind(phase)
-                .bind(argument.map(integer::<i64>).transpose()?)
-                .bind(0_i64)
-                .bind(Option::<String>::None)
-                .bind(Option::<String>::None)
-                .bind(Option::<i64>::None)
-                .bind(turn_deadline.map(|deadline| deadline.0))
-                .bind(commit.epoch.0)
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            Ok(())
+            let mut admitted = turn(session, run);
+            admitted.push(Value::text(
+                admission.to_stored().map_err(|error| encoding(&error))?,
+            ));
+            let mut phased = turn(session, run);
+            phased.extend([
+                Value::text(phase),
+                Value::Int(argument.map(integer::<i64>).transpose()?),
+                Value::int(0),
+                Value::Text(None),
+                Value::Text(None),
+                Value::Int(None),
+                Value::Int(turn_deadline.map(|deadline| deadline.0)),
+                Value::int(epoch.0),
+            ]);
+            vec![
+                Step::one(&ADMIT_RUN, admitted),
+                Step::any(&INSERT_PHASE, phased),
+            ]
         }
         TurnWrite::Advance {
             session,
@@ -116,64 +175,30 @@ pub(super) async fn apply(
         } => {
             let (stored, argument) = phase.stored();
             let pin = phase.model();
-            let advanced: Option<String> =
-                crate::observed_sql::query_scalar(SQL.advance_phase.sql())
-                    .bind(session.as_str())
-                    .bind(run.as_str())
-                    .bind(stored)
-                    .bind(argument.map(integer::<i64>).transpose()?)
-                    .bind(i64::from(*iteration))
-                    .bind(phase.checkpoint().map(|checkpoint| checkpoint.to_hex()))
-                    .bind(pin.map(|pin| pin.request_ref.as_str()))
-                    .bind(pin.map(|pin| pin.deadline.0))
-                    .bind(commit.epoch.0)
-                    .bind(pin.map(|pin| i64::from(pin.call)))
-                    .bind(pin.map(|pin| pin.stream_from.as_str()))
-                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-            if advanced.is_none() {
-                return refuse(DomainRefusal::TurnNotOpen {
-                    session: session.clone(),
-                    run: run.clone(),
-                });
-            }
-            Ok(())
+            let mut values = turn(session, run);
+            values.extend([
+                Value::text(stored),
+                Value::Int(argument.map(integer::<i64>).transpose()?),
+                Value::int(i64::from(*iteration)),
+                Value::Text(phase.checkpoint().map(|checkpoint| checkpoint.to_hex())),
+                Value::Text(pin.map(|pin| pin.request_ref.clone())),
+                Value::Int(pin.map(|pin| pin.deadline.0)),
+                Value::int(epoch.0),
+                Value::Int(pin.map(|pin| i64::from(pin.call))),
+                Value::Text(pin.map(|pin| pin.stream_from.clone())),
+            ]);
+            vec![Step::one(&ADVANCE_PHASE, values)]
         }
         TurnWrite::TraceExported { session, run } => {
-            let recorded: Option<String> =
-                crate::observed_sql::query_scalar(SQL.trace_exported.sql())
-                    .bind(session.as_str())
-                    .bind(run.as_str())
-                    .bind(commit.epoch.0)
-                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-            if recorded.is_none() {
-                return refuse(DomainRefusal::TurnNotOpen {
-                    session: session.clone(),
-                    run: run.clone(),
-                });
-            }
-            Ok(())
+            let mut values = turn(session, run);
+            values.push(Value::int(epoch.0));
+            vec![Step::one(&TRACE_EXPORTED, values)]
         }
         TurnWrite::Namespaces {
             session,
             run,
             namespaces,
         } => {
-            let open: Option<String> = crate::observed_sql::query_scalar(SQL.open_named_run.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            if open.is_none() {
-                return refuse(DomainRefusal::TurnNotOpen {
-                    session: session.clone(),
-                    run: run.clone(),
-                });
-            }
             // One write per plugin: a later write of a plugin replaces an
             // earlier one's entry, and its values unless it holds them.
             let mut written: Vec<(&str, String, Option<String>, bool)> = Vec::new();
@@ -192,29 +217,28 @@ pub(super) async fn apply(
                 };
                 written.push((namespace.plugin.as_str(), entry, root, held));
             }
+            let mut program = vec![Step::one(&OPEN_NAMED_RUN, turn(session, run))];
             if !written.is_empty() {
-                let plugins: Vec<&str> = written.iter().map(|(plugin, ..)| *plugin).collect();
-                let entries: Vec<&str> = written
-                    .iter()
-                    .map(|(_, entry, ..)| entry.as_str())
-                    .collect();
-                let roots: Vec<Option<&str>> = written
-                    .iter()
-                    .map(|(_, _, root, _)| root.as_deref())
-                    .collect();
-                let held: Vec<bool> = written.iter().map(|(.., held)| *held).collect();
-                crate::observed_sql::query(POSTGRES_SQL.upsert_namespaces.sql())
-                    .bind(session.as_str())
-                    .bind(run.as_str())
-                    .bind(&plugins)
-                    .bind(&entries)
-                    .bind(&roots)
-                    .bind(&held)
-                    .execute(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
+                let mut values = turn(session, run);
+                values.extend([
+                    Value::Texts(
+                        written
+                            .iter()
+                            .map(|(plugin, ..)| Some((*plugin).to_owned()))
+                            .collect(),
+                    ),
+                    Value::Texts(
+                        written
+                            .iter()
+                            .map(|(_, entry, ..)| Some(entry.clone()))
+                            .collect(),
+                    ),
+                    Value::Texts(written.iter().map(|(_, _, root, _)| root.clone()).collect()),
+                    Value::Bools(written.iter().map(|(.., held)| *held).collect()),
+                ]);
+                program.push(Step::any(&UPSERT_NAMESPACES, values));
             }
-            Ok(())
+            program
         }
         TurnWrite::Working {
             session,
@@ -222,22 +246,45 @@ pub(super) async fn apply(
             expected,
             working,
         } => {
-            let set: Option<String> = crate::observed_sql::query_scalar(SQL.working_set.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .bind(working.map(|working| working.to_hex()))
-                .bind(expected.map(|expected| expected.to_hex()))
-                .bind(commit.epoch.0)
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            if set.is_none() {
-                return refuse(DomainRefusal::TurnNotOpen {
+            let mut values = turn(session, run);
+            values.extend([
+                Value::Text(working.map(|working| working.to_hex())),
+                Value::Text(expected.map(|expected| expected.to_hex())),
+                Value::int(epoch.0),
+            ]);
+            vec![Step::one(&WORKING_SET, values)]
+        }
+        TurnWrite::Terminal { .. } => return Ok(None),
+    }))
+}
+
+pub(super) async fn apply(
+    tx: &mut PgConnection,
+    commit: &Committing<'_>,
+    write: &TurnWrite,
+) -> Result<(), DurableError> {
+    match write {
+        TurnWrite::Admit { session, .. } => {
+            let program = steps(commit.epoch, write)?.unwrap_or_default();
+            match steps::run(tx, &program).await? {
+                None => Ok(()),
+                Some(_) => refuse(DomainRefusal::OpenTurnExists {
+                    session: session.clone(),
+                }),
+            }
+        }
+        TurnWrite::Advance { session, run, .. }
+        | TurnWrite::TraceExported { session, run }
+        | TurnWrite::Namespaces { session, run, .. }
+        | TurnWrite::Working { session, run, .. } => {
+            let program = steps(commit.epoch, write)?.unwrap_or_default();
+            match steps::run(tx, &program).await? {
+                None => Ok(()),
+                Some(_) => refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
                     run: run.clone(),
-                });
+                }),
             }
-            Ok(())
         }
         TurnWrite::Terminal {
             session,

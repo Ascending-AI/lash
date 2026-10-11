@@ -171,6 +171,8 @@ impl Statement {
             "LOCK TABLE",
             "PG_ADVISORY",
             "PG_TRY_ADVISORY",
+            // The one-call owner commit takes the commit's locks and writes.
+            "LASH_OWNER_COMMIT(",
         ]
         .iter()
         .any(|word| sql.contains(word));

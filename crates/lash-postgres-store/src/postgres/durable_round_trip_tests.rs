@@ -192,10 +192,9 @@ async fn an_input_acceptance_stays_within_its_round_trip_budget() {
 }
 
 /// The most round trips a turn's admission pays from its open (FIG-5936;
-/// 12 before it): the open, the fenced `BEGIN`, the envelope, the input's
-/// binding and the run's record of it, the run's conditional admission,
-/// its phase, the mailbox acknowledgement and `COMMIT`.
-const ADMIT_ROUND_TRIPS: u64 = 9;
+/// 12 before it): the open and the one-call commit, which binds the input,
+/// admits the run, writes its phase and acknowledges the mailbox.
+const ADMIT_ROUND_TRIPS: u64 = 2;
 
 /// A turn's admission of one input stays within its round-trip budget.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -222,14 +221,13 @@ async fn a_turn_admission_stays_within_its_round_trip_budget() {
 /// The most round trips a model call's critical path pays to commit
 /// `model.start` (FIG-5275; 14 before it, 8 before FIG-5936): the open,
 /// which also reads the turn's cancel and the clock, and the commit.
-const MODEL_START_ROUND_TRIPS: u64 = 6;
+const MODEL_START_ROUND_TRIPS: u64 = 2;
 
 /// The most round trips `model.start`'s commit pays once the owner is open
-/// (FIG-5936; 7 before it): the fenced `BEGIN`, the envelope's one
-/// statement, which also reads the turn's cancel, the install of the
-/// phase's checkpoint node (FIG-5894), the phase's `Advance` and `COMMIT`.
-/// No checkout pings the server.
-const MODEL_START_COMMIT_ROUND_TRIPS: u64 = 5;
+/// (FIG-5936; 7 before it): one call, which runs the envelope, reading the
+/// turn's cancel, installs the phase's checkpoint node and advances the
+/// phase. No checkout pings the server.
+const MODEL_START_COMMIT_ROUND_TRIPS: u64 = 1;
 
 /// The owner's path from a model call's first poll to its committed
 /// `model.start` stays within its round-trip budget, and its commit within
@@ -284,9 +282,9 @@ async fn a_model_start_commit_stays_within_its_round_trip_budget() {
 }
 
 /// The most round trips a round's outcome pays from its open (FIG-5936;
-/// 10 before it): the open, the fenced `BEGIN`, the envelope, the install
-/// of its record, the fact's one conditional append and `COMMIT`.
-const ROUND_OUTCOME_ROUND_TRIPS: u64 = 6;
+/// 10 before it): the open and the one-call commit, which installs its
+/// record and appends the fact.
+const ROUND_OUTCOME_ROUND_TRIPS: u64 = 2;
 
 /// A round's outcome of one call stays within its round-trip budget.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -317,10 +315,9 @@ async fn a_round_outcome_stays_within_its_round_trip_budget() {
 }
 
 /// The most round trips a VM's park over its earlier park pays from its
-/// open (FIG-5936; 9 before it): the open, the fenced `BEGIN`, the
-/// envelope, the install of its state, the root's one guarded replace and
-/// `COMMIT`.
-const VM_PARK_ROUND_TRIPS: u64 = 6;
+/// open (FIG-5936; 9 before it): the open and the one-call commit, which
+/// installs its state and replaces the root.
+const VM_PARK_ROUND_TRIPS: u64 = 2;
 
 /// A VM park over an earlier park stays within its round-trip budget.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

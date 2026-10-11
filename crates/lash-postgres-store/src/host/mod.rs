@@ -301,6 +301,9 @@ pub struct TransactionPrelude {
     /// begins with.
     collecting: Arc<str>,
     deadline: Option<Duration>,
+    /// The `lock_timeout` a one-call commit installs, and its statement
+    /// budget in milliseconds.
+    call_guards: (Option<Arc<str>>, Option<i64>),
 }
 
 impl TransactionPrelude {
@@ -330,6 +333,13 @@ impl TransactionPrelude {
             fenced: fenced_begin(&settings).into(),
             collecting: collecting_begin(&settings).into(),
             deadline: guards.operation_deadline,
+            call_guards: (
+                timeout_setting(guards.lock).map(|ms| format!("{ms}ms").into()),
+                match guards.statement {
+                    ServerTimeout::Limit(limit) => i64::try_from(limit.as_millis()).ok(),
+                    ServerTimeout::Inherit | ServerTimeout::Disabled => None,
+                },
+            ),
         }
     }
 
@@ -341,6 +351,7 @@ impl TransactionPrelude {
             fenced: fenced_begin("").into(),
             collecting: collecting_begin("").into(),
             deadline: None,
+            call_guards: (None, None),
         }
     }
 
@@ -360,6 +371,13 @@ impl TransactionPrelude {
     /// the writer fence shared, then `BEGIN` ([`crate::guarded_tx`]).
     pub(crate) fn collecting(&self) -> &str {
         &self.collecting
+    }
+
+    /// What a one-call commit installs in place of the `BEGIN`'s guards:
+    /// its `lock_timeout`, and the budget of its statements in milliseconds,
+    /// which it checks between them.
+    pub(crate) fn call_guards(&self) -> (Option<&str>, Option<i64>) {
+        (self.call_guards.0.as_deref(), self.call_guards.1)
     }
 
     /// The whole-operation deadline of the profile.
@@ -652,6 +670,9 @@ pub(crate) struct RolePools {
     pub(crate) durable_retry: RetryPolicy,
     /// How a contended wait resolution or due settlement runs again.
     pub(crate) wait_retry: RetryPolicy,
+    /// The prompt texts this storage's commits recorded, which a one-call
+    /// commit sends without their bodies.
+    pub(crate) held_texts: crate::durable::HeldTexts,
 }
 
 impl RolePools {
@@ -680,6 +701,7 @@ impl RolePools {
             store_retry: config.retry.store,
             durable_retry: config.retry.durable,
             wait_retry: config.retry.wait_resolution,
+            held_texts: crate::durable::HeldTexts::default(),
         }
     }
 

@@ -551,6 +551,9 @@ pub(crate) struct TableShape {
 pub(crate) struct SchemaShape {
     /// Tables keyed by unqualified name.
     pub(crate) tables: BTreeMap<String, TableShape>,
+    /// Functions keyed by unqualified name: each one's identity arguments
+    /// and result, as the catalog prints them.
+    pub(crate) functions: BTreeMap<String, String>,
 }
 
 impl SchemaShape {
@@ -590,6 +593,19 @@ impl SchemaShape {
             let bad = |what: &str| format!("line {number}: {what}: {trimmed}");
             if let Some(rest) = trimmed.strip_prefix("version ") {
                 version = Some(rest.trim().parse().map_err(|_| bad("bad version"))?);
+            } else if let Some(rest) = trimmed.strip_prefix("function ") {
+                let (name, signature) = rest
+                    .trim()
+                    .split_once(' ')
+                    .ok_or_else(|| bad("bad function"))?;
+                if shape
+                    .functions
+                    .insert(name.to_string(), signature.trim().to_string())
+                    .is_some()
+                {
+                    return Err(bad("duplicate function"));
+                }
+                current = None;
             } else if let Some(rest) = trimmed.strip_prefix("table ") {
                 let name = rest.trim().to_string();
                 if shape
@@ -682,12 +698,31 @@ impl SchemaShape {
                 out.push_str(&format!("  foreign-key {key}\n"));
             }
         }
+        for (name, signature) in &self.functions {
+            out.push_str(&format!("function {name} {signature}\n"));
+        }
         out
     }
 
     /// Diffs a live shape against this expected shape.
     fn diff(&self, found: &Self) -> Vec<SchemaFinding> {
         let mut findings = Vec::new();
+        for (name, expected) in &self.functions {
+            match found.functions.get(name) {
+                None => findings.push(SchemaFinding::MissingFunction {
+                    function: name.clone(),
+                    expected: expected.clone(),
+                }),
+                Some(found) if found != expected => {
+                    findings.push(SchemaFinding::FunctionMismatch {
+                        function: name.clone(),
+                        expected: expected.clone(),
+                        found: found.clone(),
+                    });
+                }
+                Some(_) => {}
+            }
+        }
         for (name, expected_table) in &self.tables {
             let Some(found_table) = found.tables.get(name) else {
                 findings.push(SchemaFinding::MissingTable {
@@ -1143,6 +1178,23 @@ pub enum SchemaFinding {
         /// Key the database has.
         found: ForeignKeyShape,
     },
+    /// A function lash calls is absent.
+    MissingFunction {
+        /// The function's name.
+        function: String,
+        /// Its identity arguments and result this build expects.
+        expected: String,
+    },
+    /// A function lash calls takes other arguments or answers another
+    /// result.
+    FunctionMismatch {
+        /// The function's name.
+        function: String,
+        /// Its identity arguments and result this build expects.
+        expected: String,
+        /// The ones the database has.
+        found: String,
+    },
     /// A seed row `schema.sql` inserts is absent. No structural check can see
     /// this, and lash cannot run without it.
     MissingSeedRow {
@@ -1168,6 +1220,7 @@ impl SchemaFinding {
             Self::MissingForeignKey { .. }
             | Self::ForeignKeyMismatch { .. }
             | Self::UnexpectedForeignKey { .. } => "FOREIGN KEY DRIFT",
+            Self::MissingFunction { .. } | Self::FunctionMismatch { .. } => "FUNCTION DRIFT",
             Self::MissingSeedRow { .. } => "SEED ROWS",
         }
     }
@@ -1240,6 +1293,17 @@ impl fmt::Display for SchemaFinding {
             Self::UnexpectedForeignKey { table, found } => {
                 write!(formatter, "{table}: unexpected foreign key {found}")
             }
+            Self::MissingFunction { function, expected } => {
+                write!(
+                    formatter,
+                    "{function}: function is missing, expected {expected}"
+                )
+            }
+            Self::FunctionMismatch {
+                function,
+                expected,
+                found,
+            } => write!(formatter, "{function}: expected {expected}, found {found}"),
             Self::MissingSeedRow { table, detail } => {
                 write!(formatter, "{table}: seed row is missing ({detail})")
             }
@@ -1310,6 +1374,7 @@ impl fmt::Display for SchemaReport {
             "COLUMN DRIFT",
             "UNIQUE GUARD DRIFT",
             "FOREIGN KEY DRIFT",
+            "FUNCTION DRIFT",
             "SEED ROWS",
         ];
         for section in sections {

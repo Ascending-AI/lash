@@ -13,6 +13,7 @@ use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
 use lash_sansio::{BatchId, InputId, SessionId, TurnId};
 use sqlx::PgConnection;
 
+use super::steps::{self, Entry, Shape, Step, Ty, Value};
 use super::{Committing, SQL, get, sqlx_failure};
 
 lash_store_sql::statements! {
@@ -172,14 +173,13 @@ pub(super) async fn cancel_inputs(
             continue;
         };
         if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop {
-            admit(
-                &mut *tx,
-                session,
-                run,
-                std::slice::from_ref(&affected.input_id),
-                &[],
-            )
-            .await?;
+            let write = SessionMailWrite::Admit {
+                session: session.clone(),
+                run: run.clone(),
+                inputs: vec![affected.input_id.clone()],
+                batches: Vec::new(),
+            };
+            admit(&mut *tx, &write).await?;
         }
         outcome.affected_inputs.push(affected);
     }
@@ -455,12 +455,7 @@ pub(super) async fn apply(
     write: &SessionMailWrite,
 ) -> Result<(), DurableError> {
     match write {
-        SessionMailWrite::Admit {
-            session,
-            run,
-            inputs,
-            batches,
-        } => admit(tx, session, run, inputs, batches).await,
+        SessionMailWrite::Admit { .. } => admit(tx, write).await,
         SessionMailWrite::Enqueue {
             session,
             draft_json,
@@ -530,62 +525,104 @@ async fn enqueue(
     }
 }
 
-/// Bind the admitted mail to its run, each row still open and unbound: one
-/// statement per kind, whatever their number. The first item, in the
-/// order named, that did not bind refuses the commit.
-async fn admit(
-    tx: &mut PgConnection,
-    session: &SessionId,
-    run: &TurnId,
-    inputs: &[InputId],
-    batches: &[BatchId],
-) -> Result<(), DurableError> {
-    let moved = |item: &str| {
-        DurableError::Domain(DomainRefusal::SessionMailMoved {
-            session: session.clone(),
-            item: item.to_owned(),
-        })
+/// The session-mail statements an owner commit runs as steps.
+pub(super) static BIND_INPUTS: Entry = Entry::new(
+    || &POSTGRES_SQL.bind_inputs,
+    &[Ty::Text, Ty::Texts, Ty::Text],
+    Shape::Returning,
+);
+pub(super) static RECORD_RUN_INPUTS: Entry = Entry::new(
+    || &POSTGRES_SQL.record_run_inputs,
+    &[Ty::Text, Ty::Texts, Ty::Text],
+    Shape::Exec,
+);
+pub(super) static BIND_BATCHES: Entry = Entry::new(
+    || &POSTGRES_SQL.bind_batches,
+    &[Ty::Text, Ty::Texts, Ty::Text],
+    Shape::Returning,
+);
+
+/// `write`'s step program: an admission binds its inputs, records the run
+/// executes them, and binds its batches, one statement per kind whatever
+/// their number, each bind answering every item it names. An enqueue or an
+/// operation's entry has none: what it admits is read.
+pub(super) fn steps(write: &SessionMailWrite) -> Option<Vec<Step>> {
+    let SessionMailWrite::Admit {
+        session,
+        run,
+        inputs,
+        batches,
+    } = write
+    else {
+        return None;
     };
+    let named = |items: Vec<&str>| {
+        vec![
+            Value::text(session.as_str()),
+            Value::Texts(
+                items
+                    .into_iter()
+                    .map(|item| Some(item.to_owned()))
+                    .collect(),
+            ),
+            Value::text(run.as_str()),
+        ]
+    };
+    let mut program = Vec::new();
     if !inputs.is_empty() {
-        let named: Vec<&str> = inputs.iter().map(InputId::as_str).collect();
-        let bound: std::collections::HashSet<String> =
-            crate::observed_sql::query_scalar(POSTGRES_SQL.bind_inputs.sql())
-                .bind(session.as_str())
-                .bind(&named)
-                .bind(run.as_str())
-                .fetch_all(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?
-                .into_iter()
-                .collect();
-        if let Some(input) = named.iter().find(|input| !bound.contains(**input)) {
-            return Err(moved(input));
-        }
-        crate::observed_sql::query(POSTGRES_SQL.record_run_inputs.sql())
-            .bind(session.as_str())
-            .bind(&named)
-            .bind(run.as_str())
-            .execute(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(sqlx_failure)?;
+        let items: Vec<&str> = inputs.iter().map(InputId::as_str).collect();
+        program.push(Step::new(
+            &BIND_INPUTS,
+            named(items.clone()),
+            Some(items.len() as u64),
+        ));
+        program.push(Step::any(&RECORD_RUN_INPUTS, named(items)));
     }
     if !batches.is_empty() {
-        let named: Vec<&str> = batches.iter().map(BatchId::as_str).collect();
-        let bound: std::collections::HashSet<String> =
-            crate::observed_sql::query_scalar(POSTGRES_SQL.bind_batches.sql())
-                .bind(session.as_str())
-                .bind(&named)
-                .bind(run.as_str())
-                .fetch_all(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?
-                .into_iter()
-                .collect();
-        if let Some(batch) = named.iter().find(|batch| !bound.contains(**batch)) {
-            return Err(moved(batch));
-        }
+        let items: Vec<&str> = batches.iter().map(BatchId::as_str).collect();
+        program.push(Step::new(
+            &BIND_BATCHES,
+            named(items.clone()),
+            Some(items.len() as u64),
+        ));
     }
-    Ok(())
+    Some(program)
+}
+
+/// Bind the admitted mail to its run, each row still open and unbound. The
+/// first item, in the order named, that did not bind refuses the commit.
+async fn admit(tx: &mut PgConnection, write: &SessionMailWrite) -> Result<(), DurableError> {
+    let SessionMailWrite::Admit {
+        session,
+        inputs,
+        batches,
+        ..
+    } = write
+    else {
+        return Ok(());
+    };
+    let program = steps(write).unwrap_or_default();
+    let Some(refused) = steps::run(tx, &program).await? else {
+        return Ok(());
+    };
+    let bound: std::collections::HashSet<String> = refused
+        .rows
+        .iter()
+        .map(|row| get::<String>(row, 0))
+        .collect::<Result<_, _>>()?;
+    let named: Vec<&str> = if program[refused.index].entry.name() == BIND_INPUTS.name() {
+        inputs.iter().map(InputId::as_str).collect()
+    } else {
+        batches.iter().map(BatchId::as_str).collect()
+    };
+    let item = named
+        .into_iter()
+        .find(|item| !bound.contains(*item))
+        .unwrap_or_default();
+    Err(DurableError::Domain(DomainRefusal::SessionMailMoved {
+        session: session.clone(),
+        item: item.to_owned(),
+    }))
 }
 
 /// Arm (`true`) or disarm a cut of every session-mail producer transaction

@@ -15,6 +15,7 @@ use lash_store_sql::Dialect;
 use lash_store_sql::durable::snapshots::SnapshotStatements;
 use sqlx::{PgConnection, Row};
 
+use super::steps::{self, Entry, Shape, Step, Ty, Value};
 use super::{Committing, corrupt, integer, node_ref, sqlx_failure};
 
 static SQL: LazyLock<SnapshotStatements> =
@@ -36,88 +37,109 @@ fn conflict(
     })
 }
 
-pub(super) async fn apply(
-    tx: &mut PgConnection,
-    commit: &Committing<'_>,
+/// The exec-root statements an owner commit runs as steps.
+pub(super) static PUT_FIRST: Entry = Entry::new(
+    || &SQL.put_first,
+    &[Ty::Text, Ty::Text, Ty::Bytes, Ty::Int],
+    Shape::Returning,
+);
+pub(super) static PUT_NEXT: Entry = Entry::new(
+    || &SQL.put_next,
+    &[Ty::Text, Ty::Int, Ty::Text, Ty::Bytes, Ty::Int, Ty::Text],
+    Shape::Returning,
+);
+pub(super) static RETIRE: Entry =
+    Entry::new(|| &SQL.retire, &[Ty::Text, Ty::Text], Shape::Returning);
+pub(super) static CLEAR: Entry = Entry::new(|| &SQL.clear, &[Ty::Text], Shape::Exec);
+
+/// `write`'s step program at `epoch`: a put is the first root's insert or
+/// the next root's guarded replace, a retire its guarded delete, each
+/// answering its row, and a clear one delete. A put whose expectation names
+/// a revision without a root, or a root without a revision, has none: it
+/// matches no row, and its refusal is read.
+pub(super) fn steps(
+    epoch: Epoch,
     write: &ExecRootWrite,
-) -> Result<(), DurableError> {
-    match write {
+) -> Result<Option<Vec<Step>>, DurableError> {
+    Ok(match write {
         ExecRootWrite::Put {
             exec,
             expected,
             expected_root,
             root,
             commit_id,
-        } => {
-            let key = exec.stored();
-            // One guarded write: the first root when there is none, else
-            // the next over the expected revision and root. A put whose
-            // expectation names a revision without a root, or a root without
-            // a revision, never matches a row.
-            let put: Option<i64> = match (expected, expected_root) {
-                (None, None) => crate::observed_sql::query_scalar(SQL.put_first.sql())
-                    .bind(&key)
-                    .bind(root.to_hex())
-                    .bind(commit_id.0.to_vec())
-                    .bind(commit.epoch.0)
-                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?,
-                (Some(rev), Some(expected_root)) => {
-                    crate::observed_sql::query_scalar(SQL.put_next.sql())
-                        .bind(&key)
-                        .bind(integer::<i64>(rev.0)?)
-                        .bind(root.to_hex())
-                        .bind(commit_id.0.to_vec())
-                        .bind(commit.epoch.0)
-                        .bind(expected_root.to_hex())
-                        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                        .await
-                        .map_err(sqlx_failure)?
-                }
-                _ => None,
-            };
-            if put.is_some() {
-                return Ok(());
+        } => match (expected, expected_root) {
+            (None, None) => Some(vec![Step::one(
+                &PUT_FIRST,
+                vec![
+                    Value::text(exec.stored()),
+                    Value::text(root.to_hex()),
+                    Value::Bytes(Some(commit_id.0.to_vec())),
+                    Value::int(epoch.0),
+                ],
+            )]),
+            (Some(rev), Some(expected_root)) => Some(vec![Step::one(
+                &PUT_NEXT,
+                vec![
+                    Value::text(exec.stored()),
+                    Value::int(integer::<i64>(rev.0)?),
+                    Value::text(root.to_hex()),
+                    Value::Bytes(Some(commit_id.0.to_vec())),
+                    Value::int(epoch.0),
+                    Value::text(expected_root.to_hex()),
+                ],
+            )]),
+            _ => None,
+        },
+        ExecRootWrite::Retire { exec, expected } => {
+            let mut program = vec![Step::one(
+                &RETIRE,
+                vec![Value::text(exec.stored()), Value::text(expected.to_hex())],
+            )];
+            // The consumer took the cell's report and state: its own facts
+            // and admissions have no reader left.
+            if let ExecKey::Cell(..) = exec {
+                program.extend([
+                    Step::any(
+                        &super::run_records::DELETE_OWNER,
+                        vec![Value::text(exec.stored())],
+                    ),
+                    Step::any(
+                        &super::graph::CLEAR_ADMISSIONS,
+                        vec![Value::text(exec.stored())],
+                    ),
+                ]);
             }
+            Some(program)
+        }
+        ExecRootWrite::Clear { exec } => {
+            Some(vec![Step::any(&CLEAR, vec![Value::text(exec.stored())])])
+        }
+    })
+}
+
+pub(super) async fn apply(
+    tx: &mut PgConnection,
+    commit: &Committing<'_>,
+    write: &ExecRootWrite,
+) -> Result<(), DurableError> {
+    if let Some(program) = steps(commit.epoch, write)?
+        && steps::run(tx, &program).await?.is_none()
+    {
+        return Ok(());
+    }
+    match write {
+        ExecRootWrite::Put { exec, expected, .. } => {
             // Refused: read the revision it found, for the refusal's account.
             let found: Option<i64> = crate::observed_sql::query_scalar(SQL.root.sql())
-                .bind(&key)
+                .bind(exec.stored())
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             Err(conflict(exec, *expected, found.map(revision).transpose()?))
         }
-        ExecRootWrite::Retire { exec, expected } => {
-            let retired = crate::observed_sql::query(SQL.retire.sql())
-                .bind(exec.stored())
-                .bind(expected.to_hex())
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            if retired.is_none() {
-                return Err(conflict(exec, None, None));
-            }
-            // The consumer took the cell's report and state: its own facts
-            // and admissions have no reader left.
-            if let ExecKey::Cell(..) = exec {
-                super::run_records::delete_owner(&mut *tx, &exec.stored())
-                    .await
-                    .map_err(sqlx_failure)?;
-                super::graph::clear_admissions(&mut *tx, &exec.stored())
-                    .await
-                    .map_err(sqlx_failure)?;
-            }
-            Ok(())
-        }
-        ExecRootWrite::Clear { exec } => {
-            crate::observed_sql::query(SQL.clear.sql())
-                .bind(exec.stored())
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            Ok(())
-        }
+        ExecRootWrite::Retire { exec, .. } => Err(conflict(exec, None, None)),
+        ExecRootWrite::Clear { .. } => Err(corrupt("exec root clear", "refused a delete")),
     }
 }
 

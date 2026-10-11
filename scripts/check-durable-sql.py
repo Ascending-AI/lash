@@ -10,7 +10,11 @@ the runtime lanes add to the fenced commit: `run_records`, `exec_snapshots`,
 neutral statement set and one module per dialect. Since I0 (FIG-5194) each
 of those is a directory: the core in `durable/mod.rs` and one file per
 domain (`turns`, `run_records`, `snapshots`, `waits`, `processes`,
-`session_close`, `session_mail`, `park`, `prompts`, `graph`), each owned by its lane. This check fails
+`session_close`, `session_mail`, `park`, `prompts`, `graph`), each owned by its lane.
+PostgreSQL's one-call owner commit (FIG-5936) adds two engine modules beside
+them: `steps`, a domain write's statements as a step program, and
+`executor`, which generates the server function that runs those programs
+and owns `owner_commit_latches`. This check fails
 when:
 
 - SQL naming an engine table appears in any tracked Rust or SQL file outside
@@ -46,6 +50,8 @@ DOMAINS = (
     "park",
     "prompts",
     "graph",
+    "steps",
+    "executor",
 )
 NEUTRAL_DIR = "crates/lash-store-sql/src/durable"
 DIALECT_DIRS = (
@@ -77,6 +83,7 @@ TABLES = (
     "prompt_snapshot_texts",
     "effect_admissions",
     "graph_release_pins",
+    "owner_commit_latches",
 )
 
 ENGINE_SQL = re.compile(

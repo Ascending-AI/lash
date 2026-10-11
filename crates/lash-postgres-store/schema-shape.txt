@@ -215,6 +215,11 @@ table lash_nodes
   column node_id text not-null
   column registered_at_ms bigint not-null
   primary-key (node_id)
+table lash_owner_commit_latches
+  column answer jsonb nullable
+  column created_ms bigint not-null
+  column token text not-null
+  primary-key (token)
 table lash_parent_end_plans
   column ended_at_ms bigint not-null
   column parent_id text not-null
@@ -582,3 +587,4 @@ table lash_waits
   column tool_id text nullable
   column wait_id text not-null
   primary-key (wait_id)
+function lash_owner_commit (p_registry text, p_actor text, p_epoch bigint, p_session text, p_fleet_low integer, p_fleet_high integer, p_token text, p_lock_timeout text, p_statement_ms bigint, p_named text[], p_roots text[], p_digests bytea[], p_contents bytea[], p_parents bytea[], p_children bytea[], p_steps jsonb, p_formats text, p_ack bigint, p_release text, p_due bigint, p_now bigint) -> TABLE(o_revision bigint, o_now bigint, o_fleet integer, o_state text, o_installed bigint, o_cancel_turn text, o_cancel_request text, o_cancel_origin text, o_cancel_reason text, o_cancel_disposition text, o_cancel_mode text)
