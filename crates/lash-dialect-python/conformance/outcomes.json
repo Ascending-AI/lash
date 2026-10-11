@@ -1,0 +1,278 @@
+{
+ "tests/basics/builtin_round_int.py": {
+  "status": "fail",
+  "qualifier": "FIG-5906",
+  "observed": {
+   "end": "ok",
+   "epochs": [
+    {
+     "asked": [],
+     "delivered": [],
+     "logged": [
+      "124",
+      "125",
+      "126",
+      "5",
+      "15",
+      "25",
+      "12345",
+      "12345",
+      "12345",
+      "-1234",
+      "-1234",
+      "-1234"
+     ]
+    }
+   ]
+  }
+ },
+ "tests/basics/builtin_round_intbig.py": {
+  "status": "fail",
+  "qualifier": "FIG-5906",
+  "observed": {
+   "end": "ok",
+   "epochs": [
+    {
+     "asked": [],
+     "delivered": [],
+     "logged": [
+      "1180591620717411303424",
+      "1180591620717411303424",
+      "1180591620717411303424",
+      "1180591620717411303424",
+      "-1180591620717411303424",
+      "-1180591620717411303424",
+      "-1180591620717411303424",
+      "-1180591620717411303424"
+     ]
+    }
+   ]
+  }
+ },
+ "tests/basics/closure1.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/comprehension1.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/dict_clear.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/dict_copy.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/dict_get.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/dict_pop.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/dict_popitem.py": {
+  "status": "refused",
+  "qualifier": "PY_METHOD_UNSUPPORTED"
+ },
+ "tests/basics/dict_setdefault.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/dict_views.py": {
+  "status": "excluded",
+  "qualifier": "Registered deviation dict_views_are_lists: CPython view repr and liveness."
+ },
+ "tests/basics/int1.py": {
+  "status": "fail",
+  "qualifier": "FIG-5906",
+  "observed": {
+   "end": "error ValueError: invalid literal for int() with base 0: '0o123'",
+   "epochs": [
+    {
+     "asked": [],
+     "delivered": [],
+     "logged": [
+      "0",
+      "1",
+      "0",
+      "1",
+      "1",
+      "-1",
+      "0",
+      "0",
+      "0",
+      "1",
+      "1",
+      "-1",
+      "1",
+      "0",
+      "9",
+      "10",
+      "10",
+      "-10",
+      "12",
+      "-12",
+      "99",
+      "100",
+      "314",
+      "314",
+      "314",
+      "314",
+      "1",
+      "-3",
+      "0",
+      "1",
+      "1",
+      "0",
+      "11",
+      "17",
+      "9",
+      "3",
+      "37",
+      "44027"
+     ]
+    }
+   ]
+  }
+ },
+ "tests/basics/int2.py": {
+  "status": "excluded",
+  "qualifier": "Registered deviation bool_is_not_an_integer: bool arithmetic."
+ },
+ "tests/basics/int_big_add.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/int_bytes.py": {
+  "status": "refused",
+  "qualifier": "PY_IMPORT_UNSUPPORTED"
+ },
+ "tests/basics/int_divmod.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/int_divzero.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/int_small.py": {
+  "status": "refused",
+  "qualifier": "PY_OPERATOR_UNSUPPORTED"
+ },
+ "tests/basics/list_clear.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/list_copy.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/list_count.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/list_extend.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/list_insert.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/list_pop.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/list_remove.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/list_reverse.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/list_slice.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/list_slice_3arg.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/list_slice_assign.py": {
+  "status": "refused",
+  "qualifier": "PY_TARGET_UNSUPPORTED"
+ },
+ "tests/basics/scope.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/set_comprehension.py": {
+  "status": "excluded",
+  "qualifier": "Registered deviation a_set_keeps_insertion_order: hash-order observations."
+ },
+ "tests/basics/string_partition.py": {
+  "status": "refused",
+  "qualifier": "PY_ATTRIBUTE_UNSUPPORTED"
+ },
+ "tests/basics/string_split.py": {
+  "status": "refused",
+  "qualifier": "PY_ARGUMENTS"
+ },
+ "tests/basics/string_upperlow.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/try_as_var.py": {
+  "status": "fail",
+  "qualifier": "FIG-5907",
+  "observed": {
+   "end": "ok",
+   "epochs": [
+    {
+     "asked": [],
+     "delivered": [],
+     "logged": [
+      "ValueError (534,)"
+     ]
+    }
+   ]
+  }
+ },
+ "tests/basics/try_else.py": {
+  "status": "pass",
+  "qualifier": ""
+ },
+ "tests/basics/string_split.py#str-without-maxsplit": {
+  "status": "fail",
+  "qualifier": "FIG-5906",
+  "observed": {
+   "end": "ok",
+   "epochs": [
+    {
+     "asked": [],
+     "delivered": [],
+     "logged": [
+      "['a', 'b']",
+      "['a', 'b']",
+      "['foo', '\u0007\u000b', 'bar']",
+      "['foo', 'bar']",
+      "ValueError",
+      "['', 'bc']",
+      "['a', 'c']",
+      "['ab', '']",
+      "['abc']",
+      "['', 'c']",
+      "['a', '']",
+      "['', '']",
+      "['abc']",
+      "['a', 'a', '']"
+     ]
+    }
+   ]
+  }
+ }
+}

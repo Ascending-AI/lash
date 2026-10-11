@@ -165,5 +165,33 @@ installed CPython gives.
 
 Both records were made with CPython 3.12.3.
 
+The first MicroPython `tests/basics` selection lives in `conformance/`.
+`manifest.json` pins the upstream revision, each upstream path and source
+SHA-256, the MIT notice, and each admitted, refused or excluded disposition.
+The original sources are embedded verbatim; `cell` records a reviewed subset
+adaptation where needed. A fragment in `path` identifies a separate extract
+of `upstream_path`. Unselected upstream files are outside this first corpus.
+`recorded.json` is made by this recorder on CPython 3.12, never from upstream
+`.exp` files:
+
+```sh
+python3 crates/lash-dialect-python/witness/record.py --conformance
+python3 crates/lash-dialect-python/witness/record.py --conformance --check --base origin/main
+kiln test //crates/lash-dialect-python:lash-dialect-python__unit_test \
+  --test_arg=tests::conformance::admitted_basics_keep_cpython_observations_and_dispositions \
+  --test_arg=--exact --test_arg=--nocapture
+```
+
+`outcomes.json` holds the per-case ratchet separately from admission. The law
+executes every admitted cell and tests each refused source's diagnostic;
+exclusions retain their reviewed reason. A known failure names its owning
+ticket and exact observed record. It may keep that observation or improve to
+the CPython answer; every other change fails, including a new refusal.
+When a fix lands, promote its outcome to `pass`. The recorder also compares
+the outcome ledger against the Git base (default `origin/main`): a recorded
+pass cannot fail, become refused or excluded, or leave the corpus, even when
+both the admission manifest and outcome ledger change. Passes, failures,
+refusals and exclusions are reported separately.
+
 `deviations.md` lists where the dialect is deliberately not Python, with a
 law for each entry.

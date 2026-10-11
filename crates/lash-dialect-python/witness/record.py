@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Records what CPython does with each witness case.
 
-Usage: python3 record.py            rewrite recorded.json from cases/*.py
-       python3 record.py --check    fail if recorded.json is not what CPython gives
+Usage: python3 record.py               rewrite recorded.json from cases/*.py
+       python3 record.py --check       verify the witness record
+       python3 record.py --conformance record the admitted MicroPython slice
+       python3 record.py --conformance --check --base origin/main
+                                      verify the corpus and its pass ratchet
 
 A case is a cell of the dialect: Python that may `await` at its top level
 and call the tools `echo(x)`, which answers `x`, and `boom(x)`, which fails
@@ -26,13 +29,16 @@ the script answers, so no case waits on a clock. When the cell ends, the
 tasks still running are cancelled and awaited, as `asyncio.run` does.
 """
 
+import argparse
 import ast
 import asyncio
 import asyncio.runners
+import hashlib
 import inspect
 import json
 import pathlib
 import platform
+import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).parent
@@ -178,12 +184,88 @@ def record():
     return {"python": platform.python_version(), "cases": cases}
 
 
+def conformance(base):
+    """Record admitted MicroPython sources on CPython, never upstream .exp files.
+
+    The outcome ledger is separate from admission: changing a passing case to
+    refused/excluded cannot make the runner green. Against --base, even editing
+    both ledgers cannot discard a previously passing source.
+    """
+    if (
+        platform.python_implementation() != "CPython"
+        or sys.version_info[:2] != (3, 12)
+    ):
+        raise SystemExit("conformance expectations must be recorded on CPython 3.12")
+    directory = HERE.parent / "conformance"
+    manifest = json.loads((directory / "manifest.json").read_text())
+    outcomes = json.loads((directory / "outcomes.json").read_text())
+    paths = [case["path"] for case in manifest["cases"]]
+    if len(set(paths)) != len(paths) or set(paths) != set(outcomes):
+        raise SystemExit("conformance manifest and outcome ledger membership differ")
+    if base:
+        root = HERE.parents[2]
+        path = str((directory / "outcomes.json").relative_to(root))
+        exists = subprocess.run(
+            ["git", "ls-tree", "--name-only", base, "--", path],
+            cwd=root, check=True, capture_output=True, text=True,
+        )
+        if exists.stdout.strip():
+            previous = json.loads(subprocess.run(
+                ["git", "show", f"{base}:{path}"], cwd=root,
+                check=True, capture_output=True, text=True,
+            ).stdout)
+            for name, outcome in previous.items():
+                if (
+                    outcome["status"] == "pass"
+                    and outcomes.get(name, {}).get("status") != "pass"
+                ):
+                    raise SystemExit(
+                        f"{name}: a passing case cannot fail, be refused, excluded or removed"
+                    )
+    cases = []
+    for case in manifest["cases"]:
+        if case["upstream_path"] != case["path"].split("#", 1)[0]:
+            raise SystemExit(f"{case['path']}: upstream path differs")
+        if hashlib.sha256(case["source"].encode()).hexdigest() != case["source_sha256"]:
+            raise SystemExit(f"{case['path']}: upstream source SHA differs")
+        if case["licence"] not in manifest["licences"]:
+            raise SystemExit(f"{case['path']}: licence notice missing")
+        outcome = outcomes[case["path"]]
+        expected = (
+            "admitted" if outcome["status"] in ("pass", "fail") else outcome["status"]
+        )
+        if case["status"] != expected:
+            raise SystemExit(f"{case['path']}: admission differs from the outcome ratchet")
+        if case["status"] != "admitted":
+            continue
+        source = case["cell"] if case["cell"] is not None else case["source"]
+        observed = run_case(source, [])
+        if observed["end"] != "ok" or any(
+            "SKIP" in epoch["logged"] for epoch in observed["epochs"]
+        ):
+            raise SystemExit(f"{case['path']}: reference did not complete without a skip")
+        cases.append({"path": case["path"], **observed})
+    return {"python": platform.python_version(), "cases": cases}
+
+
 def main():
-    recorded = json.dumps(record(), indent=1, ensure_ascii=False) + "\n"
-    target = HERE / "recorded.json"
-    if "--check" in sys.argv:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--conformance", action="store_true")
+    parser.add_argument(
+        "--base", default="origin/main",
+        help="Git base for the conformance pass ratchet (default: origin/main)",
+    )
+    args = parser.parse_args()
+    value = conformance(args.base) if args.conformance else record()
+    recorded = json.dumps(value, indent=1, ensure_ascii=False) + "\n"
+    target = (
+        HERE.parent / "conformance/recorded.json"
+        if args.conformance else HERE / "recorded.json"
+    )
+    if args.check:
         if target.read_text() != recorded:
-            raise SystemExit("recorded.json is not what CPython gives; run record.py")
+            raise SystemExit(f"{target}: not what CPython gives; run record.py")
         return
     target.write_text(recorded)
 
