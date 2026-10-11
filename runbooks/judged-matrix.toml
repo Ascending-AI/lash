@@ -100,7 +100,6 @@ lash-postgres-workers = { runner = "kiln test //crates/lash-postgres-workers:fai
 [deterministic_only]
 context-overflow-recovery = { tier = "deterministic", model = "scripted-provider" }
 example-core-shutdown = { tier = "deterministic", model = "scripted-provider" }
-host-effect-ledger = { tier = "deterministic", model = "scripted-provider" }
 host-provisioned-schema = { tier = "deterministic", model = "scripted-provider" }
 mcp-naming-refresh = { tier = "deterministic", model = "scripted-provider" }
 runtime-identity = { tier = "deterministic", model = "scripted-provider" }

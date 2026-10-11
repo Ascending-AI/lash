@@ -339,6 +339,31 @@ reason to make them do so.
 Durable instants come from the database clock on PostgreSQL, so node clock
 skew does not move deadlines.
 
+### External effects
+
+A host-owned tool that writes to a payments API or ticket tracker can keep
+its own durable ledger. Before the external write, the tool body claims a
+row keyed by `AttemptContext::call_id()` and records its intended effect as
+`pending`. It uses that id as the outside system's idempotency key where
+supported, then marks the row `applied` after confirming the write.
+
+A tool result check receives the same id as `ToolHookContext::call_id`.
+It only observes the reported outcome; it neither performs the external
+write nor proves that it landed. A retry can report another outcome under
+the same id, so observations must deduplicate on that id.
+
+On restart, the host reconciles pending rows against the outside system.
+It marks effects applied only when reconciliation confirms them and
+compensates only effects that reconciliation proves occurred. If undo must
+resume after a crash, the host durably records compensation progress.
+There is no atomic transaction between the host's row and the outside
+write; an unconfirmed effect remains pending for reconciliation.
+
+Lash runs no part of this ledger, reconciliation or compensation. This is
+a host pattern with no Lash law behind it. Lash supplies the
+[call identity](../adr/0117-lash-names-every-tool-call.md), not proof of an
+external effect.
+
 ## 3. SQLite is one file
 
 A SQLite deployment is **one database file**. It holds the session catalog,
