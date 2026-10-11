@@ -453,7 +453,7 @@ struct Out<'a> {
     heap: &'a mut dyn NativeHeap,
     parts: Vec<Value>,
     verbatim_kinds: u8,
-    verbatim_field: String,
+    verbatim_field: Option<String>,
 }
 
 impl Out<'_> {
@@ -571,7 +571,8 @@ fn write(
                 } else {
                     out.raw_numbers("record", raw_numbers)
                         && !fields.iter().any(|(name, value)| {
-                            *name == out.verbatim_field && matches!(value, Value::Text(_))
+                            out.verbatim_field.as_deref() == Some(name.as_str())
+                                && matches!(value, Value::Text(_))
                         })
                 };
                 out.push("{")?;
@@ -625,7 +626,7 @@ pub fn stringify_json(value: &Value, heap: &mut dyn NativeHeap) -> Result<String
         heap,
         parts: Vec::new(),
         verbatim_kinds: 0,
-        verbatim_field: String::new(),
+        verbatim_field: None,
     };
     write(value, &mut BTreeSet::new(), 0, false, &mut out)?;
     Ok(out.text)
@@ -662,7 +663,10 @@ pub(super) fn functions() -> Vec<Function> {
             &[
                 ("value", Type::Any),
                 ("verbatim_kinds", Type::Set(Box::new(Type::Text))),
-                ("verbatim_field", Type::Text),
+                (
+                    "verbatim_field",
+                    Type::Union(vec![Type::Text, Type::Absent]),
+                ),
             ],
             Type::List(Box::new(Type::Union(vec![Type::Text, Type::Number]))),
             &["json_number", "json_key", "json_depth"],
@@ -740,7 +744,16 @@ fn render_parts(call: NativeCall<'_>) -> Result<Value, NativeError> {
     if invalid {
         return Err(raise("type_error", "JSON verbatim kinds must be text"));
     }
-    let verbatim_field = text_arg(call.args, 2)?.to_owned();
+    let verbatim_field = match arg(call.args, 2)? {
+        Value::Absent => None,
+        Value::Text(field) => Some(field.to_string()),
+        _ => {
+            return Err(raise(
+                "type_error",
+                "JSON verbatim field must be text or absent",
+            ));
+        }
+    };
     let mut out = Out {
         text: String::new(),
         heap: call.heap,

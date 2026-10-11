@@ -61,8 +61,8 @@ pub(crate) enum Ty {
     /// An object, with the properties its type names.
     Record(BTreeMap<String, Ty>),
     /// An object the source built: a kernel record, whatever fields it
-    /// later gains or loses. A text `brand` written to it makes it read as
-    /// the branded value it then is, so its reads still test that.
+    /// later gains or loses. Guest properties cannot supply the kernel tuple marker
+    /// that identifies an internal branded receiver.
     Object,
     /// An array the source built, or one a built-in array method made: a
     /// kernel list, of any elements, holes among them.

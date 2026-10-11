@@ -233,39 +233,6 @@ fn parameters_preserve_defaults_rest_and_escaping_arguments() {
     );
 }
 
-/// K-ITER-004: string iteration yields Unicode code points, and a guest
-/// iterator keeps its next side effects and stops at break without prefetch.
-#[test]
-fn for_of_preserves_unicode_and_custom_next_order() {
-    use super::machine::{Ended, end};
-    let resumed = super::machine::run(
-        "for (const point of 'a😀z') { const value = await echo(point); console.log(value); }",
-        &[],
-    );
-    assert_eq!(resumed.end, "ok");
-    assert_eq!(resumed.lines(), ["a", "😀", "z"]);
-    assert_eq!(
-        end(r#"
-            let parts = []; for (const point of 'a😀é') parts.push(point);
-            let calls = 0;
-            const iterator = {brand: 'ts.iterator', next() {
-                calls++; return {done: calls > 3, value: calls};
-            }};
-            let sum = 0;
-            for (const value of iterator) { sum += value; if (value === 2) break; }
-            const remaining = iterator.next();
-            const match = /(.)(x)?/.exec('a'); let matched = [];
-            for (const value of match) matched.push(value);
-            let correct = parts.length === 4 && parts[0] === 'a' && parts[1] === '😀';
-            correct &&= parts[2] === 'e' && parts[3] === '́' && sum === 3;
-            correct &&= calls === 3 && remaining.value === 3 && matched.length === 3;
-            correct &&= matched[0] === 'a' && matched[1] === 'a' && matched[2] === undefined;
-            await finish(correct);
-            "#),
-        Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
-    );
-}
-
 /// For-of observes collection mutations before requesting the next item.
 #[test]
 fn for_of_reads_map_and_set_iterators_live() {

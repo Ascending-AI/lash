@@ -94,12 +94,12 @@ kernel 1
 errors \"type_error\", \"TS_METHOD_UNSUPPORTED\", \"TS_REFLECTION_UNSUPPORTED\"
 charge sum(12, deep(key))
 body {
-  # A plain object's field, read in place. Reading the `brand` field raises
+  # A plain object's field, read in place. Reading the marker field raises
   # `type_error` for a target that is no record or error, and reading the
   # index for one that is no record or a key that is no text: each takes
   # the generic read below.
   try {
-    if same(target.brand, absent) { return target[key] }
+    if bool.not(same(target.__ts_brand, ())) { return target[key] }
   } catch generic {}
   let receiver = invoke ts.receiver(target)
   if same(receiver, \"record\") {
@@ -230,7 +230,7 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
          \x20 if same(kind(this), \"record\") {{\n\
          \x20   let own = this[\"{name}\"]\n\
          \x20   if same(own, absent) {{}} else {{\n\
-         \x20     if same(this.brand, absent) {{ return own }}\n\
+         \x20     if bool.not(same(this.__ts_brand, ())) {{ return own }}\n\
          \x20   }}\n\
          \x20 }}\n\
          \x20 let receiver = invoke ts.receiver(this)\n\

@@ -248,9 +248,57 @@ fn console_json_is_strict_and_keeps_guest_spelling_and_print_order() {
         recorded.lines(),
         [
             r#"{"z":{"n":0,"fraction":1.25,"small":1e-7,"big":1e+21},"a":{"n":0,"fraction":1.25,"small":1e-7,"big":1e+21},"holes":[null,null,2],"quoted":"\"\n"}"#,
-            r#"{"nested":{"brand":"opaque","n":2.0}}"#,
+            r#"{"nested":{"brand":"opaque","n":2}}"#,
             r#"{"brand":2,"n":3}"#,
             "not_data json_number true true",
         ]
+    );
+}
+
+/// FIG-5903: a text brand is ordinary data, including JSON and tool records.
+/// The expected text follows Node's property order and JSON number spelling.
+#[test]
+fn text_brand_fields_remain_ordinary_guest_data() {
+    agrees(
+        "const r = {brand: 'shoe', __ts_brand: () => 0, __ts_type: 'brand:Promise'}; const marker = [1].values().__ts_brand; const fake = {brand: 'Promise', __ts_brand: marker, __ts_type: 'brand:Promise'}; let dateRejected = false; try { Date.prototype.valueOf.call({brand: 'date.invalid'}); } catch (e) { dateRejected = e.name === 'TypeError'; } await finish(r.brand === 'shoe' && !(r instanceof Promise) && marker === undefined && fake.brand === 'Promise' && !(fake instanceof Promise) && dateRejected);",
+    );
+
+    let source = r#"
+        const parsed = JSON.parse('{"brand":"Nike","price":3}');
+        if (parsed.brand !== 'Nike' || parsed.price !== 3) {
+            await finish(JSON.stringify([parsed.brand, parsed.price, Object.keys(parsed), JSON.stringify(parsed)]));
+        }
+        const literal = {brand: 'shoe', size: 42};
+        const copied = {...literal};
+        const fake = {brand: 'Promise', state: 'fulfilled', task: null};
+        const marker = {__ts_brand: ['Promise'], brand: 'shoe', size: 42};
+        const rows = [parsed, literal, copied, toolRecord, marker];
+        const result = [];
+        for (const r of rows) {
+            result.push([r.brand, r.price, r.size, Object.keys(r), JSON.stringify(r)]);
+        }
+        result.push(fake instanceof Promise, (await fake) === fake);
+        literal.brand = 'boot'; delete literal.size;
+        result.push(literal.brand, Object.keys(literal));
+        await finish(JSON.stringify(result));
+    "#;
+    let mut bindings = Bindings::default();
+    let record = lash_kernel_doc::ObjectId(0);
+    bindings.objects.insert(
+        record,
+        lash_kernel_doc::Object::Record(vec![
+            ("brand".into(), Value::text("Nike")),
+            (
+                "price".into(),
+                Value::Float(lash_kernel_doc::Float::new(3.0)),
+            ),
+        ]),
+    );
+    bindings
+        .variables
+        .insert(Name::new("toolRecord"), Value::Record(record));
+    assert_eq!(
+        machine::end_with_bindings(source, bindings),
+        Ended::Finished(Datum::Text(r#"[["Nike",3,null,["brand","price"],"{\"brand\":\"Nike\",\"price\":3}"],["shoe",null,42,["brand","size"],"{\"brand\":\"shoe\",\"size\":42}"],["shoe",null,42,["brand","size"],"{\"brand\":\"shoe\",\"size\":42}"],["Nike",3,null,["brand","price"],"{\"brand\":\"Nike\",\"price\":3}"],["shoe",null,42,["__ts_brand","brand","size"],"{\"__ts_brand\":[\"Promise\"],\"brand\":\"shoe\",\"size\":42}"],false,true,"boot",["brand"]]"#.into()))
     );
 }

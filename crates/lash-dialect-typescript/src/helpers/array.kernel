@@ -193,7 +193,7 @@ errors "type_error", "RangeError"
 charge 8
 body {
   if same(kind(value), "list") { return true }
-  if same(kind(value), "record") { return same(value.brand, "regex.match") }
+  if same(kind(value), "record") { return same((value.__ts_brand, value.__ts_type), ((), "brand:regex.match")) }
   return false
 }
 
@@ -1564,7 +1564,7 @@ body {
     let value = num.to_float(position)
     return {value: value, done: false}
   }
-  return {brand: "ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
+  return {__ts_brand: (), __ts_type: "brand:ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
 }
 
 function ts.array.values(this: Any, args: List(Any)) -> Any
@@ -1587,7 +1587,7 @@ body {
     let value = invoke ts.get(this, position)
     return {value: value, done: false}
   }
-  return {brand: "ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
+  return {__ts_brand: (), __ts_type: "brand:ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
 }
 
 function ts.array.entries(this: Any, args: List(Any)) -> Any
@@ -1611,7 +1611,7 @@ body {
     set value = [num.to_float(position), value]
     return {value: value, done: false}
   }
-  return {brand: "ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
+  return {__ts_brand: (), __ts_type: "brand:ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
 }
 
 # Array iteration retains its receiver and reads length anew on each step.
@@ -1623,7 +1623,7 @@ errors "type_error"
 charge 8
 body {
   if same(kind(this), "record") {
-    if same(this.brand, "ts.iterator") { return this }
+    if same((this.__ts_brand, this.__ts_type), ((), "brand:ts.iterator")) { return this }
   }
   let k = invoke ts.receiver(this)
   let array = invoke ts.array.is(this)

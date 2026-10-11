@@ -11,14 +11,14 @@ use ts.to_string
 
 # Strict JSON is visited once by the neutral codec. Text fragments are
 # already escaped; numeric fragments keep their value for guest spelling.
-# Maps, tuples and records marked by a text brand retain kernel spelling.
+# Maps and kernel tuples retain kernel spelling.
 function ts.console.json(value: Any) -> Text
 kernel 1
 errors "type_error", "cycle", "json_number", "json_key", "json_depth", "not_data"
 charge sum(8, deep(value), size(result))
 body {
   let verbatim = set{"map", "tuple"}
-  let parts = json.render_parts(value, verbatim, "brand")
+  let parts = json.render_parts(value, verbatim, absent)
   let out = []
   for part in parts {
     if same(kind(part), "text") { set out[list.len(out)] = part } else {

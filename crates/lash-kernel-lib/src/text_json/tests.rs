@@ -823,7 +823,7 @@ fn k_ljson_004_render_parts_validate_and_account_the_flat_result() {
     let mut heap = Heap::default();
     let kinds = Value::Set(heap.allocate(Object::Set(vec![])).unwrap());
     let value = list(&mut heap, vec![s("x"), int(2)]);
-    let args = [value, kinds.clone(), s("")];
+    let args = [value, kinds.clone(), Value::Absent];
     let result = call(&mut heap, "json.render_parts", &args).unwrap();
     assert_eq!(items(&heap, result), vec![s(r#"["x","#), int(2), s("]")]);
     assert_eq!(heap.1.reserved, 60); // Three value slots and two text/buffer pairs.

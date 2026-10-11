@@ -14,7 +14,14 @@ Unicode case conversion uses the library's pinned Unicode 17.0.0 definitions.
 Trimming and numeric parsing use ECMAScript WhiteSpace and LineTerminator
 code units: BOM is included and NEL is excluded.
 
-A guest RegExp is `{brand: "regex.ecma", pattern, flags, lastIndex}`. Its visible
+An internal receiver carries `__ts_brand: ()` and a text `__ts_type` tag.
+The empty kernel tuple cannot be produced by guest source or JSON; arrays
+are lists and function tokens are nonempty tuples. Guest properties named
+`brand`, `__ts_brand` or `__ts_type` therefore remain ordinary data. Internal
+slots are hidden by dialect readers, including iterator readers.
+
+A guest RegExp has `__ts_type: "brand:regex.ecma"`, pattern, flags and lastIndex.
+The extension snapshot remains `{brand: "regex.ecma", pattern, flags, lastIndex}`. Its visible
 `lastIndex` may hold any JavaScript value; a helper coerces it with ToLength and
 constructs an integer-index snapshot for the extension. The extension never
 mutates the receiver. Global and sticky exec/test write the returned index to
@@ -22,8 +29,8 @@ the original record, so aliases observe the same update. Non-stateful matching
 preserves the visible value. `RegExp(r)` preserves identity when flags are
 omitted; `new RegExp(r)` constructs a fresh record.
 
-A match array is a branded record, `{brand: "regex.match", items, index, input,
-groups}`. Numeric reads, length and iteration expose its items. Captures that
+A match array is an internal record with `__ts_type: "brand:regex.match"`,
+items, index, input and groups. Numeric reads, length and iteration expose its items. Captures that
 did not participate are `absent`, including named captures. The extension's
 `regex.lone_surrogate` cause remains available in the typed dialect refusal's
 data. Native charge and guard formulas remain those of the extension.

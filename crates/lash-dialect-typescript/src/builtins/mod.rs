@@ -64,7 +64,7 @@ pub enum Receiver {
     Error,
     Timestamp,
     Closure,
-    /// A record whose `brand` field is this text.
+    /// An internal record with the kernel tuple marker and this type tag.
     Brand(&'static str),
 }
 

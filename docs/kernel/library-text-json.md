@@ -128,6 +128,7 @@ strict traversal and returns a flat list of escaped text fragments and raw
 finite numbers. A caller supplies number spelling and joins the fragments.
 Inside a container whose kind is in the text set, or a record whose named
 field holds text, numbers retain their kernel spelling in text fragments.
+`verbatim_field` is text or `absent`; `absent` disables the record-field policy.
 The selection is inherited by descendants. Depth, cycle, key and data
 checks retain the strict writer's order. Text buffers and each fragment
 slot are reserved before allocation; the charge uses the standard native

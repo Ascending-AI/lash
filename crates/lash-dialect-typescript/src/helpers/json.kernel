@@ -134,9 +134,11 @@ body {
         let passed = [name]
         set value = apply to_json(value, passed)
       } else {
-        let brand = value.brand
-        if same(brand, "date.invalid") { set value = null }
-        if same(brand, "url.whatwg") { set value = value.state.href }
+        if same(value.__ts_brand, ()) {
+          let brand = value.__ts_type
+          if same(brand, "brand:date.invalid") { set value = null }
+          if same(brand, "brand:url.whatwg") { set value = value.state.href }
+        }
       }
     }
     if same(k, "timestamp") { set value = date.ecma.format(value, "iso") }
@@ -219,7 +221,7 @@ body {
 # Whether JSON.stringify writes `value` as the console's JSON render does:
 # a list, a record or a scalar whose containers hold only lists, records,
 # null, bools, text and finite numbers. A record with a `toJSON` or a
-# `brand` field, or with a key that begins with a digit (an index key, which
+# `__ts_brand` field, or with a key that begins with a digit (an index key, which
 # JSON writes before the others), is not plain. Neither is a value with more
 # than 128 values in all, counting each place a shared one is held, or with
 # containers more than eight deep, so a cycle is not plain either.
@@ -231,7 +233,7 @@ charge 1
 body {
   # The native is neutral: forbidden field names, key interval and bounds
   # are dialect policy. Its integer packs work and admission in its low bit.
-  let classified = json.classify(value, 128, 8, ("toJSON", "brand"), "0", ":")
+  let classified = json.classify(value, 128, 8, ("toJSON", "__ts_brand"), "0", ":")
   return same(num.rem_trunc(classified, 2), 1)
 }
 

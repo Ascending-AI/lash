@@ -50,17 +50,17 @@ body {
     return date.ecma.format(value, "string")
   }
   if same(k, "record") {
-    if same(value.brand, "regex.ecma") {
+    if same((value.__ts_brand, value.__ts_type), ((), "brand:regex.ecma")) {
       let pattern = value.pattern
       let flags = value.flags
       let spelled = invoke ts.regexp.spell(pattern, flags)
       return spelled
     }
-    if same(value.brand, "date.invalid") {
+    if same((value.__ts_brand, value.__ts_type), ((), "brand:date.invalid")) {
       if same(hint, "number") { return nan }
       return "Invalid Date"
     }
-    if same(value.brand, "url.whatwg") { return value.state.href }
+    if same((value.__ts_brand, value.__ts_type), ((), "brand:url.whatwg")) { return value.state.href }
   }
   if same(k, "map") { return "[object Map]" }
   if same(k, "set") { return "[object Set]" }
@@ -87,11 +87,11 @@ body {
     return absent
   }
   if same(k, "record") {
-    if same(target.brand, "url.whatwg") {
+    if same((target.__ts_brand, target.__ts_type), ((), "brand:url.whatwg")) {
       if same(key, "searchParams") { return target.searchParams }
       return target.state[key]
     }
-    if same(target.brand, "url.search_params") {
+    if same((target.__ts_brand, target.__ts_type), ((), "brand:url.search_params")) {
       if same(key, "size") { return list.len(target.pairs) }
     }
   }
@@ -112,7 +112,7 @@ body {
     return value
   }
   if same(k, "record") {
-    if same(target.brand, "url.whatwg") {
+    if same((target.__ts_brand, target.__ts_type), ((), "brand:url.whatwg")) {
       if same(kind(value), "text") {} else { throw error.new("type_error", "URL components must be text", null) }
       let href = target.state.href
       let parsed = url.whatwg.update(href, key, value)
@@ -157,7 +157,7 @@ body {
     return items
   }
   if same(k, "record") {
-    if same(target.brand, "url.search_params") { return target.pairs }
+    if same((target.__ts_brand, target.__ts_type), ((), "brand:url.search_params")) { return target.pairs }
   }
   throw error.new("type_error", "value is not iterable", null)
 }

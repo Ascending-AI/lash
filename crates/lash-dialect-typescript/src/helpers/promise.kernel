@@ -1,6 +1,6 @@
 # Promises over kernel tasks.
 #
-# A promise is a record `{brand: "Promise", state, task}`: `task` is the
+# A promise is a record `{__ts_brand: (), __ts_type: "brand:Promise", state, task}`: `task` is the
 # handle of the one task whose end settles the promise, and `state` is
 # "pending", "fulfilled" or "rejected". The task itself writes `state` in
 # the stretch it ends in (`ts.promise.run`), so a reader learns whether the
@@ -41,9 +41,9 @@ use ts.promise.decided
 # spelling its receiver. `instanceof Promise` asks this too.
 function ts.promise.is(value: Any) -> Bool
 kernel 1
-charge 4
+charge 6
 body {
-  if same(kind(value), "record") { return same(value.brand, "Promise") }
+  if same(kind(value), "record") { return same((value.__ts_brand, value.__ts_type), ((), "brand:Promise")) }
   return false
 }
 
@@ -51,9 +51,9 @@ body {
 # and writes the handle to `task`.
 function ts.promise.pending() -> Any
 kernel 1
-charge 4
+charge 5
 body {
-  return {brand: "Promise", state: "pending", task: absent}
+  return {__ts_brand: (), __ts_type: "brand:Promise", state: "pending", task: absent}
 }
 
 # `await value`: the value a promise fulfils with, or a raise of what it

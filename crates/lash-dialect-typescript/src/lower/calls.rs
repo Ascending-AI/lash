@@ -235,7 +235,7 @@ impl Lowerer<'_> {
     /// which it gives what the helper would: `None` where no value of the
     /// object's type has one.
     ///
-    /// A plain record, a record whose `brand` is no text, answers a name no
+    /// A plain record, a record without the internal tuple marker, answers a name no
     /// built-in has with its field by that name, `undefined` when it has
     /// none (`ts.read`); a name some built-in has, or a computed text, only
     /// when the record holds a field by it (`ts.member.<name>`,
@@ -337,10 +337,9 @@ impl Lowerer<'_> {
         }
         let brand = Expr::Member(Box::new(Member::Field {
             target: object.expr(),
-            field: "brand".to_string(),
+            field: "__ts_brand".to_string(),
         }));
-        let kind = self.native("kind", vec![brand])?;
-        let branded = self.same(kind, Operand::text("text").expr())?;
+        let branded = self.same(brand, Expr::Tuple(Vec::new()))?;
         tests.push(self.native("bool.not", vec![branded])?);
         Ok(Some(tests))
     }

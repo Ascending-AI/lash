@@ -23,7 +23,7 @@ const BOUNDS: Bounds = Bounds {
 };
 
 /// The library functions the entries name.
-const USES: [&str; 27] = [
+const USES: [&str; 25] = [
     "eq",
     "kind",
     "same",
@@ -40,8 +40,6 @@ const USES: [&str; 27] = [
     "map.values",
     "text.concat",
     "ts.boundary",
-    "ts.receiver",
-    "ts.promise.is",
     "num.floor",
     "num.abs",
     "num.is_nan",
@@ -110,45 +108,6 @@ fn former_boundary(value) {
 }
 "#;
 
-/// `ts.receiver` and `ts.promise.is` as they were before the commonest
-/// receivers came first and a promise was told by its brand alone.
-const FORMER_RECEIVER: &str = r#"
-fn former_receiver(value) {
-  let k = kind(value)
-  if same(k, "record") {
-    let brand = value.brand
-    if same(brand, absent) { return k }
-    if same(kind(brand), "text") {
-      return text.concat("brand:", brand)
-    }
-    return k
-  }
-  if same(k, "list") {
-    return k
-  }
-  if same(k, "float") {
-    return "number"
-  }
-  if same(k, "integer") {
-    return "number"
-  }
-  if same(k, "function") {
-    return "closure"
-  }
-  if same(k, "tuple") {
-    if same(value, ()) {} else {
-      if same(value[0], "ts.function") { return "closure" }
-      if same(value[0], "ts.object") { return "builtin" }
-    }
-  }
-  return k
-}
-fn former_promise_is(value) {
-  let k = call former_receiver(value)
-  return same(k, "brand:Promise")
-}
-"#;
-
 /// `ts.number.to_string` as it was before integers were asked first.
 const FORMER_NUMBER_TO_STRING: &str = r#"
 fn former_number_to_string(value) {
@@ -180,10 +139,8 @@ entry former_boundary_entry(v: Any, mode: Int) -> Any
 entry boundary_cost(v: Any, mode: Int) -> Any
 entry former_boundary_cost(v: Any, mode: Int) -> Any
 entry idle(v: Any, mode: Int) -> Any
-entry receiver(v: Any, mode: Int) -> Any
 entry number_text(v: Any, mode: Int) -> Any
 entry former_number_text(v: Any, mode: Int) -> Any
-entry former_receiver_entry(v: Any, mode: Int) -> Any
 fn nest(v, n) {
   let d = v
   let i = 0
@@ -254,18 +211,6 @@ fn former_boundary_cost(v, mode) {
   let out = call former_boundary(x)
   return null
 }
-fn receiver(v, mode) {
-  let x = call build(v, mode)
-  let k = invoke ts.receiver(x)
-  let promise = invoke ts.promise.is(x)
-  return (k, promise)
-}
-fn former_receiver_entry(v, mode) {
-  let x = call build(v, mode)
-  let k = call former_receiver(x)
-  let promise = call former_promise_is(x)
-  return (k, promise)
-}
 fn number_text(v, mode) {
   let out = invoke ts.number.to_string(v)
   return out
@@ -295,7 +240,6 @@ fn program() -> &'static Program {
         }
         text.push_str(ENTRIES);
         text.push_str(FORMER_BOUNDARY);
-        text.push_str(FORMER_RECEIVER);
         text.push_str(FORMER_NUMBER_TO_STRING);
         let mut document = parse_document(&text).unwrap_or_else(|error| panic!("{error}"));
         document.manifest.functions =
@@ -558,30 +502,6 @@ fn the_boundary_matches_its_former_copy_and_walk() {
         }
     }
     println!("boundary differential: cases={cases} plain containers={containers}");
-}
-
-/// `ts.receiver` names every value as its former body named it, and
-/// `ts.promise.is` answers as asking the former receiver for
-/// "brand:Promise" did: for every leaf kind, generated trees, records with
-/// a text, other or no brand ("Promise" among them), function and built-in
-/// tokens whatever their path, the empty tuple, other tuples, closures and
-/// function references.
-#[test]
-fn the_receiver_names_what_its_former_body_named() {
-    let mut cases = 0;
-    for value in values(0x5885_0000_0000_0003, 60) {
-        for mode in [0, 1, 6, 12, 13, 14, 15, 16, 17] {
-            let now = run("receiver", &value, mode);
-            let before = run("former_receiver_entry", &value, mode);
-            assert_eq!(
-                (&now.end, &now.printed),
-                (&before.end, &before.printed),
-                "{value:?} mode {mode}"
-            );
-            cases += 1;
-        }
-    }
-    println!("receiver differential: cases={cases}");
 }
 
 /// `ts.number.to_string` spells every number as its former body did: the

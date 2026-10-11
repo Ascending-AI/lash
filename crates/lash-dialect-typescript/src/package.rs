@@ -158,10 +158,7 @@ pub(crate) fn dispatcher(
 /// member reads and calls have.
 const RECEIVER: &str = "  let receiver = kind(this)
   if same(receiver, \"record\") {
-    let brand = this.brand
-    if same(brand, absent) {} else {
-      if same(kind(brand), \"text\") { set receiver = text.concat(\"brand:\", brand) }
-    }
+    if same(this.__ts_brand, ()) { set receiver = this.__ts_type }
   } else {
     if same(receiver, \"list\") {} else {
       if same(receiver, \"text\") {} else { set receiver = invoke ts.receiver(this) }
@@ -182,7 +179,7 @@ fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
     };
     let fallback = if call { "ts.call_member" } else { "ts.read" };
     let mut source = format!(
-        "use same\nuse kind\nuse num.lt\nuse text.compare\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
+        "use bool.not\nuse same\nuse kind\nuse num.lt\nuse text.compare\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
     );
     if !call {
         source.push_str("use num.le\nuse num.to_float\nuse list.len\nuse text.utf16_len\nuse ts.number_index\nuse ts.get\n");
@@ -258,7 +255,7 @@ fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
         "  if same(kind(this), \"record\") {{
     let own = absent
     try {{
-      if same(this.brand, absent) {{ set own = this[key] }}
+      if bool.not(same(this.__ts_brand, ())) {{ set own = this[key] }}
     }} catch generic {{}}
     if same(own, absent) {{}} else {{
     {own}

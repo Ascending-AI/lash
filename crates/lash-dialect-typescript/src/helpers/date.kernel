@@ -43,6 +43,7 @@ use ts.date.getUTCMinutes
 use ts.date.getUTCMonth
 use ts.date.getUTCSeconds
 use ts.date.is
+use ts.date.require
 use ts.date.now
 use ts.date.parse
 use ts.date.parts
@@ -126,12 +127,17 @@ body {
     if eq(list.len(args), 1) {
       let value = args[0]
       if same(kind(value), "timestamp") { return value }
-      if same(kind(value), "record") { if same(value.brand, "date.invalid") { return date.ecma.timestamp(nan) } }
+      if same(kind(value), "record") { if same((value.__ts_brand, value.__ts_type), ((), "brand:date.invalid")) { return {brand: "date.invalid", __ts_brand: (), __ts_type: "brand:date.invalid"} } }
       let value = invoke ts.to_primitive(value, "default")
       if same(kind(value), "text") { set time = date.ecma.parse(value) } else { set time = invoke ts.to_number(value) }
     } else { set time = invoke ts.date.utc(args) }
   }
-  return date.ecma.timestamp(num.to_float(time))
+  let date = date.ecma.timestamp(num.to_float(time))
+  if same(kind(date), "record") {
+    set date.__ts_brand = ()
+    set date.__ts_type = "brand:date.invalid"
+  }
+  return date
 }
 
 function ts.date.is(value: Any) -> Bool
@@ -140,8 +146,20 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   if same(kind(value), "timestamp") { return true }
-  if same(kind(value), "record") { return same(value.brand, "date.invalid") }
+  if same(kind(value), "record") { return same((value.__ts_brand, value.__ts_type), ((), "brand:date.invalid")) }
   return false
+}
+
+# Public Date methods validate the dialect marker before entering the native
+# extension, whose record representation is deliberately plain kernel data.
+function ts.date.require(value: Any) -> Any
+kernel 1
+errors "type_error"
+charge 8
+body {
+  let date = invoke ts.date.is(value)
+  if date { return value }
+  throw error.new("type_error", "Date receiver required", null)
 }
 
 function ts.date.call(this: Any, args: List(Any)) -> Any
@@ -185,6 +203,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  do invoke ts.date.require(date)
   let time = date.ecma.milliseconds(date)
   if num.is_finite(time) {} else { return (nan, nan, nan, nan, nan, nan, nan, nan) }
   let days = num.floor(num.div(time, 86400000.0))
@@ -208,6 +227,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  do invoke ts.date.require(this)
   return date.ecma.milliseconds(this)
 }
 
@@ -216,6 +236,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  do invoke ts.date.require(this)
   return date.ecma.milliseconds(this)
 }
 
@@ -296,6 +317,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  do invoke ts.date.require(this)
   return date.ecma.format(this, "iso")
 }
 
@@ -304,6 +326,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  do invoke ts.date.require(this)
   return date.ecma.format(this, "utc")
 }
 
@@ -312,6 +335,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  do invoke ts.date.require(this)
   return date.ecma.format(this, "string")
 }
 
