@@ -82,10 +82,35 @@ codemode = [
 # LLM tools are usable by workflow processes as well as REPL cells.
 rlm = ["codemode", "dep:lash-protocol-rlm", "dep:lash-rlm-types", "dep:lash-render"]
 
+# The dialects a host's sessions and processes are written in, each off by
+# default: a host names the ones it runs, and there is no dialect it gets
+# without choosing (FIG-5990). A dialect's feature builds its helper
+# releases, which the parent links, admits and resumes documents against,
+# and, in a host that is its own worker (`worker`), links its parser into
+# the worker embedding. A host that enables one compiles none of the
+# other's parser or helpers.
+#
+# `dialect-typescript` also gives the host the TypeScript front end and
+# printer in its own process (`typescript`: the `lash::typescript` module and
+# `WorkflowDocument::typescript`), which a host uses to lower workflow source
+# to a kernel document and print one back without a worker.
+dialect-typescript = [
+    "codemode",
+    "typescript",
+    "lash-vm-runtime/dialect-typescript",
+    "lash-vm-worker?/dialect-typescript",
+]
+dialect-python = [
+    "codemode",
+    "lash-vm-runtime/dialect-python",
+    "lash-vm-worker?/dialect-python",
+]
+
 # The worker embedding (`lash::vm::worker_entry` and what a worker
 # registers): a single-binary host is its own worker, so it links the
-# kernel library, lash's extensions and the TypeScript dialect. A host that
-# runs the shipped worker executable leaves it off and links no dialect.
+# kernel library and each dialect its `dialect-*` features name. A host that
+# runs the shipped worker executable leaves it off and links no worker
+# embedding.
 worker = ["codemode", "dep:lash-vm-worker"]
 
 # Host-wired extension features (ADR 0079 section 1). Each gates one
@@ -98,6 +123,9 @@ openai = ["dep:lash-provider-openai", "dep:lash-llm-transport"]
 anthropic = ["dep:lash-provider-anthropic", "dep:lash-llm-transport"]
 google = ["dep:lash-provider-google", "dep:lash-llm-transport"]
 mcp = ["dep:lash-plugin-mcp"]
+# The TypeScript front end and printer in the host's own process
+# (`lash::typescript`, `WorkflowDocument::typescript`), with no helper
+# release: `dialect-typescript` includes it.
 typescript = ["codemode", "dep:lash-dialect-typescript", "lash-vm-runtime/typescript"]
 http-transport = ["dep:lash-http-transport"]
 # Exposes `lash::testing` (e.g. `TestProvider`) for embedder integration tests.
@@ -130,8 +158,9 @@ lash-kernel-vm = { workspace = true }
 chrono.workspace = true
 # The dev-dependencies' testing client is paired with a testing worker when
 # the `worker` feature links one (FIG-4409).
-lash-vm-worker = { workspace = true, features = ["testing"] }
-lash-dialect-python = { workspace = true }
+lash-vm-worker = { workspace = true, features = ["testing", "dialect-typescript", "dialect-python"] }
+# The facade's laws run TypeScript and Python sessions and processes.
+lash-vm-runtime = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-conformance.workspace = true
 insta = "1"
 lash-core = { workspace = true, features = ["testing"] }
@@ -152,5 +181,5 @@ opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 [[example]]
 name = "worker_host"
 path = "examples/worker_host.rs"
-required-features = ["worker"]
+required-features = ["worker", "dialect-typescript"]
 test = false

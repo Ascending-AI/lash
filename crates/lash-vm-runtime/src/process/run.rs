@@ -206,6 +206,7 @@ async fn kernel_run(
             providers: ProjectionCatalog::of_backend(run.projection_providers.as_deref()),
         }),
         &document,
+        &settings.dialect,
         Start {
             target: Target::Entry(process_input.entry.clone()),
             args,

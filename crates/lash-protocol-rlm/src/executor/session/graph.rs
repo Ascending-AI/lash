@@ -143,7 +143,7 @@ pub(super) fn stage(
             kind: NodeKind::FUNCTION_BUNDLE.0,
             reason: format!("the session holds no function `{declared}`"),
         })?;
-        let manifest = super::release::manifest(&bundle)?;
+        let manifest = super::release::manifest(&bundle, dialect)?;
         let reference =
             bundle.stage(manifest, |kind, logical| stage_node(staging, kind, logical))?;
         let member = bundle

@@ -25,16 +25,16 @@ use lash_core_store::checkpoint_graph::{
 use lash_kernel_dialect::Bundle;
 use lash_kernel_doc::FunctionId;
 use lash_kernel_doc::graph_tokens::{ChildRef, decode_body};
-use lash_vm_runtime::{HelperReleaseIndex, ReleaseManifest};
+use lash_vm_runtime::ReleaseManifest;
 
 use super::CodeModeSnapshotError;
 
 /// The releases this build holds, each staged once in a process: a build's
 /// releases never change while it runs.
 struct Held {
-    releases: Vec<HelperReleaseIndex>,
-    /// Each release's manifest, by ordinal.
-    manifests: BTreeMap<u32, ChildRef>,
+    /// Each dialect's releases, oldest first: the manifest and every
+    /// function it holds.
+    lines: BTreeMap<String, Vec<(ChildRef, BTreeSet<FunctionId>)>>,
     /// Every node of every manifest's closure.
     nodes: BTreeMap<NodeId, EncodedNode>,
 }
@@ -42,31 +42,40 @@ struct Held {
 fn held() -> Result<&'static Held, GraphRefusal> {
     static HELD: OnceLock<Result<Held, GraphRefusal>> = OnceLock::new();
     HELD.get_or_init(|| {
-        let releases = lash_vm_runtime::standard_helper_releases().map_err(|error| {
-            GraphRefusal::InvalidBody {
-                kind: NodeKind::RELEASE_MANIFEST.0,
-                reason: error.to_string(),
-            }
-        })?;
         let graph = lash_vm_broker::kernel::state::release_manifests().map_err(|error| {
             GraphRefusal::InvalidBody {
                 kind: NodeKind::RELEASE_MANIFEST.0,
                 reason: error.to_string(),
             }
         })?;
-        let manifests = graph
-            .nodes
-            .keys()
-            .filter_map(|id| {
-                graph
+        let lines = graph
+            .manifests
+            .dialects()
+            .map(|dialect| {
+                let mut releases: Vec<&ReleaseManifest> = Vec::new();
+                let mut line: Vec<(u32, ChildRef, BTreeSet<FunctionId>)> = graph
                     .manifests
-                    .get(&id.child_ref())
-                    .map(|manifest| (manifest.ordinal, id.child_ref()))
+                    .of_dialect(dialect)
+                    .map(|(reference, manifest)| {
+                        releases.push(manifest);
+                        (
+                            manifest.ordinal,
+                            reference,
+                            manifest.function_ids().collect(),
+                        )
+                    })
+                    .collect();
+                line.sort_by_key(|(ordinal, _, _)| *ordinal);
+                (
+                    dialect.to_owned(),
+                    line.into_iter()
+                        .map(|(_, reference, functions)| (reference, functions))
+                        .collect(),
+                )
             })
             .collect();
         Ok(Held {
-            releases,
-            manifests,
+            lines,
             nodes: graph.nodes,
         })
     })
@@ -74,31 +83,32 @@ fn held() -> Result<&'static Held, GraphRefusal> {
     .map_err(Clone::clone)
 }
 
-/// The manifest `bundle` names: the newest release this build holds that
-/// holds every helper of `bundle`'s pins that any release holds.
-pub(super) fn manifest(bundle: &Bundle) -> Result<ChildRef, GraphRefusal> {
+/// The manifest `bundle`, written in `dialect`, names: the newest release
+/// this build holds for the dialect that holds every helper of `bundle`'s
+/// pins that any of the dialect's releases holds.
+pub(super) fn manifest(bundle: &Bundle, dialect: &str) -> Result<ChildRef, GraphRefusal> {
     let held = held()?;
+    let line = held
+        .lines
+        .get(dialect)
+        .ok_or(GraphRefusal::ReleaseMismatch)?;
     let pinned: BTreeSet<FunctionId> = bundle
         .members()
         .values()
         .flat_map(|member| member.document.manifest.functions.keys().copied())
         .collect();
-    let released: BTreeSet<&FunctionId> = held
-        .releases
-        .iter()
-        .flat_map(|release| &release.functions)
-        .collect();
-    held.releases
-        .iter()
+    let released: BTreeSet<&FunctionId> =
+        line.iter().flat_map(|(_, functions)| functions).collect();
+    line.iter()
         .rev()
-        .find(|release| {
+        .find(|(_, functions)| {
             pinned
                 .iter()
                 .filter(|function| released.contains(function))
-                .all(|function| release.functions.contains(function))
+                .all(|function| functions.contains(function))
         })
-        .or(held.releases.last())
-        .and_then(|release| held.manifests.get(&release.ordinal).copied())
+        .or(line.last())
+        .map(|(reference, _)| *reference)
         .ok_or(GraphRefusal::ReleaseMismatch)
 }
 

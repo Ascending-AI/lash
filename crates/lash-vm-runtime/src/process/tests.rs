@@ -58,7 +58,11 @@ fn sealed_stating(stated: u32) -> SealedRun {
     let whole = capture_whole(
         &OpenedRun {
             run,
-            release: super::migrate::current_release().expect("the build holds a release"),
+            release: lash_vm_broker::kernel::state::release_manifests()
+                .expect("the build's releases")
+                .manifests
+                .current(lash_vm_releases::TYPESCRIPT)
+                .expect("the build holds a TypeScript release"),
             binding: lash_core_store::checkpoint_graph::bodies::OwnerBinding::Process {
                 process: "law".to_owned(),
             },

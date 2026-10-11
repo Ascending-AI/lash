@@ -24,7 +24,7 @@ workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
-lash = { workspace = true, features = ["rlm", "postgres", "testing"] }
+lash = { workspace = true, features = ["rlm", "postgres", "testing", "dialect-typescript"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }

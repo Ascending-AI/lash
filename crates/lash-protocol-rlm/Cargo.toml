@@ -55,15 +55,17 @@ tokio = { workspace = true, features = ["rt", "sync"] }
 [dev-dependencies]
 lash-vm-client = { workspace = true, features = ["testing"] }
 # A testing client is paired with a testing worker, which the runtime links.
-lash-vm-runtime = { workspace = true, features = ["testing"] }
+# The laws run TypeScript and Python sessions, so their build holds both
+# dialects' helper releases.
+lash-vm-runtime = { workspace = true, features = ["testing", "dialect-typescript", "dialect-python"] }
 lash-core = { workspace = true, features = ["testing"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-sansio = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 # The worker a Python-dialect law runs its cell in: this crate's test binary
-# re-entered as a worker with `lash-dialect-python` installed.
-lash-vm-worker = { workspace = true, features = ["testing"] }
+# re-entered as the worker of a host that names Python alone.
+lash-vm-worker = { workspace = true, features = ["testing", "dialect-typescript", "dialect-python"] }
 lash-dialect-python = { workspace = true }
 # The prompt walker lowers every example a prompt shows with the dialect's
 # own front end.

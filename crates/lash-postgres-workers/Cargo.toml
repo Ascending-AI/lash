@@ -24,7 +24,7 @@ workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
-lash = { workspace = true, features = ["rlm", "testing"] }
+lash = { workspace = true, features = ["rlm", "testing", "dialect-typescript"] }
 lash-core = { workspace = true }
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }

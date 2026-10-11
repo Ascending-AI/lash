@@ -115,21 +115,30 @@ impl CellEnvelope {
     }
 }
 
-/// The helper release manifest a cell's envelope pins: the build's own,
-/// which its workers run a cell started here on.
-pub(super) fn cell_release() -> Result<NodeId, String> {
-    static RELEASES: std::sync::OnceLock<Result<NodeId, String>> = std::sync::OnceLock::new();
+/// The helper release manifest the envelope of a cell written in `dialect`
+/// pins: the build's own for that dialect, which its workers run a cell
+/// started here on.
+pub(super) fn cell_release(dialect: &str) -> Result<NodeId, String> {
+    static RELEASES: std::sync::OnceLock<Result<BTreeMap<String, NodeId>, String>> =
+        std::sync::OnceLock::new();
     RELEASES
         .get_or_init(|| {
             let releases = lash_vm_broker::kernel::state::release_manifests()
                 .map_err(|failure| failure.to_string())?;
-            releases
+            Ok(releases
                 .manifests
-                .current()
-                .map(|release| NodeId(release.0))
-                .ok_or_else(|| "the build holds no helper release".to_owned())
+                .dialects()
+                .filter_map(|dialect| {
+                    let release = releases.manifests.current(dialect)?;
+                    Some((dialect.to_owned(), NodeId(release.0)))
+                })
+                .collect())
         })
-        .clone()
+        .as_ref()
+        .map_err(Clone::clone)?
+        .get(dialect)
+        .copied()
+        .ok_or_else(|| format!("the build holds no helper release of the dialect `{dialect}`"))
 }
 
 /// The limits a cell's own root is read within: every node was admitted

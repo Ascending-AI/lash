@@ -41,7 +41,7 @@ workflow-graph-roundtrip port='3031':
   target_dir="${WORKFLOW_GRAPH_TARGET_DIR:-/tmp/lash-workflow-graph-{{port}}}"
   # The host finds the VM worker beside its own executable.
   CARGO_TARGET_DIR="$target_dir" \
-    cargo build -p lash-internal-vm-worker --bin lash-vm-worker --profile judged
+    cargo build -p lash-internal-vm-worker --bin lash-vm-worker --features dialect-typescript --profile judged
   WORKFLOW_GRAPH_ADDR="127.0.0.1:{{port}}" CARGO_TARGET_DIR="$target_dir" \
     cargo run -p workflow-graph-roundtrip --bin workflow-graph-roundtrip --profile judged
 

@@ -157,7 +157,18 @@ fn main() {
             }
         }
     };
-    match lash_vm_worker::worker_entry_with_hook(&mut hook) {
+    // The pool laws run under a host that names TypeScript alone and under
+    // one that names every dialect the fixture is built with (FIG-5990).
+    let embed: &lash_vm_worker::Embed = if args.iter().any(|arg| arg == "--dialects=typescript") {
+        &|tuning| {
+            lash_vm_worker::Embedder::kernel()?
+                .dialect(lash_vm_worker::typescript(tuning))?
+                .finish()
+        }
+    } else {
+        &lash_vm_worker::built_dialects
+    };
+    match lash_vm_worker::worker_entry_with_hook(embed, &mut hook) {
         Ok(true) => {}
         _ => std::process::exit(1),
     }

@@ -305,8 +305,11 @@ impl PluginFactory for RlmProtocolPluginFactory {
         &self,
         ctx: &lash_core::plugin::ProcessEngineContributionContext<'_>,
     ) -> Result<Vec<lash_core::ProcessEngineRegistration>, PluginError> {
+        // The processes a session's cells start run documents written in
+        // the session's dialect.
         let factory = lash_vm_runtime::KernelProcessPluginFactory::new(
             self.workers.clone(),
+            self.creation_dialect().name(),
             self.process_bounds(),
         );
         let factory = match &self.worker_functions {

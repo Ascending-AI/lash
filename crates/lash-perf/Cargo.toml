@@ -38,8 +38,7 @@ workspace = true
 [dependencies]
 lash-sansio = { workspace = true }
 lash-vm-client = { workspace = true, features = ["perf-witness"] }
-lash-vm-worker = { workspace = true, features = ["testing"] }
-lash-dialect-python = { workspace = true }
+lash-vm-worker = { workspace = true, features = ["testing", "dialect-typescript", "dialect-python"] }
 libc = { workspace = true }
 lash-core = { workspace = true, features = ["perf-witness", "testing"] }
 lash-core-execution = { workspace = true, features = ["testing"] }
@@ -47,7 +46,7 @@ lash-core-store = { workspace = true, features = ["testing"] }
 lash-durable = { workspace = true }
 lash-vm-runtime = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["perf-witness", "testing"] }
-lash = { workspace = true, features = ["rlm", "sqlite", "postgres", "otel-trace", "testing"] }
+lash = { workspace = true, features = ["rlm", "sqlite", "postgres", "otel-trace", "testing", "dialect-typescript", "dialect-python"] }
 lash-llm-transport = { workspace = true }
 lash-http-transport = { workspace = true }
 lash-llm-tools = { workspace = true }

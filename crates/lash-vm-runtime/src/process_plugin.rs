@@ -10,6 +10,7 @@ use lash_vm_client::{RunBounds, service::Service};
 /// and worker library for publication and execution.
 pub struct KernelProcessPluginFactory {
     workers: Service,
+    dialect: String,
     bounds: RunBounds,
     functions: Option<Arc<lash_kernel_doc::FunctionRegistry>>,
     #[cfg(feature = "synthetic-next")]
@@ -18,9 +19,14 @@ pub struct KernelProcessPluginFactory {
 }
 
 impl KernelProcessPluginFactory {
-    pub fn new(workers: Service, bounds: RunBounds) -> Self {
+    /// The engine for processes whose documents are written in `dialect`,
+    /// run on `workers` and held to `bounds`. The host names the dialect:
+    /// each process records it at creation, and a worker whose embedding
+    /// lacks it refuses the process's runs (FIG-5990).
+    pub fn new(workers: Service, dialect: impl Into<String>, bounds: RunBounds) -> Self {
         Self {
             workers,
+            dialect: dialect.into(),
             bounds,
             functions: None,
             #[cfg(feature = "synthetic-next")]
@@ -73,12 +79,18 @@ impl PluginFactory for KernelProcessPluginFactory {
         let engine = match &self.functions {
             Some(functions) => crate::KernelProcessEngine::with_functions(
                 documents,
+                &self.dialect,
                 Arc::clone(functions),
                 self.workers.clone(),
                 bounds,
             ),
-            None => crate::KernelProcessEngine::new(documents, self.workers.clone(), bounds)
-                .map_err(|error| PluginError::Registration(error.to_string()))?,
+            None => crate::KernelProcessEngine::new(
+                documents,
+                &self.dialect,
+                self.workers.clone(),
+                bounds,
+            )
+            .map_err(|error| PluginError::Registration(error.to_string()))?,
         }
         .with_trace_runtime(ctx.trace_runtime().clone());
         #[cfg(feature = "synthetic-next")]

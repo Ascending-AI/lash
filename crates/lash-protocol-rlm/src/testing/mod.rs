@@ -191,21 +191,14 @@ pub(crate) fn with_finish(
 /// The name of [`python_worker_entry`], as libtest spells it.
 const PYTHON_WORKER_ENTRY: &str = "testing::python_worker_entry";
 
-/// What a worker with the Python dialect runs: the kernel library and
-/// `lash-dialect-python`.
+/// What the worker of a host that names Python alone runs: the kernel
+/// library and the Python dialect, through the builder every host uses.
 fn python_embedding(
     _tuning: &lash_vm_client::WorkerTuning,
 ) -> Result<lash_vm_worker::Embedding, lash_vm_worker::EmbedError> {
-    let mut embedder = lash_vm_worker::Embedder::kernel()?;
-    let mut library = embedder.library()?;
-    let functions = lash_dialect_python::define_helpers(&mut library).map_err(|error| {
-        lash_vm_worker::EmbedError::Dialect {
-            dialect: lash_dialect_python::DIALECT.to_owned(),
-            message: error.to_string(),
-        }
-    })?;
-    embedder.install(lash_dialect_python::package(functions))?;
-    embedder.finish()
+    lash_vm_worker::Embedder::kernel()?
+        .dialect(lash_vm_worker::python())?
+        .finish()
 }
 
 /// The worker entry of [`python_workers`]: a pool execs this test binary
@@ -217,7 +210,7 @@ fn python_embedding(
     reason = "a worker's process ends when its pool closes it, not when libtest returns"
 )]
 fn python_worker_entry() {
-    if lash_vm_worker::worker_entry_with(&python_embedding).expect("serve as a Python worker") {
+    if lash_vm_worker::worker_entry(&python_embedding).expect("serve as a Python worker") {
         std::process::exit(0);
     }
 }

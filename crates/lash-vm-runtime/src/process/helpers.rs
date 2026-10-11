@@ -221,7 +221,7 @@ fn adopt_run(
     capture_whole(
         &OpenedRun {
             run: carried,
-            release: super::migrate::current_release().map_err(state)?,
+            release: super::migrate::current_release(&opened.release).map_err(state)?,
             binding: opened.binding,
         },
         u64::MAX,

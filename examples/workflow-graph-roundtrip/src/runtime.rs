@@ -546,7 +546,9 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
     };
     let core = LashCore::standard_builder(backend)
         .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
-            workers, bounds,
+            workers,
+            lash::vm::TYPESCRIPT_DIALECT,
+            bounds,
         )))
         .tools(Arc::new(lash::tools::StaticToolProvider::new(
             crate::display::tool_definitions(),

@@ -28,6 +28,10 @@
 
 #![allow(clippy::expect_used)]
 
+/// The dialect whose release the laws' runs pin: their documents call the
+/// kernel library alone, which every dialect's release holds.
+const DIALECT: &str = lash_vm_releases::TYPESCRIPT;
+
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -534,8 +538,9 @@ impl Activation for ParkActivation {
                 }
                 continue;
             }
-            let machines = InProcess::new(self.program.clone(), bounds(), start(), NoReads)
-                .expect("the document has an identity");
+            let machines =
+                InProcess::new(self.program.clone(), DIALECT, bounds(), start(), NoReads)
+                    .expect("the document has an identity");
             let run = broker.run(&machines, &CancellationToken::new()).await;
             match run {
                 Ok(KernelEnd::Ended {
@@ -609,7 +614,7 @@ async fn two_orders(
         // committed, and the broker resumes from it.
         return Ok(());
     }
-    let machines = InProcess::new(program.clone(), bounds(), start(), NoReads)
+    let machines = InProcess::new(program.clone(), DIALECT, bounds(), start(), NoReads)
         .map_err(|error| refused(&error))?;
     let document = machines.document();
     let releases = machines.releases().map_err(|error| refused(&error))?;

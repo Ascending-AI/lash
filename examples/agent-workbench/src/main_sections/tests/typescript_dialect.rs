@@ -152,32 +152,30 @@ fn workbench_effects(dialect: WorkbenchDialect) -> lash::vm::HostBoundary {
 /// declared effects, as a worker would lower it.
 #[test]
 fn the_workbench_tutorials_lower_in_each_dialect() {
-    let embedding =
-        lash::vm::standard_worker_embedding(&lash::vm::WorkerTuning::default()).expect("embedding");
+    // The Workbench names both dialects, as its worker does.
+    let tuning = lash::vm::WorkerTuning::default();
+    let embedding = lash::vm::WorkerEmbedder::kernel()
+        .and_then(|embedder| embedder.dialect(lash::vm::typescript_worker_dialect(&tuning)))
+        .and_then(|embedder| embedder.dialect(lash::vm::python_worker_dialect()))
+        .and_then(lash::vm::WorkerEmbedder::finish)
+        .expect("embedding");
     for dialect in [WorkbenchDialect::TypeScript, WorkbenchDialect::Python] {
         let boundary = workbench_effects(dialect);
         let effects = boundary.signatures();
         let controls = boundary.controls();
-        // Python lowering is independent of the worker integration in FIG-5990.
-        let mut library = embedding.library().clone();
-        if dialect == WorkbenchDialect::Python {
-            lash_dialect_python::define_helpers(&mut library).expect("Python helpers");
-        }
+        let name = dialect.cell_dialect().name().to_owned();
         let lower = |program: &str| {
             let environment = lash::dialect::Environment {
-                library: &library,
+                library: embedding.library(),
                 effects: &effects,
                 tool_roots: &Default::default(),
                 controls: &controls,
                 bindings: &Default::default(),
                 functions: &Default::default(),
             };
-            match dialect {
-                WorkbenchDialect::TypeScript => embedding
-                    .lower("typescript", program, &environment)
-                    .expect("TypeScript is installed"),
-                WorkbenchDialect::Python => lash_dialect_python::lower(program, &environment),
-            }
+            embedding
+                .lower(&name, program, &environment)
+                .expect("the Workbench installs the dialect")
         };
         let programs = prompt_programs(dialect);
         assert_eq!(
@@ -374,7 +372,6 @@ async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
 /// The boot selector and executed transcript agree; Python tutorials and cell
 /// execution never inherit TypeScript source from the host.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5990: explicit Python worker feature and sealed helper release"]
 async fn a_python_workbench_serves_python_turns_and_records_the_dialect() {
     let served_prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let provider = {

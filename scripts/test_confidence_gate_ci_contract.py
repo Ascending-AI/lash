@@ -2389,6 +2389,7 @@ derive_mutation_jobs() {{
         self.assertEqual(
             {
                 "sansio-schema-validation",
+                "dialects",
                 "otel-feature-chain",
                 "core-internal-features",
                 "figments-facade",
@@ -2424,7 +2425,10 @@ derive_mutation_jobs() {{
             and ":lash-vm-worker__bin" in unit["label"]
         }
         self.assertEqual(
-            {frozenset({"testing"}), frozenset({"synthetic-next", "testing"})},
+            {
+                frozenset({"dialect-python", "dialect-typescript", "testing"}),
+                frozenset({"dialect-python", "dialect-typescript", "synthetic-next", "testing"}),
+            },
             worker_features,
             "the rolling-deploy lane must compile the predecessor and successor workers",
         )
@@ -2890,7 +2894,9 @@ class ReleaseDryRunTests(unittest.TestCase):
         label = re.search(r"worker_label=(\S+)", build).group(1)
         target = next(target for target in json.loads(LANE_TABLE.read_text())["feature_lane_units"]
                       if target["label"] == label)
-        self.assertEqual([], target["features"])
+        # The SDK worker installs every dialect lash ships (FIG-5990), and
+        # carries no testing control.
+        self.assertEqual(["dialect-python", "dialect-typescript"], target["features"])
         self.assertIn("tools/buck2/outputs.py", build)
         self.assertIn('echo "SDK_WORKER=${worker}" >> "$GITHUB_ENV"', build)
         bundle = next(step["run"] for step in job["steps"] if step.get("name") == "Bundle helper and exact SDK source")

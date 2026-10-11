@@ -48,13 +48,11 @@ in its own `dialects` list, which defaults to `["typescript"]`. Rows judging
 host, UI or store behaviour may need only one dialect; rows judging cell
 fluency exercise both.
 
-Python execution is **pending FIG-5990**: hosts will name explicit dialect build
-features with no worker default, and each dialect will have its own sealed helper
-release. Python inventory rows carry `pending = "FIG-5990"`; do not execute or
-certify them until that prerequisite lands. The three Python smoke entries carry
-`pending_dialects = { python = "FIG-5990" }`, and their runner skips them.
-The selectors and Python tutorial front-end checks are present; they do not
-claim that a Python worker is installed.
+A host names its dialects (FIG-5990): `dialect-typescript` and
+`dialect-python` are build features with no default, the worker installs the
+dialects it was built with, and each dialect has its own helper release. The
+workbench and `rlm-smoke` name both, so Python rows run like TypeScript ones.
+A session records its dialect, and a worker that lacks it refuses the run.
 
 The SQL store axis defaults to `stores = ["sqlite"]`. G4 rows
 (`workbench-crash-resume`, `workbench-session-resume`, and
@@ -120,10 +118,9 @@ Judging is a separate sharded phase over completed evidence bundles, so a judge 
 or mutates the app it scores. `python3 scripts/judged_runbook_matrix.py --shard I/N` emits a
 stable JSON work shard. The matrix currently expands to **37 rows**: 23 RLM scenarios (including `host-flows`),
 eight additional Python rows, two no-RLM-session rows, and four PostgreSQL rows
-(three TypeScript and one pending Python). The three smoke
-cases declare six scripted rows outside the judged shard; three Python rows
-are pending FIG-5990. Of the 37 judged inventory rows, nine Python rows are
-pending and 28 rows are runnable.
+(three TypeScript and one Python). The three smoke
+cases declare six scripted rows outside the judged shard. All 37 judged
+inventory rows are runnable.
 Every `runbooks/*/` directory is a row or a declared `scripted_harness`. The arithmetic
 is asserted by `scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave
 this number stale without turning CI red.

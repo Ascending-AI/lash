@@ -105,6 +105,7 @@ fn build(stores: Arc<dyn StoreSet>, clock: &Arc<SimClock>) -> (Backend, Arc<Kern
     let engine = Arc::new(
         KernelProcessEngine::new(
             KernelDocuments::new(stores.module_artifacts()),
+            lash_vm_runtime::TYPESCRIPT_DIALECT,
             workers,
             bounds(),
         )
@@ -294,8 +295,11 @@ async fn seed(backend: &Backend) {
         .await,
     ));
     registration.engine_config = Some(
-        serde_json::to_value(lash_vm_runtime::KernelRecordedSettings::from(bounds()))
-            .expect("the settings encode"),
+        serde_json::to_value(lash_vm_runtime::KernelRecordedSettings::new(
+            lash_vm_runtime::TYPESCRIPT_DIALECT,
+            bounds(),
+        ))
+        .expect("the settings encode"),
     );
     let id = backend
         .process_registry()

@@ -44,6 +44,10 @@ pub use lash_vm_library::{LibraryError, standard_functions};
 /// A helper release as checkpoint graph nodes: the exact manifest a run or a
 /// saved function pins (FIG-5887 §3).
 pub use lash_vm_releases::{HeldManifests, ManifestFunction, ReleaseManifest, ReleaseRefusal};
+/// The names of the dialects lash ships: what a session or process records
+/// at creation, and what a host passes where it names its dialect
+/// (FIG-5990).
+pub use lash_vm_releases::{PYTHON as PYTHON_DIALECT, TYPESCRIPT as TYPESCRIPT_DIALECT};
 pub use projection::{ProjectionCatalog, ProjectionProvider, ProjectionRefusal};
 
 /// The machine a worker hosts, as the broker drives it, and the run's

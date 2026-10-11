@@ -165,16 +165,17 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             )
         self.assertEqual({row["label"] for row in rows}, {"typescript", "python", "standard"})
 
-    def test_pending_dialects_remain_inventory_without_claiming_execution(self) -> None:
+    def test_no_dialect_is_pending_and_a_pending_one_must_be_declared(self) -> None:
+        # FIG-5990: hosts name Python explicitly and its worker runs, so no
+        # row is inventory only. A pending mark stays validated for a future
+        # dialect: it names a declared dialect and a reason.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
         rows = MATRIX.rows(config)
-        pending = [row for row in rows if "pending" in row]
-        self.assertEqual(len(pending), 9)
-        self.assertTrue(all(row["label"] == "python" and row["pending"] == "FIG-5990" for row in pending))
-        self.assertTrue(all("pending" not in row for row in rows if row["label"] != "python"))
-        for entry in config["scripted_live_model"].values():
-            self.assertEqual(entry["pending_dialects"], {"python": "FIG-5990"})
+        self.assertEqual([row for row in rows if "pending" in row], [])
+        for group in ("scenarios", "scripted_live_model"):
+            for entry in config[group].values():
+                self.assertNotIn("pending_dialects", entry)
         entry = config["scenarios"]["workbench-weather"]
         for invalid in ({"ruby": "FIG-5990"}, {"python": ""}, ["python"]):
             entry["pending_dialects"] = invalid

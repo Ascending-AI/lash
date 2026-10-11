@@ -45,9 +45,14 @@ const SUPPLEMENTS: &[(&str, &str)] = &[
 fn typescript_workflow_print_import_preserves_the_printer_corpus_observations() {
     let shards = load_corpus(CORPUS_FILES.iter().chain(SUPPLEMENTS).copied())
         .expect("decode every conformance document shard");
+    let embedding = lash_vm_worker::Embedder::kernel()
+        .expect("worker kernel")
+        .dialect(lash_vm_worker::typescript(&Default::default()))
+        .expect("TypeScript dialect")
+        .finish()
+        .expect("worker embedding");
     let registry = Arc::new(
-        lash_vm_worker::standard(&Default::default())
-            .expect("worker embedding")
+        embedding
             .registry()
             .expect("worker registry")
             .as_ref()

@@ -272,7 +272,8 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
         units = json.loads(INVENTORY.read_text())["feature_lane_units"]
         workbench_e2e = feature_variant(units, "agent-workbench", WORKBENCH, ["e2e-tools"])
         worker_next = feature_variant(
-            units, "lash-internal-vm-worker", WORKER, ["synthetic-next", "testing"])
+            units, "lash-internal-vm-worker", WORKER,
+            ["dialect-python", "dialect-typescript", "synthetic-next", "testing"])
         lashctl_n = feature_variant(units, "lashctl", LASHCTL, [])
         lashctl_next = feature_variant(units, "lashctl", LASHCTL, ["synthetic-next"])
         build = artifacts / "build.json"

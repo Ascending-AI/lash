@@ -171,6 +171,7 @@ The generated region below is checked against the live filenames and headings.
 | 0137 | [The host owns events, routing and scheduling](0137-the-host-owns-events-routing-and-scheduling.md) |
 | 0138 | [Code mode cells are kernel programs](0138-codemode-cells-are-kernel-programs.md) |
 | 0139 | [The Lash VM is a dialect-free kernel](0139-the-lash-vm-is-a-dialect-free-kernel.md) |
+| 0140 | [Hosts name their dialects](0140-hosts-name-their-dialects.md) |
 <!-- adr-index:end -->
 
 ## Replaced and retired decisions

@@ -5,7 +5,6 @@ PACKAGE_DEPS = {
         "dev": {
             "http": "//third-party/rust:p0147",
             "lash": "//crates/lash:lash",
-            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_sim": "//crates/lash-sim:lash-sim",
             "tempfile": "//third-party/rust:p0370",
             "tokio": "//third-party/rust:p0379"
@@ -871,6 +870,7 @@ PACKAGE_DEPS = {
             "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "sqlx": "//third-party/rust:p0340",
             "tokio": "//third-party/rust:p0379"
         },
@@ -949,6 +949,7 @@ PACKAGE_DEPS = {
         "build": {
             "blake3": "//third-party/rust:p0032",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
@@ -972,6 +973,7 @@ PACKAGE_DEPS = {
     "lash-internal-vm-runtime": {
         "build": {},
         "dev": {
+            "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
             "tokio": "//third-party/rust:p0379"
         },
         "normal": {
@@ -1011,6 +1013,7 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
@@ -1179,7 +1182,6 @@ PACKAGE_DEPS = {
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
-            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_http_transport": "//crates/lash-http-transport:lash-http-transport",
             "lash_llm_tools": "//crates/lash-llm-tools:lash-llm-tools",
@@ -1226,13 +1228,13 @@ PACKAGE_DEPS = {
             "insta": "//third-party/rust:p0170",
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",
-            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_kernel_conformance": "//crates/lash-kernel-conformance:lash-kernel-conformance",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_protocol_rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm",
             "lash_provider_anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "lash_vm_runtime": "//crates/lash-vm-runtime:lash-vm-runtime",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "opentelemetry_sdk": "//third-party/rust:p0225",
             "rmp_serde": "//third-party/rust:p0285",

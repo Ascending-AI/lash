@@ -122,11 +122,14 @@ pub(crate) fn failure(
     lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(failure))
 }
 
-/// The bounds a process records at creation and every run of it is held
-/// to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// What a process records at creation: the dialect its documents are
+/// written in, which a worker must install to run it, and the bounds every
+/// run of it is held to. Every run reads both back from the record
+/// (FIG-5990).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KernelRecordedSettings {
+    pub dialect: String,
     pub charge: u64,
     pub memory: u64,
     pub call_depth: u32,
@@ -135,9 +138,12 @@ pub struct KernelRecordedSettings {
     pub join_members: u32,
 }
 
-impl From<lash_kernel_vm::Bounds> for KernelRecordedSettings {
-    fn from(bounds: lash_kernel_vm::Bounds) -> Self {
+impl KernelRecordedSettings {
+    /// The settings of a process written in `dialect` and held to `bounds`.
+    #[must_use]
+    pub fn new(dialect: &str, bounds: lash_kernel_vm::Bounds) -> Self {
         Self {
+            dialect: dialect.to_owned(),
             charge: bounds.charge,
             memory: bounds.memory,
             call_depth: bounds.call_depth,
@@ -209,6 +215,9 @@ pub struct KernelProcessEngine {
     /// document is linked and admitted against in the parent.
     pub(crate) functions: Arc<lash_kernel_doc::FunctionRegistry>,
     pub(crate) workers: lash_vm_client::service::Service,
+    /// The dialect the host's process documents are written in: a new
+    /// process records it, and its runs name it to their worker.
+    pub(crate) dialect: String,
     pub(crate) bounds: lash_kernel_vm::Bounds,
     /// The kernel version this engine writes: the newest its build
     /// interprets.
@@ -258,20 +267,24 @@ fn process_random() -> u64 {
 }
 
 impl KernelProcessEngine {
-    /// The engine that runs the documents in `documents` on `workers`,
-    /// holding each new process to `bounds`, for workers assembled as lash
-    /// ships them.
+    /// The engine that runs the documents in `documents`, written in
+    /// `dialect`, on `workers`, holding each new process to `bounds`, for
+    /// workers that hold the library of the dialects this build was built
+    /// with.
     ///
     /// # Errors
     ///
-    /// The library's own error: the shipped library does not assemble.
+    /// The library's own error: the build's library does not assemble.
     pub fn new(
         documents: KernelDocuments,
+        dialect: &str,
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
     ) -> Result<Self, lash_vm_library::LibraryError> {
         let functions = lash_vm_library::standard_functions()?;
-        Ok(Self::with_functions(documents, functions, workers, bounds))
+        Ok(Self::with_functions(
+            documents, dialect, functions, workers, bounds,
+        ))
     }
 
     /// The engine for workers a host assembled itself: `functions` are the
@@ -279,6 +292,7 @@ impl KernelProcessEngine {
     /// linked and admitted against.
     pub fn with_functions(
         documents: KernelDocuments,
+        dialect: &str,
         functions: Arc<lash_kernel_doc::FunctionRegistry>,
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
@@ -287,6 +301,7 @@ impl KernelProcessEngine {
             documents,
             functions,
             workers,
+            dialect: dialect.to_owned(),
             bounds,
             writes: lash_kernel_doc::KernelVersion::NEWEST,
             policy: KernelRunPolicy::standard(),
@@ -415,7 +430,7 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
         &self,
         _env_spec: &lash_core::ProcessExecutionEnvSpec,
     ) -> Result<Option<serde_json::Value>, lash_core::PluginError> {
-        serde_json::to_value(KernelRecordedSettings::from(self.bounds))
+        serde_json::to_value(KernelRecordedSettings::new(&self.dialect, self.bounds))
             .map(Some)
             .map_err(|error| lash_core::PluginError::Registration(error.to_string()))
     }

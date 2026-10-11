@@ -8,9 +8,19 @@ pool, framing, queue admission and opaque state client live in
 
 `lash_vm_client::WorkerPool::new(PoolConfig::standard(WorkerEntry::helper(path)))`
 prewarms a credential-free helper. There is no in-process fallback. A host may
-instead register `worker_entry()` as its first action and configure
+instead register `worker_entry(&embed)` as its first action and configure
 `WorkerEntry::reexec()`. Register the entry before creating a runtime, loading
 credentials, opening stores, or constructing providers.
+
+A host names its dialects (ADR 0140). `dialect-typescript` and
+`dialect-python` are build features, neither a default, and `embed` builds the
+embedding from the ones it names:
+`Embedder::kernel()?.dialect(typescript(tuning))?.dialect(python())?.finish()`.
+An embedding with no dialect is refused (`EmbedError::NoDialect`). The helper
+executable installs every dialect it was built with, so build it with the
+host's dialect features. A run names the dialect its session or process
+recorded, and a worker that lacks it refuses the run with
+`RunRefusal::DialectNotInstalled` before it reads the document.
 
 The launcher clears the environment. Immediately after exec, the entry closes
 all inherited descriptors except its socket. Linux uses `close_range` and

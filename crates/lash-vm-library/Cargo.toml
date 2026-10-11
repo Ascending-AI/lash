@@ -22,6 +22,11 @@ synthetic-next = [
     "lash-kernel-migrate/synthetic-next",
 ]
 
+# The dialects whose helper releases the build defines and a parent holds
+# (FIG-5990). None is a default.
+dialect-typescript = ["lash-vm-releases/dialect-typescript"]
+dialect-python = ["lash-vm-releases/dialect-python"]
+
 [lints]
 workspace = true
 

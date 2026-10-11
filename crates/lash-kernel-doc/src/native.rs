@@ -222,7 +222,7 @@ pub enum RegistryError {
     /// Validated functions were offered to a registry that does not hold
     /// exactly the functions they were validated against.
     #[error(
-        "the functions were validated against {validated} other functions; this registry holds {held}"
+        "the functions were validated against {validated} functions, and this registry of {held} lacks some of them"
     )]
     OtherBasis { validated: usize, held: usize },
 }
@@ -317,9 +317,10 @@ impl FunctionRegistry {
     }
 
     /// Registers functions [`FunctionRegistry::validate_functions`]
-    /// validated against exactly the functions this registry holds, without
+    /// validated against functions this registry holds, every one, without
     /// validating or identifying them again: validation and identity are
-    /// functions of a definition and the registry it joins.
+    /// functions of a definition and the functions it names, so a registry
+    /// that holds more (another dialect's helpers) answers the same.
     ///
     /// The functions are trusted as given, so they must be a build's own
     /// work, as a worker takes the helpers its build assembled; a document
@@ -328,13 +329,17 @@ impl FunctionRegistry {
     ///
     /// # Errors
     ///
-    /// [`RegistryError::OtherBasis`] when the registry holds other
-    /// functions, and [`RegistryError::AlreadyRegistered`].
+    /// [`RegistryError::OtherBasis`] when the registry lacks a function
+    /// they were validated against, and [`RegistryError::AlreadyRegistered`].
     pub fn register_validated(
         &mut self,
         validated: ValidatedFunctions,
     ) -> Result<(), RegistryError> {
-        if !self.functions.keys().eq(validated.basis.iter()) {
+        if !validated
+            .basis
+            .iter()
+            .all(|function| self.functions.contains_key(function))
+        {
             return Err(RegistryError::OtherBasis {
                 validated: validated.basis.len(),
                 held: self.functions.len(),

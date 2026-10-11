@@ -24,7 +24,7 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 fastrand = { workspace = true }
-lash = { workspace = true, features = ["rlm", "testing"] }
+lash = { workspace = true, features = ["rlm", "testing", "dialect-typescript"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }

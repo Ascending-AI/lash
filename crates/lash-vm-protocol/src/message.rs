@@ -266,6 +266,12 @@ pub struct ParkedGraph {
 #[serde(deny_unknown_fields)]
 pub struct Start {
     pub owner: VmOwner,
+    /// The dialect the run's document is written in, as its session or
+    /// process recorded it at creation. A worker whose embedding lacks it
+    /// refuses the run before it reads the document
+    /// ([`crate::RunRefusal::DialectNotInstalled`]), and a new run pins
+    /// that dialect's helper release (FIG-5990).
+    pub dialect: String,
     /// The admitted document, in its JSON encoding. The worker validates
     /// and compiles it: the parent never compiles model code.
     pub document: EncodedPayload,

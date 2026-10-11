@@ -152,7 +152,9 @@ async fn core_with_process_tools(
     };
     let builder = lash::LashCore::standard_builder(backend)
         .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
-            workers, bounds,
+            workers,
+            lash::vm::TYPESCRIPT_DIALECT,
+            bounds,
         )))
         .tools(echo_tool());
     let builder = if process_tools {

@@ -192,6 +192,9 @@ fn held_releases(
 /// embedder's plain loop, for hosts that choose no isolation and for laws.
 pub struct InProcess<H> {
     program: Program,
+    /// The dialect the run's document is written in: a new run pins that
+    /// dialect's release.
+    dialect: String,
     bounds: Bounds,
     start: Start,
     document: DocumentId,
@@ -200,13 +203,15 @@ pub struct InProcess<H> {
 }
 
 impl<H> InProcess<H> {
-    /// The run of `program` from `start`, held to `bounds`, reading `host`.
+    /// The run of `program`, written in `dialect`, from `start`, held to
+    /// `bounds`, reading `host`.
     ///
     /// # Errors
     ///
     /// [`KernelFailure::Document`] when the document has no identity.
     pub fn new(
         program: Program,
+        dialect: &str,
         bounds: Bounds,
         start: Start,
         host: H,
@@ -214,6 +219,7 @@ impl<H> InProcess<H> {
         Ok(Self {
             document: program.document.identity()?,
             program,
+            dialect: dialect.to_owned(),
             bounds,
             start,
             host: std::sync::Arc::new(std::sync::Mutex::new(host)),
@@ -310,11 +316,16 @@ where
     }
 
     async fn start(&self, _binding: &OwnerBinding) -> Result<Self::Machine, KernelFailure> {
-        let release = self.releases()?.manifests.current().ok_or_else(|| {
-            KernelFailure::State(GraphStateFailure::Unwritable(
-                "the build holds no helper release".to_owned(),
-            ))
-        })?;
+        let release = self
+            .releases()?
+            .manifests
+            .current(&self.dialect)
+            .ok_or_else(|| {
+                KernelFailure::State(GraphStateFailure::Unwritable(format!(
+                    "the build holds no helper release of the dialect `{}`",
+                    self.dialect
+                )))
+            })?;
         Ok(InProcessMachine {
             machine: KernelMachine::start(self.program.clone(), self.bounds, self.start.clone())?,
             release,

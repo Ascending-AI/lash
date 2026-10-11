@@ -17,7 +17,7 @@ cargo build -p lash-perf --locked
 # names it for these packages; the cargo run names it the same way. The
 # `testing` feature is part of the baked-in build identity, so the helper
 # must carry it to match the feature set the test-side client sees.
-cargo build -p lash-internal-vm-worker --bin lash-vm-worker --features testing --locked
+cargo build -p lash-internal-vm-worker --bin lash-vm-worker --features testing,dialect-typescript,dialect-python --locked
 target_dir="${CARGO_TARGET_DIR:-target}"
 [[ "$target_dir" = /* ]] || target_dir="$PWD/$target_dir"
 export LASH_VM_WORKER="$target_dir/debug/lash-vm-worker"

@@ -1,6 +1,6 @@
 //! The worker's graph state (FIG-5887 §3, §9, §11): PC-WHOLE and the leaf
 //! placement of large values through the real staging, and the release,
-//! native and admission refusals of a resume, against the standard
+//! native and admission refusals of a resume, against a TypeScript
 //! embedding.
 #![expect(
     clippy::unwrap_used,
@@ -27,7 +27,11 @@ use lash_vm_client::graph::{
 use lash_vm_protocol::{KernelRestoreRefusal, ParkedGraph, SealedGraphState, VmOwner};
 use lash_vm_releases::HeldManifests;
 
-use crate::embedding::{Embedding, standard};
+use crate::embedding::Embedding;
+use crate::embedding::tests::typescript_only as embedding;
+
+/// The dialect the laws' runs pin the release of.
+const DIALECT: &str = lash_vm_releases::TYPESCRIPT;
 
 struct Quiet;
 
@@ -158,7 +162,7 @@ fn export(
             .release_manifests()
             .unwrap()
             .manifests
-            .current()
+            .current(DIALECT)
             .unwrap(),
         &document.identity().unwrap().to_string(),
         64 << 20,
@@ -191,7 +195,7 @@ fn limits() -> DecodeLimits {
 /// as the run that never parked.
 #[test]
 fn a_whole_state_streams_large_structure_and_shares_large_text() {
-    let embedding = standard(&WorkerTuning::standard()).unwrap();
+    let embedding = embedding(&WorkerTuning::standard()).unwrap();
     let document = document(&embedding, LARGE);
     let straight = {
         let mut machine =
@@ -258,7 +262,7 @@ fn a_whole_state_streams_large_structure_and_shares_large_text() {
         limits(),
     )
     .unwrap();
-    assert_eq!(Some(pinned), releases.manifests.current());
+    assert_eq!(Some(pinned), releases.manifests.current(DIALECT));
     echo(&mut resumed, &second[0]);
     assert_eq!(resumed.run(&mut Quiet, u64::MAX).unwrap(), straight);
     assert!(matches!(straight, Step::Ended(End::Finished(_))));
@@ -277,7 +281,7 @@ fn start() -> Start {
 /// and with each wait's admission. Each refusal is the kernel's typed one.
 #[test]
 fn a_resume_refuses_a_wrong_release_a_missing_native_or_a_missing_admission() {
-    let embedding = standard(&WorkerTuning::standard()).unwrap();
+    let embedding = embedding(&WorkerTuning::standard()).unwrap();
     let document = document(
         &embedding,
         "main {\n  let n = num.add(1, 2)\n  let r = perform echo(n) as Any\n  return r\n}\n",
@@ -308,7 +312,7 @@ fn a_resume_refuses_a_wrong_release_a_missing_native_or_a_missing_admission() {
 
     // Another build's releases: the pinned manifest is not held, and no
     // release of the same name stands in for it.
-    let pinned = releases.manifests.current().unwrap();
+    let pinned = releases.manifests.current(DIALECT).unwrap();
     let foreign = ReleaseGraph {
         manifests: HeldManifests::default(),
         nodes: releases.nodes.clone(),

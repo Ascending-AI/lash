@@ -1,34 +1,37 @@
 //! What a worker can run: the function registry it assembles when it
 //! starts, and the dialects it lowers and prints.
 //!
+//! A host names its dialects: there is no embedding it gets without
+//! choosing (FIG-5990). It builds one from the kernel library and each
+//! dialect it installs, `Embedder::kernel()?.dialect(typescript(tuning))?
+//! .dialect(python())?.finish()`, and an embedding with no dialect is
+//! refused. Each dialect is a build feature of this crate
+//! (`dialect-typescript`, `dialect-python`), off by default: a host that
+//! enables one compiles none of the other's parser.
+//!
 //! A document names every function it uses by content identity and carries
 //! none of them (kernel spec §9 rule 2), so the registry is fixed before the
 //! first document arrives: the kernel library, the machine's own functions,
-//! each extension crate's, and each dialect's helpers. The standard
-//! embedding's TypeScript helpers are defined once, when `lash-vm-releases`
-//! is built; a worker registers them as built (FIG-5796).
+//! and each installed dialect's extensions and helpers. A dialect's helpers
+//! are defined once, when `lash-vm-releases` is built; a worker registers
+//! them as built (FIG-5796).
 //!
-//! The standard embedding also holds every function of the helper releases
-//! it retains that it does not define itself (FIG-5799, `lash-vm-releases`): a
-//! run parked under an earlier release's helpers, and a saved function
-//! written against them, resume on exactly the functions they pin. Names
-//! resolve against the embedding's own functions alone, or, for a writer the
-//! fleet holds to an earlier release, against that release's.
+//! The embedding also holds every function of the helper releases each of
+//! its dialects retains that it does not define itself (FIG-5799,
+//! `lash-vm-releases`): a run parked under an earlier release's helpers,
+//! and a saved function written against them, resume on exactly the
+//! functions they pin. Names resolve against the embedding's own functions
+//! alone, or, for a writer the fleet holds to an earlier release, against
+//! that release's.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
-use lash_kernel_dialect::{
-    Diagnostic, Environment, FrontEnd, Library, Lowered, NamedLibrary, Package, Printer,
-};
-use lash_kernel_doc::{
-    Document, FunctionDefinition, FunctionId, FunctionRegistry, ValidatedFunctions,
-};
+use lash_kernel_dialect::{Diagnostic, Environment, Lowered, NamedLibrary, Package};
+use lash_kernel_doc::{FunctionId, FunctionRegistry, ValidatedFunctions};
 use lash_kernel_vm::PreparedLibrary;
-use lash_vm_client::WorkerTuning;
 use lash_vm_client::graph::ReleaseGraph;
 use lash_vm_library::{HELPER_RELEASE, HelperReleaseIndex};
-use lash_vm_releases::{HELPER_RELEASE_INDEX, RETAINED_FUNCTIONS, TYPESCRIPT_HELPERS};
 
 /// Why a worker could not assemble what it runs. The worker refuses to
 /// start: it is a defect of the build, never of a document.
@@ -40,6 +43,13 @@ pub enum EmbedError {
     DuplicateDialect { dialect: String },
     #[error("the dialect `{dialect}` could not be installed: {message}")]
     Dialect { dialect: String, message: String },
+    /// The host named no dialect. An embedding has no default one: the host
+    /// installs each dialect its sessions and processes are written in.
+    #[error(
+        "the embedding installs no dialect; name each one the host runs, as in \
+         `Embedder::kernel()?.dialect(typescript(tuning))?.finish()`"
+    )]
+    NoDialect,
     /// A writer asked for the names of a helper release the embedding does
     /// not hold.
     #[error("helper release {release} is not held by this embedding")]
@@ -95,6 +105,18 @@ impl Embedding {
         self.writes
     }
 
+    /// The dialects the host installed, by name.
+    pub fn dialects(&self) -> impl Iterator<Item = &str> {
+        self.dialects.keys().map(String::as_str)
+    }
+
+    /// Whether the host installed `dialect`: a worker runs a session or a
+    /// process only in a dialect its embedding installs.
+    #[must_use]
+    pub fn installs(&self, dialect: &str) -> bool {
+        self.dialects.contains_key(dialect)
+    }
+
     /// The manifests of the helper releases the build holds: a parked run
     /// resumes only on the exact one it pins.
     ///
@@ -110,7 +132,8 @@ impl Embedding {
     }
 
     /// The released helper sets the embedding holds besides its own
-    /// functions, oldest first.
+    /// functions, oldest first: each release as every installed dialect
+    /// holds it, together.
     pub fn helper_releases(&self) -> impl Iterator<Item = &HelperReleaseIndex> {
         self.releases.iter().map(|(release, _)| release)
     }
@@ -217,6 +240,27 @@ impl Embedding {
     }
 }
 
+/// A dialect a host installs in its worker embedding: its front end and
+/// printer, the library it ships with beyond the kernel's, and its helpers
+/// as the build defined them ([`typescript`], [`python`]).
+pub struct Dialect {
+    package: Package,
+    /// Registers the functions the dialect's helpers call beyond the
+    /// kernel library's.
+    extensions: Option<RegisterExtensions>,
+}
+
+/// Registers a dialect's extension functions.
+type RegisterExtensions = fn(&mut FunctionRegistry) -> Result<(), String>;
+
+impl Dialect {
+    /// The dialect's name: what a session records and a run names.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.package.dialect
+    }
+}
+
 /// A worker's registry while it is assembled.
 pub struct Embedder {
     registry: FunctionRegistry,
@@ -225,11 +269,14 @@ pub struct Embedder {
     /// resolves to.
     retained: BTreeSet<FunctionId>,
     writes: u32,
-    releases: Vec<HelperReleaseIndex>,
+    /// Each retained release, by ordinal, as the dialects installed so far
+    /// hold it.
+    releases: BTreeMap<u32, HelperReleaseIndex>,
 }
 
 impl Embedder {
-    /// The kernel library and the machine's own functions.
+    /// The kernel library and the machine's own functions: what every
+    /// embedding holds before the host names a dialect.
     ///
     /// # Errors
     ///
@@ -242,7 +289,7 @@ impl Embedder {
             dialects: BTreeMap::new(),
             retained: BTreeSet::new(),
             writes: HELPER_RELEASE,
-            releases: Vec::new(),
+            releases: BTreeMap::new(),
         })
     }
 
@@ -251,8 +298,7 @@ impl Embedder {
         &mut self.registry
     }
 
-    /// Every function registered so far, by name: what a dialect defines
-    /// its helpers against.
+    /// Every function registered so far, by name.
     ///
     /// # Errors
     ///
@@ -262,25 +308,65 @@ impl Embedder {
             .map_err(|error| EmbedError::Registry(error.to_string()))
     }
 
-    /// Registers functions of the helper releases `releases` this embedding
-    /// retains, validated against exactly what it holds now, under no name:
-    /// they are found by identity alone (FIG-5799).
+    /// Installs `dialect`: registers the library it ships with, its helpers
+    /// as the build defined them, and the functions of the helper releases
+    /// the build retains for it, and keeps its front end and printer.
     ///
     /// # Errors
     ///
-    /// [`EmbedError::Registry`].
-    fn retain(
-        &mut self,
-        functions: ValidatedFunctions,
-        releases: Vec<HelperReleaseIndex>,
-    ) -> Result<(), EmbedError> {
-        self.retained
-            .extend(functions.iter().map(|(function, _)| *function));
+    /// [`EmbedError::DuplicateDialect`]; [`EmbedError::Dialect`] when the
+    /// build holds no helper release of the dialect; [`EmbedError::Registry`]
+    /// when a function is refused.
+    pub fn dialect(mut self, dialect: Dialect) -> Result<Self, EmbedError> {
+        let Dialect {
+            package,
+            extensions,
+        } = dialect;
+        if self.dialects.contains_key(&package.dialect) {
+            return Err(EmbedError::DuplicateDialect {
+                dialect: package.dialect,
+            });
+        }
+        let built =
+            lash_vm_releases::dialect(&package.dialect).ok_or_else(|| EmbedError::Dialect {
+                dialect: package.dialect.clone(),
+                message: "the build holds no helper release of it".to_owned(),
+            })?;
+        let registry = |error: &dyn std::fmt::Display| EmbedError::Registry(error.to_string());
+        if let Some(extensions) = extensions {
+            extensions(&mut self.registry).map_err(EmbedError::Registry)?;
+        }
+        let helpers =
+            ValidatedFunctions::from_json(built.helpers).map_err(|error| registry(&error))?;
         self.registry
-            .register_validated(functions)
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        self.releases = releases;
-        Ok(())
+            .register_validated(helpers)
+            .map_err(|error| registry(&error))?;
+        // The functions of the releases the dialect retains, validated
+        // against exactly what it holds now, under no name: they are found
+        // by identity alone (FIG-5799).
+        let retained = ValidatedFunctions::from_json(built.retained_functions)
+            .map_err(|error| registry(&error))?;
+        self.retained
+            .extend(retained.iter().map(|(function, _)| *function));
+        self.registry
+            .register_validated(retained)
+            .map_err(|error| registry(&error))?;
+        let releases: Vec<HelperReleaseIndex> =
+            serde_json::from_slice(built.helper_release_index).map_err(|error| registry(&error))?;
+        for release in releases {
+            match self.releases.entry(release.ordinal) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(release);
+                }
+                std::collections::btree_map::Entry::Occupied(mut entry) => {
+                    let held = entry.get_mut();
+                    held.writes.extend(release.writes);
+                    held.functions.extend(release.functions);
+                }
+            }
+        }
+        self.dialects.insert(package.dialect.clone(), package);
+        Ok(self)
     }
 
     /// Registers the helpers this build changes over the release it
@@ -309,34 +395,17 @@ impl Embedder {
         Ok(())
     }
 
-    /// Installs a dialect: registers its functions, in the order the
-    /// package lists them, and keeps its front end and printer.
-    ///
-    /// # Errors
-    ///
-    /// [`EmbedError::DuplicateDialect`], or [`EmbedError::Registry`] when a
-    /// function is refused.
-    pub fn install(&mut self, mut package: Package) -> Result<(), EmbedError> {
-        if self.dialects.contains_key(&package.dialect) {
-            return Err(EmbedError::DuplicateDialect {
-                dialect: package.dialect,
-            });
-        }
-        for definition in std::mem::take(&mut package.functions) {
-            self.registry
-                .register(definition, None)
-                .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        }
-        self.dialects.insert(package.dialect.clone(), package);
-        Ok(())
-    }
-
     /// The finished embedding.
     ///
     /// # Errors
     ///
+    /// [`EmbedError::NoDialect`] when the host installed none, and
     /// [`EmbedError::Registry`].
-    pub fn finish(self) -> Result<Embedding, EmbedError> {
+    pub fn finish(mut self) -> Result<Embedding, EmbedError> {
+        if self.dialects.is_empty() {
+            return Err(EmbedError::NoDialect);
+        }
+        self.change_helpers()?;
         // The names a front end resolves are those of the version it
         // writes. A successor's functions are redeclared when a document
         // of it first runs (`Embedding::registry`).
@@ -350,7 +419,7 @@ impl Embedder {
             writes: self.writes,
             releases: self
                 .releases
-                .into_iter()
+                .into_values()
                 .map(|release| (release, OnceLock::new()))
                 .collect(),
             manifests: OnceLock::new(),
@@ -358,119 +427,180 @@ impl Embedder {
     }
 }
 
-/// The embedding lash ships: the kernel library, lash's extensions and the
-/// TypeScript dialect, whose helpers it registers as the build defined
-/// them. A worker that starts defines none.
-///
-/// # Errors
-///
-/// [`EmbedError`].
-pub fn standard(tuning: &WorkerTuning) -> Result<Embedding, EmbedError> {
-    let mut embedder = Embedder::kernel()?;
-    crate::library::register_extensions(embedder.registry()).map_err(EmbedError::Registry)?;
-    let helpers = ValidatedFunctions::from_json(TYPESCRIPT_HELPERS)
-        .map_err(|error| EmbedError::Registry(error.to_string()))?;
-    embedder
-        .registry()
-        .register_validated(helpers)
-        .map_err(|error| EmbedError::Registry(error.to_string()))?;
-    let retained = ValidatedFunctions::from_json(RETAINED_FUNCTIONS)
-        .map_err(|error| EmbedError::Registry(error.to_string()))?;
-    embedder.retain(retained, helper_release_index()?)?;
-    embedder.change_helpers()?;
-    embedder.install(typescript_package(tuning, Vec::new()))?;
-    embedder.finish()
+/// The TypeScript dialect, its parser's stack sized by the parent's working
+/// policy. It ships with lash's extensions: ECMAScript regular expressions
+/// and dates, and WHATWG URLs.
+#[cfg(feature = "dialect-typescript")]
+#[must_use]
+pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Dialect {
+    Dialect {
+        package: Package {
+            dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
+            front_end: Box::new(typescript::FrontEnd::new(tuning)),
+            printer: Some(Box::new(typescript::Printer)),
+            function_values: Some(lash_dialect_typescript::function_values()),
+            functions: Vec::new(),
+        },
+        extensions: Some(crate::library::register_extensions),
+    }
 }
 
-/// The helper releases the standard embedding retains, oldest first, as
-/// the build indexed them: the last is the release the tree builds
-/// (FIG-5799).
-///
-/// # Errors
-///
-/// [`EmbedError::Registry`] when the build's index does not decode: a
-/// defect of the build.
-fn helper_release_index() -> Result<Vec<HelperReleaseIndex>, EmbedError> {
-    serde_json::from_slice(HELPER_RELEASE_INDEX)
-        .map_err(|error| EmbedError::Registry(error.to_string()))
+/// The Python dialect. Its helpers call the kernel library alone.
+#[cfg(feature = "dialect-python")]
+#[must_use]
+pub fn python() -> Dialect {
+    Dialect {
+        package: lash_dialect_python::package(Vec::new()),
+        extensions: None,
+    }
 }
 
-/// The TypeScript dialect, its helpers defined against `library`.
-///
-/// # Errors
-///
-/// [`EmbedError::Dialect`] when a helper names a function `library` lacks.
-pub fn typescript(library: &NamedLibrary, tuning: &WorkerTuning) -> Result<Package, EmbedError> {
-    #[cfg(test)]
-    tests::HELPER_DEFINITIONS.with(|defined| defined.set(defined.get() + 1));
-    let mut library = library.clone();
-    let functions = lash_dialect_typescript::define_helpers(&mut library).map_err(|error| {
-        EmbedError::Dialect {
-            dialect: TYPESCRIPT.to_owned(),
-            message: error.to_string(),
+#[cfg(feature = "dialect-typescript")]
+mod typescript {
+    use std::sync::Mutex;
+
+    use lash_kernel_dialect::{Diagnostic, Environment, Library, Lowered};
+    use lash_kernel_doc::Document;
+
+    /// The TypeScript front end on one reused parser thread, whose stack
+    /// the parent's working policy sizes.
+    pub(super) struct FrontEnd {
+        parser: Mutex<lash_dialect_typescript::Parser>,
+    }
+
+    impl FrontEnd {
+        pub(super) fn new(tuning: &lash_vm_client::WorkerTuning) -> Self {
+            Self {
+                parser: Mutex::new(lash_dialect_typescript::Parser::with_stack(
+                    lash_dialect_typescript::ParserStack {
+                        base_bytes: tuning.parser_stack_base_bytes,
+                        bytes_per_source_byte: tuning.parser_stack_bytes_per_source_byte,
+                    },
+                )),
+            }
         }
-    })?;
-    Ok(typescript_package(tuning, functions))
-}
-
-/// The TypeScript dialect with `functions` as its helpers.
-fn typescript_package(tuning: &WorkerTuning, functions: Vec<FunctionDefinition>) -> Package {
-    Package {
-        dialect: TYPESCRIPT.to_owned(),
-        front_end: Box::new(TypeScript {
-            parser: Mutex::new(lash_dialect_typescript::Parser::with_stack(
-                lash_dialect_typescript::ParserStack {
-                    base_bytes: tuning.parser_stack_base_bytes,
-                    bytes_per_source_byte: tuning.parser_stack_bytes_per_source_byte,
-                },
-            )),
-        }),
-        printer: Some(Box::new(TypeScriptPrinter)),
-        function_values: Some(lash_dialect_typescript::function_values()),
-        functions,
     }
-}
 
-const TYPESCRIPT: &str = "typescript";
-
-/// The TypeScript front end on one reused parser thread, whose stack the
-/// parent's working policy sizes.
-struct TypeScript {
-    parser: Mutex<lash_dialect_typescript::Parser>,
-}
-
-impl FrontEnd for TypeScript {
-    fn lower(&self, source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
-        self.parser
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .lower(source, environment)
-            .map_err(Into::into)
+    impl lash_kernel_dialect::FrontEnd for FrontEnd {
+        fn lower(
+            &self,
+            source: &str,
+            environment: &Environment<'_>,
+        ) -> Result<Lowered, Diagnostic> {
+            self.parser
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .lower(source, environment)
+                .map_err(Into::into)
+        }
     }
-}
 
-struct TypeScriptPrinter;
+    pub(super) struct Printer;
 
-impl Printer for TypeScriptPrinter {
-    fn print(&self, document: &Document, _library: &dyn Library) -> Result<String, Diagnostic> {
-        lash_dialect_typescript::print(document)
+    impl lash_kernel_dialect::Printer for Printer {
+        fn print(&self, document: &Document, _library: &dyn Library) -> Result<String, Diagnostic> {
+            lash_dialect_typescript::print(document)
+        }
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use lash_kernel_doc::FunctionDefinition;
+    use lash_vm_client::WorkerTuning;
 
-    thread_local! {
-        /// How many times this thread defined the TypeScript helpers.
-        pub(super) static HELPER_DEFINITIONS: std::cell::Cell<usize> =
-            const { std::cell::Cell::new(0) };
+    /// A host that names TypeScript alone.
+    pub(crate) fn typescript_only(tuning: &WorkerTuning) -> Result<Embedding, EmbedError> {
+        Embedder::kernel()?.dialect(typescript(tuning))?.finish()
+    }
+
+    /// A host that names every dialect lash ships.
+    pub(crate) fn every_dialect(tuning: &WorkerTuning) -> Result<Embedding, EmbedError> {
+        Embedder::kernel()?
+            .dialect(typescript(tuning))?
+            .dialect(python())?
+            .finish()
+    }
+
+    /// FIG-5990: an embedding has no default dialect. A host that names
+    /// none is refused when it finishes, by a typed error, and one that
+    /// names a dialect twice is refused at the second.
+    #[test]
+    fn an_embedding_with_no_dialect_is_refused() {
+        assert!(matches!(
+            Embedder::kernel().expect("the kernel library").finish(),
+            Err(EmbedError::NoDialect)
+        ));
+        assert!(matches!(
+            Embedder::kernel()
+                .expect("the kernel library")
+                .dialect(python())
+                .expect("the Python dialect")
+                .dialect(python()),
+            Err(EmbedError::DuplicateDialect { dialect }) if dialect == "python"
+        ));
+    }
+
+    /// FIG-5990: an embedding holds the dialects its host named and no
+    /// other: a TypeScript-only one installs no Python front end and holds
+    /// none of Python's helpers, a Python-only one holds none of
+    /// TypeScript's or of its extensions, and one with both holds each.
+    #[test]
+    fn an_embedding_holds_only_the_dialects_its_host_named() {
+        let tuning = WorkerTuning::standard();
+        let helpers = |dialect: &str| -> BTreeSet<FunctionId> {
+            let built = lash_vm_releases::dialect(dialect).expect("the built dialect");
+            ValidatedFunctions::from_json(built.helpers)
+                .expect("the built helpers")
+                .iter()
+                .map(|(function, _)| *function)
+                .collect()
+        };
+        let (ts, py) = (helpers("typescript"), helpers("python"));
+        let holds = |embedding: &Embedding, functions: &BTreeSet<FunctionId>| {
+            functions
+                .iter()
+                .filter(|function| embedding.written.get(function).is_some())
+                .count()
+        };
+        let typescript_only = typescript_only(&tuning).expect("a TypeScript embedding");
+        assert_eq!(
+            typescript_only.dialects().collect::<Vec<_>>(),
+            ["typescript"]
+        );
+        assert!(!typescript_only.installs("python"));
+        assert_eq!(holds(&typescript_only, &ts), ts.len());
+        assert_eq!(holds(&typescript_only, &py), 0);
+
+        let python_only = Embedder::kernel()
+            .and_then(|embedder| embedder.dialect(python()))
+            .and_then(Embedder::finish)
+            .expect("a Python embedding");
+        assert_eq!(python_only.dialects().collect::<Vec<_>>(), ["python"]);
+        assert_eq!(holds(&python_only, &py), py.len());
+        assert_eq!(holds(&python_only, &ts), 0);
+        assert!(
+            python_only
+                .library()
+                .iter()
+                .all(|(name, _)| !name.to_string().starts_with("regex.ecma.")),
+            "the extensions are the TypeScript dialect's"
+        );
+
+        let both = every_dialect(&tuning).expect("an embedding of both");
+        assert_eq!(
+            both.dialects().collect::<Vec<_>>(),
+            ["python", "typescript"]
+        );
+        assert_eq!(holds(&both, &ts) + holds(&both, &py), ts.len() + py.len());
     }
 
     /// V25: a fixed assembly failure is initialized once, just like a successful catalog.
     #[test]
     fn worker_catalog_initialization_retains_a_build_failure() {
-        let mut embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
+        let mut embedding =
+            typescript_only(&WorkerTuning::standard()).expect("a TypeScript embedding");
         let mut writes = BTreeSet::new();
         // An invalid released name table is a fixed build defect: resolving
         // it must fail once and leave that failure in the release's slot.
@@ -512,51 +642,42 @@ mod tests {
         }
     }
 
-    /// A worker's startup defines no helper: the standard embedding
-    /// registers the TypeScript helpers as the build defined them, so a
-    /// worker reads no helper source and validates and identifies no helper
-    /// before it is ready (FIG-5796).
+    /// The helpers the build defined for a dialect are the ones the dialect
+    /// defines against the library it ships with (the kernel library, and
+    /// for TypeScript lash's extensions), in order and under the same
+    /// identities: a worker holds exactly the functions it would have
+    /// defined itself, and defines none when it starts (FIG-5796).
     #[test]
-    fn assembling_the_standard_embedding_defines_no_helper() {
-        let defined = HELPER_DEFINITIONS.with(std::cell::Cell::get);
-        let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
-        assert!(embedding.dialects.contains_key("typescript"));
-        assert_eq!(
-            HELPER_DEFINITIONS.with(std::cell::Cell::get),
-            defined,
-            "the standard embedding defined the TypeScript helpers"
-        );
-    }
-
-    /// The helpers the build defined are the ones the TypeScript dialect
-    /// defines against the kernel library and lash's extensions, in order
-    /// and under the same identities: a worker holds exactly the functions
-    /// it would have defined itself.
-    #[test]
-    fn the_built_helpers_are_the_ones_the_dialect_defines() {
+    fn the_built_helpers_are_the_ones_each_dialect_defines() {
         let mut registry = FunctionRegistry::new();
         crate::library::register_kernel(&mut registry).expect("the kernel library");
+        let mut library = NamedLibrary::from_registry(&registry).expect("the library");
+        let python = lash_dialect_python::define_helpers(&mut library).expect("Python's helpers");
         crate::library::register_extensions(&mut registry).expect("lash's extensions");
         let mut library = NamedLibrary::from_registry(&registry).expect("the library");
-        let defined: Vec<_> = lash_dialect_typescript::define_helpers(&mut library)
-            .expect("the TypeScript helpers")
-            .into_iter()
-            .map(|definition| (definition.identity().expect("an identity"), definition))
-            .collect();
-        let built = ValidatedFunctions::from_json(TYPESCRIPT_HELPERS).expect("the built helpers");
-        let built: Vec<_> = built
-            .iter()
-            .map(|(function, definition)| (*function, definition.clone()))
-            .collect();
-        assert_eq!(built.len(), defined.len(), "the same number of helpers");
-        assert!(
-            built == defined,
-            "the built helpers differ from the defined ones"
-        );
+        let typescript =
+            lash_dialect_typescript::define_helpers(&mut library).expect("TypeScript's helpers");
+        for (dialect, defined) in [("python", python), ("typescript", typescript)] {
+            let defined: Vec<_> = defined
+                .into_iter()
+                .map(|definition| (definition.identity().expect("an identity"), definition))
+                .collect();
+            let built = lash_vm_releases::dialect(dialect).expect("the built dialect");
+            let built = ValidatedFunctions::from_json(built.helpers).expect("the built helpers");
+            let built: Vec<_> = built
+                .iter()
+                .map(|(function, definition)| (*function, definition.clone()))
+                .collect();
+            assert_eq!(built.len(), defined.len(), "{dialect}: as many helpers");
+            assert!(
+                built == defined,
+                "{dialect}: the built helpers differ from the defined ones"
+            );
+        }
     }
 
     /// Target 5: the worker registers every function before a document
-    /// arrives, and a document resolves against nothing else. The standard
+    /// arrives, and a document resolves against nothing else. A TypeScript
     /// embedding holds the kernel library, the machine's functions, the
     /// regular-expression extension and the TypeScript dialect's helpers,
     /// each under one name, and the functions of the helper releases it
@@ -565,8 +686,8 @@ mod tests {
     /// holds each function redeclared for it too (FIG-5793), from when a
     /// document of the successor first needs them (FIG-5796).
     #[test]
-    fn the_standard_embedding_registers_every_function_at_startup() {
-        let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
+    fn an_embedding_registers_every_function_at_startup() {
+        let embedding = typescript_only(&WorkerTuning::standard()).expect("a TypeScript embedding");
         let registry = embedding.registry().expect("every version's functions");
         let names: Vec<String> = embedding
             .library()
@@ -614,9 +735,10 @@ mod tests {
         assert!(embedding.dialects.contains_key("typescript"));
     }
 
-    /// A parent holds exactly the functions a worker holds, without
-    /// linking a dialect or an extension (FIG-5812): the registry it reads
-    /// from the retained helper releases is the standard embedding's, every
+    /// A parent holds exactly the functions a worker of every dialect the
+    /// build holds does, without linking a dialect or an extension
+    /// (FIG-5812): the registry it reads from each built dialect's retained
+    /// helper releases is that embedding's, every
     /// function under the same identity and definition, for every kernel
     /// version the build interprets. It is the union of every retained
     /// release, so a run parked on an earlier release's helpers resolves on
@@ -627,7 +749,7 @@ mod tests {
         let parent = lash_vm_library::standard_functions().expect("the parent's functions");
         let again = lash_vm_library::standard_functions().expect("the parent's functions");
         assert!(Arc::ptr_eq(&parent, &again), "assembled once in a process");
-        let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
+        let embedding = every_dialect(&WorkerTuning::standard()).expect("an embedding of both");
         let worker = embedding.registry().expect("every version's functions");
         let definitions =
             |registry: &FunctionRegistry| -> BTreeMap<FunctionId, FunctionDefinition> {
@@ -661,7 +783,7 @@ mod tests {
     #[cfg(feature = "synthetic-next")]
     #[test]
     fn a_successor_is_redeclared_when_a_document_of_it_first_needs_it() {
-        let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
+        let embedding = typescript_only(&WorkerTuning::standard()).expect("a TypeScript embedding");
         let written = embedding
             .registry_for(lash_kernel_doc::KERNEL_VERSION)
             .expect("the functions as registered");
@@ -692,7 +814,7 @@ mod tests {
         use lash_kernel_doc::{EffectName, Name, Signature};
         use std::collections::BTreeSet;
 
-        let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
+        let embedding = typescript_only(&WorkerTuning::standard()).expect("a TypeScript embedding");
         let tool = Signature {
             params: vec![lash_kernel_doc::Param {
                 name: Name::new("input"),
@@ -732,7 +854,7 @@ mod tests {
         ] {
             let lowered = embedding
                 .lower(
-                    TYPESCRIPT,
+                    lash_vm_releases::TYPESCRIPT,
                     source,
                     &lash_kernel_dialect::Environment {
                         library: embedding.library(),

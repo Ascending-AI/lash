@@ -19,7 +19,7 @@ futures-util = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 dotenvy = "0.15"
-lash = { workspace = true, features = ["rlm", "sqlite", "openai"] }
+lash = { workspace = true, features = ["rlm", "sqlite", "openai", "dialect-typescript"] }
 reqwest = { workspace = true, features = ["json", "rustls", "stream"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

@@ -1,15 +1,16 @@
-//! The library functions lash's shipped worker holds, as a parent knows
-//! them (FIG-5812).
+//! The library functions a host's workers hold, as a parent knows them
+//! (FIG-5812).
 //!
 //! A parent links, admits and migrates documents against exactly the
 //! functions its workers hold, and runs none of them (ADR 0123). It reads
-//! them from the helper releases the build holds (FIG-5799,
-//! `lash-vm-releases`): each release holds every function a build of it
-//! holds, by identity, and the release the tree builds is the one the build
-//! defines until the cut seals it (FIG-5839). A worker reads its helpers
-//! from the same build. So a parent holds the shipped library, the
-//! TypeScript helpers included, without linking a dialect or an extension:
-//! the build defines them, and keeps their definitions as data.
+//! them from the helper releases the build holds for the dialects it was
+//! built with (FIG-5799, FIG-5990, `lash-vm-releases`): each release holds
+//! every function a build of it holds, by identity, and the release the
+//! tree builds is the one the build defines until the cut seals it
+//! (FIG-5839). A worker reads its helpers from the same build. So a parent
+//! holds the library and each built dialect's helpers without linking a
+//! dialect or an extension: the build defines them, and keeps their
+//! definitions as data. A build with no dialect feature holds none.
 
 #[cfg(feature = "synthetic-next")]
 mod synthetic;
@@ -19,11 +20,12 @@ use std::sync::{Arc, OnceLock};
 
 use lash_kernel_doc::{FunctionId, FunctionName, FunctionRegistry};
 
+use lash_vm_releases::HeldReleases;
 pub use lash_vm_releases::{
     HelperRelease, HelperReleaseIndex, RETAINED_HELPER_RELEASES, ReleasedFunction,
 };
 
-/// The helper release the standard embedding writes: the version of the
+/// The helper release this build's dialects write: the version of the
 /// `kernel-helpers` format surface a state its cells and processes write
 /// holds (FIG-5799). The synthetic successor changes a helper, so it writes
 /// the release after the one this tree builds, and retains that one.
@@ -81,8 +83,11 @@ struct Standard {
     interpreted: Arc<FunctionRegistry>,
     /// What the build's own release resolves each name to.
     names: BTreeMap<FunctionName, FunctionId>,
+    /// Each retained release, oldest first: what every dialect the build
+    /// holds has of it, together.
     releases: Vec<HelperReleaseIndex>,
-    retiring: Vec<HelperRelease>,
+    /// Each retiring release, likewise.
+    retiring: Vec<HelperReleaseIndex>,
     surveyed: Arc<FunctionRegistry>,
 }
 
@@ -102,49 +107,71 @@ fn standard_in(
 }
 
 fn assemble() -> Result<Standard, LibraryError> {
-    let held = lash_vm_releases::held_releases().map_err(LibraryError::new)?;
-    assemble_releases(held.retained, held.retiring)
+    let lines = lash_vm_releases::DIALECTS
+        .iter()
+        .map(|built| built.held_releases().map_err(LibraryError::new))
+        .collect::<Result<Vec<_>, _>>()?;
+    assemble_releases(lines)
 }
 
-fn assemble_releases(
-    releases: Vec<HelperRelease>,
-    retiring: Vec<HelperRelease>,
-) -> Result<Standard, LibraryError> {
-    let building = releases
-        .last()
-        .ok_or_else(|| LibraryError::new("no helper release is retained"))?;
+/// Assembles what a parent holds from `lines`, the helper releases of each
+/// dialect the build holds: the union of their functions, and of each
+/// release's index across the dialects. A build with no dialect holds
+/// nothing.
+fn assemble_releases(lines: Vec<HeldReleases>) -> Result<Standard, LibraryError> {
     // Each release lists every function after the functions its body
     // calls, and holds those callees itself.
     let mut written = FunctionRegistry::declarations();
-    for release in &releases {
-        for released in &release.functions {
-            if written.get(&released.function).is_some() {
-                continue;
+    let mut names = BTreeMap::new();
+    let mut releases: BTreeMap<u32, HelperReleaseIndex> = BTreeMap::new();
+    for line in &lines {
+        let building = line
+            .retained
+            .last()
+            .ok_or_else(|| LibraryError::new("no helper release is retained"))?;
+        for release in &line.retained {
+            for released in &release.functions {
+                if written.get(&released.function).is_some() {
+                    continue;
+                }
+                let function = written
+                    .register(released.definition.clone(), None)
+                    .map_err(LibraryError::new)?;
+                if function != released.function {
+                    return Err(LibraryError::new(format!(
+                        "helper release {} holds `{}` as {}, and its definition is {function}",
+                        release.release, released.definition.name, released.function
+                    )));
+                }
             }
-            let function = written
-                .register(released.definition.clone(), None)
-                .map_err(LibraryError::new)?;
-            if function != released.function {
+            merge(&mut releases, release.index())?;
+        }
+        let mut line_names = BTreeMap::new();
+        for function in &building.writes {
+            let registered = written.get(function).ok_or_else(|| {
+                LibraryError::new(format!(
+                    "helper release {} writes {function}, which it does not hold",
+                    building.release
+                ))
+            })?;
+            if let Some(other) = line_names.insert(registered.definition.name.clone(), *function) {
                 return Err(LibraryError::new(format!(
-                    "helper release {} holds `{}` as {}, and its definition is {function}",
-                    release.release, released.definition.name, released.function
+                    "helper release {} writes `{}` as {other} and {function}",
+                    building.release, registered.definition.name
                 )));
             }
         }
-    }
-    let mut names = BTreeMap::new();
-    for function in &building.writes {
-        let registered = written.get(function).ok_or_else(|| {
-            LibraryError::new(format!(
-                "helper release {} writes {function}, which it does not hold",
-                building.release
-            ))
-        })?;
-        if let Some(other) = names.insert(registered.definition.name.clone(), *function) {
-            return Err(LibraryError::new(format!(
-                "helper release {} writes `{}` as {other} and {function}",
-                building.release, registered.definition.name
-            )));
+        // Two dialects share the kernel library, by identity; a name two of
+        // them resolve otherwise would make a parent's answer depend on
+        // which it read first.
+        for (name, function) in line_names {
+            if let Some(other) = names.insert(name.clone(), function)
+                && other != function
+            {
+                return Err(LibraryError::new(format!(
+                    "two dialects write `{name}`, as {other} and {function}"
+                )));
+            }
         }
     }
     for function in changed_helpers(names.values().copied().collect(), &written)? {
@@ -169,66 +196,103 @@ fn assemble_releases(
     } else {
         Arc::clone(&written)
     };
-    let surveyed = if retiring.is_empty() {
-        Arc::clone(&interpreted)
-    } else {
-        let mut surveyed = FunctionRegistry::clone(&interpreted);
-        let mut retired_ordinals = BTreeSet::new();
-        let mut retired_names = BTreeSet::new();
-        for release in &retiring {
-            if !retired_ordinals.insert(release.ordinal) || !retired_names.insert(&release.release)
-            {
-                return Err(LibraryError::new(
-                    "a retiring helper release is declared twice",
-                ));
-            }
-            if releases
-                .iter()
-                .any(|kept| kept.ordinal == release.ordinal || kept.release == release.release)
-            {
-                return Err(LibraryError::new(
-                    "a helper release cannot be retained and retiring",
-                ));
-            }
-            if release.ordinal >= building.ordinal {
-                return Err(LibraryError::new(
-                    "a retiring helper release must precede the building release",
-                ));
-            }
-            let index = release.index();
-            if !index.writes.is_subset(&index.functions) {
-                return Err(LibraryError::new(
-                    "a retiring release writes a function it does not hold",
-                ));
-            }
-            for released in &release.functions {
-                if released.definition.identity().map_err(LibraryError::new)? != released.function {
-                    return Err(LibraryError::new(
-                        "a retiring helper identity differs from its definition",
-                    ));
+    let mut retiring: BTreeMap<u32, HelperReleaseIndex> = BTreeMap::new();
+    let surveyed =
+        if lines.iter().all(|line| line.retiring.is_empty()) {
+            Arc::clone(&interpreted)
+        } else {
+            let mut surveyed = FunctionRegistry::clone(&interpreted);
+            for line in &lines {
+                let building = line
+                    .retained
+                    .last()
+                    .ok_or_else(|| LibraryError::new("no helper release is retained"))?;
+                let mut retired_ordinals = BTreeSet::new();
+                let mut retired_names = BTreeSet::new();
+                for release in &line.retiring {
+                    if !retired_ordinals.insert(release.ordinal)
+                        || !retired_names.insert(&release.release)
+                    {
+                        return Err(LibraryError::new(
+                            "a retiring helper release is declared twice",
+                        ));
+                    }
+                    if line.retained.iter().any(|kept| {
+                        kept.ordinal == release.ordinal || kept.release == release.release
+                    }) {
+                        return Err(LibraryError::new(
+                            "a helper release cannot be retained and retiring",
+                        ));
+                    }
+                    if release.ordinal >= building.ordinal {
+                        return Err(LibraryError::new(
+                            "a retiring helper release must precede the building release",
+                        ));
+                    }
+                    let index = release.index();
+                    if !index.writes.is_subset(&index.functions) {
+                        return Err(LibraryError::new(
+                            "a retiring release writes a function it does not hold",
+                        ));
+                    }
+                    for released in &release.functions {
+                        if released.definition.identity().map_err(LibraryError::new)?
+                            != released.function
+                        {
+                            return Err(LibraryError::new(
+                                "a retiring helper identity differs from its definition",
+                            ));
+                        }
+                        if surveyed.get(&released.function).is_none() {
+                            surveyed
+                                .register(released.definition.clone(), None)
+                                .map_err(LibraryError::new)?;
+                        }
+                    }
+                    merge(&mut retiring, index)?;
                 }
-                if surveyed.get(&released.function).is_none() {
-                    surveyed
-                        .register(released.definition.clone(), None)
+            }
+            for version in lash_kernel_doc::KernelVersion::ALL {
+                if let Some(migration) = lash_kernel_migrate::migration_from(*version) {
+                    lash_kernel_migrate::migrate_registry(&mut surveyed, migration)
                         .map_err(LibraryError::new)?;
                 }
             }
-        }
-        for version in lash_kernel_doc::KernelVersion::ALL {
-            if let Some(migration) = lash_kernel_migrate::migration_from(*version) {
-                lash_kernel_migrate::migrate_registry(&mut surveyed, migration)
-                    .map_err(LibraryError::new)?;
-            }
-        }
-        Arc::new(surveyed)
-    };
+            Arc::new(surveyed)
+        };
     Ok(Standard {
         interpreted,
         names,
-        releases: releases.iter().map(HelperRelease::index).collect(),
-        retiring,
+        releases: releases.into_values().collect(),
+        retiring: retiring.into_values().collect(),
         surveyed,
     })
+}
+
+/// Joins `index`, one dialect's release, to what the other dialects hold of
+/// the release of its ordinal: a release is one line, and each dialect has
+/// its own functions under it.
+fn merge(
+    releases: &mut BTreeMap<u32, HelperReleaseIndex>,
+    index: HelperReleaseIndex,
+) -> Result<(), LibraryError> {
+    match releases.entry(index.ordinal) {
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            entry.insert(index);
+        }
+        std::collections::btree_map::Entry::Occupied(mut entry) => {
+            let held = entry.get_mut();
+            if held.release != index.release {
+                return Err(LibraryError::new(format!(
+                    "helper release {} is `{}` for one dialect and `{}` for another",
+                    index.ordinal, held.release, index.release
+                )));
+            }
+            held.writes.extend(index.writes);
+            held.functions.extend(index.functions);
+        }
+    }
+    Ok(())
 }
 
 /// The function registry a parent links, admits and migrates documents
@@ -245,7 +309,7 @@ pub fn standard_functions() -> Result<Arc<FunctionRegistry>, LibraryError> {
     Ok(Arc::clone(&standard()?.interpreted))
 }
 
-/// The helper releases the standard embedding retains, oldest first: the
+/// The helper releases this build's dialects retain, oldest first: the
 /// last is the release the tree builds (FIG-5799).
 ///
 /// # Errors
@@ -261,11 +325,7 @@ pub fn standard_helper_releases() -> Result<Vec<HelperReleaseIndex>, LibraryErro
 /// # Errors
 /// [`LibraryError`] when a declaration or artifact is invalid.
 pub fn retiring_helper_releases() -> Result<Vec<HelperReleaseIndex>, LibraryError> {
-    Ok(standard()?
-        .retiring
-        .iter()
-        .map(HelperRelease::index)
-        .collect())
+    Ok(standard()?.retiring.clone())
 }
 
 /// The declaration catalog used only to survey retirement: includes removed
@@ -277,7 +337,7 @@ pub fn helper_survey_functions() -> Result<Arc<FunctionRegistry>, LibraryError> 
     Ok(Arc::clone(&standard()?.surveyed))
 }
 
-/// The functions a build of the standard embedding would stop holding were
+/// The functions this build would stop holding were
 /// it to stop retaining helper release `release`, each with its
 /// counterpart: the function of the same name and kernel version the
 /// embedding writes, when it has one (FIG-5799). A function no newer
@@ -302,7 +362,7 @@ fn retired_helpers_in(
         .releases
         .iter()
         .cloned()
-        .chain(standard.retiring.iter().map(HelperRelease::index))
+        .chain(standard.retiring.iter().cloned())
         .find(|index| index.ordinal == release)
         .ok_or_else(|| {
             LibraryError::new(format!("helper release {release} has no retirement index"))
@@ -394,7 +454,11 @@ mod tests {
         let current = release(2, 2);
         let old = removed.functions[0].function;
         let new = current.functions[0].function;
-        let standard = assemble_releases(vec![current], vec![removed]).expect("the build");
+        let standard = assemble_releases(vec![HeldReleases {
+            retained: vec![current],
+            retiring: vec![removed],
+        }])
+        .expect("the build");
         assert!(
             standard.interpreted.get(&old).is_none(),
             "retired is not runnable"

@@ -17,11 +17,11 @@ the oracle before the model's terminal finish: a model that claims success witho
 it. So `turn_succeeded` is not the verdict — score the row on the oracle's exit alone, and
 do not read a succeeded turn as a passing row.
 
-The three Python rows are pending **FIG-5990**, which supplies explicit worker
-dialect features and separate sealed helper releases. The runner skips entries
-in `pending_dialects`; the selector accepts Python but Python execution is blocked.
+The host names both dialects (`dialect-typescript`, `dialect-python`), so each
+case runs once in TypeScript and once in Python. The runner still skips any
+entry a future `pending_dialects` marks.
 
-Run the three currently runnable TypeScript rows with:
+Run the six rows with:
 
 ```sh
 just rlm-smoke-e2e

@@ -166,58 +166,91 @@ pub enum ReleaseRefusal {
     MissingNative { function: FunctionId },
 }
 
-/// The manifests of the releases a build retains, by reference: what a run
-/// may pin and resume on.
+/// The manifests of the releases a build retains for the dialects it holds,
+/// by reference: what a run may pin and resume on.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HeldManifests {
     by_reference: BTreeMap<ChildRef, ReleaseManifest>,
-    /// The release the tree builds: the one a new run pins.
-    current: Option<ChildRef>,
+    /// Each dialect's release the tree builds: the one a new run written in
+    /// that dialect pins.
+    current: BTreeMap<String, ChildRef>,
+    /// The dialect each manifest is a release of.
+    dialects: BTreeMap<ChildRef, String>,
 }
 
 impl HeldManifests {
-    /// The manifests already staged by the build, with their exact node refs.
+    /// Adds `dialect`'s manifests as the build staged them, with their
+    /// exact node refs, oldest first.
     ///
     /// # Errors
     ///
     /// A malformed build artifact.
-    pub fn from_staged(bytes: &[u8]) -> Result<Self, TokenError> {
+    pub fn add_staged(&mut self, dialect: &str, bytes: &[u8]) -> Result<(), TokenError> {
         let mut input = TokenReader::new(bytes);
         let count = input.seq()?;
-        let mut manifests = Self::default();
         for _ in 0..count {
             input.expect_struct(2)?;
             let reference = ChildRef::decode(&mut input)?;
             let manifest = ReleaseManifest::decode(&mut input)?;
-            manifests.by_reference.insert(reference, manifest);
-            manifests.current = Some(reference);
+            self.hold(dialect, reference, manifest);
         }
-        input.finish()?;
-        Ok(manifests)
+        input.finish()
     }
 
-    /// Stages every retained release of `held`.
+    /// Stages every release `held` retains for `dialect`, oldest first, and
+    /// holds its manifest.
     ///
     /// # Errors
     ///
     /// The first error `stage` returns.
     pub fn stage<E>(
+        &mut self,
+        dialect: &str,
         held: &HeldReleases,
         mut stage: impl FnMut(u32, &[u8]) -> Result<ChildRef, E>,
-    ) -> Result<Self, E> {
-        let mut manifests = Self::default();
+    ) -> Result<(), E> {
         for release in &held.retained {
             let (manifest, reference) = stage_release(release, &mut stage)?;
-            manifests.by_reference.insert(reference, manifest);
-            manifests.current = Some(reference);
+            self.hold(dialect, reference, manifest);
         }
-        Ok(manifests)
+        Ok(())
     }
 
-    /// The manifest a new run pins.
+    fn hold(&mut self, dialect: &str, reference: ChildRef, manifest: ReleaseManifest) {
+        self.by_reference.insert(reference, manifest);
+        self.dialects.insert(reference, dialect.to_owned());
+        self.current.insert(dialect.to_owned(), reference);
+    }
+
+    /// The manifest a new run written in `dialect` pins: the release the
+    /// tree builds for it. `None` when the build holds no release of that
+    /// dialect.
     #[must_use]
-    pub fn current(&self) -> Option<ChildRef> {
-        self.current
+    pub fn current(&self, dialect: &str) -> Option<ChildRef> {
+        self.current.get(dialect).copied()
+    }
+
+    /// The dialects the build holds releases for.
+    pub fn dialects(&self) -> impl Iterator<Item = &str> {
+        self.current.keys().map(String::as_str)
+    }
+
+    /// The dialect the manifest `reference` names is a release of.
+    #[must_use]
+    pub fn dialect_of(&self, reference: &ChildRef) -> Option<&str> {
+        self.dialects.get(reference).map(String::as_str)
+    }
+
+    /// The manifests the build holds for `dialect`, each with its
+    /// reference, in no order.
+    pub fn of_dialect<'a>(
+        &'a self,
+        dialect: &'a str,
+    ) -> impl Iterator<Item = (ChildRef, &'a ReleaseManifest)> + 'a {
+        self.by_reference
+            .iter()
+            .filter(move |(reference, _)| self.dialect_of(reference) == Some(dialect))
+            .map(|(reference, manifest)| (*reference, manifest))
     }
 
     /// Whether a release the build retains holds `function`: a helper

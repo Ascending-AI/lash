@@ -125,7 +125,8 @@ impl ReleaseGraph {
     }
 }
 
-/// The helper releases this build holds, staged. Staging is deterministic:
+/// The helper releases this build holds for the dialects it was built with,
+/// staged. Staging is deterministic:
 /// a parent and a worker of one build name every manifest alike. The build's
 /// immutable nodes are staged once per process and shared by every cell.
 ///
@@ -143,24 +144,26 @@ fn read_release_manifests() -> Result<ReleaseGraph, GraphStateFailure> {
     let build_error = |error: lash_kernel_doc::graph_tokens::TokenError| {
         GraphStateFailure::Unwritable(error.to_string())
     };
-    let manifests =
-        HeldManifests::from_staged(lash_vm_releases::CHECKPOINT_MANIFESTS).map_err(build_error)?;
-    let mut input = TokenReader::new(lash_vm_releases::CHECKPOINT_NODES);
-    let count = input.seq().map_err(build_error)?;
+    let mut manifests = HeldManifests::default();
     let mut nodes = BTreeMap::new();
-    for _ in 0..count {
-        input.expect_struct(2).map_err(build_error)?;
-        let id = NodeId(ChildRef::decode(&mut input).map_err(build_error)?.0);
-        let bytes = input.bytes().map_err(build_error)?;
-        nodes.insert(
-            id,
-            EncodedNode {
+    // Two dialects share the kernel library's definition nodes, by digest.
+    for built in lash_vm_releases::DIALECTS {
+        manifests
+            .add_staged(built.dialect, built.checkpoint_manifests)
+            .map_err(build_error)?;
+        let mut input = TokenReader::new(built.checkpoint_nodes);
+        let count = input.seq().map_err(build_error)?;
+        for _ in 0..count {
+            input.expect_struct(2).map_err(build_error)?;
+            let id = NodeId(ChildRef::decode(&mut input).map_err(build_error)?.0);
+            let bytes = input.bytes().map_err(build_error)?;
+            nodes.entry(id).or_insert_with(|| EncodedNode {
                 id,
                 bytes: Arc::from(bytes),
-            },
-        );
+            });
+        }
+        input.finish().map_err(build_error)?;
     }
-    input.finish().map_err(build_error)?;
     // Each node is checked the first time a reader meets it.
     lash_core_store::checkpoint_graph::node::register_immutable_catalog(&nodes);
     Ok(ReleaseGraph { manifests, nodes })
@@ -715,7 +718,7 @@ mod tests {
         let first = release_manifests().expect("the build's release graph");
         let second = release_manifests().expect("the same build's release graph");
         assert!(!first.nodes.is_empty());
-        assert_eq!(first.manifests.current(), second.manifests.current());
+        assert_eq!(first.manifests, second.manifests);
         for (id, node) in &first.nodes {
             assert!(
                 Arc::ptr_eq(&node.bytes, &second.nodes[id].bytes),
@@ -728,11 +731,16 @@ mod tests {
     /// release identity the runtime encoder produces.
     #[test]
     fn the_builds_checkpoint_catalog_is_the_canonical_release_graph() {
-        let held = lash_vm_releases::held_releases().expect("the build's releases");
         let mut staging = staging(u64::MAX);
-        let manifests =
-            HeldManifests::stage(&held, |kind, logical| stage(&mut staging, kind, logical))
+        let mut manifests = HeldManifests::default();
+        for dialect in lash_vm_releases::DIALECTS {
+            let held = dialect.held_releases().expect("the build's releases");
+            manifests
+                .stage(dialect.dialect, &held, |kind, logical| {
+                    stage(&mut staging, kind, logical)
+                })
                 .expect("canonical release graph");
+        }
         let built = release_manifests().expect("the build's staged catalog");
         assert_eq!(built.manifests, manifests);
         assert_eq!(built.nodes, staging.into_nodes());

@@ -238,13 +238,7 @@ fn rlm_core_in_dialect(
         dialect,
     );
     let factory = if python {
-        let embedding =
-            python_process_embedding(&lash::vm::WorkerTuning::default()).expect("Python embedding");
-        factory
-            .with_worker_service(python_process_workers())
-            .with_worker_functions(Arc::clone(
-                embedding.registry().expect("every version's functions"),
-            ))
+        factory.with_worker_service(python_process_workers())
     } else {
         factory
     };
@@ -1217,25 +1211,19 @@ fn postgres_variants_never_pass_without_a_database_url() {
     }
 }
 
+/// What the worker of a host that names Python alone runs.
 fn python_process_embedding(
     _tuning: &lash::vm::WorkerTuning,
 ) -> Result<lash::vm::WorkerEmbedding, lash::vm::WorkerEmbedError> {
-    let mut embedder = lash::vm::WorkerEmbedder::kernel()?;
-    let mut library = embedder.library()?;
-    let functions = lash_dialect_python::define_helpers(&mut library).map_err(|error| {
-        lash::vm::WorkerEmbedError::Dialect {
-            dialect: "python".to_owned(),
-            message: error.to_string(),
-        }
-    })?;
-    embedder.install(lash_dialect_python::package(functions))?;
-    embedder.finish()
+    lash::vm::WorkerEmbedder::kernel()?
+        .dialect(lash::vm::python_worker_dialect())?
+        .finish()
 }
 
 // This support entry becomes a worker only when the pool reexecs it.
 #[test]
 fn python_saved_function_worker_entry() {
-    if lash::vm::worker_entry_with(&python_process_embedding).expect("Python worker") {
+    if lash::vm::worker_entry(&python_process_embedding).expect("Python worker") {
         std::process::exit(0);
     }
 }

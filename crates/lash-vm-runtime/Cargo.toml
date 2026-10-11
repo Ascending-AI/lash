@@ -17,6 +17,11 @@ name = "lash_vm_runtime"
 doctest = false
 
 [features]
+# The dialects whose helper releases the build defines and this parent
+# holds, each off by default: a host names the dialects its sessions and
+# processes are written in (FIG-5990).
+dialect-typescript = ["lash-vm-library/dialect-typescript"]
+dialect-python = ["lash-vm-library/dialect-python"]
 # Prints a workflow document as TypeScript.
 typescript = ["dep:lash-dialect-typescript"]
 testing = ["lash-vm-client/testing", "lash-core/testing"]
@@ -61,4 +66,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+# The laws' runs pin a dialect's release, so their build holds one.
+lash-vm-library = { workspace = true, features = ["dialect-typescript"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

@@ -289,6 +289,11 @@ pub enum RunRefusal {
     },
     #[error("{refusal}")]
     GraphState { refusal: GraphStateRefusal },
+    /// The run's session or process recorded a dialect this worker's
+    /// embedding does not install: the host that built the worker did not
+    /// name it. Refused before the document is read or anything runs.
+    #[error("the run is written in the dialect `{dialect}`, which this worker does not install")]
+    DialectNotInstalled { dialect: String },
     /// The worker will not resume the parked graph state: its pinned
     /// release, a function or native it needs, or a wait's admission.
     #[error("{refusal}")]

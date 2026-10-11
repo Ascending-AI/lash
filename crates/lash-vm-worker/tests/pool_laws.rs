@@ -15,10 +15,68 @@ use lash_vm_protocol::*;
 
 const SLICE: u64 = 1_000_000;
 
+/// The dialect the laws' runs are written in, which every embedding the
+/// laws run under installs.
+const DIALECT: &str = "typescript";
+
+thread_local! {
+    /// The dialects the host of the law running on this thread names: what
+    /// its workers' embedding installs.
+    static HOST_DIALECTS: std::cell::Cell<&'static str> = const { std::cell::Cell::new("") };
+}
+
+/// Runs `law` with workers whose host names `dialects`.
+fn under(dialects: &'static str, law: fn()) {
+    HOST_DIALECTS.set(dialects);
+    law();
+}
+
+/// Every law holds whichever dialects the host names beside the one its
+/// runs are written in: with a TypeScript-only embedding, and with one of
+/// TypeScript and Python (FIG-5990).
+macro_rules! under_each_embedding {
+    ($($law:ident),* $(,)?) => {
+        $(
+            mod $law {
+                #[test]
+                fn typescript_only() {
+                    super::under("typescript", super::$law);
+                }
+
+                #[test]
+                fn typescript_and_python() {
+                    super::under("typescript,python", super::$law);
+                }
+            }
+        )*
+    };
+}
+
+under_each_embedding!(
+    a_parked_run_carries_on_in_another_worker_without_asking_again,
+    parts_that_outgrow_one_frame_cross_apart_and_the_run_goes_on_the_same,
+    a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission,
+    a_typescript_cell_lowered_in_the_worker_parks_and_resumes,
+    a_parked_run_is_refused_under_another_document,
+    host_reads_are_answered_by_the_parent_and_prints_arrive_in_order,
+    a_run_cancel_is_observed_where_a_slice_returns,
+    a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused,
+    worker_crash_mid_run_leaves_the_parent_running,
+    a_forbidden_syscall_kills_the_worker_with_typed_evidence,
+    a_panic_with_a_backtrace_requested_is_typed_not_a_forbidden_syscall,
+    the_address_space_ceiling_bounds_a_runs_allocation,
+    workers_refuse_another_protocol_before_guest_admission,
+    a_worker_silent_during_bootstrap_reports_the_time_it_was_silent,
+);
+
 fn config(mode: &str) -> PoolConfig {
     let mut entry = WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker-fixture"));
-    if !mode.is_empty() {
-        entry.args.push(mode.into());
+    // The fixture reads its mode first.
+    entry.args.push(mode.into());
+    match HOST_DIALECTS.get() {
+        "typescript" => entry.args.push("--dialects=typescript".into()),
+        "typescript,python" => {}
+        other => panic!("a law runs under a named embedding, not `{other}`"),
     }
     // The shipped watchdog: it also bounds a worker's startup.
     let mut config = PoolConfig::standard(entry);
@@ -43,8 +101,8 @@ fn owner() -> VmOwner {
 /// `body` as a document against the registry every worker assembles, with
 /// its identity and its wire payload.
 fn document(body: &str) -> (String, EncodedPayload) {
-    let embedding =
-        lash_vm_worker::standard(&WorkerTuning::standard()).expect("the standard embedding");
+    let embedding = lash_vm_worker::built_dialects(&WorkerTuning::standard())
+        .expect("an embedding of every built dialect");
     let mut text = String::from("numbers by_spelling\nkernel 1\neffect echo(x?: Any) -> Any\n");
     for (name, id) in embedding.library().iter() {
         if ["num.add", "num.lt", "text.repeat"].contains(&name.to_string().as_str()) {
@@ -70,6 +128,7 @@ fn bounds() -> RunBounds {
 fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
     Start {
         owner: owner(),
+        dialect: DIALECT.into(),
         document: document.clone(),
         from: StartFrom::Fresh(
             wire::encode(
@@ -190,6 +249,7 @@ fn killed_at_a_park_and_resumed(
         .start(
             Start {
                 owner: owner(),
+                dialect: DIALECT.into(),
                 document: document.clone(),
                 from: StartFrom::ParkedGraph(ParkedGraph {
                     state,
@@ -219,7 +279,6 @@ fn killed_at_a_park_and_resumed(
 /// is exported at the park, its worker is killed, and another worker carries
 /// on from the state. The effect answered before the export is not asked
 /// for again.
-#[test]
 fn a_parked_run_carries_on_in_another_worker_without_asking_again() {
     let pool = WorkerPool::new(config("")).expect("pool");
     let (identity, document) = document(TOOL_LOOP);
@@ -235,7 +294,6 @@ fn a_parked_run_carries_on_in_another_worker_without_asking_again() {
 /// cross alone before the slice, and a park whose state and request
 /// together outgrow a frame hands the state over when the parent asks for
 /// it.
-#[test]
 fn parts_that_outgrow_one_frame_cross_apart_and_the_run_goes_on_the_same() {
     const FRAME: u32 = 64 * 1024;
     let mut config = config("");
@@ -274,6 +332,7 @@ main {{
         .start(
             Start {
                 owner: owner(),
+                dialect: DIALECT.into(),
                 document: document.clone(),
                 from: StartFrom::ParkedGraph(ParkedGraph {
                     state,
@@ -329,7 +388,6 @@ fn admitted(step: RunStep) -> (u64, Datum, EncodedPayload) {
 /// admission of the wait it holds, and finishes without asking again. The
 /// state alone, without the admission, is refused with the kernel's typed
 /// refusal.
-#[test]
 fn a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission() {
     let pool = WorkerPool::new(config("")).expect("pool");
     let (identity, document) = document(TOOL_LOOP);
@@ -350,6 +408,7 @@ fn a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission() 
 
     let resume = |admissions: Vec<EncodedPayload>| Start {
         owner: owner(),
+        dialect: DIALECT.into(),
         document: document.clone(),
         from: StartFrom::ParkedGraph(ParkedGraph {
             state: state.clone(),
@@ -395,7 +454,6 @@ fn a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission() 
 /// functions it registered at startup, and the document it gives runs,
 /// parks, is killed and resumes like any other. The cell's top-level
 /// binding is the session's when the run finishes.
-#[test]
 fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
     use lash_vm_client::service::{Request, Response};
     let pool = WorkerPool::new(config("")).expect("pool");
@@ -451,9 +509,176 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
     );
 }
 
+/// FIG-5990: a run names the dialect its session or process recorded at
+/// creation, and a worker whose host did not name that dialect refuses it
+/// with a typed refusal before it reads the document or runs anything: a
+/// new run before its first slice, and a parked one before its state. The
+/// worker of a host that named the dialect runs the same start.
+#[test]
+fn a_worker_refuses_a_run_in_a_dialect_its_host_did_not_name() {
+    let (identity, document) = {
+        HOST_DIALECTS.set("typescript,python");
+        document(TOOL_LOOP)
+    };
+    let python = |from: StartFrom| Start {
+        owner: owner(),
+        dialect: "python".into(),
+        document: document.clone(),
+        from,
+        bounds: bounds(),
+        export: Some(binding()),
+    };
+    let new_run = || python(fresh(&document, Target::Main, Vec::new()).from);
+
+    // A host that names Python runs it, to a park another worker resumes.
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut worker = checkout(&pool);
+    worker
+        .start(new_run(), &identity, ExecutionClass::Cell)
+        .expect("start");
+    let (_, _, admission) = admitted(worker.run(SLICE, false).expect("a Python run"));
+    let state = export(&mut worker);
+    worker.release().expect("release at the park");
+    drop(pool);
+
+    // A host that names TypeScript alone refuses both starts.
+    HOST_DIALECTS.set("typescript");
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let parked = python(StartFrom::ParkedGraph(ParkedGraph {
+        state,
+        admissions: vec![admission],
+    }));
+    for (start, from) in [(new_run(), "a new run"), (parked, "a parked run")] {
+        let mut worker = checkout(&pool);
+        let refused = worker
+            .start(start, &identity, ExecutionClass::Cell)
+            .and_then(|()| worker.run(SLICE, false))
+            .expect_err("the worker installs no Python");
+        assert!(
+            matches!(
+                &refused,
+                PoolError::Infrastructure(InfrastructureOutcome::RunRefused {
+                    refusal: RunRefusal::DialectNotInstalled { dialect }
+                }) if dialect == "python"
+            ),
+            "{from}: {refused:?}"
+        );
+    }
+}
+
+/// FIG-5990: a Python cell is lowered and run by the worker of a host that
+/// names Python, through the entry and the confinement every worker has:
+/// lowering it, running it and parking at each effect makes no system call
+/// the confinement forbids, and the run pins Python's helper release, on
+/// which another worker resumes it.
+#[test]
+fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
+    use lash_vm_client::service::{Request, Response};
+    HOST_DIALECTS.set("typescript,python");
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let echo = lash_kernel_doc::Signature {
+        params: vec![lash_kernel_doc::Param {
+            name: Name::new("x"),
+            ty: lash_kernel_doc::Type::Any,
+            optional: false,
+        }],
+        result: lash_kernel_doc::Type::Any,
+    };
+    let request = Request::Lower {
+        dialect: "python".into(),
+        source: "total = 0\nfor step in [1, 2, 3]:\n    total = total + await echo(step)\n".into(),
+        effects: [(
+            lash_kernel_doc::EffectName::new("echo").expect("effect name"),
+            echo,
+        )]
+        .into(),
+        controls: Default::default(),
+        tool_roots: Default::default(),
+        bindings: Default::default(),
+        functions: Default::default(),
+        helpers: lash_vm_library::HELPER_RELEASE,
+    };
+    let mut worker = checkout(&pool);
+    let response = worker
+        .prepare(
+            owner(),
+            EncodedPayload(rmp_serde::to_vec_named(&request).expect("request")),
+        )
+        .expect("lowered in the worker");
+    let Response::Lowered { document, .. } = rmp_serde::from_slice(&response.0).expect("response")
+    else {
+        panic!("the cell lowers")
+    };
+    let identity = lash_kernel_doc::Document::from_json(
+        std::str::from_utf8(&document).expect("document text"),
+    )
+    .expect("document")
+    .identity()
+    .expect("identity")
+    .to_string();
+    let document = wire::wrap(PayloadKind::Document, &document).expect("payload");
+    let mut start = fresh(&document, Target::Main, Vec::new());
+    start.dialect = "python".into();
+    // The worker that lowered the cell starts its run.
+    worker
+        .start(start, &identity, ExecutionClass::Cell)
+        .expect("start");
+    // Its first park is exported and the worker killed: another resumes it
+    // only on the release it pinned, which holds Python's helpers and no
+    // other dialect's.
+    let (wait, argument, admission) = admitted(
+        worker
+            .run(SLICE, false)
+            .expect("no system call the confinement forbids"),
+    );
+    let state = export(&mut worker);
+    drop(worker);
+    let mut worker = checkout(&pool);
+    worker
+        .start(
+            Start {
+                owner: owner(),
+                dialect: "python".into(),
+                document: document.clone(),
+                from: StartFrom::ParkedGraph(ParkedGraph {
+                    state,
+                    admissions: vec![admission],
+                }),
+                bounds: bounds(),
+                export: Some(binding()),
+            },
+            &identity,
+            ExecutionClass::Cell,
+        )
+        .expect("resumed on Python's release");
+    worker.deliver(wait, completed(argument)).expect("deliver");
+    let mut asked = 1;
+    let finished = loop {
+        let step = worker
+            .run(SLICE, false)
+            .expect("no system call the confinement forbids");
+        if !matches!(step, RunStep::Parked { .. }) {
+            break ended(step);
+        }
+        let (wait, argument) = requested(step);
+        asked += 1;
+        worker.deliver(wait, completed(argument)).expect("deliver");
+    };
+    let End::Finished(finished) = finished else {
+        panic!("the cell finishes: {finished:?}")
+    };
+    assert_eq!(asked, 3, "each call is asked once");
+    assert_eq!(
+        format!("{:?}", finished.bindings.variables.get(&Name::new("total"))),
+        format!("{:?}", Some(lash_kernel_doc::Value::Int(Integer::from(6)))),
+    );
+    worker
+        .release()
+        .expect("the worker resets at the run's end");
+}
+
 /// A parked run names its document; a worker handed another document
 /// refuses the state before any machine is built.
-#[test]
 fn a_parked_run_is_refused_under_another_document() {
     let pool = WorkerPool::new(config("")).expect("pool");
     let (identity, document_a) = document(TOOL_LOOP);
@@ -475,6 +700,7 @@ fn a_parked_run_is_refused_under_another_document() {
         .start(
             Start {
                 owner: owner(),
+                dialect: DIALECT.into(),
                 document: document_b,
                 from: StartFrom::ParkedGraph(ParkedGraph {
                     state,
@@ -503,7 +729,6 @@ fn a_parked_run_is_refused_under_another_document() {
 /// Target 1: the machine's clock, random source and projection reads are
 /// answered by the parent in the middle of a slice, and what the run prints
 /// arrives with the slice, in order.
-#[test]
 fn host_reads_are_answered_by_the_parent_and_prints_arrive_in_order() {
     let pool = WorkerPool::new(config("")).expect("pool");
     let (identity, document) = document(
@@ -598,7 +823,6 @@ main { }"#,
 /// Target 2: a slice returns to the parent with the run still ready, and a
 /// run cancel sent with the next slice ends the run cancelled. The worker
 /// is whole and resets.
-#[test]
 fn a_run_cancel_is_observed_where_a_slice_returns() {
     let pool = WorkerPool::new(config("")).expect("pool");
     let (identity, document) = document("main { while true { } }");
@@ -622,7 +846,6 @@ fn a_run_cancel_is_observed_where_a_slice_returns() {
 
 /// A run that passes a bound ends with that bound's typed error. It is the
 /// run's own end, not a worker failure: the worker resets and is reused.
-#[test]
 fn a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused() {
     let pool = WorkerPool::new(config("")).expect("pool");
     let (identity, document) = document("main { while true { } }");
@@ -645,7 +868,6 @@ fn a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused() {
 
 /// A worker that dies in the middle of a run fails the exchange typed, is
 /// reaped, and leaves the parent with a pool that hands out a replacement.
-#[test]
 fn worker_crash_mid_run_leaves_the_parent_running() {
     let pool = WorkerPool::new(config("abort")).expect("pool");
     let (identity, document) = document(TOOL_LOOP);
@@ -677,7 +899,6 @@ fn worker_crash_mid_run_leaves_the_parent_running() {
 /// it, such as opening a socket or mapping memory writable and executable
 /// at once, kills the worker; the parent reads that as a typed crash and
 /// the pool hands out a replacement.
-#[test]
 fn a_forbidden_syscall_kills_the_worker_with_typed_evidence() {
     let (identity, document) = document(TOOL_LOOP);
     for mode in ["open_socket", "map_write_exec"] {
@@ -714,7 +935,6 @@ fn a_forbidden_syscall_kills_the_worker_with_typed_evidence() {
 /// panic. Printing the backtrace asks for the working directory, which the
 /// confinement refuses rather than kills on, so the panic still reaches the
 /// parent.
-#[test]
 fn a_panic_with_a_backtrace_requested_is_typed_not_a_forbidden_syscall() {
     let pool = WorkerPool::new(config("panic_backtrace")).expect("pool");
     let (identity, document) = document(TOOL_LOOP);
@@ -740,7 +960,6 @@ fn a_panic_with_a_backtrace_requested_is_typed_not_a_forbidden_syscall() {
 /// run can allocate even where the run's memory bound would allow more.
 /// The allocation is refused as the run's memory bound, and the worker,
 /// which never held the memory, is reused.
-#[test]
 fn the_address_space_ceiling_bounds_a_runs_allocation() {
     const GIB: u64 = 1024 * 1024 * 1024;
     let mut config = config("");
@@ -834,7 +1053,6 @@ fn a_heap_profiled_worker_writes_its_profile_under_confinement_across_a_reset() 
 
 /// FIG-6007: silence during the Ready handshake reports the actual wait,
 /// just as silence during guest execution does. It is not an instant exit.
-#[test]
 fn a_worker_silent_during_bootstrap_reports_the_time_it_was_silent() {
     let mut config = config("bootstrap_wait");
     config.protocol.no_response_watchdog = std::time::Duration::from_millis(20);
@@ -851,7 +1069,6 @@ fn a_worker_silent_during_bootstrap_reports_the_time_it_was_silent() {
 
 /// The kernel worker's live protocol is admitted before any guest request.
 /// Synthetic-next keeps the same refusal as the plain parent.
-#[test]
 fn workers_refuse_another_protocol_before_guest_admission() {
     for mode in ["protocol_below", "protocol_above", "opposite_generation"] {
         let error = WorkerPool::new(config(mode))

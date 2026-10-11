@@ -181,8 +181,11 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
     // environment has, so `TS_UNKNOWN_BINDING` is expected and a *syntax* error
     // is not.
     let typescript = crate::dialect::TypescriptPrompts;
-    let embedding = lash_vm_worker::standard(&lash_vm_client::WorkerTuning::standard())
-        .expect("the standard worker embedding");
+    let tuning = lash_vm_client::WorkerTuning::standard();
+    let embedding = lash_vm_worker::Embedder::kernel()
+        .and_then(|embedder| embedder.dialect(lash_vm_worker::typescript(&tuning)))
+        .and_then(lash_vm_worker::Embedder::finish)
+        .expect("a TypeScript worker embedding");
     let (effects, bindings) = (
         std::collections::BTreeMap::new(),
         std::collections::BTreeSet::new(),

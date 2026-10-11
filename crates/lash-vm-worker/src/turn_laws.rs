@@ -22,6 +22,9 @@ use lash_vm_client::wire::{self, OutcomeWire, ParkWire, StartWire};
 use lash_vm_client::{PoolConfig, WorkerEntry};
 use lash_vm_protocol::*;
 
+/// The dialect the law's cells are written in.
+const DIALECT: &str = lash_vm_releases::TYPESCRIPT;
+
 thread_local! {
     /// The bytes this thread asked the allocator for.
     static ALLOCATED: Cell<u64> = const { Cell::new(0) };
@@ -158,6 +161,7 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
     };
     let start = Start {
         owner: VmOwner::new("codemode:session"),
+        dialect: DIALECT.into(),
         document: wire::wrap(PayloadKind::Document, &document).expect("document"),
         from: StartFrom::Fresh(
             wire::encode(
@@ -233,7 +237,8 @@ fn a_ready_worker_serves_its_first_turn_at_a_warm_turns_cost() {
         let codec = codec.clone();
         let marks = Arc::clone(&marks);
         move || {
-            let embedding = crate::embedding::standard(&bootstrap.tuning).expect("embedding");
+            let embedding =
+                crate::embedding::tests::typescript_only(&bootstrap.tuning).expect("embedding");
             let mut server =
                 crate::worker::Server::new(served, codec, bootstrap, &embedding).expect("server");
             let mut mark = |message: &ParentMessage| {

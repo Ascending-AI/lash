@@ -68,6 +68,10 @@ pub struct RemoteMachines {
     pub frame_epoch: FrameEpoch,
     pub host: Arc<dyn RunHost>,
     document: DocumentId,
+    /// The dialect the run's document is written in, as its session or
+    /// process recorded it: the worker refuses one its embedding lacks, and
+    /// a new run pins that dialect's helper release.
+    dialect: String,
     encoded: Arc<Vec<u8>>,
     start: Start,
     bounds: Bounds,
@@ -75,7 +79,9 @@ pub struct RemoteMachines {
 }
 
 impl RemoteMachines {
-    /// The run of `document` from `start`, held to `bounds`.
+    /// The run of `document`, written in `dialect`, from `start`, held to
+    /// `bounds`. `dialect` is recorded configuration: what the run's session
+    /// or process recorded at creation, never a live read.
     ///
     /// # Errors
     ///
@@ -89,6 +95,7 @@ impl RemoteMachines {
         frame_epoch: FrameEpoch,
         host: Arc<dyn RunHost>,
         document: &Document,
+        dialect: &str,
         start: Start,
         bounds: Bounds,
     ) -> Result<Self, KernelFailure> {
@@ -99,6 +106,7 @@ impl RemoteMachines {
             frame_epoch,
             host,
             document: document.identity()?,
+            dialect: dialect.to_owned(),
             encoded: Arc::new(
                 wire::wrap(PayloadKind::Document, document.to_json()?.as_bytes())
                     .map_err(worker)?
@@ -120,6 +128,7 @@ impl RemoteMachines {
     ) -> Result<RemoteMachine, KernelFailure> {
         let start = lash_vm_protocol::Start {
             owner: self.owner.clone(),
+            dialect: self.dialect.clone(),
             document: EncodedPayload(self.encoded.as_ref().clone()),
             from,
             bounds: RunBounds {

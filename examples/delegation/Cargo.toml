@@ -13,10 +13,10 @@ doctest = false
 workspace = true
 
 [dependencies]
-lash = { workspace = true, features = ["rlm"] }
+lash = { workspace = true, features = ["rlm", "dialect-typescript"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-lash = { workspace = true, features = ["rlm", "testing", "typescript"] }
+lash = { workspace = true, features = ["rlm", "testing", "typescript", "dialect-typescript"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

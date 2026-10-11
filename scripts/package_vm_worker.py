@@ -45,7 +45,7 @@ def package(source: Path, worker: Path, output: Path, version: str, target: str 
         "worker_binary": "bin/lash-vm-worker",
         "worker_sha256": digest(worker),
         "source_sha256": {name: digest(source / name) for name in paths},
-        "build": "cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker",
+        "build": "cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker --features dialect-typescript,dialect-python",
     }
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f"lash-sdk-worker-{version}-{target}.tar.gz"

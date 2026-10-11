@@ -42,22 +42,22 @@ scripted_live_model = { emits = false, referent = "harness_case" }
 scripted_harness = { emits = false, referent = "harness" }
 deterministic_only = { emits = false, referent = "runbook" }
 
-# Python rows remain inventory, pending FIG-5990 explicit worker features/releases.
+# Python rows run on a worker whose host names Python (FIG-5990).
 # Declaration order is shard order; each scenario's dialect order is retained.
 [scenarios]
 workbench-crash-resume = { tier = "deterministic", model = "scripted-provider", stores = ["sqlite", "postgres"] }
 provider-runtime-feedback = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "runtime_feedback_ workspace nextest companion; live outgoing retry request remains judged" }
-rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
-workbench-approval = { tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
+rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash", dialects = ["typescript", "python"] }
+workbench-approval = { tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"] }
 workbench-attachments = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "only Phase 2 calls a provider" }
 workbench-chat-projection = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "Phase 2 mail delivery is host-driven; composer and registration turns call the live provider" }
-workbench-continue-as = { tier = "frontier", model = "openai/gpt-6.1-sol", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
-workbench-deferred-tools = { tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
+workbench-continue-as = { tier = "frontier", model = "openai/gpt-6.1-sol", dialects = ["typescript", "python"] }
+workbench-deferred-tools = { tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"] }
 workbench-durable-stop = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
-workbench-execution-state-rehydration = { tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
+workbench-execution-state-rehydration = { tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"] }
 workbench-failure-paths = { tier = "deterministic", model = "scripted-provider" }
 workbench-inbox-world = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
-workbench-process-lifecycle = { stores = ["sqlite", "postgres"], tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
+workbench-process-lifecycle = { stores = ["sqlite", "postgres"], tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"] }
 workbench-reconnect-resilience = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 workbench-session-id-retirement = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-session-isolation = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
@@ -66,9 +66,9 @@ workbench-shared-session-multi-tab = { tier = "economy", model = "deepseek/deeps
 workbench-tool-membership = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 workbench-trigger-lifecycle = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-turn-ingress = { tier = "frontier", model = "openai/gpt-6.1-sol", deterministic_phases = "Phase 5 queue management may use exec-blocked; Phases 0-4 use the live provider" }
-workbench-weather = { tier = "frontier", model = "openai/gpt-6.1-sol", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
+workbench-weather = { tier = "frontier", model = "openai/gpt-6.1-sol", dialects = ["typescript", "python"] }
 
-host-flows = { tier = "frontier", model = "openai/gpt-6.1-sol", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
+host-flows = { tier = "frontier", model = "openai/gpt-6.1-sol", dialects = ["typescript", "python"] }
 
 # Scenarios that open no RLM session have no language to pin at all. They get
 # one row each, emitted with the label `standard` — the mode, not a language —
@@ -88,9 +88,9 @@ workflow-editor-authoring = { tier = "deterministic", model = "scripted-provider
 # judged-browser shard: the named runner owns the model turn and the oracle
 # owns the verdict.
 [scripted_live_model]
-rlm-smoke-file-edit-bugfix = { tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
-rlm-smoke-missing-helper-file = { tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
-rlm-smoke-config-contract-edit = { tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
+rlm-smoke-file-edit-bugfix = { tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e", dialects = ["typescript", "python"] }
+rlm-smoke-missing-helper-file = { tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e", dialects = ["typescript", "python"] }
+rlm-smoke-config-contract-edit = { tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e", dialects = ["typescript", "python"] }
 
 # Scripted harness roots, including README-only directories. Cases above
 # carry funding; a root emits no judged-browser row.

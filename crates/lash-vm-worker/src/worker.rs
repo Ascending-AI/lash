@@ -31,9 +31,10 @@ struct Hosted {
     /// (FIG-4458).
     memory: u64,
     ended: bool,
-    /// The release manifest the run pins, once it resumed from graph state;
-    /// a run started here pins the release the build writes.
-    release: Option<lash_kernel_doc::graph_tokens::ChildRef>,
+    /// The release manifest the run pins: the one its graph state named
+    /// when it resumed, and for a run started here the release the build
+    /// writes for the run's dialect.
+    release: lash_kernel_doc::graph_tokens::ChildRef,
     /// The execution the run's state is bound to at each park that requests
     /// something, as its start named it.
     export: Option<EncodedPayload>,
@@ -443,6 +444,14 @@ impl<'embedding> Server<'embedding> {
     /// successor's; nothing is loaded from the document.
     fn start(&mut self, start: Start) -> Result<Hosted, PoolError> {
         self.wire = None;
+        // The run's dialect is what its session or process recorded at
+        // creation. A worker whose host did not name that dialect refuses
+        // before it reads the document or the parked state (FIG-5990).
+        if !self.embedding.installs(&start.dialect) {
+            return Err(PoolError::refused(RunRefusal::DialectNotInstalled {
+                dialect: start.dialect,
+            }));
+        }
         self.codec.check_payload(&start.document.0)?;
         let undecodable = |input: RunInput, error: &dyn std::fmt::Display| {
             PoolError::refused(RunRefusal::Undecodable {
@@ -478,17 +487,30 @@ impl<'embedding> Server<'embedding> {
             requests_per_park: start.bounds.requests_per_park,
             join_members: start.bounds.join_members,
         };
-        let mut release = None;
-        let machine = match start.from {
+        let (machine, release) = match start.from {
             StartFrom::Fresh(payload) => {
                 self.codec.check_payload(&payload.0)?;
                 let from: StartWire = wire::decode(PayloadKind::Start, &payload)
                     .map_err(|error| undecodable(RunInput::Start, &error))?;
-                KernelMachine::start(program, bounds, from.into()).map_err(|error| {
-                    PoolError::refused(RunRefusal::Start {
-                        detail: Detail::new(error),
-                    })
-                })?
+                let release = self
+                    .embedding
+                    .release_manifests()
+                    .map_err(machine_breach)?
+                    .manifests
+                    .current(&start.dialect)
+                    .ok_or_else(|| {
+                        machine_breach(format!(
+                            "the build holds no helper release of the dialect `{}`",
+                            start.dialect
+                        ))
+                    })?;
+                let machine =
+                    KernelMachine::start(program, bounds, from.into()).map_err(|error| {
+                        PoolError::refused(RunRefusal::Start {
+                            detail: Detail::new(error),
+                        })
+                    })?;
+                (machine, release)
             }
             StartFrom::ParkedGraph(parked) => {
                 parked
@@ -523,8 +545,7 @@ impl<'embedding> Server<'embedding> {
                             }
                             other => undecodable(RunInput::ParkedRun, &other),
                         })?;
-                release = Some(pinned);
-                machine
+                (machine, pinned)
             }
         };
         Ok(Hosted {
@@ -686,15 +707,8 @@ impl<'embedding> Server<'embedding> {
         let binding: OwnerBinding = lash_kernel_doc::graph_tokens::decode_body(&binding.0)
             .map_err(|error| PoolError::payload(PayloadKind::ParkedRun, error))?;
         let bound = self.bootstrap.state;
-        let current = self
-            .embedding
-            .release_manifests()
-            .map_err(machine_breach)?
-            .manifests
-            .current()
-            .ok_or_else(|| machine_breach("the build holds no helper release"))?;
         let hosted = self.running()?;
-        let release = hosted.release.unwrap_or(current);
+        let release = hosted.release;
         graph::export_parked(
             &mut hosted.machine,
             owner,

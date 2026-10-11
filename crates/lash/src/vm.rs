@@ -18,12 +18,22 @@
 /// [`WorkerService::default`] explicitly defaults to the helper beside the host
 /// executable and does not search PATH or a repository.
 ///
-/// A single-binary host enables the `worker` feature and calls
-/// `worker_entry` (or `worker_entry_with`, for its own functions and
-/// dialects) as its first action, before runtime creation, credentials,
-/// stores or providers, and returns from main when that call returns
-/// `true`. It selects [`WorkerEntry::reexec`]. A host that runs the shipped
-/// worker executable links no worker embedding and no dialect.
+/// A host names the dialects it runs: `dialect-typescript` and
+/// `dialect-python` are build features, neither a default, and each builds
+/// that dialect's helper releases for the parent. A single-binary host also
+/// enables the `worker` feature and calls `worker_entry` with the embedding
+/// it builds, naming each dialect
+/// (`WorkerEmbedder::kernel()?.dialect(typescript_worker_dialect(tuning))?.finish()`),
+/// as its first action, before runtime creation, credentials, stores or
+/// providers, and returns from main when that call returns `true`. It
+/// selects [`WorkerEntry::reexec`]. An embedding with no dialect is refused.
+/// A host that runs the shipped worker executable links no worker
+/// embedding; that executable installs the dialects it was built with.
+/// `dialect-typescript` also gives the host `lash::typescript`, the front
+/// end and printer in its own process.
+/// A session or process records its dialect at creation, and a worker whose
+/// embedding lacks it refuses the run
+/// ([`RunRefusal::DialectNotInstalled`]).
 /// `examples/worker_host.rs` proves this bootstrap.
 /// The child starts with an empty environment and closes inherited descriptors.
 /// The language bounds guest authority; the process contains native crashes.
@@ -44,13 +54,24 @@ pub use lash_vm_client::{
 };
 /// A helper release a worker retains beside its own functions (FIG-5799).
 pub use lash_vm_runtime::{HelperReleaseIndex, KernelProcessPluginFactory};
+/// The names of the dialects lash ships. A host passes one where it names
+/// the dialect its process documents are written in
+/// ([`KernelProcessPluginFactory::new`]); a session or process records it
+/// at creation.
+pub use lash_vm_runtime::{PYTHON_DIALECT, TYPESCRIPT_DIALECT};
+/// The Python dialect, for a host to install in its worker embedding.
+#[cfg(all(feature = "worker", feature = "dialect-python"))]
+pub use lash_vm_worker::python as python_worker_dialect;
+/// The TypeScript dialect, for a host to install in its worker embedding.
+#[cfg(all(feature = "worker", feature = "dialect-typescript"))]
+pub use lash_vm_worker::typescript as typescript_worker_dialect;
 /// What a worker registers when it starts: the kernel library, extension
 /// functions and the dialects it lowers and prints.
 #[cfg(feature = "worker")]
 pub use lash_vm_worker::{
-    Embed as WorkerEmbed, EmbedError as WorkerEmbedError, Embedder as WorkerEmbedder,
-    Embedding as WorkerEmbedding, standard as standard_worker_embedding,
-    typescript as typescript_worker_dialect, worker_entry, worker_entry_with,
+    Dialect as WorkerDialect, Embed as WorkerEmbed, EmbedError as WorkerEmbedError,
+    Embedder as WorkerEmbedder, Embedding as WorkerEmbedding,
+    built_dialects as built_worker_dialects, worker_entry,
 };
 
 /// The host boundary in the kernel type grammar, the providers that answer

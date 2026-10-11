@@ -1,8 +1,5 @@
 # E2E Scenario: Host flows
 
-Python execution is pending **FIG-5990** (explicit worker features and separate
-sealed helper releases). The Python matrix row is inventory only until it lands.
-
 > **Read [../RULES.md](../RULES.md) first.** This runbook adds the surface no
 > other row covers: the process lifecycle authored first-shot against the
 > plugin-tool contract. It still obeys the real-token, screenshot,

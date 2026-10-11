@@ -16,7 +16,7 @@ use std::sync::Arc;
 use lash_core::plugin::{CarriedCell, StoredCell};
 use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{
-    EncodeBudget, ExplicitLimit, GraphDecoder, GraphStaging, NodeId, NodeKind,
+    EncodeBudget, ExplicitLimit, GraphDecoder, GraphStaging, NodeKind,
 };
 use lash_kernel_dialect::SavedFunction;
 use lash_kernel_doc::{Annotations, FunctionId, FunctionRegistry, KERNEL_VERSION, KernelVersion};
@@ -172,13 +172,7 @@ impl KernelCarry {
         }
         let parked = WholeState::parked_in(&cell.graph, body.state, body.format, &READ_LIMITS)
             .map_err(graph)?;
-        let releases = lash_vm_broker::kernel::state::release_manifests()
-            .map_err(|failure| state(failure.to_string()))?;
-        let release = releases
-            .manifests
-            .current()
-            .ok_or_else(|| state("the build holds no helper release".to_owned()))?;
-        let whole = migrate_run(&parked, &admitted, &base, &plan, release)?;
+        let whole = migrate_run(&parked, &admitted, &base, &plan)?;
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
         let reidentified = reidentify(
             &mut staging,
@@ -233,7 +227,12 @@ impl KernelCarry {
             carried_cell.annotations =
                 serde_json::to_string(&annotations).map_err(|error| state(error.to_string()))?;
         }
-        let release_node = NodeId(release.0);
+        // The carried cell stays in its dialect's release line: its
+        // envelope pins the release this build writes for that dialect, as
+        // its run does.
+        let release_node = super::envelope::cell_release(&carried_cell.dialect).map_err(state)?;
+        let releases = lash_vm_broker::kernel::state::release_manifests()
+            .map_err(|failure| state(failure.to_string()))?;
         let envelope = carried_cell
             .stage(&mut staging, release_node)
             .map_err(graph)?;

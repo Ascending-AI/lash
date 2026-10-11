@@ -4,21 +4,14 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-/// A worker with the Python dialect installed: the kernel library and
-/// `lash-dialect-python`, which the shipped TypeScript worker does not carry.
+/// What a replay's Python worker runs: this host names Python alone for
+/// it, through the builder every host uses.
 fn python_embedding(
     _tuning: &lash::vm::WorkerTuning,
 ) -> Result<lash_vm_worker::Embedding, lash_vm_worker::EmbedError> {
-    let mut embedder = lash_vm_worker::Embedder::kernel()?;
-    let mut library = embedder.library()?;
-    let functions = lash_dialect_python::define_helpers(&mut library).map_err(|error| {
-        lash_vm_worker::EmbedError::Dialect {
-            dialect: lash_dialect_python::DIALECT.to_owned(),
-            message: error.to_string(),
-        }
-    })?;
-    embedder.install(lash_dialect_python::package(functions))?;
-    embedder.finish()
+    lash_vm_worker::Embedder::kernel()?
+        .dialect(lash_vm_worker::python())?
+        .finish()
 }
 
 /// Serve as a Python worker when this process was started as one: a pool
@@ -28,7 +21,7 @@ fn python_embedding(
 ///
 /// The worker could not start or serve.
 pub fn python_worker_entry() -> Result<bool, lash::vm::PoolError> {
-    lash_vm_worker::worker_entry_with(&python_embedding)
+    lash_vm_worker::worker_entry(&python_embedding)
 }
 
 /// The worker service for `protocol`'s cells, with its run deadlines off the

@@ -163,8 +163,9 @@ pub fn migrate_saved_function(
 }
 
 /// The run `parked` under `base`, each wait's request in `admitted`,
-/// carried onto `plan`'s rewrite of it and pinning `release`, the build's
-/// helper release, which the rewritten document is admitted against.
+/// carried onto `plan`'s rewrite of it and pinning the build's helper
+/// release for the dialect of the release it pinned, which the rewritten
+/// document is admitted against.
 ///
 /// # Errors
 ///
@@ -174,7 +175,6 @@ pub fn migrate_run(
     admitted: &[AdmittedWait],
     base: &Document,
     plan: &PlannedMigration,
-    release: ChildRef,
 ) -> Result<WholeState, KernelMigrationRefusal> {
     let state = |message: String| KernelMigrationRefusal::State { message };
     let refused = |refusal| KernelMigrationRefusal::Parked {
@@ -192,7 +192,7 @@ pub fn migrate_run(
     capture_whole(
         &OpenedRun {
             run: carried,
-            release,
+            release: current_release(&opened.release).map_err(state)?,
             binding: opened.binding,
         },
         u64::MAX,
@@ -220,13 +220,17 @@ pub(crate) fn open_run(
     .map_err(|failure| failure.to_string())
 }
 
-/// The helper release this build pins a carried run to.
-pub(crate) fn current_release() -> Result<ChildRef, String> {
-    lash_vm_broker::kernel::state::release_manifests()
-        .map_err(|failure| failure.to_string())?
+/// The helper release this build pins a carried run to: the one it builds
+/// for the dialect of `pinned`, the release the run was written under. A
+/// run stays in its dialect's release line.
+pub(crate) fn current_release(pinned: &ChildRef) -> Result<ChildRef, String> {
+    let releases = lash_vm_broker::kernel::state::release_manifests()
+        .map_err(|failure| failure.to_string())?;
+    releases
         .manifests
-        .current()
-        .ok_or_else(|| "the build holds no helper release".to_owned())
+        .dialect_of(pinned)
+        .and_then(|dialect| releases.manifests.current(dialect))
+        .ok_or_else(|| "the run pins a helper release this build does not hold".to_owned())
 }
 
 /// A sealed parked run as a whole state again.
@@ -462,13 +466,7 @@ async fn carry(
             .values()
             .map(|admission| admission.0.clone())
             .collect();
-        let carried = migrate_run(
-            &whole,
-            &admitted,
-            &base,
-            &plan,
-            current_release().map_err(undecodable)?,
-        )?;
+        let carried = migrate_run(&whole, &admitted, &base, &plan)?;
         state.parked = Some(if at_park {
             SealedRun(carried.sealed(
                 parked.0.owner().clone(),

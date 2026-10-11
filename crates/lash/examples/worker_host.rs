@@ -1,12 +1,19 @@
 //! A single executable enters its worker before any host runtime or credentials.
-use lash::vm::{WorkerEntry, WorkerPoolConfig, WorkerService, worker_entry};
+use lash::vm::{
+    WorkerEmbedder, WorkerEntry, WorkerPoolConfig, WorkerService, typescript_worker_dialect,
+    worker_entry,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This call precedes runtime creation, credential loading and store
-    // opening. The worker registers the kernel library, lash's extensions
-    // and the TypeScript dialect; a host with functions or dialects of its
-    // own calls `worker_entry_with` instead.
-    if worker_entry()? {
+    // opening. The host names the dialects its worker installs: here the
+    // kernel library and TypeScript, built with `dialect-typescript`. There
+    // is no embedding a host gets without naming one.
+    if worker_entry(&|tuning| {
+        WorkerEmbedder::kernel()?
+            .dialect(typescript_worker_dialect(tuning))?
+            .finish()
+    })? {
         return Ok(());
     }
     let entry = WorkerEntry::reexec()?;

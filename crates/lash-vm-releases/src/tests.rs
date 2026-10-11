@@ -168,62 +168,119 @@ fn only_the_release_the_tree_builds_is_defined_by_the_build() {
     }
 }
 
-/// The releases this build holds are the ones it declares, and the release
-/// the tree builds writes exactly what the build defines.
+/// The releases this build holds for each dialect it is built with are the
+/// ones it declares, and the release the tree builds writes exactly what the
+/// build defines (FIG-5990: one release line a dialect).
 #[test]
-fn the_build_holds_the_releases_it_declares() {
-    let held = held_releases().expect("the build's releases");
-    let declared = |releases: &[HelperRelease]| -> Vec<(String, u32)> {
-        releases
-            .iter()
-            .map(|release| (release.release.clone(), release.ordinal))
-            .collect()
-    };
+fn the_build_holds_the_releases_it_declares_for_each_dialect() {
     let named = |declarations: &[(&str, u32)]| -> Vec<(String, u32)> {
         declarations
             .iter()
             .map(|(name, ordinal)| ((*name).to_owned(), *ordinal))
             .collect()
     };
-    assert_eq!(declared(&held.retained), named(RETAINED_HELPER_RELEASES));
-    assert_eq!(declared(&held.retiring), named(RETIRING_HELPER_RELEASES));
-    let index: Vec<HelperReleaseIndex> =
-        serde_json::from_slice(HELPER_RELEASE_INDEX).expect("the index decodes");
-    assert_eq!(
-        index,
-        held.retained
+    let declared = |releases: &[HelperRelease]| -> Vec<(String, u32)> {
+        releases
             .iter()
-            .map(HelperRelease::index)
-            .collect::<Vec<_>>()
-    );
-    let helpers = lash_kernel_doc::ValidatedFunctions::from_json(TYPESCRIPT_HELPERS)
-        .expect("the helpers decode");
-    let building = held.retained.last().expect("the release the tree builds");
-    for (function, _) in helpers.iter() {
-        assert!(
-            building.writes.contains(function),
-            "the release the tree builds writes the build's helper {function}"
+            .map(|release| (release.release.clone(), release.ordinal))
+            .collect()
+    };
+    for built in DIALECTS {
+        assert!(SHIPPED_DIALECTS.contains(&built.dialect));
+        assert_eq!(
+            dialect(built.dialect).map(|found| found.dialect),
+            Some(built.dialect)
         );
+        let held = built.held_releases().expect("the build's releases");
+        assert_eq!(declared(&held.retained), named(RETAINED_HELPER_RELEASES));
+        assert_eq!(declared(&held.retiring), named(RETIRING_HELPER_RELEASES));
+        let index: Vec<HelperReleaseIndex> =
+            serde_json::from_slice(built.helper_release_index).expect("the index decodes");
+        assert_eq!(
+            index,
+            held.retained
+                .iter()
+                .map(HelperRelease::index)
+                .collect::<Vec<_>>()
+        );
+        let helpers = lash_kernel_doc::ValidatedFunctions::from_json(built.helpers)
+            .expect("the helpers decode");
+        let building = held.retained.last().expect("the release the tree builds");
+        for (function, _) in helpers.iter() {
+            assert!(
+                building.writes.contains(function),
+                "{}'s release the tree builds writes the build's helper {function}",
+                built.dialect
+            );
+        }
     }
 }
 
-/// Seals the release the tree builds, and keeps every sealed release in
-/// `src/sealed.rs`: the one act of the cut that ships it (`SEAL`). A build
-/// after it holds the release as it shipped, and changes a helper by
-/// declaring the next release. Run again, it keeps what is sealed and seals
-/// the release the tree builds if it is new; a release no longer declared
-/// is dropped.
+/// FIG-5990: a dialect's release holds its own helpers and none of another
+/// dialect's, so a host built with one dialect carries only that one's.
+#[test]
+fn a_dialects_release_holds_none_of_another_dialects_helpers() {
+    let helpers = |built: &DialectReleases| -> std::collections::BTreeSet<_> {
+        lash_kernel_doc::ValidatedFunctions::from_json(built.helpers)
+            .expect("the helpers decode")
+            .iter()
+            .map(|(function, _)| *function)
+            .collect()
+    };
+    for built in DIALECTS {
+        let held = built.held_releases().expect("the build's releases");
+        for other in DIALECTS
+            .iter()
+            .filter(|other| other.dialect != built.dialect)
+        {
+            let theirs = helpers(other);
+            for release in &held.retained {
+                assert!(
+                    release
+                        .functions
+                        .iter()
+                        .all(|held| !theirs.contains(&held.function)),
+                    "{}'s release {} holds a helper of {}",
+                    built.dialect,
+                    release.release,
+                    other.dialect
+                );
+            }
+        }
+    }
+}
+
+/// Seals each built dialect's release the tree builds, and keeps every
+/// sealed release, in `src/sealed.rs`: the one act of the cut that ships
+/// them (`SEAL`), run in a build with every shipped dialect. A build after
+/// it holds each release as it shipped, and changes a helper by declaring
+/// the next release. Run again, it keeps what is sealed and seals a
+/// dialect's release the tree builds if it is new; a release no longer
+/// declared is dropped.
 #[test]
 #[ignore = "regenerates crates/lash-vm-releases/src/sealed.rs"]
 fn seal_helper_release() {
     assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-    let held = held_releases().expect("the build's releases");
-    let mut sealed: Vec<HelperRelease> = held.retiring.into_iter().chain(held.retained).collect();
-    sealed.sort_by_key(|release| release.ordinal);
-    for release in &mut sealed {
-        if !release.sealed {
-            release.seal().expect("seal the release the tree builds");
+    assert_eq!(
+        DIALECTS
+            .iter()
+            .map(|built| built.dialect)
+            .collect::<Vec<_>>(),
+        SHIPPED_DIALECTS,
+        "the cut seals every shipped dialect: build with each dialect feature"
+    );
+    let mut sealed = Vec::new();
+    for built in DIALECTS {
+        let held = built.held_releases().expect("the build's releases");
+        let mut releases: Vec<HelperRelease> =
+            held.retiring.into_iter().chain(held.retained).collect();
+        releases.sort_by_key(|release| release.ordinal);
+        for release in &mut releases {
+            if !release.sealed {
+                release.seal().expect("seal the release the tree builds");
+            }
         }
+        sealed.push((built.dialect, releases));
     }
     let workspace =
         std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("the regeneration workspace");
@@ -234,42 +291,53 @@ fn seal_helper_release() {
     .expect("the sealed releases are written");
 }
 
-/// The source `src/sealed.rs` keeps `releases` in, oldest first: each
-/// release's JSON, one function to a line, as a string constant.
-fn sealed_source(releases: &[HelperRelease]) -> Result<String, String> {
+/// The source `src/sealed.rs` keeps each dialect's `releases` in, oldest
+/// first: each release's JSON, one function to a line, as a string
+/// constant. A dialect with no sealed release has no entry.
+fn sealed_source(dialects: &[(&str, Vec<HelperRelease>)]) -> Result<String, String> {
     let mut text = format!(
         "// @generated by `{SEAL}`; do not edit.\n\
-         //! The helper releases that have shipped, oldest first, each as it was\n\
-         //! sealed: every function a build of it holds (FIG-5799). Until the 1.0 cut\n\
-         //! none has, and the build defines the release the tree builds (FIG-5839).\n\n\
-         pub(crate) const SEALED: &[&str] = &["
+         //! The helper releases that have shipped, by dialect, oldest first, each as\n\
+         //! it was sealed: every function a build of it holds (FIG-5799, FIG-5990).\n\
+         //! Until the 1.0 cut none has, and the build defines each dialect's release\n\
+         //! the tree builds (FIG-5839).\n\n\
+         pub(crate) const SEALED: &[(&str, &[&str])] = &["
     );
-    for release in releases {
-        let mut body = format!(
-            "{{\"release\":{},\"ordinal\":{},",
-            json(&release.release)?,
-            release.ordinal
-        );
-        if release.sealed {
-            body.push_str("\"sealed\":true,");
+    let mut any = false;
+    for (dialect, releases) in dialects {
+        if releases.is_empty() {
+            continue;
         }
-        let _ = write!(
-            body,
-            "\"writes\":{},\"functions\":[",
-            json(&release.writes)?
-        );
-        for (index, function) in release.functions.iter().enumerate() {
-            body.push_str(if index == 0 { "\n" } else { ",\n" });
-            body.push_str(&json(function)?);
+        any = true;
+        let _ = write!(text, "\n    ({}, &[", json(dialect)?);
+        for release in releases {
+            let mut body = format!(
+                "{{\"release\":{},\"ordinal\":{},",
+                json(&release.release)?,
+                release.ordinal
+            );
+            if release.sealed {
+                body.push_str("\"sealed\":true,");
+            }
+            let _ = write!(
+                body,
+                "\"writes\":{},\"functions\":[",
+                json(&release.writes)?
+            );
+            for (index, function) in release.functions.iter().enumerate() {
+                body.push_str(if index == 0 { "\n" } else { ",\n" });
+                body.push_str(&json(function)?);
+            }
+            body.push_str("\n]}\n");
+            let mut hashes = String::from("#");
+            while body.contains(&format!("\"{hashes}")) {
+                hashes.push('#');
+            }
+            let _ = write!(text, "\n        r{hashes}\"{body}\"{hashes},");
         }
-        body.push_str("\n]}\n");
-        let mut hashes = String::from("#");
-        while body.contains(&format!("\"{hashes}")) {
-            hashes.push('#');
-        }
-        let _ = write!(text, "\n    r{hashes}\"{body}\"{hashes},");
+        text.push_str("\n    ]),");
     }
-    if !releases.is_empty() {
+    if any {
         text.push('\n');
     }
     text.push_str("];\n");
@@ -284,9 +352,14 @@ fn the_sealed_source_keeps_the_releases_it_is_given() {
         sealed_source(&[]).expect("no release"),
         include_str!("sealed.rs")
     );
+    assert_eq!(
+        sealed_source(&[(TYPESCRIPT, Vec::new())]).expect("a dialect with none"),
+        include_str!("sealed.rs")
+    );
     let mut shipped = release::freeze("1.0", 1, None, &helper_registry(1), &Default::default());
     shipped.seal().expect("seal 1.0");
-    let source = sealed_source(std::slice::from_ref(&shipped)).expect("1.0's source");
+    let source = sealed_source(&[(PYTHON, vec![shipped.clone()])]).expect("1.0's source");
+    assert!(source.contains("(\"python\", &["), "{source}");
     let start = source.find("r#\"").expect("a raw string") + 3;
     let end = source.rfind("\"#").expect("its end");
     assert_eq!(
@@ -353,8 +426,19 @@ fn a_run_resumes_only_on_the_exact_release_manifest_it_pinned() {
         retained: vec![one_release(2)],
         retiring: Vec::new(),
     };
-    let manifests = HeldManifests::stage(&held, |kind, body| staged.stage(kind, body)).unwrap();
-    let current = manifests.current().expect("the release the tree builds");
+    let mut manifests = HeldManifests::default();
+    manifests
+        .stage(TYPESCRIPT, &held, |kind, body| staged.stage(kind, body))
+        .unwrap();
+    let current = manifests
+        .current(TYPESCRIPT)
+        .expect("the release the tree builds");
+    assert_eq!(manifests.dialect_of(&current), Some(TYPESCRIPT));
+    assert_eq!(
+        manifests.current(PYTHON),
+        None,
+        "a dialect the build does not hold has no release to pin"
+    );
     assert_ne!(pinned, current);
     let required = std::collections::BTreeSet::new();
     assert_eq!(
@@ -382,15 +466,18 @@ fn a_missing_native_or_helper_refuses_resume() {
     let native = release.functions[0].function;
     let body = release.functions[1].function;
     let mut staged = Staged::default();
-    let manifests = HeldManifests::stage(
-        &HeldReleases {
-            retained: vec![release],
-            retiring: Vec::new(),
-        },
-        |kind, body| staged.stage(kind, body),
-    )
-    .unwrap();
-    let pinned = manifests.current().unwrap();
+    let mut manifests = HeldManifests::default();
+    manifests
+        .stage(
+            TYPESCRIPT,
+            &HeldReleases {
+                retained: vec![release],
+                retiring: Vec::new(),
+            },
+            |kind, body| staged.stage(kind, body),
+        )
+        .unwrap();
+    let pinned = manifests.current(TYPESCRIPT).unwrap();
     let required: std::collections::BTreeSet<_> = [native, body].into();
     assert_eq!(
         manifests.admit(&pinned, &required, |function| Some(*function != native)),

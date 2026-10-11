@@ -8,11 +8,24 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "The helper releases lash's shipped worker holds, as data: the sealed ones as the repository keeps them, and the one the tree builds as its build defines it."
+description = "Each dialect's helper releases, as data: the sealed ones as the repository keeps them, and the one the tree builds as its build defines it."
 
 [lib]
 name = "lash_vm_releases"
 doctest = false
+
+# Which dialects' helper releases the build defines and holds, each off by
+# default: a host names the dialects it builds with (FIG-5990). The
+# extensions (ECMAScript regular expressions and dates, WHATWG URLs) are the
+# TypeScript dialect's.
+[features]
+dialect-typescript = [
+    "dep:lash-dialect-typescript",
+    "dep:lash-ext-date-ecma",
+    "dep:lash-ext-regex-ecma",
+    "dep:lash-ext-url-whatwg",
+]
+dialect-python = ["dep:lash-dialect-python"]
 
 [lints]
 workspace = true
@@ -33,9 +46,10 @@ lash-kernel-doc = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-lib = { workspace = true }
 lash-kernel-vm = { workspace = true }
-lash-dialect-typescript = { workspace = true }
-lash-ext-date-ecma = { workspace = true }
-lash-ext-regex-ecma = { workspace = true }
-lash-ext-url-whatwg = { workspace = true }
+lash-dialect-typescript = { workspace = true, optional = true }
+lash-dialect-python = { workspace = true, optional = true }
+lash-ext-date-ecma = { workspace = true, optional = true }
+lash-ext-regex-ecma = { workspace = true, optional = true }
+lash-ext-url-whatwg = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

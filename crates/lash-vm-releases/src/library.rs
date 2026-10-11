@@ -1,19 +1,19 @@
 //! The library functions lash ships, each registered by the crate that
-//! implements it: what the standard embedding holds before a dialect adds
-//! its helpers.
+//! implements it: what an embedding holds before a dialect adds its
+//! helpers. Every embedding holds the kernel library; the extensions are
+//! the TypeScript dialect's (FIG-5990).
 //!
 //! This crate's build script includes this file, and so does
-//! `lash-vm-worker`: the build defines the TypeScript helpers and the
+//! `lash-vm-worker`: the build defines each dialect's helpers and the
 //! release the tree builds against these functions once, when this crate is
 //! built, and a worker registers the functions again at startup beside
 //! their native implementations. The library of this crate holds data
 //! alone, and does not compile this file.
 
-use std::sync::Arc;
-
 use lash_kernel_doc::FunctionRegistry;
 
 /// How many compiled patterns the regular-expression extension keeps.
+#[cfg(feature = "dialect-typescript")]
 const CACHED_PATTERNS: usize = 256;
 
 /// Registers the kernel library and the machine's own functions.
@@ -26,11 +26,12 @@ pub(crate) fn register_kernel(registry: &mut FunctionRegistry) -> Result<(), Str
 }
 
 /// Registers lash's extensions: ECMAScript regular expressions and dates,
-/// and WHATWG URLs.
+/// and WHATWG URLs, which the TypeScript dialect's helpers call.
+#[cfg(feature = "dialect-typescript")]
 pub(crate) fn register_extensions(registry: &mut FunctionRegistry) -> Result<(), String> {
     lash_ext_regex_ecma::register(
         registry,
-        &Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
+        &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
     )
     .map_err(|error| error.to_string())?;
     lash_ext_date_ecma::register(registry).map_err(|error| error.to_string())?;

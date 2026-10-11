@@ -6,19 +6,15 @@ use crate::worker::Server;
 use lash_vm_client::ipc::Bootstrap;
 use lash_vm_protocol::*;
 
-/// Register as the host binary's first action. Returns false for a normal
-/// host invocation. The pool always execs with an empty environment. The
-/// worker runs [`crate::standard`]: the kernel library, lash's extensions
-/// and the TypeScript dialect.
-pub fn worker_entry() -> Result<bool, PoolError> {
-    worker_entry_with(&crate::embedding::standard)
-}
-
-/// Enter the credential-free worker with the host's own embedding: the
-/// functions and dialects it registers, assembled once the process knows it
-/// is a worker. Call this before constructing the host runtime or
-/// credentials.
-pub fn worker_entry_with(embed: &Embed) -> Result<bool, PoolError> {
+/// Enter the credential-free worker with the host's embedding: the dialects
+/// it names and any functions of its own, assembled once the process knows
+/// it is a worker. Register it as the host binary's first action, before
+/// constructing the host runtime or credentials. Returns false for a normal
+/// host invocation. The pool always execs with an empty environment.
+///
+/// There is no embedding a host gets without choosing (FIG-5990): `embed`
+/// builds one from [`crate::Embedder`], naming each dialect.
+pub fn worker_entry(embed: &Embed) -> Result<bool, PoolError> {
     worker_entry_inner(embed, None)
 }
 
@@ -26,8 +22,11 @@ pub fn worker_entry_with(embed: &Embed) -> Result<bool, PoolError> {
 pub type Embed = dyn Fn(&lash_vm_client::WorkerTuning) -> Result<Embedding, EmbedError>;
 
 #[cfg(feature = "testing")]
-pub fn worker_entry_with_hook(hook: &mut dyn FnMut(&ParentMessage)) -> Result<bool, PoolError> {
-    worker_entry_inner(&crate::embedding::standard, Some(hook))
+pub fn worker_entry_with_hook(
+    embed: &Embed,
+    hook: &mut dyn FnMut(&ParentMessage),
+) -> Result<bool, PoolError> {
+    worker_entry_inner(embed, Some(hook))
 }
 
 #[expect(

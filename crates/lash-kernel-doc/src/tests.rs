@@ -648,8 +648,10 @@ fn a_formula_saturates() {
 }
 
 /// Functions validated against a registry's contents join, without being
-/// validated again, only a registry holding exactly those contents, under
-/// the identities validation gave them (FIG-5796).
+/// validated again, only a registry holding every one of those contents,
+/// under the identities validation gave them (FIG-5796). A registry that
+/// holds more, as a worker with a second dialect does, is joined too
+/// (FIG-5990).
 #[test]
 fn validated_functions_join_only_the_registry_they_were_validated_against() {
     let holding = |name: &str| {
@@ -669,6 +671,12 @@ fn validated_functions_join_only_the_registry_they_were_validated_against() {
             .map(|(id, _)| id)
             .eq(built.iter().map(|(id, _)| id))
     );
+    let mut wider = holding("helper.base");
+    wider
+        .register(definition("helper.other", false), None)
+        .unwrap();
+    wider.register_validated(validated.clone()).unwrap();
+    assert_eq!(wider.len(), built.len() + 1);
     for mut other in [holding("helper.other"), FunctionRegistry::new()] {
         let held = other.len();
         assert!(matches!(

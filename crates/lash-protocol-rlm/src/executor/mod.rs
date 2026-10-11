@@ -638,6 +638,9 @@ async fn run_linked_cell(
         resumed: runs_on,
     } = linked;
     let projected = envelope.projected.clone();
+    // The run names the dialect its cell's envelope recorded: a worker
+    // whose embedding lacks it refuses the cell (FIG-5990).
+    let dialect = envelope.dialect.clone();
     let annotations =
         serde_json::from_str::<lash_kernel_doc::Annotations>(&envelope.annotations).ok();
     let document_identity = document.identity();
@@ -712,6 +715,7 @@ async fn run_linked_cell(
         lash_vm_protocol::FrameEpoch(0),
         run_host,
         &document,
+        &dialect,
         Start {
             target: Target::Main,
             args: Vec::new(),
