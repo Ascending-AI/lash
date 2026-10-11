@@ -4,7 +4,7 @@ use lash_kernel_doc::{Expr, Float, Integer, Literal, MapEntry, Member, Name, Pla
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
 
-use super::statements::Body;
+use super::statements::{Body, ForHeader};
 use super::{Buf, Lowerer, Lowering, Operand};
 use crate::diagnostics::{self, Code};
 use crate::scope::Ty;
@@ -117,6 +117,7 @@ impl Lowerer<'_> {
                     false,
                     &defaults,
                     "<lambda>",
+                    None,
                 )?;
                 let written = self.function_written(lambda.parameters.as_deref(), false, None);
                 let closure = self.emit_closure(params, body);
@@ -534,15 +535,45 @@ impl Lowerer<'_> {
         let Expr::Variable(target) = out.expr.clone() else {
             return Ok(out);
         };
+        let Some(first) = generators.first() else {
+            self.collect(&collect, &target)?;
+            return Ok(out);
+        };
+        // The first iterable is evaluated before the comprehension's own
+        // variables exist. Every clause's variable is the comprehension's
+        // from then on: one variable for the whole comprehension, which a
+        // read before its clause binds it finds unbound.
+        let header = self.for_header(&first.iter)?;
         let renames = self.renames.len();
-        let result = self.generators(generators, &collect, &target);
+        let mut declared = Vec::new();
+        for generator in generators {
+            let mut names = Vec::new();
+            target_names(&generator.target, &mut names);
+            for name in names {
+                let renamed = self.fresh(&format!("{name}_"));
+                self.emit(Stmt::Let {
+                    name: renamed.clone(),
+                    value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+                });
+                self.unbound_renames.insert(renamed.clone());
+                declared.push(renamed.clone());
+                self.renames.push((name, renamed));
+            }
+        }
+        let result = self.generators(generators, Some(header), &collect, &target);
         self.renames.truncate(renames);
+        for renamed in &declared {
+            self.unbound_renames.remove(renamed);
+        }
         result.map(|()| out)
     }
 
+    /// The clauses of a comprehension from `generators` on. `header` is
+    /// what the first of them walks, when the caller evaluated it.
     fn generators(
         &mut self,
         generators: &[ast::Comprehension],
+        header: Option<ForHeader>,
         collect: &Collect<'_>,
         out: &Name,
     ) -> Lowering<()> {
@@ -557,29 +588,34 @@ impl Lowerer<'_> {
                 "await inside an ordinary `for` loop",
             ));
         }
-        // The iterable is evaluated before the comprehension's own
-        // variables exist.
-        let iterable = self.expr(&generator.iter)?;
-        let walked = self.invoke("py.iter", &[iterable], Ty::Unknown)?;
-        let mut names = Vec::new();
-        target_names(&generator.target, &mut names);
-        for name in names {
-            let renamed = self.fresh(&format!("{name}_"));
-            self.emit(Stmt::Let {
-                name: renamed.clone(),
-                value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-            });
-            self.renames.push((name, renamed));
-        }
+        let (walked, guard) = match header {
+            Some(header) => header,
+            None => self.for_header(&generator.iter)?,
+        };
         let binding = self.temp();
         let body = self.block(|this| {
+            if let Some((watched, size)) = &guard {
+                this.invoke_do("py.iter_guard", &[watched.clone(), size.clone()])?;
+            }
             this.assign(
                 &generator.target,
                 Operand::temp(binding.clone(), Ty::Unknown),
             )?;
+            let mut names = Vec::new();
+            target_names(&generator.target, &mut names);
+            for name in names {
+                if let Some(found) = this.variable(&name) {
+                    this.unbound_renames.remove(&found.name);
+                }
+            }
             this.conditions(&generator.ifs, rest, collect, out)
         })?;
         self.emit_for(binding, walked.expr, body);
+        // A dict or a set that changed size in the last pass is refused
+        // too, as Python's next step of the iteration would.
+        if let Some((watched, size)) = &guard {
+            self.invoke_do("py.iter_guard", &[watched.clone(), size.clone()])?;
+        }
         Ok(())
     }
 
@@ -591,7 +627,7 @@ impl Lowerer<'_> {
         out: &Name,
     ) -> Lowering<()> {
         let Some((condition, rest)) = conditions.split_first() else {
-            return self.generators(generators, collect, out);
+            return self.generators(generators, None, collect, out);
         };
         let test = self.expr(condition)?;
         let holds = self.truth(test)?;

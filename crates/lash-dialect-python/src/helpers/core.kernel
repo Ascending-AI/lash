@@ -68,6 +68,7 @@ use set.keys
 use set.copy
 use py.exc.name
 use py.exc.args
+use py.exc.check_cause
 use py.float_text
 use py.text_repr
 use py.repr
@@ -331,6 +332,20 @@ body {
   throw error.new(name, message, ((message,), null))
 }
 
+# The cause of `raise ... from cause`: an exception or None.
+function py.exc.check_cause(cause: Any) -> Null
+kernel 1
+charge 4
+body {
+  if same(cause, null) {
+    return null
+  }
+  if bool.not(same(kind(cause), "error")) {
+    do invoke py.fail("TypeError", "exception causes must derive from BaseException")
+  }
+  return null
+}
+
 # A new exception of class `name` made with `args`. `str(e)` is its
 # message: the one argument as `str` gives it, or as `repr` does for
 # KeyError and its subclasses (`quoted`).
@@ -338,6 +353,7 @@ function py.exc.new(name: Text, args: Any, cause: Any, quoted: Bool) -> Error
 kernel 1
 charge sum(8, deep(args))
 body {
+  do invoke py.exc.check_cause(cause)
   let count = tuple.len(args)
   let message = ""
   if eq(count, 1) {
@@ -379,6 +395,7 @@ body {
   if bool.not(same(kind(value), "error")) {
     do invoke py.fail("TypeError", "exceptions must derive from BaseException")
   }
+  do invoke py.exc.check_cause(cause)
   let args = invoke py.exc.args(value)
   return error.new(value.kind, value.message, (args, cause))
 }
@@ -393,14 +410,30 @@ body {
   return tuple.contains(names, name)
 }
 
-# Whether `except Exception` takes a raised value: everything but a
-# cancellation and the exits Python keeps outside `Exception`.
-function py.exc.is_exception(value: Any) -> Bool
+# Whether `except (Exception, *also)` takes a raised value: everything but
+# a cancellation and the exits Python keeps outside `Exception`, and of
+# those the classes `also` names.
+function py.exc.is_exception(value: Any, also: Any) -> Bool
 kernel 1
-charge 8
+charge sum(8, size(also))
 body {
   let name = invoke py.exc.name(value)
+  if tuple.contains(also, name) {
+    return true
+  }
   return bool.not(tuple.contains(("CancelledError", "KeyboardInterrupt", "SystemExit", "GeneratorExit"), name))
+}
+
+# A bare `raise` where the exception being handled is known only when it
+# runs: in a function a handler called, or in a `finally`.
+function py.exc.reraise(active: Any) -> Any
+kernel 1
+charge 4
+body {
+  if same(active, absent) {
+    do invoke py.fail("RuntimeError", "No active exception to reraise")
+  }
+  throw active
 }
 
 # `raise value`.

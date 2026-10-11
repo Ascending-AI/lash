@@ -41,8 +41,9 @@ const BUILTIN: &[(&str, &str)] = &[
 pub(crate) enum Catches {
     /// Every raised value: a bare `except` and `except BaseException`.
     Everything,
-    /// What `except Exception` takes: all but a cancellation and the exits.
-    Exceptions,
+    /// What `except Exception` takes, all but a cancellation and the exits,
+    /// and of those the classes listed, subclasses written out.
+    Exceptions(Vec<String>),
     /// These classes, subclasses written out.
     Named(Vec<String>),
 }
@@ -107,14 +108,11 @@ impl Classes {
             .cloned()
             .collect();
         taken.sort();
-        if !exceptions {
-            return Catches::Named(taken);
-        }
-        if taken.is_empty() {
-            Catches::Exceptions
-        } else {
+        if exceptions {
             // `except (Exception, CancelledError)` and the like.
-            Catches::Everything
+            Catches::Exceptions(taken)
+        } else {
+            Catches::Named(taken)
         }
     }
 }

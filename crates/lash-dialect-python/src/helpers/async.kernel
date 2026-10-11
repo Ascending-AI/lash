@@ -20,6 +20,7 @@ use py.type
 use py.fail
 use py.is_number
 use py.task.bridge
+use py.await
 
 # What a task runs: `work()` is the coroutine call the task was made from.
 function py.task.run(work: Any) -> Any
@@ -37,7 +38,7 @@ body {
 
 # `await value`. A task gives its result or raises what ended it. When the
 # awaiting task is cancelled while it waits, the task it awaits is cancelled
-# too, as asyncio does. Any other value is what a coroutine call returned.
+# too, as asyncio does. Any other value is not awaitable.
 function py.await(value: Any) -> Any
 kernel 1
 charge 6
@@ -55,11 +56,29 @@ body {
     }
     throw outcome[1]
   }
+  let name = invoke py.type(value)
+  let hoisted3 = text.join(["object ", name, " can't be used in 'await' expression"], "")
+  do invoke py.fail("TypeError", hoisted3)
+  return null
+}
+
+# `await f(...)` where the front end cannot see what `f` is. A coroutine
+# call has already run to its result there, so a value that is not a task
+# is what the call returned.
+function py.await.result(value: Any) -> Any
+kernel 1
+charge 6
+body {
+  if same(kind(value), "task") {
+    let awaited = invoke py.await(value)
+    return awaited
+  }
   return value
 }
 
-# One member of a `gather`: ends as the task did, in its result or its
-# error, so the gathering `join` sees the first failure when it happens.
+# One member of a `gather`: ends as the task did, in its result or in its
+# error tagged as a member's, so the gathering `join` sees the first failure
+# when it happens and can tell it from its own cancellation.
 function py.task.bridge(task: Any) -> Any
 kernel 1
 charge 6
@@ -68,11 +87,13 @@ body {
   if same(outcome[0], "ok") {
     return outcome[1]
   }
-  throw outcome[1]
+  throw ("member", outcome[1])
 }
 
 # `await asyncio.gather(...)` over tasks: their results in order, or the
-# first failure. The others keep running (`K-TASK-015`).
+# first failure. On a failure the others keep running (`K-TASK-015`). When
+# the gathering task is cancelled, every task it gathers is cancelled and
+# has ended before the cancellation goes on, as asyncio does.
 function py.gather(tasks: Any) -> List(Any)
 kernel 1
 charge sum(6, size(tasks), size(result))
@@ -88,7 +109,19 @@ body {
       do invoke py.fail("TypeError", hoisted1)
     }
   }
-  let values = join all members
+  let values = absent
+  try {
+    set values = join all members
+  } catch reason {
+    if same(kind(reason), "tuple") {
+      throw reason[1]
+    }
+    for task in tasks {
+      do cancel task
+    }
+    let ended = join settled members
+    throw reason
+  }
   return values
 }
 

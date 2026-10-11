@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
 /// What the front end knows of an operand before the program runs.
@@ -99,6 +100,9 @@ pub(crate) struct Bindings {
     pub(crate) types: BTreeMap<String, Ty>,
     /// The functions bound once, by a `def`.
     pub(crate) defs: BTreeMap<String, Signature>,
+    /// Those of `defs` that take the exception their caller handles, for a
+    /// bare `raise` they reach (`reraisers`).
+    pub(crate) reraisers: BTreeSet<String>,
 }
 
 #[derive(Default)]
@@ -214,11 +218,12 @@ impl Collector {
 /// What `body` binds. `parameters` are bound once each and annotated as
 /// written. `rebound` are the names some `global` or `nonlocal` statement
 /// of the program mentions: another scope may assign them, so none is a
-/// function bound once.
+/// function bound once. `outer` are the reraisers of the enclosing scopes.
 pub(crate) fn bindings(
     body: &[Stmt],
     parameters: Option<&ast::Parameters>,
     rebound: &BTreeSet<String>,
+    outer: &BTreeSet<String>,
 ) -> Bindings {
     let mut collector = Collector::default();
     if let Some(parameters) = parameters {
@@ -250,11 +255,125 @@ pub(crate) fn bindings(
         .into_keys()
         .filter(|name| !globals.contains(name) && !nonlocals.contains(name))
         .collect();
+    let reraisers = reraisers(body, outer)
+        .into_iter()
+        .filter(|name| defs.contains_key(name))
+        .collect();
     Bindings {
         locals,
         globals,
         types,
         defs,
+        reraisers,
+    }
+}
+
+/// The functions `body` defines that may run a bare `raise` with no
+/// `except` clause of their own around it, themselves or through a call of
+/// another such function, `outer` being those of the enclosing scopes.
+/// Python raises again the exception the caller is handling there, so each
+/// takes it from the caller.
+pub(crate) fn reraisers(body: &[Stmt], outer: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut defs = Vec::new();
+    defined(body, &mut defs);
+    let mut found = BTreeSet::new();
+    loop {
+        let visible: BTreeSet<String> = outer.union(&found).cloned().collect();
+        let before = found.len();
+        for def in &defs {
+            let name = def.name.id.as_str();
+            if found.contains(name) {
+                continue;
+            }
+            let inner = reraisers(&def.body, &visible);
+            if reraises(&def.body, &visible.union(&inner).cloned().collect()) {
+                found.insert(name.to_string());
+            }
+        }
+        if found.len() == before {
+            return found;
+        }
+    }
+}
+
+/// The functions `body` defines in its own scope.
+fn defined<'a>(body: &'a [Stmt], out: &mut Vec<&'a ast::StmtFunctionDef>) {
+    for statement in body {
+        match statement {
+            Stmt::FunctionDef(def) => out.push(def),
+            Stmt::For(for_loop) => {
+                defined(&for_loop.body, out);
+                defined(&for_loop.orelse, out);
+            }
+            Stmt::While(while_loop) => {
+                defined(&while_loop.body, out);
+                defined(&while_loop.orelse, out);
+            }
+            Stmt::If(branch) => {
+                defined(&branch.body, out);
+                for clause in &branch.elif_else_clauses {
+                    defined(&clause.body, out);
+                }
+            }
+            Stmt::Try(attempt) => {
+                defined(&attempt.body, out);
+                for ast::ExceptHandler::ExceptHandler(handler) in &attempt.handlers {
+                    defined(&handler.body, out);
+                }
+                defined(&attempt.orelse, out);
+                defined(&attempt.finalbody, out);
+            }
+            Stmt::With(with) => defined(&with.body, out),
+            _ => {}
+        }
+    }
+}
+
+/// Whether `body` may run a bare `raise` outside every `except` clause of
+/// its own, itself or by calling one of `reraisers`. Nested functions and
+/// lambdas are scopes of their own.
+pub(crate) fn reraises(body: &[Stmt], reraisers: &BTreeSet<String>) -> bool {
+    let mut finder = Reraise {
+        reraisers,
+        found: false,
+    };
+    finder.visit_body(body);
+    finder.found
+}
+
+struct Reraise<'s> {
+    reraisers: &'s BTreeSet<String>,
+    found: bool,
+}
+
+impl<'a> Visitor<'a> for Reraise<'_> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
+            Stmt::Raise(raise) if raise.exc.is_none() => self.found = true,
+            // A handler's body raises again what its clause caught.
+            Stmt::Try(attempt) => {
+                self.visit_body(&attempt.body);
+                self.visit_body(&attempt.orelse);
+                self.visit_body(&attempt.finalbody);
+            }
+            _ => visitor::walk_stmt(self, stmt),
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        match expr {
+            Expr::Lambda(_) => {}
+            Expr::Call(call) => {
+                if let Expr::Name(name) = call.func.as_ref()
+                    && self.reraisers.contains(name.id.as_str())
+                {
+                    self.found = true;
+                }
+                visitor::walk_expr(self, expr);
+            }
+            _ => visitor::walk_expr(self, expr),
+        }
     }
 }
 

@@ -40,7 +40,8 @@ is `spawn`, and `asyncio.sleep(0)` is `yield`. Where it is not, the lowerer call
 named `py.*`, written in kernel text under `src/helpers/` and installed
 with `define_helpers`. Truthiness, operators on values whose kind is not
 known when lowering, subscripts with negative indices and slices, the
-check that a dict or set did not change size under a `for`, `str`, `repr`
+check that a dict or set did not change size under a `for` or a
+comprehension, `str`, `repr`
 and f-string formatting are helpers.
 
 A source is a cell of a session: the names its top level binds are session

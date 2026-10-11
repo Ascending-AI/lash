@@ -125,7 +125,8 @@ print(c, d)
     );
 }
 
-/// CPython makes a coroutine object and runs nothing until it is awaited.
+/// CPython makes a coroutine object and runs nothing until it is awaited;
+/// awaiting the object gives 1.
 #[test]
 fn a_coroutine_call_the_front_end_cannot_see_runs_at_once() {
     let source = "\
@@ -136,8 +137,42 @@ functions = [work]
 made = functions[0]()
 print(made)
 print(await functions[0]())
+try:
+    print(await made)
+except TypeError as error:
+    print(error)
 ";
-    assert_eq!(lines(source), ["ran", "1", "ran", "1"]);
+    assert_eq!(
+        lines(source),
+        [
+            "ran",
+            "1",
+            "ran",
+            "1",
+            "object int can't be used in 'await' expression"
+        ]
+    );
+}
+
+/// CPython: `ValueError v`, the exception the calling handler handles.
+#[test]
+fn a_bare_raise_reached_through_a_call_the_front_end_cannot_see_has_no_exception() {
+    let source = "\
+def helper():
+    raise
+callers = [helper]
+try:
+    try:
+        raise ValueError('v')
+    except ValueError:
+        callers[0]()
+except Exception as error:
+    print(type(error).__name__, error)
+";
+    assert_eq!(
+        lines(source),
+        ["RuntimeError No active exception to reraise"]
+    );
 }
 
 /// CPython raises RecursionError, which a program can catch.

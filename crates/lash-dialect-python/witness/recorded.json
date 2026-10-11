@@ -2,6 +2,39 @@
  "python": "3.12.3",
  "cases": [
   {
+   "name": "await_value",
+   "source": "try:\n    print(\"got\", await 1)\nexcept TypeError as error:\n    print(\"TypeError\", error)\ndef plain():\n    return 2\ntry:\n    print(\"got\", await plain())\nexcept TypeError as error:\n    print(\"TypeError\", error)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "TypeError object int can't be used in 'await' expression",
+      "TypeError object int can't be used in 'await' expression"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "bare_raise",
+   "source": "def helper():\n    raise\ntry:\n    try:\n        raise ValueError(\"v\")\n    except ValueError:\n        helper()\nexcept ValueError as error:\n    print(\"helper ValueError\", error)\nexcept RuntimeError as error:\n    print(\"helper RuntimeError\", error)\ntry:\n    try:\n        raise ValueError(\"w\")\n    finally:\n        try:\n            raise\n        except RuntimeError:\n            print(\"RuntimeError in finally\")\nexcept ValueError as error:\n    print(\"finally ValueError\", error)\ntry:\n    helper()\nexcept RuntimeError as error:\n    print(\"no active exception:\", error)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "helper ValueError v",
+      "finally ValueError w",
+      "no active exception: No active exception to reraise"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
    "name": "cancel_cleanup",
    "source": "import asyncio\nlog = []\nasync def job(tag):\n    try:\n        log.append(await echo(tag + \":work\"))\n        await echo(tag + \":more\")\n        return \"finished\"\n    finally:\n        log.append(await echo(tag + \":cleanup\"))\n        print(tag, \"cleaned up\")\ntask = asyncio.create_task(job(\"a\"))\nawait echo(\"main:first\")\ntask.cancel()\ntry:\n    print(await task)\nexcept asyncio.CancelledError:\n    print(\"the task was cancelled\")\nprint(log)\ndone = asyncio.create_task(job(\"b\"))\nprint(await done, log)\nleftover = asyncio.create_task(job(\"c\"))\nawait echo(\"main:last\")\nprint(\"main ends\")\n",
    "deliveries": [],
@@ -91,6 +124,22 @@
    "end": "ok"
   },
   {
+   "name": "cancel_result",
+   "source": "import asyncio\nasync def quick():\n    return 1\nasync def slow():\n    await asyncio.sleep(1)\nended = asyncio.create_task(quick())\nawait ended\nwaiting = asyncio.create_task(slow())\nawait asyncio.sleep(0)\nprint(ended.cancel(), waiting.cancel())\ntry:\n    await waiting\nexcept asyncio.CancelledError:\n    print(\"cancelled\", waiting.cancel())\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "False True",
+      "cancelled False"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
    "name": "collections",
    "source": "xs = [5, 3, 8, 1]\nprint(xs[0], xs[-1], xs[1:3], xs[:2], xs[2:], xs[::-1], xs[::2], xs[-3:-1], xs[10:], xs[1:100], xs[3:0:-1])\ntext = \"hello world\"\nprint(text[0], text[-1], text[1:4], text[::-1], text[::3], len(text), \"lo\" in text, \"z\" not in text)\npair = (1, \"two\", 3.0)\nprint(pair[1], pair[-1], pair[:2], pair + (4,), len(pair), pair * 2, 3.0 in pair)\nxs.append(9)\nxs.extend([2, 2])\nxs.insert(1, 7)\nxs.insert(-100, 0)\nxs.insert(100, 6)\nprint(xs, xs.pop(), xs.pop(0), xs.index(8), xs.count(2), 2 in xs)\nxs.remove(2)\nxs.sort()\nys = xs\nys.reverse()\nprint(xs, ys is xs, sorted(xs), xs.copy() == xs, sum(xs), min(xs), max(xs))\nxs += [1]\nys = ys + [0]\nprint(xs, ys, [0] * 3, [1, 2] * 2, \"ab\" * 3, 2 * \"x\", [[0] * 2] * 2)\ntry:\n    xs[99]\nexcept IndexError as error:\n    print(error)\ntry:\n    xs.remove(1000)\nexcept ValueError as error:\n    print(error)\ntry:\n    (1, 2)[0] = 5\nexcept TypeError as error:\n    print(\"tuples are immutable\")\nd = {\"b\": 2, \"a\": 1}\nd[\"c\"] = 3\nd[\"b\"] = 20\nprint(d, list(d), list(d.keys()), list(d.values()), list(d.items()), len(d), \"a\" in d, 1 in d)\nprint(d.get(\"z\"), d.get(\"z\", 0), d.setdefault(\"z\", []), d.pop(\"a\"), d)\nd.update({\"b\": 0, \"y\": 1})\ndel d[\"z\"]\ne = dict(d)\ne[\"new\"] = True\nprint(d, e, d == {\"y\": 1, \"c\": 3, \"b\": 0}, {1: \"int\"}[1.0], {} == dict(), dict([(\"k\", \"v\")]))\ns = {3, 1, 2, 3}\ns.add(4)\ns.discard(1)\ns.discard(100)\nprint(sorted(s), len(s), 2 in s, sorted(s | {9}), sorted(s & {2, 3, 7}), sorted(s - {2}), sorted(s ^ {2, 5}), sorted(set(\"aab\")), set() == set([]), {1, 2} == {2, 1}, sorted(s.union([7])), sorted(s.intersection([2, 3])), sorted(s.difference([2])))\nprint([x * 2 for x in range(5) if x % 2], {x: x * x for x in range(3)}, sorted({x % 2 for x in range(5)}), [(x, y) for x in range(2) for y in \"ab\"])\nprint(list(zip([1, 2, 3], \"ab\")), list(enumerate([\"a\", \"b\"], 1)), list(reversed([1, 2, 3])), tuple([1, 2]), list((1, 2)), list(\"ab\"), sum(x for x in range(4)))\nmatrix = [[1, 2], [3, 4]]\nmatrix[0][1] = 20\nmatrix[1][0] += 5\nprint(matrix, [row[0] for row in matrix], [n for row in matrix for n in row], matrix[1][-1])\nprint(\"a,b,,c\".split(\",\"), \"  two  words \".split(), \" pad \".strip() + \"|\", \"Hello\".upper(), \"Hello\".lower(), \"hello\".replace(\"l\", \"L\"), \"hello\".find(\"l\"), \"hello\".find(\"z\"), \"hello\".startswith(\"he\"), \"hello\".endswith(\"lo\"), \"hello\".count(\"l\"), \", \".join(str(n) for n in range(3)))\nprint(str(1.0), str(None), str(True), repr(\"it's\"), repr('say \"hi\"'), repr(\"tab\\there\"), int(\"7\") + 1, float(3), str([1.5, \"x\"]), isinstance(1, int), isinstance(True, int), isinstance(1.0, (int, str)), isinstance(\"s\", str), type(1).__name__, type([]).__name__, type(None).__name__)\nprint(ord(\"a\"), chr(98), abs(-3.5), abs(4), len(\"\"), len([[], []]), bool(\"False\"), 10 in range(11), [1, 2] < [1, 3], (1, 2) < (1, 2, 0), \"abc\" < \"abd\", min(\"b\", \"a\"), max([1, 5, 3]))\n",
    "deliveries": [],
@@ -118,6 +167,40 @@
       "['a', 'b', '', 'c'] ['two', 'words'] pad| HELLO hello heLLo 2 -1 True True 2 0, 1, 2",
       "1.0 None True \"it's\" 'say \"hi\"' 'tab\\there' 8 3.0 [1.5, 'x'] True True False True int list NoneType",
       "97 b 3.5 4 0 2 True True True True True a 5"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "comprehension_scope",
+   "source": "j = 99\ntry:\n    print([j for i in [0] if j for j in [1]])\nexcept UnboundLocalError as error:\n    print(type(error).__name__, error)\nfs = [lambda: (i, j) for i in [0, 1] for j in range(i + 1)]\nprint([f() for f in fs], j)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "UnboundLocalError cannot access local variable 'j' where it is not associated with a value",
+      "[(1, 1), (1, 1), (1, 1)] 99"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "comprehension_size",
+   "source": "d = {\"a\": 1}\ndef add(name):\n    d[\"z\" + name] = 1\n    return name\ntry:\n    print([add(name) for name in d])\nexcept RuntimeError as error:\n    print(\"RuntimeError\", error)\nprint(len(d))\ns = {1}\ndef grow(x):\n    s.add(x + 10)\n    return x\ntry:\n    print({grow(x) for x in s})\nexcept RuntimeError as error:\n    print(\"RuntimeError\", error)\nprint(sorted(s))\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "RuntimeError dictionary changed size during iteration",
+      "2",
+      "RuntimeError Set changed size during iteration",
+      "[1, 11]"
      ]
     }
    ],
@@ -153,6 +236,24 @@
       "b 7",
       "2 1 3 [4] [0, 1, 2] [5, 3, 1] 10 [] []",
       "assert b is not two"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "except_target",
+   "source": "saved = \"old\"\ntry:\n    raise ValueError(\"x\")\nexcept ValueError as saved:\n    print(\"inside\", saved)\ntry:\n    print(saved)\nexcept NameError as error:\n    print(\"NameError\", error)\ndef leave():\n    try:\n        raise KeyError(\"k\")\n    except KeyError as caught:\n        print(\"caught\", caught)\n    try:\n        return caught\n    except UnboundLocalError as error:\n        return \"UnboundLocalError \" + str(error)\nprint(leave())\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "inside x",
+      "NameError name 'saved' is not defined",
+      "caught 'k'",
+      "UnboundLocalError cannot access local variable 'caught' where it is not associated with a value"
      ]
     }
    ],
@@ -208,6 +309,71 @@
     }
    ],
    "end": "error NotFound: at the end"
+  },
+  {
+   "name": "gather_cancel",
+   "source": "import asyncio\nlog = []\nasync def child(n):\n    try:\n        await asyncio.sleep(1)\n        print(\"child continued\", n)\n    finally:\n        log.append(n)\nasync def both():\n    await asyncio.gather(child(1), child(2))\ngroup = asyncio.create_task(both())\nawait asyncio.sleep(0)\nawait asyncio.sleep(0)\ngroup.cancel()\ntry:\n    await group\nexcept asyncio.CancelledError:\n    print(\"cancelled\", log)\nawait asyncio.sleep(2)\nprint(\"end\", log)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [
+      "sleep:2000"
+     ],
+     "logged": [
+      "cancelled [1, 2]"
+     ]
+    },
+    {
+     "delivered": [
+      "sleep:2000"
+     ],
+     "asked": [],
+     "logged": [
+      "end [1, 2]"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "handler_tuple",
+   "source": "import asyncio\ndef attempt(which):\n    if which == \"interrupt\":\n        raise KeyboardInterrupt()\n    if which == \"cancel\":\n        raise asyncio.CancelledError()\n    raise ValueError(which)\nfor which in [\"interrupt\", \"cancel\", \"value\"]:\n    try:\n        try:\n            attempt(which)\n        except (Exception, asyncio.CancelledError):\n            print(\"first inner\", which)\n    except BaseException:\n        print(\"first outer\", which)\n    try:\n        try:\n            attempt(which)\n        except (Exception, KeyboardInterrupt):\n            print(\"second inner\", which)\n    except BaseException:\n        print(\"second outer\", which)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "first outer interrupt",
+      "second inner interrupt",
+      "first inner cancel",
+      "second outer cancel",
+      "first inner value",
+      "second inner value"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "list_pop",
+   "source": "xs = [10, 20]\ntry:\n    xs.pop(1.0)\nexcept TypeError as error:\n    print(\"TypeError\", error)\nprint(xs)\ntry:\n    xs.pop(0, 99)\nexcept TypeError as error:\n    print(\"TypeError\", error)\nprint(xs)\nprint(xs.pop(-2), xs)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "TypeError 'float' object cannot be interpreted as an integer",
+      "[10, 20]",
+      "TypeError pop expected at most 1 argument, got 2",
+      "[10, 20]",
+      "10 [20]"
+     ]
+    }
+   ],
+   "end": "ok"
   },
   {
    "name": "methods",
@@ -375,6 +541,23 @@
       "{'k': [11, 2]} ['first', 'second', 'key', 'i', 'add']",
       "result ['choose', 'called', 'f1', 'f2', 'm', 'n'] 16161 Ab",
       "[1, 2, 3, 4] [1, 2, 3, 5] rebind"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "raise_cause",
+   "source": "try:\n    raise ValueError(\"x\") from 1\nexcept TypeError as error:\n    print(\"TypeError\", error)\nexcept ValueError as error:\n    print(\"ValueError\", error.__cause__)\nmade = KeyError(\"k\")\ntry:\n    raise made from \"text\"\nexcept TypeError as error:\n    print(\"TypeError\", error)\ntry:\n    raise ValueError(\"y\") from None\nexcept ValueError as error:\n    print(\"ValueError\", error, error.__cause__)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "TypeError exception causes must derive from BaseException",
+      "TypeError exception causes must derive from BaseException",
+      "ValueError y None"
      ]
     }
    ],

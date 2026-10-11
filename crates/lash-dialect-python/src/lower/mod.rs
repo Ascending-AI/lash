@@ -120,12 +120,31 @@ struct Scope {
     /// Names that hold a value at this point, one frame per kernel block
     /// open in this scope. A read of a name in none of them is checked.
     bound: Vec<BTreeSet<String>>,
-    /// The values the `except` clauses being lowered caught, innermost
-    /// last: what a bare `raise` raises again.
-    handlers: Vec<Name>,
+    /// The exceptions being handled where the lowering is, innermost last:
+    /// what a bare `raise` raises again.
+    handlers: Vec<Active>,
     /// The loops being lowered, innermost last, each with the variable
     /// that records its `break` when something needs to know.
     loops: Vec<Option<Name>>,
+}
+
+/// The exception a bare `raise` raises again.
+#[derive(Clone)]
+enum Active {
+    /// The value an `except` clause caught.
+    Caught(Name),
+    /// A variable that holds the exception being handled when the code
+    /// runs, or absent when none is: a function's hidden parameter, or what
+    /// a `finally` runs under.
+    Passed(Name),
+}
+
+impl Active {
+    fn name(&self) -> &Name {
+        match self {
+            Active::Caught(name) | Active::Passed(name) => name,
+        }
+    }
 }
 
 /// A Python variable as the kernel names it.
@@ -149,6 +168,9 @@ pub(crate) struct Lowerer<'a> {
     scopes: Vec<Scope>,
     /// Comprehension variables, which Python scopes to the comprehension.
     renames: Vec<(String, Name)>,
+    /// The comprehension variables a read may meet before their clause
+    /// binds them.
+    unbound_renames: BTreeSet<Name>,
     classes: Classes,
     rebound: BTreeSet<String>,
     buf: Buf,
@@ -211,7 +233,7 @@ pub(crate) fn lower(
     );
     let (globals, nonlocals) = scope::rebound(&module.body);
     let rebound: BTreeSet<String> = globals.union(&nonlocals).cloned().collect();
-    let mut bindings = scope::bindings(&module.body, None, &rebound);
+    let mut bindings = scope::bindings(&module.body, None, &rebound, &BTreeSet::new());
     let saved_startable = environment
         .functions
         .keys()
@@ -271,6 +293,7 @@ pub(crate) fn lower(
             loops: Vec::new(),
         }],
         renames: Vec::new(),
+        unbound_renames: BTreeSet::new(),
         classes: Classes::builtin(),
         rebound,
         buf: Buf::default(),
@@ -458,6 +481,25 @@ impl Lowerer<'_> {
             .any(|frame| frame.contains(id))
     }
 
+    /// Records that `id` may hold no value from here on, in every block of
+    /// the scope that owns it.
+    fn mark_unbound(&mut self, id: &str) {
+        if let Some(scope) = self.variable(id).and_then(|found| found.scope) {
+            for frame in &mut self.scopes[scope].bound {
+                frame.remove(id);
+            }
+        }
+    }
+
+    /// The exception being handled where the lowering is, for a call that
+    /// passes it on: absent where none is.
+    fn active(&self) -> Operand {
+        match self.scope().handlers.last() {
+            Some(active) => Operand::temp(active.name().clone(), Ty::Unknown),
+            None => Operand::literal(Literal::Absent, Ty::Unknown),
+        }
+    }
+
     /// Records that `id` holds a value from here to the end of the block.
     fn mark_bound(&mut self, id: &str) {
         let current = self.scopes.len() - 1;
@@ -482,6 +524,23 @@ impl Lowerer<'_> {
         self.scopes[found.scope?].bindings.defs.get(id).cloned()
     }
 
+    /// The functions of every scope open here that take the exception
+    /// their caller handles.
+    fn reraisers(&self) -> BTreeSet<String> {
+        self.scopes
+            .iter()
+            .flat_map(|scope| scope.bindings.reraisers.iter().cloned())
+            .collect()
+    }
+
+    /// Whether the function `id` names, when a `def` is all that binds it,
+    /// takes the exception its caller handles as its last parameter.
+    fn takes_active(&self, id: &str) -> bool {
+        self.variable(id)
+            .and_then(|found| found.scope)
+            .is_some_and(|scope| self.scopes[scope].bindings.reraisers.contains(id))
+    }
+
     /// A read of the name `id`.
     fn read(&mut self, id: &str, range: TextRange) -> Lowering<Operand> {
         let Some(found) = self.variable(id) else {
@@ -498,6 +557,13 @@ impl Lowerer<'_> {
             let value = Operand::temp(found.name.clone(), ty);
             self.invoke_do("py.name_check", &[value, Operand::text(id), local])?;
             self.mark_bound(id);
+        }
+        // A comprehension's variable read in a clause before the one that
+        // binds it.
+        if found.scope.is_none() && self.unbound_renames.contains(&found.name) {
+            let local = Operand::literal(Literal::Bool(true), Ty::Bool);
+            let value = Operand::temp(found.name.clone(), ty);
+            self.invoke_do("py.name_check", &[value, Operand::text(id), local])?;
         }
         // A name that one `def` binds holds that function from then on.
         if self.known_def(id).is_some() {

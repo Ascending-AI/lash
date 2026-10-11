@@ -227,20 +227,8 @@
   "qualifier": ""
  },
  "tests/basics/try_as_var.py": {
-  "status": "fail",
-  "qualifier": "FIG-5907",
-  "observed": {
-   "end": "ok",
-   "epochs": [
-    {
-     "asked": [],
-     "delivered": [],
-     "logged": [
-      "ValueError (534,)"
-     ]
-    }
-   ]
-  }
+  "status": "pass",
+  "qualifier": ""
  },
  "tests/basics/try_else.py": {
   "status": "pass",

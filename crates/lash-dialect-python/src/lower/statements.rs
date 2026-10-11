@@ -6,7 +6,7 @@ use lash_kernel_doc::{Closure, Expr, Literal, Member, Name, Place, Rhs, Stmt};
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
 
-use super::{Buf, Lowerer, Lowering, Note, Operand, Scope, ScopeKind};
+use super::{Active, Buf, Lowerer, Lowering, Note, Operand, Scope, ScopeKind};
 use crate::diagnostics::{self, Code};
 use crate::exceptions::Catches;
 use crate::scope::{self, Ty};
@@ -17,6 +17,10 @@ pub(super) enum Body<'a> {
     /// A lambda: the block returns the expression.
     Value(&'a PyExpr),
 }
+
+/// What a `for` walks, and the dict or set it must find unchanged in size
+/// with that size.
+pub(super) type ForHeader = (Operand, Option<(Operand, Operand)>);
 
 /// The built-in calls whose result is a fresh list, which no loop over it
 /// can find changed in size.
@@ -365,7 +369,7 @@ impl Lowerer<'_> {
 
     /// What a `for` walks, and the dict or set whose size it must find
     /// unchanged, with that size.
-    fn for_header(&mut self, iter: &PyExpr) -> Lowering<(Operand, Option<(Operand, Operand)>)> {
+    pub(super) fn for_header(&mut self, iter: &PyExpr) -> Lowering<ForHeader> {
         if let PyExpr::Call(call) = iter {
             match call.func.as_ref() {
                 // `for k, v in d.items()`: the view is walked as a list,
@@ -576,6 +580,9 @@ impl Lowerer<'_> {
             ));
         }
         let has_else = !attempt.orelse.is_empty();
+        if !attempt.finalbody.is_empty() && scope::reraises(&attempt.finalbody, &self.reraisers()) {
+            return self.finally_reraising(attempt, span);
+        }
         if attempt.handlers.is_empty() {
             // `try` and `finally` alone.
             let body = self.suite(&attempt.body)?;
@@ -598,6 +605,68 @@ impl Lowerer<'_> {
         let finally = self.suite(&attempt.finalbody)?;
         self.span = span;
         self.emit_try(body, None, Some(finally));
+        Ok(())
+    }
+
+    /// A `try` whose `finally` may raise again the exception being handled
+    /// when it runs: the one unwinding through it, or else the one handled
+    /// around the `try`.
+    fn finally_reraising(
+        &mut self,
+        attempt: &ast::StmtTry,
+        span: Option<lash_kernel_dialect::Span>,
+    ) -> Lowering<()> {
+        let pending = self.fresh("pending");
+        self.emit(Stmt::Let {
+            name: pending.clone(),
+            value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+        });
+        let body = self.block(|this| {
+            if attempt.handlers.is_empty() {
+                return this.statements(&attempt.body);
+            }
+            let caught = this.temp();
+            this.handled(attempt, &caught, None, span)
+        })?;
+        let raised = self.temp();
+        let record = self.block(|this| {
+            this.emit(Stmt::Assign {
+                place: Place::Variable(pending.clone()),
+                value: Rhs::Expr(Expr::Variable(raised.clone())),
+            });
+            this.emit(Stmt::Throw {
+                value: Expr::Variable(raised.clone()),
+            });
+            Ok(())
+        })?;
+        let finally = self.block(|this| {
+            let active = this.fresh("active");
+            this.emit(Stmt::Let {
+                name: active.clone(),
+                value: Rhs::Expr(Expr::Variable(pending.clone())),
+            });
+            let outer = this.active();
+            if !matches!(outer.expr, Expr::Literal(Literal::Absent)) {
+                let none = this.native(
+                    "same",
+                    vec![
+                        Expr::Variable(active.clone()),
+                        Expr::Literal(Literal::Absent),
+                    ],
+                )?;
+                let inherit = this.single(Stmt::Assign {
+                    place: Place::Variable(active.clone()),
+                    value: Rhs::Expr(outer.expr),
+                });
+                this.emit_if(none, inherit, Buf::default());
+            }
+            this.scope_mut().handlers.push(Active::Passed(active));
+            let result = this.statements(&attempt.finalbody);
+            this.scope_mut().handlers.pop();
+            result
+        })?;
+        self.span = span;
+        self.emit_try(body, Some((raised, record)), Some(finally));
         Ok(())
     }
 
@@ -661,36 +730,61 @@ impl Lowerer<'_> {
         };
         let raised = Operand::temp(caught.clone(), Ty::Unknown);
         let body = |this: &mut Self| -> Lowering<()> {
-            if let Some(name) = &handler.name {
-                let id = name.id.as_str();
-                let variable = this.written(id, name.range)?;
-                this.emit(Stmt::Assign {
-                    place: Place::Variable(variable),
-                    value: Rhs::Expr(Expr::Variable(caught.clone())),
-                });
-                this.mark_bound(id);
-            }
-            this.scope_mut().handlers.push(caught.clone());
-            let result = this.statements(&handler.body);
+            this.scope_mut()
+                .handlers
+                .push(Active::Caught(caught.clone()));
+            let result = match &handler.name {
+                None => this.statements(&handler.body),
+                Some(name) => this.named_handler(name, caught, &handler.body),
+            };
             this.scope_mut().handlers.pop();
             result
         };
+        let classes = |names: Vec<String>| {
+            let names = names
+                .into_iter()
+                .map(|name| Expr::Literal(Literal::Text(name)))
+                .collect();
+            Operand::inline(Expr::Tuple(names), Ty::Tuple)
+        };
         let matched = match catches {
             Catches::Everything => return body(self),
-            Catches::Exceptions => self.invoke("py.exc.is_exception", &[raised], Ty::Bool)?,
+            Catches::Exceptions(also) => {
+                self.invoke("py.exc.is_exception", &[raised, classes(also)], Ty::Bool)?
+            }
             Catches::Named(names) => {
-                let names = names
-                    .into_iter()
-                    .map(|name| Expr::Literal(Literal::Text(name)))
-                    .collect();
-                let names = Operand::inline(Expr::Tuple(names), Ty::Tuple);
-                self.invoke("py.exc.matches", &[raised, names], Ty::Bool)?
+                self.invoke("py.exc.matches", &[raised, classes(names)], Ty::Bool)?
             }
         };
         let then_block = self.block(body)?;
         let else_block = self.block(|this| this.handlers(rest, caught))?;
         self.span = span;
         self.emit_if(matched.expr, then_block, else_block);
+        Ok(())
+    }
+
+    /// The body of `except ... as name`. The name holds the exception in the
+    /// body and is unbound however the body is left, as Python deletes it.
+    fn named_handler(
+        &mut self,
+        name: &ast::Identifier,
+        caught: &Name,
+        body: &[PyStmt],
+    ) -> Lowering<()> {
+        let id = name.id.as_str();
+        let variable = self.written(id, name.range)?;
+        self.emit(Stmt::Assign {
+            place: Place::Variable(variable.clone()),
+            value: Rhs::Expr(Expr::Variable(caught.clone())),
+        });
+        self.mark_bound(id);
+        let block = self.suite(body)?;
+        let unbind = self.single(Stmt::Assign {
+            place: Place::Variable(variable),
+            value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+        });
+        self.emit_try(block, None, Some(unbind));
+        self.mark_unbound(id);
         Ok(())
     }
 
@@ -752,9 +846,12 @@ impl Lowerer<'_> {
     fn raise(&mut self, raise: &ast::StmtRaise) -> Lowering<()> {
         let Some(exception) = &raise.exc else {
             match self.scope().handlers.last().cloned() {
-                Some(caught) => self.emit(Stmt::Throw {
+                Some(Active::Caught(caught)) => self.emit(Stmt::Throw {
                     value: Expr::Variable(caught),
                 }),
+                Some(Active::Passed(active)) => {
+                    self.invoke_do("py.exc.reraise", &[Operand::temp(active, Ty::Unknown)])?;
+                }
                 None => self.invoke_do(
                     "py.fail",
                     &[
@@ -869,12 +966,14 @@ impl Lowerer<'_> {
         let defaults = self.defaults(&def.parameters)?;
         // The body runs only once the name is bound.
         self.mark_bound(name);
+        let active = self.takes_active(name).then(|| self.fresh("active"));
         let (params, body) = self.function_body(
             Some(&def.parameters),
             Body::Suite(&def.body),
             def.is_async,
             &defaults,
             name,
+            active,
         )?;
         let written =
             self.function_written(Some(&def.parameters), def.is_async, def.returns.as_deref());
@@ -930,7 +1029,9 @@ impl Lowerer<'_> {
         Ok(defaults)
     }
 
-    /// The kernel parameters and block of a function or a lambda.
+    /// The kernel parameters and block of a function or a lambda. `active`
+    /// is the last parameter of a function that takes the exception its
+    /// caller handles.
     pub(super) fn function_body(
         &mut self,
         parameters: Option<&ast::Parameters>,
@@ -938,12 +1039,13 @@ impl Lowerer<'_> {
         is_async: bool,
         defaults: &[Option<Operand>],
         name: &str,
+        active: Option<Name>,
     ) -> Lowering<(Vec<Name>, Buf)> {
         let suite: &[PyStmt] = match body {
             Body::Suite(suite) => suite,
             Body::Value(_) => &[],
         };
-        let bindings = scope::bindings(suite, parameters, &self.rebound);
+        let bindings = scope::bindings(suite, parameters, &self.rebound, &self.reraisers());
         let params: Vec<String> = parameters
             .map(|parameters| {
                 parameters
@@ -977,7 +1079,7 @@ impl Lowerer<'_> {
             kind: ScopeKind::Function { is_async },
             bindings,
             bound: vec![params.iter().cloned().collect::<BTreeSet<String>>()],
-            handlers: Vec::new(),
+            handlers: active.iter().cloned().map(Active::Passed).collect(),
             loops: Vec::new(),
         });
         let span = self.span;
@@ -1026,6 +1128,7 @@ impl Lowerer<'_> {
         let params = params
             .iter()
             .map(|param| Name::new(param.as_str()))
+            .chain(active)
             .collect();
         Ok((params, block?))
     }

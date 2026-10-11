@@ -124,7 +124,7 @@ fn admitted_basics_keep_cpython_observations_and_dispositions() {
                     }
                     "fail" if &actual != expected && outcome.observed.as_ref() == Some(&actual) => {
                         assert!(
-                            matches!(outcome.qualifier.as_str(), "FIG-5906" | "FIG-5907"),
+                            outcome.qualifier == "FIG-5906",
                             "{path}: failure needs its owning ticket"
                         );
                         failing += 1;

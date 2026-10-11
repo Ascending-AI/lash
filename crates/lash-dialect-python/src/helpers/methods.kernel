@@ -26,6 +26,8 @@ use text.trim_u17_0_0
 use text.trim_start_u17_0_0
 use text.trim_end_u17_0_0
 use list.len
+use list.contains
+use tasks.unfinished
 use list.copy
 use list.insert
 use list.clear
@@ -140,6 +142,16 @@ charge sum(6, size(self))
 body {
   let k = kind(self)
   if same(k, "list") {
+    if bool.not(same(second, absent)) {
+      do invoke py.fail("TypeError", "pop expected at most 1 argument, got 2")
+    }
+    if bool.not(same(first, absent)) {
+      if bool.not(same(kind(first), "integer")) {
+        let name = invoke py.type(first)
+        let wrong = text.join(["'", name, "' object cannot be interpreted as an integer"], "")
+        do invoke py.fail("TypeError", wrong)
+      }
+    }
     let length = list.len(self)
     if eq(length, 0) {
       do invoke py.fail("IndexError", "pop from empty list")
@@ -671,14 +683,16 @@ body {
   return 0
 }
 
-# `task.cancel()`: the task meets CancelledError at the wait it is in.
+# `task.cancel()`: the task meets CancelledError at the wait it is in, and
+# the answer is whether it had not ended yet.
 function py.method.cancel(self: Any) -> Bool
 kernel 1
 charge 4
 body {
   if same(kind(self), "task") {
+    let live = list.contains(tasks.unfinished(), self)
     do cancel self
-    return true
+    return live
   }
   do invoke py.no_attribute(self, "cancel")
   return false

@@ -349,11 +349,13 @@ impl Lowerer<'_> {
     /// where keywords need it.
     ///
     /// The inner error is the message of the TypeError a call Python would
-    /// refuse raises when it runs.
+    /// refuse raises when it runs. `in_task` is a call a new task makes,
+    /// where no exception is being handled.
     fn prepare(
         &mut self,
         call: &ast::ExprCall,
         awaited: bool,
+        in_task: bool,
     ) -> Lowering<Result<Prepared, String>> {
         let signature = match call.func.as_ref() {
             PyExpr::Name(name) => self.known_def(name.id.as_str()),
@@ -427,10 +429,36 @@ impl Lowerer<'_> {
                 slots.pop();
             }
         }
-        let slots: Vec<Operand> = slots
+        let mut slots: Vec<Operand> = slots
             .into_iter()
             .map(|slot| slot.unwrap_or_else(absent))
             .collect();
+        // A function that may raise again what its caller handles takes it
+        // after every parameter.
+        if let (PyExpr::Name(name), Some(signature)) = (call.func.as_ref(), &signature)
+            && self.takes_active(name.id.as_str())
+        {
+            let count = signature.params.len();
+            if slots.len() > count {
+                let fewest = signature
+                    .params
+                    .iter()
+                    .filter(|param| !param.has_default)
+                    .count();
+                let takes = match (fewest == count, count) {
+                    (true, 1) => "1 positional argument".to_string(),
+                    (true, _) => format!("{count} positional arguments"),
+                    (false, _) => format!("from {fewest} to {count} positional arguments"),
+                };
+                let given = match slots.len() {
+                    1 => "1 was given".to_string(),
+                    many => format!("{many} were given"),
+                };
+                return Ok(Err(format!("{}() takes {takes} but {given}", name.id)));
+            }
+            slots.resize(count, absent());
+            slots.push(if in_task { absent() } else { self.active() });
+        }
         let callee = match callee.expr {
             Expr::Variable(name) => name,
             _ => match self.pin(callee).expr {
@@ -443,7 +471,7 @@ impl Lowerer<'_> {
     }
 
     fn call_function(&mut self, call: &ast::ExprCall, awaited: bool) -> Lowering<Operand> {
-        let prepared = match self.prepare(call, awaited)? {
+        let prepared = match self.prepare(call, awaited, false)? {
             Ok(prepared) => prepared,
             Err(problem) => {
                 self.invoke_do(
@@ -564,21 +592,32 @@ impl Lowerer<'_> {
             return self.invoke("py.await", &[value], Ty::Unknown);
         };
         // An awaited coroutine call is an ordinary call, and an awaited
-        // tool call is one `perform` and the reading of its reply.
-        let direct = match call.func.as_ref() {
+        // tool call is one `perform` and the reading of its reply. The value
+        // of a call the front end can see is awaitable only if it is a task.
+        // Of a call of a value it cannot see, a coroutine call has run
+        // already: what it returned is what the `await` gives.
+        let helper = match call.func.as_ref() {
             PyExpr::Name(name) => {
-                self.effect(call).is_some()
-                    || self
-                        .known_def(name.id.as_str())
-                        .is_some_and(|signature| signature.is_async)
+                let id = name.id.as_str();
+                match self.known_def(id) {
+                    Some(signature) if signature.is_async => None,
+                    Some(_) => Some("py.await"),
+                    None if self.effect(call).is_some() => None,
+                    None if self.variable(id).is_some() => Some("py.await.result"),
+                    None => Some("py.await"),
+                }
             }
-            _ => matches!(self.asyncio_function(call), Some("sleep" | "gather")),
+            PyExpr::Attribute(_) => match self.asyncio_function(call) {
+                Some("sleep" | "gather") => None,
+                _ => Some("py.await"),
+            },
+            _ => Some("py.await.result"),
         };
         let value = self.call(call, true)?;
-        if direct {
-            return Ok(value);
+        match helper {
+            None => Ok(value),
+            Some(helper) => self.invoke(helper, &[value], Ty::Unknown),
         }
-        self.invoke("py.await", &[value], Ty::Unknown)
     }
 
     fn asyncio(
@@ -776,7 +815,7 @@ impl Lowerer<'_> {
                         return Err(refusal(call.range()));
                     }
                     self.no_stars(&call.arguments)?;
-                    let prepared = match self.prepare(call, true)? {
+                    let prepared = match self.prepare(call, true, true)? {
                         Ok(prepared) => prepared,
                         Err(problem) => {
                             self.invoke_do(
