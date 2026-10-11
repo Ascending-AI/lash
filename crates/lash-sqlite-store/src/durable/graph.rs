@@ -131,7 +131,9 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
         WHERE admission_base_checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'read_pin', root_ref FROM blob_read_pins
     UNION ALL SELECT 'artifact', blob_ref FROM artifact_refs
-    UNION ALL SELECT 'release', root_ref FROM graph_release_pins;
+    UNION ALL SELECT 'release', root_ref FROM graph_release_pins
+    UNION ALL SELECT 'terminal_window', terminal_window_checkpoint_ref FROM session_runs
+        WHERE terminal_window_checkpoint_ref IS NOT NULL;
 ";
 
 lash_store_sql::statements! {

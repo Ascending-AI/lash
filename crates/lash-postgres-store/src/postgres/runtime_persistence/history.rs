@@ -285,28 +285,16 @@ pub(crate) async fn window_conn(
     #[cfg(any(test, feature = "testing"))] decoded: Option<&std::sync::atomic::AtomicU64>,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
     check_live(conn, session_id).await?;
-    if let WindowSelector::Terminal(run) = &selector {
-        let json: Option<String> = sqlx::query_scalar(
-            super::super::session_runs::session_runs_sql()
-                .runs
-                .select_terminal_window
-                .sql(),
-        )
-        .bind(session_id.as_str())
-        .bind(run.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut *conn))
-        .await
-        .map_err(store_sqlx_error)?
-        .flatten();
-        return json
-            .map(|json| {
-                serde_json::from_str(&json)
-                    .map_err(|error| corrupt("RunTerminalWindow", error.to_string()))
-            })
-            .transpose();
-    }
     read_session_state_version_tx(conn, session_id, false, fleet).await?;
-    let Some(meta) = load_session_head_meta_tx(conn, session_id, false, fleet).await? else {
+    let head = match &selector {
+        WindowSelector::Terminal(run) => {
+            load_terminal_head_meta_tx(conn, session_id, run, fleet).await?
+        }
+        WindowSelector::Current | WindowSelector::Admitted(_) => {
+            load_session_head_meta_tx(conn, session_id, false, fleet).await?
+        }
+    };
+    let Some(meta) = head else {
         return match selector {
             WindowSelector::Current | WindowSelector::Terminal(_) => Ok(None),
             WindowSelector::Admitted(base) => Err(StoreError::TurnBaseNotRetained {

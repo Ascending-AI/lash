@@ -568,6 +568,12 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "postgres": "lash_graph_release_pins.root_ref",
       "source": "release",
       "sqlite": "graph_release_pins.root_ref"
+    },
+    {
+      "number": 11,
+      "postgres": "lash_session_runs.terminal_window_checkpoint_ref",
+      "source": "terminal_window",
+      "sqlite": "session_runs.terminal_window_checkpoint_ref"
     }
   ]
 }"##;

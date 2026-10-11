@@ -907,6 +907,19 @@ async fn fence_deleted_session_frames_tx(
     Ok(())
 }
 
+/// The one text column `statement` selects for session `session_id`.
+async fn session_texts(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    statement: &str,
+    session_id: &SessionId,
+) -> Result<Vec<String>, StoreError> {
+    sqlx::query_scalar(statement)
+        .bind(session_id.as_str())
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)
+}
+
 /// Delete `session_id`'s rows in `tx`: the deleted session's terminal
 /// record, when it was materialized, is the caller's to sequence at the
 /// transaction's tail.
@@ -951,26 +964,29 @@ pub(crate) async fn delete_session_tx(
     .await
     .map_err(store_sqlx_error)?;
     let (leaf_node_id, checkpoint_ref) = head.unwrap_or((None, None));
-    // What the session roots: its head, and every revision it still retains.
-    // Its pins and revisions go with it, so each root they held becomes a
-    // reclaim candidate here.
-    let mut checkpoint_refs: std::collections::BTreeSet<String> =
-        sqlx::query_scalar(session_sql().revisions.select_session_checkpoints.sql())
-            .bind(session_id.as_str())
-            .fetch_all(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?
-            .into_iter()
-            .collect();
+    // What the session roots: its head, every revision it still retains and
+    // every window its terminals name. Its pins, revisions and runs go with
+    // it, so each root they held becomes a reclaim candidate here.
+    let runs = &crate::session_runs::session_runs_sql().runs;
+    let mut checkpoint_refs: std::collections::BTreeSet<String> = session_texts(
+        tx,
+        session_sql().revisions.select_session_checkpoints.sql(),
+        session_id,
+    )
+    .await?
+    .into_iter()
+    .chain(session_texts(tx, runs.select_session_window_checkpoints.sql(), session_id).await?)
+    .collect();
+    let mut retained_leaves: std::collections::BTreeSet<String> = session_texts(
+        tx,
+        session_sql().revisions.select_session_leaves.sql(),
+        session_id,
+    )
+    .await?
+    .into_iter()
+    .chain(session_texts(tx, runs.select_session_window_leaves.sql(), session_id).await?)
+    .collect();
     checkpoint_refs.extend(checkpoint_ref);
-    let mut retained_leaves: std::collections::BTreeSet<String> =
-        sqlx::query_scalar(session_sql().revisions.select_session_leaves.sql())
-            .bind(session_id.as_str())
-            .fetch_all(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?
-            .into_iter()
-            .collect();
     retained_leaves.extend(leaf_node_id);
     let candidates =
         crate::session_blob_reclaim::enumerate_checkpoint_blob_candidates_tx(tx, &checkpoint_refs)
@@ -993,6 +1009,10 @@ pub(crate) async fn delete_session_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
+    // The session's logical runs and their input bindings go with it, before
+    // its ancestry retires: a terminal window roots its leaf while its row
+    // lives. A `close_session` intent stays as its deletion tombstone.
+    crate::session_runs::delete_session_runs_conn(tx, session_id).await?;
     for leaf_node_id in &retained_leaves {
         crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, leaf_node_id).await?;
     }
@@ -1022,9 +1042,6 @@ pub(crate) async fn delete_session_tx(
     .await
     .map_err(store_sqlx_error)?;
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
-    // The session's logical runs and their input bindings go with it; a
-    // `close_session` intent stays as its deletion tombstone.
-    crate::session_runs::delete_session_runs_conn(tx, session_id).await?;
     for statement in [
         turn_ingress.queued_batches.delete_by_session.sql(),
         turn_ingress.pending_inputs.delete_by_session.sql(),

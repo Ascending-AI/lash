@@ -64,11 +64,14 @@ crate::statements! {
              RETURNING run";
 
         /// End unfinished run `?2` of session `?1` with cause `?4`, whose kind
-        /// is `?3`, and head revision `?5` at `?6`. No row when it is not
-        /// unfinished.
+        /// is `?3`, and head revision `?5` at `?6`, on the window `?7` to
+        /// `?10` names (`session_runs::write_terminal`'s). No row when it is
+        /// not unfinished.
         end_run = "UPDATE session_runs
              SET terminal_kind = ?3, terminal_cause_json = ?4,
-                 terminal_head_revision = ?5, terminal_at_ms = ?6, terminal_window_json = ?7
+                 terminal_head_revision = ?5, terminal_at_ms = ?6,
+                 terminal_window_revision = ?7, terminal_window_leaf_node_id = ?8,
+                 terminal_window_checkpoint_ref = ?9, terminal_window_head_digest = ?10
              WHERE session_id = ?1 AND run = ?2
                AND admission_json IS NOT NULL AND terminal_kind IS NULL
              RETURNING run";

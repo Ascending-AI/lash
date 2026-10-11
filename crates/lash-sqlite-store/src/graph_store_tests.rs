@@ -203,6 +203,27 @@ impl GraphTier for Tier {
                 "DELETE FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2",
                 vec![text(namespace), text(artifact)],
             ),
+            ForeignWrite::TerminalWindow {
+                session,
+                run,
+                root: Some(root),
+            } => (
+                "INSERT INTO session_runs
+                     (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms,
+                      terminal_window_revision, terminal_window_checkpoint_ref,
+                      terminal_window_head_digest)
+                 VALUES (?1, ?2, 'cancelled', '{\"cause\":\"operator_cancelled\"}', 1,
+                         1, ?3, 'head')",
+                vec![text(session.as_str()), text(run.as_str()), hex(&root)],
+            ),
+            ForeignWrite::TerminalWindow {
+                session,
+                run,
+                root: None,
+            } => (
+                "DELETE FROM session_runs WHERE session_id = ?1 AND run = ?2",
+                vec![text(session.as_str()), text(run.as_str())],
+            ),
             ForeignWrite::BreakCatalog => ("DROP VIEW graph_root_catalog", Vec::new()),
         };
         self.raw(sql.to_owned(), params).await;

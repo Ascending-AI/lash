@@ -240,6 +240,43 @@ fn lineage(conn: &Connection, session: &SessionId) -> Result<LineageStamp, Store
     ))
 }
 
+/// The head that run `run`'s terminal named as its window (FIG-5931), read
+/// like the live head: its head document, revision, leaf and checkpoint, and
+/// the frame its leaf row names. The terminal's row roots the leaf and the
+/// checkpoint, so later commits and collections leave them readable. `None`
+/// when the run has no terminal or its terminal names no window.
+fn terminal_head(
+    conn: &Connection,
+    session: &SessionId,
+    run: &lash_core_execution::TurnId,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<Option<lash_core_execution::store::SessionHeadMeta>, StoreError> {
+    conn.prepare_cached(
+        crate::session_runs::session_runs_sql()
+            .runs
+            .select_terminal_window
+            .sql(),
+    )
+    .map_err(sqlite_error)?
+    .query_row(params![session.as_str(), run.as_str()], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
+        ))
+    })
+    .optional()
+    .map_err(sqlite_error)?
+    .map(|(head_json, revision, leaf, checkpoint, frame)| {
+        crate::codec::assemble_session_head_meta(
+            session, &head_json, revision, leaf, checkpoint, frame, fleet,
+        )
+    })
+    .transpose()
+}
+
 pub(crate) fn window(
     conn: &Connection,
     session: &SessionId,
@@ -249,27 +286,13 @@ pub(crate) fn window(
     chunk_size: usize,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
     live(conn, session)?;
-    if let WindowSelector::Terminal(run) = &selector {
-        let json: Option<String> = conn
-            .query_row(
-                crate::session_runs::session_runs_sql()
-                    .runs
-                    .select_terminal_window
-                    .sql(),
-                params![session.as_str(), run.as_str()],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?
-            .flatten();
-        return json
-            .map(|json| {
-                serde_json::from_str(&json)
-                    .map_err(|error| corrupt("RunTerminalWindow", error.to_string()))
-            })
-            .transpose();
-    }
-    let Some(meta) = try_load_session_head_meta_from_conn(conn, session, fleet)? else {
+    let head = match &selector {
+        WindowSelector::Terminal(run) => terminal_head(conn, session, run, fleet)?,
+        WindowSelector::Current | WindowSelector::Admitted(_) => {
+            try_load_session_head_meta_from_conn(conn, session, fleet)?
+        }
+    };
+    let Some(meta) = head else {
         return match selector {
             WindowSelector::Current | WindowSelector::Terminal(_) => Ok(None),
             WindowSelector::Admitted(base) => Err(StoreError::TurnBaseNotRetained {

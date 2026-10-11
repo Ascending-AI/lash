@@ -213,13 +213,11 @@ pub(super) async fn apply(
                 )
                 .await?;
             }
-            let window = super::super::session_runs::terminal_window_json(
-                &mut *tx,
-                session,
-                commit.checkpoint_ref_chunk,
-            )
-            .await
-            .map_err(|error| encoding(&error))?;
+            let window = super::super::session_runs::terminal_window_ref(&mut *tx, session)
+                .await
+                .map_err(|error| encoding(&error))?;
+            let (window_revision, window_leaf, window_checkpoint, window_head) =
+                super::super::session_runs::TerminalWindowRef::columns(window.as_ref());
             let ended: Option<String> = sqlx::query_scalar(SQL.end_run.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
@@ -227,7 +225,10 @@ pub(super) async fn apply(
                 .bind(cause.to_stored().map_err(|error| encoding(&error))?)
                 .bind(head_revision.map(integer::<i64>).transpose()?)
                 .bind(commit.now.0)
-                .bind(window)
+                .bind(window_revision)
+                .bind(window_leaf)
+                .bind(window_checkpoint)
+                .bind(window_head)
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;

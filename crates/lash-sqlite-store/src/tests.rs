@@ -7,6 +7,7 @@ use super::*;
 use crate::session_listing::list_session_views;
 use std::collections::BTreeMap;
 
+use lash_core_execution::store::RunStore as _;
 use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
@@ -1038,4 +1039,117 @@ fn partial_run_terminals_are_corruption_at_decode() {
         crate::session_runs::run_terminal_conn(&conn, &session, &run),
         Err(StoreError::StoredDataCorrupt { .. })
     ));
+}
+
+/// The bytes the store holds for every terminal's window: each terminal
+/// row's window columns (its revision an 8-byte integer) and each head
+/// document they name.
+async fn terminal_window_bytes(store: &SqliteStore) -> i64 {
+    store
+        .conn
+        .call(|conn| {
+            conn.query_row(
+                "SELECT
+                     (SELECT coalesce(sum(CASE WHEN terminal_window_revision IS NULL THEN 0 ELSE 8 END
+                         + coalesce(length(terminal_window_leaf_node_id), 0)
+                         + coalesce(length(terminal_window_checkpoint_ref), 0)
+                         + coalesce(length(terminal_window_head_digest), 0)), 0)
+                      FROM session_runs)
+                   + (SELECT coalesce(sum(length(head_digest) + length(CAST(head_json AS BLOB))), 0)
+                      FROM session_run_window_heads)",
+                [],
+                |row| row.get(0),
+            )
+        })
+        .await
+        .expect("count terminal window bytes")
+}
+
+/// FIG-5931: a terminal records the window it ended on by reference, so the
+/// bytes it writes for its window do not grow with the session's history:
+/// every terminal writes at most 1 KiB (the first also records the session's
+/// head document, once), every later one the same count, while the window
+/// each names is the one it ended on, through later commits and a host
+/// collection. Before, each terminal wrote its whole hydrated window.
+#[tokio::test]
+async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_position() {
+    let store = crate::test_support::sqlite_memory_store()
+        .await
+        .expect("open terminal-window store");
+    let session = SessionId::fixture("terminal-window-bytes");
+    let mut state = durable_state(&store, &session).await;
+    let mut written = Vec::new();
+    let mut runs = Vec::new();
+    for position in 0..24_u64 {
+        state.append_active_read_delta(&[lash_core_execution::Message {
+            id: format!("history-{position}"),
+            role: lash_core_execution::MessageRole::User,
+            origin: None,
+            parts: Arc::new(vec![lash_core_execution::Part::text(
+                format!("history-{position}.p0"),
+                format!("{position}:{}", "h".repeat(2_048)),
+                None,
+            )]),
+            reply_marker: None,
+        }]);
+        let run = lash_sansio::TurnId::fixture(format!("terminal-window-{position}"));
+        let (commit, appended) = RuntimeCommit::persisted_state_with_operation(
+            &mut state,
+            lash_core_execution::OperationId::turn(&session, run.clone(), "commit"),
+        )
+        .expect("prepare a longer history");
+        let receipt = store
+            .commit_runtime_state(commit)
+            .await
+            .expect("commit a longer history");
+        state.apply_persisted_commit_result(receipt);
+        state.mark_node_ids_persisted(appended);
+        let before = terminal_window_bytes(&store).await;
+        store
+            .end_command_run(&session, &run, position)
+            .await
+            .expect("end the run");
+        written.push(terminal_window_bytes(&store).await - before);
+        runs.push(run);
+    }
+    assert!(
+        written.iter().all(|bytes| *bytes <= 1_024),
+        "a terminal wrote more than 1 KiB for its window: {written:?}"
+    );
+    assert!(
+        written[1..].iter().all(|bytes| *bytes == written[1]),
+        "a terminal's window bytes grew with history: {written:?}"
+    );
+    let windows = |store: Arc<SqliteStore>, runs: Vec<lash_sansio::TurnId>| {
+        let session = session.clone();
+        async move {
+            let mut lengths = Vec::new();
+            for run in runs {
+                let window = store
+                    .load_session_window(
+                        &session,
+                        lash_core_execution::store::WindowSelector::Terminal(run),
+                    )
+                    .await
+                    .expect("read a terminal window")
+                    .expect("a terminal names its window");
+                lengths.push((window.head_revision, window.window.nodes.len()));
+            }
+            lengths
+        }
+    };
+    let ended = windows(Arc::clone(&store), runs.clone()).await;
+    assert!(
+        ended.windows(2).all(|pair| pair[0].1 < pair[1].1),
+        "each terminal names the window it ended on: {ended:?}"
+    );
+    store
+        .gc_unreachable()
+        .await
+        .expect("the host collection completes");
+    assert_eq!(
+        windows(Arc::clone(&store), runs).await,
+        ended,
+        "a host collection changed a terminal's window"
+    );
 }

@@ -215,18 +215,43 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     else {
         return Ok(None);
     };
+    let head_json = head_json.ok_or_else(|| {
+        stored_data_corrupt("SessionHeadMeta", "head pointer names a missing revision")
+    })?;
+    assemble_session_head_meta(
+        session_id,
+        &head_json,
+        head_revision,
+        leaf_node_id,
+        checkpoint_ref,
+        current_frame_node_id,
+        fleet,
+    )
+    .map(Some)
+}
+
+/// Assemble the head metadata a revision row names: its head document, its
+/// revision, its leaf and checkpoint, and the frame its leaf row names. The
+/// live head and a terminal's recorded window (FIG-5931) both read a head
+/// this way.
+pub(crate) fn assemble_session_head_meta(
+    session_id: &SessionId,
+    head_json: &str,
+    head_revision: i64,
+    leaf_node_id: Option<String>,
+    checkpoint_ref: Option<String>,
+    current_frame_node_id: Option<String>,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<SessionHeadMeta, StoreError> {
     let head_revision = u64::try_from(head_revision).map_err(|_| {
         stored_data_corrupt(
             "SessionHeadMeta",
             format!("head_revision must be non-negative, got {head_revision}"),
         )
     })?;
-    let head_json = head_json.ok_or_else(|| {
-        stored_data_corrupt("SessionHeadMeta", "head pointer names a missing revision")
-    })?;
     let payload: SessionHeadPayload =
         lash_core_execution::store::decode_versioned_json_record_for_fleet(
-            &head_json,
+            head_json,
             "SessionHeadMeta",
             lash_core_execution::surface_format!(
                 lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
@@ -245,7 +270,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
         .map(lash_core_execution::FrameNodeId::new)
         .transpose()
         .map_err(|error| stored_data_corrupt("SessionGraph", error))?;
-    Ok(Some(SessionHeadMeta::assemble(
+    SessionHeadMeta::assemble(
         session_id,
         payload,
         head_revision,
@@ -254,7 +279,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
             .map(lash_core_execution::NodeId::parse)
             .transpose()?,
         current_frame_node_id,
-    )?))
+    )
 }
 
 pub(crate) fn encode_msgpack<T: serde::Serialize>(

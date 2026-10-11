@@ -157,6 +157,7 @@ pub const TABLES: &[&str] = &[
     session_runs::control_intents::TABLE,
     session_runs::run_inputs::TABLE,
     session_runs::runs::TABLE,
+    session_runs::runs::WINDOW_HEADS_TABLE,
     session_ingress::sequence::TABLE,
 ];
 

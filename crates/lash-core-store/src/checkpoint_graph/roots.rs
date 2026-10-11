@@ -42,6 +42,9 @@ pub enum RootSource {
     ArtifactBridge = 9,
     /// `graph_release_pins.root_ref`: installed runnable manifests.
     ReleasePin = 10,
+    /// `session_runs.terminal_window_checkpoint_ref`: the checkpoint of the
+    /// window a run's terminal names, while the run's row lives (FIG-5931).
+    RunTerminalWindow = 11,
 }
 
 /// Where one source's roots live in a backend's schema.
@@ -55,7 +58,7 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Exec,
         Self::RunFact,
         Self::EffectAdmission,
@@ -67,6 +70,7 @@ impl RootSource {
         Self::ReadPin,
         Self::ArtifactBridge,
         Self::ReleasePin,
+        Self::RunTerminalWindow,
     ];
 
     /// The `source` column of the root catalog view.
@@ -84,6 +88,7 @@ impl RootSource {
             Self::ReadPin => "read_pin",
             Self::ArtifactBridge => "artifact",
             Self::ReleasePin => "release",
+            Self::RunTerminalWindow => "terminal_window",
         }
     }
 
@@ -127,6 +132,9 @@ impl RootSource {
                 Some("storage_kind = 1"),
             ),
             Self::ReleasePin => RootField::of("lash_graph_release_pins", "root_ref", None),
+            Self::RunTerminalWindow => {
+                RootField::of("lash_session_runs", "terminal_window_checkpoint_ref", None)
+            }
         }
     }
 
@@ -143,6 +151,7 @@ impl RootSource {
             Self::ReadPin => ("blob_read_pins", "root_ref", None),
             Self::ArtifactBridge => ("artifact_refs", "blob_ref", None),
             Self::ReleasePin => ("graph_release_pins", "root_ref", None),
+            Self::RunTerminalWindow => ("session_runs", "terminal_window_checkpoint_ref", None),
         }
     }
 }

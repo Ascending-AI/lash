@@ -258,6 +258,43 @@ async fn a_durable_report_is_pinned_to_its_terminal() -> Result<()> {
     Ok(())
 }
 
+/// FIG-5931: a terminal names its window by reference, and that reference is
+/// a root: after later turns and a host collection, which releases the
+/// revision the run ended on, the run's durable report is unchanged.
+async fn a_durable_report_reads_its_window_after_a_collection() -> Result<()> {
+    let fixture = fixture(1).await?;
+    let session = fixture
+        .core
+        .session(SessionId::fixture("collected-report"))
+        .created()
+        .await
+        .durable()
+        .await?;
+    let handle = session
+        .send(TurnInput::text("first"))
+        .id(crate::TurnId::fixture("first-run"))
+        .await?;
+    let input = handle.input_id().clone();
+    handle.output().await?;
+    let first = session.attach(input.clone()).output().await?;
+    for later in ["second", "third"] {
+        session.send(TurnInput::text(later)).await?.output().await?;
+    }
+    fixture
+        .core
+        .store_factory
+        .gc_unreachable()
+        .await
+        .expect("the host collection completes");
+    let again = session.attach(input).output().await?;
+    assert_eq!(
+        serde_json::to_string(&first.result)?,
+        serde_json::to_string(&again.result)?,
+        "a collection changed an old run's report"
+    );
+    Ok(())
+}
+
 /// D-RUNREPORT: reading an unchanged graph-less session invents no timestamp.
 async fn graphless_session_reads_are_identical() -> Result<()> {
     let fixture = fixture(1).await?;
@@ -1591,6 +1628,11 @@ macro_rules! send_handle_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_durable_report_is_pinned_to_its_terminal() -> Result<()> {
                 super::a_durable_report_is_pinned_to_its_terminal().await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_durable_report_reads_its_window_after_a_collection() -> Result<()> {
+                super::a_durable_report_reads_its_window_after_a_collection().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

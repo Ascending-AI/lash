@@ -182,6 +182,32 @@ impl GraphTier for Tier {
             )
             .bind(namespace.clone())
             .bind(artifact.clone()),
+            ForeignWrite::TerminalWindow {
+                session,
+                run,
+                root: Some(root),
+            } => sqlx::query(
+                "WITH head AS (
+                     INSERT INTO lash_session_run_window_heads (session_id, head_digest, head_json)
+                     VALUES ($1, 'head', '{}')
+                 )
+                 INSERT INTO lash_session_runs
+                     (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms,
+                      terminal_window_revision, terminal_window_checkpoint_ref,
+                      terminal_window_head_digest)
+                 VALUES ($1, $2, 'cancelled', '{\"cause\":\"operator_cancelled\"}', 1,
+                         1, $3, 'head')",
+            )
+            .bind(session.as_str().to_owned())
+            .bind(run.as_str().to_owned())
+            .bind(hex(root)),
+            ForeignWrite::TerminalWindow {
+                session,
+                run,
+                root: None,
+            } => sqlx::query("DELETE FROM lash_session_runs WHERE session_id = $1 AND run = $2")
+                .bind(session.as_str().to_owned())
+                .bind(run.as_str().to_owned()),
             ForeignWrite::BreakCatalog => sqlx::query("DROP VIEW lash_graph_root_catalog"),
         };
         query

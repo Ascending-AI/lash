@@ -486,6 +486,11 @@ table lash_session_run_specs
   column spec_hash text not-null
   column spec_json text not-null
   primary-key (session_id, spec_hash)
+table lash_session_run_window_heads
+  column head_digest text not-null
+  column head_json text not-null
+  column session_id text not-null
+  primary-key (session_id, head_digest)
 table lash_session_runs
   column admission_json text nullable
   column run text not-null
@@ -494,9 +499,14 @@ table lash_session_runs
   column terminal_cause_json text nullable
   column terminal_head_revision bigint nullable
   column terminal_kind text nullable
-  column terminal_window_json text nullable
+  column terminal_window_checkpoint_ref text nullable
+  column terminal_window_head_digest text nullable
+  column terminal_window_leaf_node_id text nullable
+  column terminal_window_revision bigint nullable
   unique (session_id) where (admission_json is not null) and (terminal_kind is null)
   primary-key (session_id, run)
+  foreign-key (session_id, terminal_window_head_digest) references lash_session_run_window_heads (session_id, head_digest) on delete no action
+  foreign-key (terminal_window_checkpoint_ref) references lash_blobs (hash) on delete restrict
 table lash_session_scope_ends
   column begun_at_ms bigint not-null
   column scope_key text not-null

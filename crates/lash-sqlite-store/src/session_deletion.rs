@@ -87,9 +87,10 @@ pub(super) async fn delete_session_from_catalog(
                     now_ms,
                 )?;
             }
-            // What the session roots: its head, and every revision it still
-            // retains. Its pins and revisions go with it, so each root they
-            // held becomes a reclaim candidate here.
+            // What the session roots: its head, every revision it still
+            // retains and every window its terminals name. Its pins,
+            // revisions and runs go with it, so each root they held becomes a
+            // reclaim candidate here.
             let text_column = |sql: &str| -> Result<Vec<String>, lash_core_execution::StoreError> {
                 let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
                 let rows = stmt
@@ -97,14 +98,17 @@ pub(super) async fn delete_session_from_catalog(
                     .map_err(sqlite_error)?;
                 rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
             };
+            let runs = &crate::session_runs::session_runs_sql().runs;
             let mut roots: std::collections::BTreeSet<String> =
                 text_column(session_sql().revisions.select_session_checkpoints.sql())?
                     .into_iter()
+                    .chain(text_column(runs.select_session_window_checkpoints.sql())?)
                     .collect();
             roots.extend(checkpoint_ref);
             let mut retained_leaves: std::collections::BTreeSet<String> =
                 text_column(session_sql().revisions.select_session_leaves.sql())?
                     .into_iter()
+                    .chain(text_column(runs.select_session_window_leaves.sql())?)
                     .collect();
             retained_leaves.extend(leaf_node_id);
             // Every blob the session's roots reach is a candidate: a graph
@@ -137,6 +141,11 @@ pub(super) async fn delete_session_from_catalog(
                 crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
                     .map_err(sqlite_error)?;
             }
+            // The session's logical runs and their input bindings go with
+            // it, before its ancestry retires: a terminal window roots its
+            // leaf while its row lives. A `close_session` intent stays as
+            // its deletion tombstone.
+            crate::session_runs::delete_session_runs_conn(tx, &session_id)?;
             for leaf_node_id in &retained_leaves {
                 persistence::retire_unreachable_ancestry_conn(tx, leaf_node_id)?;
             }
@@ -195,9 +204,6 @@ pub(super) async fn delete_session_from_catalog(
                 crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
                     .map_err(sqlite_error)?;
             }
-            // The session's logical runs and their input bindings go with
-            // it; a `close_session` intent stays as its deletion tombstone.
-            crate::session_runs::delete_session_runs_conn(tx, &session_id)?;
             // The session-core rows the family owns, named rather than spelled.
             for statement in [
                 session_sql().observer_intents.delete_by_session.sql(),

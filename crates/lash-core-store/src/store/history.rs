@@ -22,7 +22,10 @@ pub enum WindowSelector {
     Current,
     /// The head a turn was admitted on (FIG-3682).
     Admitted(SessionHeadRef),
-    /// The window recorded atomically with this run's terminal (D-RUNREPORT).
+    /// The window this run's terminal names, recorded atomically with it by
+    /// reference to the head it ended on and kept readable through later
+    /// commits and collections while the run's row lives (D-RUNREPORT,
+    /// FIG-5931).
     Terminal(TurnId),
 }
 

@@ -60,6 +60,13 @@ pub enum ForeignWrite {
         artifact: String,
         root: Option<NodeId>,
     },
+    /// Point run `run`'s terminal window's checkpoint at `root`, or drop
+    /// the run's row.
+    TerminalWindow {
+        session: SessionId,
+        run: TurnId,
+        root: Option<NodeId>,
+    },
     /// Make the root catalog's enumeration fail.
     BreakCatalog,
 }
@@ -685,7 +692,8 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             RootSource::ReadPin
             | RootSource::SessionRevision
             | RootSource::SessionAdmissionBase
-            | RootSource::ArtifactBridge => (None, None),
+            | RootSource::ArtifactBridge
+            | RootSource::RunTerminalWindow => (None, None),
         };
         let mut writes: Vec<DomainWrite> = publish.into_iter().collect();
         if writes.is_empty() {
@@ -740,6 +748,14 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 })
                 .await;
             }
+            RootSource::RunTerminalWindow => {
+                tier.foreign(ForeignWrite::TerminalWindow {
+                    session: owner.session.clone(),
+                    run: turn("ended"),
+                    root: Some(root),
+                })
+                .await;
+            }
             _ => {}
         }
         if matches!(
@@ -748,6 +764,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 | RootSource::SessionRevision
                 | RootSource::SessionAdmissionBase
                 | RootSource::ArtifactBridge
+                | RootSource::RunTerminalWindow
         ) {
             commit(
                 tier,
@@ -806,6 +823,14 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 tier.foreign(ForeignWrite::ArtifactBridge {
                     namespace: "kernel_document".into(),
                     artifact: "bridge".into(),
+                    root: None,
+                })
+                .await;
+            }
+            (RootSource::RunTerminalWindow, ..) => {
+                tier.foreign(ForeignWrite::TerminalWindow {
+                    session: owner.session.clone(),
+                    run: turn("ended"),
                     root: None,
                 })
                 .await;

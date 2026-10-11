@@ -391,9 +391,20 @@ CREATE TABLE IF NOT EXISTS lash_session_ingress_sequence (
 -- the run's admission, committed in the admission's own transaction, and the
 -- run's terminal evidence once it has one: the `terminal_*` columns are set
 -- together, exactly once, and `terminal_kind` is the kind the cause derives,
--- kept for the indexes and checked against it. `lash_session_run_inputs` binds each accepted input to the
+-- kept for the indexes and checked against it. A terminal names the window it
+-- ended on by reference (FIG-5931): the head's revision, leaf and checkpoint,
+-- and its head document in `lash_session_run_window_heads`, stored once per
+-- distinct document of the session. The leaf and the checkpoint are roots
+-- while the row lives. `lash_session_run_inputs` binds each accepted input to the
 -- run that executes it. `lash_control_intents` records a session's close; a
 -- `close_session` row outlives its session as the deletion tombstone.
+CREATE TABLE IF NOT EXISTS lash_session_run_window_heads (
+    session_id TEXT NOT NULL,
+    head_digest TEXT NOT NULL,
+    head_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, head_digest)
+);
+
 CREATE TABLE IF NOT EXISTS lash_session_runs (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
@@ -401,9 +412,15 @@ CREATE TABLE IF NOT EXISTS lash_session_runs (
     terminal_kind TEXT,
     terminal_cause_json TEXT,
     terminal_head_revision BIGINT,
-    terminal_window_json TEXT,
     terminal_at_ms BIGINT,
+    terminal_window_revision BIGINT,
+    terminal_window_leaf_node_id TEXT,
+    terminal_window_checkpoint_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    terminal_window_head_digest TEXT,
     PRIMARY KEY (session_id, run),
+    FOREIGN KEY (session_id, terminal_window_head_digest)
+        REFERENCES lash_session_run_window_heads(session_id, head_digest),
+    CONSTRAINT ck_session_runs_terminal_window CHECK ((terminal_window_revision IS NULL AND terminal_window_leaf_node_id IS NULL AND terminal_window_checkpoint_ref IS NULL AND terminal_window_head_digest IS NULL) OR (terminal_kind IS NOT NULL AND terminal_window_revision IS NOT NULL AND terminal_window_head_digest IS NOT NULL)),
     CONSTRAINT ck_session_runs_terminal CHECK (((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IS NOT NULL AND terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_session_runs_terminal_kind CHECK (terminal_kind IS NULL OR terminal_kind = CASE (terminal_cause_json::jsonb ->> 'cause')
         WHEN 'committed' THEN CASE
@@ -426,6 +443,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_session_runs_unfinished
 CREATE INDEX IF NOT EXISTS idx_lash_session_runs_open
     ON lash_session_runs(session_id, run)
     WHERE terminal_kind IS NULL;
+CREATE INDEX IF NOT EXISTS idx_lash_session_runs_window_leaf
+    ON lash_session_runs(terminal_window_leaf_node_id);
+CREATE INDEX IF NOT EXISTS idx_lash_session_runs_window_checkpoint_ref
+    ON lash_session_runs(terminal_window_checkpoint_ref);
 
 CREATE TABLE IF NOT EXISTS lash_session_run_inputs (
     session_id TEXT NOT NULL,
@@ -1149,4 +1170,6 @@ CREATE OR REPLACE VIEW lash_graph_root_catalog AS
         WHERE admission_base_checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'read_pin', root_ref FROM lash_blob_read_pins
     UNION ALL SELECT 'artifact', graph_ref FROM lash_lash_vm_artifacts WHERE storage_kind = 1
-    UNION ALL SELECT 'release', root_ref FROM lash_graph_release_pins;
+    UNION ALL SELECT 'release', root_ref FROM lash_graph_release_pins
+    UNION ALL SELECT 'terminal_window', terminal_window_checkpoint_ref FROM lash_session_runs
+        WHERE terminal_window_checkpoint_ref IS NOT NULL;

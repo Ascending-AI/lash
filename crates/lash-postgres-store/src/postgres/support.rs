@@ -550,6 +550,31 @@ pub(crate) async fn load_session_head_meta_tx(
     decode_session_head_meta_row(session_id, row, fleet)
 }
 
+/// The head that run `run`'s terminal named as its window (FIG-5931), read
+/// like the live head: its head document, revision, leaf and checkpoint, and
+/// the frame its leaf row names. The terminal's row roots the leaf and the
+/// checkpoint, so later commits and collections leave them readable. `None`
+/// when the run has no terminal or its terminal names no window.
+pub(crate) async fn load_terminal_head_meta_tx(
+    tx: &mut sqlx::PgConnection,
+    session_id: &SessionId,
+    run: &lash_core_execution::TurnId,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<Option<SessionHeadMeta>, StoreError> {
+    let row = sqlx::query(
+        crate::session_runs::session_runs_sql()
+            .runs
+            .select_terminal_window
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(run.as_str())
+    .fetch_optional(crate::observed_sql::executor(&mut *tx))
+    .await
+    .map_err(store_sqlx_error)?;
+    decode_session_head_meta_row(session_id, row, fleet)
+}
+
 fn decode_session_head_meta_row(
     session_id: &SessionId,
     row: Option<sqlx::postgres::PgRow>,
