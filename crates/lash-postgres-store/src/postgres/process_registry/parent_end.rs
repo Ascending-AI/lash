@@ -229,24 +229,3 @@ pub(crate) async fn mark_holds_tx(
     }
     Ok(())
 }
-
-/// The close releases only holds the scope registered.
-pub(crate) async fn release_holds_tx(
-    tx: &mut sqlx::PgConnection,
-    owner: &ScopeId,
-) -> Result<(), PluginError> {
-    let (kind, id) = ledger_key(owner);
-    crate::observed_sql::query(process_sql().process.release_consumer_holds_owned_by.sql())
-        .bind(kind)
-        .bind(&id)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(plugin_sqlx_error)?;
-    crate::observed_sql::query(process_sql().abandoned_hold.forget_owned_by.sql())
-        .bind(kind)
-        .bind(&id)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(plugin_sqlx_error)?;
-    Ok(())
-}

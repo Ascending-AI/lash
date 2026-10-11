@@ -35,28 +35,9 @@ use crate::process_sql::process_sql;
 use crate::session_sql::session_sql;
 use crate::store_sqlx_error;
 
-/// A turn's commit receipt, staged on the turn feed.
-#[derive(Debug)]
-pub(crate) struct TurnReceipt {
-    pub(crate) session_id: String,
-    pub(crate) turn_id: String,
-    pub(crate) turn_commit_hash: String,
-    pub(crate) result_json: String,
-    pub(crate) outcome_code: Option<String>,
-    pub(crate) committed_at_ms: i64,
-    pub(crate) request_identity_hash: Option<String>,
-    pub(crate) requested_node_count: Option<i64>,
-    pub(crate) identity_encoding_version: Option<i32>,
-    pub(crate) failure_evidence: bool,
-    /// The head revision the commit published.
-    pub(crate) head_revision: i64,
-}
-
 /// One change of the turn feed.
 #[derive(Debug)]
 pub(crate) enum TurnChange {
-    /// A runtime commit's receipt.
-    Receipt(TurnReceipt),
     /// A session's terminal record: its deletion, or its fault.
     SessionTerminal {
         session_id: String,
@@ -72,22 +53,6 @@ pub(crate) async fn stage_turn_change(
 ) -> Result<(), sqlx::Error> {
     let sql = &session_sql().turn_commits_postgres;
     match change {
-        TurnChange::Receipt(receipt) => {
-            crate::observed_sql::query(sql.insert_staged.sql())
-                .bind(receipt.session_id)
-                .bind(receipt.turn_id)
-                .bind(receipt.turn_commit_hash)
-                .bind(receipt.result_json)
-                .bind(receipt.outcome_code)
-                .bind(receipt.committed_at_ms)
-                .bind(receipt.request_identity_hash)
-                .bind(receipt.requested_node_count)
-                .bind(receipt.identity_encoding_version)
-                .bind(receipt.failure_evidence)
-                .bind(receipt.head_revision)
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await?;
-        }
         TurnChange::SessionTerminal {
             session_id,
             fault_json,

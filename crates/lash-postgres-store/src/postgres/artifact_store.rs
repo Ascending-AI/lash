@@ -68,6 +68,9 @@ pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
 
 #[path = "artifact_store/local_end.rs"]
 mod local_end;
+pub(crate) use local_end::{
+    EndArguments as LocalEndArguments, failure as end_local_failure, validate as validate_local_end,
+};
 
 #[cfg(test)]
 pub(crate) use local_end::function_ddl as local_end_function_ddl;
@@ -124,15 +127,20 @@ fn backend(error: impl ToString) -> ArtifactStoreError {
     ArtifactStoreError::Backend(error.to_string())
 }
 
+/// The advisory lock key of `referrer`.
+pub(crate) fn referrer_lock_key(referrer: &ArtifactReferrer) -> String {
+    format!(
+        "lash-artifact-referrer:{}:{}",
+        referrer.kind().as_str(),
+        referrer.canonical_id()
+    )
+}
+
 pub(crate) async fn lock_referrer_tx(
     conn: &mut sqlx::PgConnection,
     referrer: &ArtifactReferrer,
 ) -> Result<(), sqlx::Error> {
-    let key = format!(
-        "lash-artifact-referrer:{}:{}",
-        referrer.kind().as_str(),
-        referrer.canonical_id()
-    );
+    let key = referrer_lock_key(referrer);
     crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .lock_xact_by_text

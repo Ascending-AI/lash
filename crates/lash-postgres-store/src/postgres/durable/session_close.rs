@@ -21,6 +21,18 @@ use super::{Committing, corrupt, get, sqlx_failure};
 static SQL: LazyLock<SessionCloseStatements> =
     LazyLock::new(|| SessionCloseStatements::render(Dialect::postgres()));
 
+/// Record a scope of a session as ending: it has an `Until` child left.
+pub(super) static SCOPE_ENDING: super::steps::Entry = super::steps::Entry::new(
+    || &SQL.scope_ending,
+    &[
+        super::steps::Ty::Text,
+        super::steps::Ty::Text,
+        super::steps::Ty::Now,
+        super::steps::Ty::Int,
+    ],
+    super::steps::Shape::Exec,
+);
+
 /// The stored row: its last step done, when it began, its writer's epoch.
 type Stored = (Option<SessionCloseStep>, i64, i64);
 

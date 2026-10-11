@@ -340,10 +340,6 @@ pub(super) fn apply(
                 Ok(stored) => stored,
                 Err(error) => return Ok(Err(encoding(&error))),
             };
-            let window = crate::session_runs::terminal_window_ref(tx, session)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-            let (window_revision, window_leaf, window_checkpoint, window_head) =
-                crate::session_runs::TerminalWindowRef::columns(window.as_ref());
             let ended = tx
                 .prepare_cached(SQL.end_run.sql())?
                 .query_row(
@@ -354,10 +350,6 @@ pub(super) fn apply(
                         stored,
                         head_revision.map(integer::<i64>).transpose()?,
                         commit.now.0,
-                        window_revision,
-                        window_leaf,
-                        window_checkpoint,
-                        window_head,
                     ],
                     |_| Ok(()),
                 )

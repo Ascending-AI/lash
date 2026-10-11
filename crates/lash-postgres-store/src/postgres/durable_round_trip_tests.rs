@@ -360,11 +360,10 @@ async fn a_vm_park_stays_within_its_round_trip_budget() {
     within("cell.snapshot", trips, VM_PARK_ROUND_TRIPS);
 }
 
-/// The most round trips `turn.commit` pays from its open (FIG-5936; 45
-/// before it). Its head commit and terminal stay client-driven, an
-/// explicit transaction: the session store's planner reads the head it
-/// commits over.
-const TURN_COMMIT_ROUND_TRIPS: u64 = 42;
+/// The most round trips `turn.commit` pays from its open (FIG-5942; 38
+/// before it): the open, which reads the head the commit is planned on,
+/// and the one call, which guards every fact of that plan.
+const TURN_COMMIT_ROUND_TRIPS: u64 = 2;
 
 /// A turn's commit, its session's head commit with the run's terminal and
 /// its scope's end, stays within its round-trip budget.

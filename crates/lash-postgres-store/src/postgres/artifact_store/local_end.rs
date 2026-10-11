@@ -25,21 +25,7 @@ pub(super) async fn end(
     now_ms: u64,
     namespaces: &[&str],
 ) -> Result<(), StoreError> {
-    let pattern = gate
-        .map(|journal| {
-            serde_json::to_string(journal.key())
-                .map(|encoded| {
-                    format!(
-                        "%\"gate\":{}%",
-                        encoded
-                            .replace('\\', "\\\\")
-                            .replace('%', "\\%")
-                            .replace('_', "\\_")
-                    )
-                })
-                .map_err(|error| StoreError::Backend(error.to_string()))
-        })
-        .transpose()?;
+    let pattern = gate.map(gate_pattern).transpose()?;
     let answer: serde_json::Value =
         crate::observed_sql::query_scalar(super::artifact_sql().postgres.end_local.sql())
             .bind(referrer.kind().as_str())
@@ -50,26 +36,85 @@ pub(super) async fn end(
             .bind(namespaces)
             .fetch_one(crate::observed_sql::executor(tx))
             .await
-            .map_err(|error| {
-                if error
-                    .as_database_error()
-                    .is_some_and(|error| error.code().as_deref() == Some("22P02"))
-                {
-                    StoreError::StoredDataCorrupt {
-                        record_kind: "artifact_cleanup_obligation",
-                        message: error.to_string(),
-                    }
-                } else {
-                    crate::support::store_sqlx_error(error)
-                }
-            })?;
+            .map_err(failure)?;
+    validate(answer)
+}
+
+/// The arguments of an end of `referrer` gated on `gate` run as a step:
+/// the end call's six, then the canonical body of a frame cleanup gated on
+/// `gate`, which a one-call commit vouches each answered plan against.
+pub(crate) struct EndArguments {
+    pub(crate) kind: &'static str,
+    pub(crate) id: String,
+    pub(crate) gate: Option<String>,
+    pub(crate) pattern: Option<String>,
+    pub(crate) namespaces: &'static [&'static str],
+    pub(crate) gated_body: Option<String>,
+}
+
+impl EndArguments {
+    pub(crate) fn of(
+        referrer: &ArtifactReferrer,
+        gate: Option<&EffectJournalIdentity>,
+    ) -> Result<Self, StoreError> {
+        let gated_body = gate
+            .map(|gate| {
+                ArtifactCleanup::ended(referrer.clone(), Vec::new(), Some(gate.clone()))
+                    .to_json()
+                    .map_err(|error| StoreError::Backend(error.to_string()))
+            })
+            .transpose()?;
+        Ok(Self {
+            kind: referrer.kind().as_str(),
+            id: referrer.canonical_id(),
+            gate: gate.map(|gate| gate.key().to_owned()),
+            pattern: gate.map(gate_pattern).transpose()?,
+            namespaces: &NAMESPACES,
+            gated_body,
+        })
+    }
+}
+
+/// The `LIKE` pattern of the cleanups gated on `gate`.
+pub(super) fn gate_pattern(gate: &EffectJournalIdentity) -> Result<String, StoreError> {
+    serde_json::to_string(gate.key())
+        .map(|encoded| {
+            format!(
+                "%\"gate\":{}%",
+                encoded
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            )
+        })
+        .map_err(|error| StoreError::Backend(error.to_string()))
+}
+
+/// A failed end call, as the store reports it: a stored cleanup body that
+/// is not JSON is corrupt.
+pub(crate) fn failure(error: sqlx::Error) -> StoreError {
+    if error
+        .as_database_error()
+        .is_some_and(|error| error.code().as_deref() == Some("22P02"))
+    {
+        StoreError::StoredDataCorrupt {
+            record_kind: "artifact_cleanup_obligation",
+            message: error.to_string(),
+        }
+    } else {
+        crate::support::store_sqlx_error(error)
+    }
+}
+
+/// Refuse malformed stored pairs and plans of an end's `answer` before the
+/// owner's transaction can commit, including surviving readers that
+/// blocked reclamation.
+pub(crate) fn validate(answer: serde_json::Value) -> Result<(), StoreError> {
     let answer: Answer =
         serde_json::from_value(answer).map_err(|error| StoreError::StoredDataCorrupt {
             record_kind: "artifact local end",
             message: error.to_string(),
         })?;
-    // Refuse malformed stored pairs and plans before the owner's transaction
-    // can commit, including surviving readers that blocked reclamation.
     for (kind, id) in answer.checks {
         ArtifactReferrer::decode(&kind, &id)
             .map_err(|error| error.into_store_error("artifact referrer edge"))?;

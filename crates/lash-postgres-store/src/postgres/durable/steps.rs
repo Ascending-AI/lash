@@ -1,4 +1,4 @@
-//! An owner commit's domain writes as step programs (FIG-5936).
+//! An owner commit's domain writes as step programs (FIG-5936, FIG-5942).
 //!
 //! A step is one of the shared statements with its values and how many rows
 //! it must answer. A domain write that is a step program is decided by its
@@ -12,22 +12,74 @@
 //! A step can retire graph roots (FIG-5949): the roots its statement
 //! answers in a named column, and the roots its writer knew it replaced.
 //! Either path peels them once every step ran, before the commit ends.
+//!
+//! A program decides with its statements' answers, not with values its
+//! client read (FIG-5942). A step can capture the first row it answered in
+//! a slot, and a later step can run only when that slot holds a row, or a
+//! row whose named boolean column is true (or not). A flagged entry counts
+//! only the rows whose flag column is true, so a query answering whether a
+//! fact holds is a guard. A step also collects what its rows name for the
+//! commit's mechanics: the session graph leaves whose unreachable ancestry
+//! is retired right after it, the actors it woke, and the prompt texts it
+//! released or keeps, which a later reclaim step peels. The database clock
+//! is a value no client knows before its commit: a step names it as
+//! [`Value::Now`].
 
-use lash_durable::DurableError;
+use std::collections::{BTreeMap, BTreeSet};
+
+use lash_durable::{ActorKey, DurableError, DurableInstant};
 use lash_store_sql::Rendered;
 use sqlx::PgConnection;
 use sqlx::postgres::PgRow;
 
 use super::{Retired, sqlx_failure};
 
+/// Why a program's run failed, before either store's error names it.
+pub(super) enum Failure {
+    Sql(sqlx::Error),
+    Store(crate::StoreError),
+    Durable(DurableError),
+}
+
+impl From<sqlx::Error> for Failure {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Sql(error)
+    }
+}
+
+impl From<Failure> for DurableError {
+    fn from(failure: Failure) -> Self {
+        match failure {
+            Failure::Sql(error) => sqlx_failure(error),
+            Failure::Store(error) => super::store_failure(error),
+            Failure::Durable(error) => error,
+        }
+    }
+}
+
+impl Failure {
+    /// The failure as the session store reports it.
+    pub(super) fn into_store(self) -> crate::StoreError {
+        match self {
+            Self::Sql(error) => crate::support::store_sqlx_error(error),
+            Self::Store(error) => error,
+            Self::Durable(error) => crate::StoreError::Backend(error.to_string()),
+        }
+    }
+}
+
 /// A step parameter's type, as the executor decodes it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Ty {
     Text,
     Int,
+    Bool,
     Bytes,
     Texts,
     Bools,
+    Ints,
+    /// The commit's database clock, in milliseconds: no value is sent.
+    Now,
 }
 
 /// What a step's statement answers.
@@ -39,15 +91,59 @@ pub(super) enum Shape {
     Returning,
     /// A query: its rows are the rows it answered.
     Select,
+    /// The artifact local end (FIG-5971): its one row is the answer this
+    /// path validates. The one-call commit vouches for the answer instead,
+    /// and declines one it cannot vouch for ([`super::executor`]).
+    EndLocal,
+    /// The reclaim of the prompt texts the earlier steps released, keeping
+    /// those they protected. It answers no rows.
+    TextReclaim,
 }
+
+/// What an answered column names for the commit's mechanics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Collect {
+    /// A graph root the row retired: its closure is peeled.
+    Closure(&'static str),
+    /// An array of graph roots the row retired.
+    Closures(&'static str),
+    /// An ended turn's PhaseRoot: peeled alone.
+    PhaseEnd(&'static str),
+    /// A session graph leaf whose unreachable ancestry is retired.
+    Ancestry(&'static str),
+    /// An actor the row woke, unless it is the committing one.
+    Wake(&'static str),
+    /// A prompt text the row released.
+    Text(&'static str),
+    /// A prompt text the reclaim keeps.
+    Protect(&'static str),
+}
+
+impl Collect {
+    pub(super) fn column(self) -> &'static str {
+        match self {
+            Self::Closure(column)
+            | Self::Closures(column)
+            | Self::PhaseEnd(column)
+            | Self::Ancestry(column)
+            | Self::Wake(column)
+            | Self::Text(column)
+            | Self::Protect(column) => column,
+        }
+    }
+}
+
+/// The most collections one entry names.
+const COLLECTS: usize = 3;
 
 /// A statement an owner commit may run as a step.
 pub(super) struct Entry {
     statement: fn() -> &'static Rendered,
     pub(super) params: &'static [Ty],
     pub(super) shape: Shape,
-    /// The answered column naming a root each answered row retires.
-    pub(super) retires: Option<&'static str>,
+    /// The boolean column whose true rows are the step's rows.
+    pub(super) flag: Option<&'static str>,
+    collects: [Option<Collect>; COLLECTS],
 }
 
 impl Entry {
@@ -60,18 +156,43 @@ impl Entry {
             statement,
             params,
             shape,
-            retires: None,
+            flag: None,
+            collects: [None; COLLECTS],
         }
     }
 
     /// This entry, each answered row of which retires the root its column
     /// `column` names (none when null): a query or a `RETURNING` write.
     pub(super) const fn retiring(self, column: &'static str) -> Self {
-        assert!(!matches!(self.shape, Shape::Exec));
-        Self {
-            retires: Some(column),
-            ..self
+        self.collecting(Collect::Closure(column))
+    }
+
+    /// This entry, whose answered rows also name `collect`: a query or a
+    /// `RETURNING` write.
+    pub(super) const fn collecting(mut self, collect: Collect) -> Self {
+        assert!(matches!(self.shape, Shape::Returning | Shape::Select));
+        let mut index = 0;
+        while index < COLLECTS {
+            if self.collects[index].is_none() {
+                self.collects[index] = Some(collect);
+                return self;
+            }
+            index += 1;
         }
+        panic!("an entry names at most three collections");
+    }
+
+    /// This entry, whose rows are those whose boolean column `column` is
+    /// true: a query or a `RETURNING` write.
+    pub(super) const fn flagged(mut self, column: &'static str) -> Self {
+        assert!(matches!(self.shape, Shape::Returning | Shape::Select));
+        self.flag = Some(column);
+        self
+    }
+
+    /// What the answered rows name for the commit's mechanics.
+    pub(super) fn collects(&self) -> impl Iterator<Item = Collect> + '_ {
+        self.collects.iter().flatten().copied()
     }
 
     pub(super) fn statement(&self) -> &'static Rendered {
@@ -89,9 +210,17 @@ impl Entry {
 pub(super) enum Value {
     Text(Option<String>),
     Int(Option<i64>),
+    Bool(bool),
     Bytes(Option<Vec<u8>>),
     Texts(Vec<Option<String>>),
     Bools(Vec<bool>),
+    Ints(Vec<Option<i64>>),
+    /// The commit's database clock.
+    Now,
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 impl Value {
@@ -99,9 +228,12 @@ impl Value {
         match self {
             Self::Text(_) => Ty::Text,
             Self::Int(_) => Ty::Int,
+            Self::Bool(_) => Ty::Bool,
             Self::Bytes(_) => Ty::Bytes,
             Self::Texts(_) => Ty::Texts,
             Self::Bools(_) => Ty::Bools,
+            Self::Ints(_) => Ty::Ints,
+            Self::Now => Ty::Now,
         }
     }
 
@@ -113,15 +245,23 @@ impl Value {
         Self::Int(Some(value))
     }
 
+    /// Each of `values`, as a list of texts.
+    pub(super) fn texts<T: AsRef<str>>(values: impl IntoIterator<Item = T>) -> Self {
+        Self::Texts(
+            values
+                .into_iter()
+                .map(|value| Some(value.as_ref().to_owned()))
+                .collect(),
+        )
+    }
+
     /// The value as the executor's JSON reads it.
     pub(super) fn json(&self) -> serde_json::Value {
         use serde_json::Value as Json;
-        fn hex(bytes: &[u8]) -> String {
-            bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-        }
         match self {
             Self::Text(text) => text.clone().map_or(Json::Null, Json::String),
             Self::Int(int) => int.map_or(Json::Null, Json::from),
+            Self::Bool(flag) => Json::Bool(*flag),
             Self::Bytes(bytes) => bytes
                 .as_deref()
                 .map_or(Json::Null, |bytes| hex(bytes).into()),
@@ -130,8 +270,22 @@ impl Value {
                 .map(|text| text.clone().map_or(Json::Null, Json::String))
                 .collect(),
             Self::Bools(flags) => flags.iter().copied().map(Json::Bool).collect(),
+            Self::Ints(ints) => ints
+                .iter()
+                .map(|int| int.map_or(Json::Null, Json::from))
+                .collect(),
+            Self::Now => Json::Null,
         }
     }
+}
+
+/// When a step runs: slot `slot` holds a row (`column` `None`), or a row
+/// whose boolean column `column` is true, exactly when `holds`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct When {
+    pub(super) slot: u8,
+    pub(super) column: Option<&'static str>,
+    pub(super) holds: bool,
 }
 
 /// One statement of a step program, with its values, the rows it must
@@ -142,6 +296,12 @@ pub(super) struct Step {
     pub(super) values: Vec<Value>,
     pub(super) expect: Option<u64>,
     pub(super) retired: Vec<String>,
+    /// Session graph leaves whose unreachable ancestry the step retires.
+    pub(super) ancestry: Vec<String>,
+    /// The slot that records the first row the step answered.
+    pub(super) capture: Option<u8>,
+    /// What must hold for the step to run.
+    pub(super) when: Option<When>,
 }
 
 impl Step {
@@ -161,6 +321,9 @@ impl Step {
             values,
             expect,
             retired: Vec::new(),
+            ancestry: Vec::new(),
+            capture: None,
+            when: None,
         }
     }
 
@@ -170,9 +333,49 @@ impl Step {
         self
     }
 
+    /// This step, after which the unreachable ancestry of `leaves` is
+    /// retired.
+    pub(super) fn retiring_ancestry(mut self, leaves: impl IntoIterator<Item = String>) -> Self {
+        self.ancestry.extend(leaves);
+        self
+    }
+
+    /// This step, which records the first row it answers in `slot`.
+    pub(super) fn capturing(mut self, slot: u8) -> Self {
+        self.capture = Some(slot);
+        self
+    }
+
+    /// This step, which runs only when `slot` holds a row exactly when
+    /// `holds`.
+    pub(super) fn when_row(mut self, slot: u8, holds: bool) -> Self {
+        self.when = Some(When {
+            slot,
+            column: None,
+            holds,
+        });
+        self
+    }
+
+    /// This step, which runs only when `slot` holds a row whose `column`
+    /// is true exactly when `holds`.
+    pub(super) fn when_flag(mut self, slot: u8, column: &'static str, holds: bool) -> Self {
+        self.when = Some(When {
+            slot,
+            column: Some(column),
+            holds,
+        });
+        self
+    }
+
     /// `entry` run with `values`, refusing unless it answers one row.
     pub(super) fn one(entry: &'static Entry, values: Vec<Value>) -> Self {
         Self::new(entry, values, Some(1))
+    }
+
+    /// `entry` run with `values`, refusing unless it answers no row.
+    pub(super) fn none(entry: &'static Entry, values: Vec<Value>) -> Self {
+        Self::new(entry, values, Some(0))
     }
 
     /// `entry` run with `values`, whatever it answers.
@@ -180,32 +383,76 @@ impl Step {
         Self::new(entry, values, None)
     }
 
-    /// Run the step in `tx`: how many rows it answered, and the
-    /// rows a query or a `RETURNING` write answered.
-    async fn run(&self, tx: &mut PgConnection) -> Result<(u64, Vec<PgRow>), DurableError> {
+    /// Run the step's statement in `tx` at `now`: how many rows it
+    /// answered (its true rows, when its entry is flagged), and the rows a
+    /// query or a `RETURNING` write answered.
+    async fn run(
+        &self,
+        tx: &mut PgConnection,
+        now: DurableInstant,
+    ) -> Result<(u64, Vec<PgRow>), Failure> {
+        use sqlx::Row as _;
         let mut query = crate::observed_sql::query(self.entry.statement().sql());
-        for value in &self.values {
+        // An end's vouching values are the executor's alone.
+        let bound = match self.entry.shape {
+            Shape::EndLocal => END_LOCAL_PARAMS,
+            _ => self.values.len(),
+        };
+        for value in &self.values[..bound] {
             query = match value {
                 Value::Text(text) => query.bind(text.clone()),
                 Value::Int(int) => query.bind(*int),
+                Value::Bool(flag) => query.bind(*flag),
                 Value::Bytes(bytes) => query.bind(bytes.clone()),
                 Value::Texts(texts) => query.bind(texts.clone()),
                 Value::Bools(flags) => query.bind(flags.clone()),
+                Value::Ints(ints) => query.bind(ints.clone()),
+                Value::Now => query.bind(now.0),
             };
         }
         let executor = crate::observed_sql::executor(&mut *tx);
-        match self.entry.shape {
+        Ok(match self.entry.shape {
             Shape::Exec => query
                 .execute(executor)
                 .await
                 .map(|done| (done.rows_affected(), Vec::new())),
-            Shape::Returning | Shape::Select => query
-                .fetch_all(executor)
-                .await
-                .map(|rows| (rows.len() as u64, rows)),
-        }
-        .map_err(sqlx_failure)
+            Shape::EndLocal => {
+                let rows = query.fetch_all(executor).await.map_err(|error| {
+                    Failure::Store(crate::artifact_store::end_local_failure(error))
+                })?;
+                for row in &rows {
+                    let answer: serde_json::Value = row.try_get(0)?;
+                    crate::artifact_store::validate_local_end(answer).map_err(Failure::Store)?;
+                }
+                return Ok((rows.len() as u64, rows));
+            }
+            Shape::Returning | Shape::Select => query.fetch_all(executor).await.and_then(|rows| {
+                let Some(flag) = self.entry.flag else {
+                    return Ok((rows.len() as u64, rows));
+                };
+                let mut truths = 0;
+                for row in &rows {
+                    if row.try_get::<Option<bool>, _>(flag)? == Some(true) {
+                        truths += 1;
+                    }
+                }
+                Ok((truths, rows))
+            }),
+            Shape::TextReclaim => unreachable!("a reclaim runs no statement of its own"),
+        }?)
     }
+}
+
+/// How many parameters the local end's statement takes; an end step's
+/// further values are what a one-call commit vouches for.
+pub(super) const END_LOCAL_PARAMS: usize = 6;
+
+/// What a program runs under: the roots it retires, the committing actor a
+/// wake skips, and the commit's clock.
+pub(super) struct Context<'a> {
+    pub(super) retired: &'a Retired,
+    pub(super) actor: &'a ActorKey,
+    pub(super) now: DurableInstant,
 }
 
 /// The step of a program that answered another number of rows than it
@@ -215,33 +462,134 @@ pub(super) struct Refused {
     pub(super) rows: Vec<PgRow>,
 }
 
-/// Run `steps` in `tx`, in order, until one answers another number
-/// of rows than it must: that step, which ends the run. Each step that ran
-/// records the roots it retired in `retired`.
+/// What a slot captured: no row, or a row's boolean columns that a later
+/// step's condition names.
+pub(super) type Slots = BTreeMap<u8, Option<BTreeMap<&'static str, bool>>>;
+
+/// Whether `when` holds over `slots`.
+fn holds(slots: &Slots, when: &When) -> bool {
+    let captured = slots.get(&when.slot).and_then(Option::as_ref);
+    let truth = match (captured, when.column) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(row), Some(column)) => row.get(column).copied().unwrap_or(false),
+    };
+    truth == when.holds
+}
+
+/// Run `steps` in `tx`, in order, until one answers another number of rows
+/// than it must: that step, which ends the run. Each step that ran records
+/// the roots it retired in the context's `retired`, retires the ancestry it
+/// named, wakes the actors it named and collects the texts a later reclaim
+/// peels.
 pub(super) async fn run(
     tx: &mut PgConnection,
     steps: &[Step],
-    retired: &Retired,
+    context: &Context<'_>,
 ) -> Result<Option<Refused>, DurableError> {
+    Ok(run_capturing(tx, steps, context).await?.err())
+}
+
+/// [`run`], answering what the slots captured when no step refused.
+pub(super) async fn run_capturing(
+    tx: &mut PgConnection,
+    steps: &[Step],
+    context: &Context<'_>,
+) -> Result<Result<Slots, Refused>, Failure> {
     use sqlx::Row as _;
-    for (index, step) in steps.iter().enumerate() {
-        let (count, rows) = step.run(tx).await?;
-        if step.expect.is_some_and(|expect| expect != count) {
-            return Ok(Some(Refused { index, rows }));
+    // Each slot keeps the columns a later condition names.
+    let mut named: BTreeMap<u8, BTreeSet<&'static str>> = BTreeMap::new();
+    for step in steps {
+        if let Some(When {
+            slot,
+            column: Some(column),
+            ..
+        }) = step.when
+        {
+            named.entry(slot).or_default().insert(column);
         }
-        if let Some(column) = step.entry.retires {
+    }
+    let mut slots = Slots::new();
+    let mut texts = BTreeSet::new();
+    let mut protected = BTreeSet::new();
+    for (index, step) in steps.iter().enumerate() {
+        if let Some(when) = &step.when
+            && !holds(&slots, when)
+        {
+            continue;
+        }
+        if step.entry.shape == Shape::TextReclaim {
+            let released = std::mem::take(&mut texts);
+            let kept = std::mem::take(&mut protected);
+            super::prompts::reclaim_with_protection(tx, released.into_iter().collect(), &kept)
+                .await?;
+            continue;
+        }
+        let (count, rows) = step.run(tx, context.now).await?;
+        if let Some(slot) = step.capture {
+            let captured = match rows.first() {
+                Some(row) => {
+                    let mut columns = BTreeMap::new();
+                    for column in named.get(&slot).into_iter().flatten() {
+                        let truth: Option<bool> = row.try_get(*column)?;
+                        columns.insert(*column, truth.unwrap_or(false));
+                    }
+                    Some(columns)
+                }
+                None if step.entry.shape == Shape::Exec && count > 0 => Some(BTreeMap::new()),
+                None => None,
+            };
+            slots.insert(slot, captured);
+        }
+        if step.expect.is_some_and(|expect| expect != count) {
+            return Ok(Err(Refused { index, rows }));
+        }
+        let mut leaves: BTreeSet<String> = step.ancestry.iter().cloned().collect();
+        let mut owners = Vec::new();
+        for collect in step.entry.collects() {
+            let column = collect.column();
             for row in &rows {
-                if let Some(root) = row
-                    .try_get::<Option<String>, _>(column)
-                    .map_err(sqlx_failure)?
-                {
-                    retired.stored(root);
+                if let Collect::Closures(_) = collect {
+                    let roots: Option<Vec<String>> = row.try_get(column)?;
+                    for root in roots.unwrap_or_default() {
+                        context.retired.stored(root);
+                    }
+                    continue;
+                }
+                let Some(value) = row.try_get::<Option<String>, _>(column)? else {
+                    continue;
+                };
+                match collect {
+                    Collect::Closure(_) => context.retired.stored(value),
+                    Collect::PhaseEnd(_) => context.retired.phase_end(value),
+                    Collect::Ancestry(_) => {
+                        leaves.insert(value);
+                    }
+                    Collect::Wake(_) => owners.push(value),
+                    Collect::Text(_) => {
+                        texts.insert(value);
+                    }
+                    Collect::Protect(_) => {
+                        protected.insert(value);
+                    }
+                    Collect::Closures(_) => {}
                 }
             }
         }
         for root in &step.retired {
-            retired.stored(root.clone());
+            context.retired.stored(root.clone());
+        }
+        // Each leaf in id order: the order every multi-node writer locks in.
+        for leaf in &leaves {
+            crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, leaf)
+                .await
+                .map_err(Failure::Store)?;
+        }
+        if !owners.is_empty() {
+            super::waits::wake_owners(tx, context.actor, owners, context.now)
+                .await
+                .map_err(Failure::Durable)?;
         }
     }
-    Ok(None)
+    Ok(Ok(slots))
 }

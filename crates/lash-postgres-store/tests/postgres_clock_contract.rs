@@ -32,6 +32,10 @@ const RUNTIME_PERSISTENCE_INGRESS_SETTLEMENT_SOURCE: &str = concat!(
     include_str!("../src/postgres/runtime_persistence/ingress_settlement.rs"),
     "\n// end of ingress_settlement.rs"
 );
+const HEAD_COMMIT_SOURCE: &str = concat!(
+    include_str!("../src/postgres/durable/head_commit.rs"),
+    "\n// end of head_commit.rs"
+);
 const RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE: &str =
     include_str!("../src/postgres/runtime_persistence/turn_input.rs");
 const RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE: &str =
@@ -95,11 +99,18 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "pub(crate) async fn admit_at_checkpoint_postgres(",
             "// end of admission.rs",
         ),
-        // A commit's settlement of the rows its run admitted runs inside the
-        // commit's transaction, on the same server clock.
+        // A commit's settlement of the rows its run admitted is steps of
+        // the head commit's program, each stamped with the commit's server
+        // clock; the reads of the rows a cancel released and of a refused
+        // settlement's standing run inside the commit's transaction.
+        (
+            HEAD_COMMIT_SOURCE,
+            "pub(super) static LOCK_SESSION: Entry",
+            "// end of head_commit.rs",
+        ),
         (
             RUNTIME_PERSISTENCE_INGRESS_SETTLEMENT_SOURCE,
-            "async fn settle_commit_ingress_tx(",
+            "pub(crate) async fn released_rows_tx(",
             "// end of ingress_settlement.rs",
         ),
         (

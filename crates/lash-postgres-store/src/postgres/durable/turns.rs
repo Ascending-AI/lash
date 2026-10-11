@@ -24,7 +24,7 @@ use lash_store_sql::Dialect;
 use lash_store_sql::durable::turns::TurnStatements;
 use sqlx::{PgConnection, Row};
 
-use super::steps::{self, Entry, Shape, Step, Ty, Value};
+use super::steps::{self, Collect, Entry, Shape, Step, Ty, Value};
 use super::{Committing, corrupt, integer, node_ref, sqlx_failure};
 
 static SQL: LazyLock<TurnStatements> =
@@ -46,9 +46,26 @@ lash_store_sql::statements! {
              ), cancel AS (
                  DELETE FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2
              )
-             SELECT (SELECT checkpoint_ref FROM phase),
-                 (SELECT working_execution_ref FROM phase),
-                 ARRAY(SELECT graph_root_ref FROM namespaces WHERE graph_root_ref IS NOT NULL)";
+             SELECT (SELECT checkpoint_ref FROM phase) AS checkpoint_ref,
+                 (SELECT working_execution_ref FROM phase) AS working_execution_ref,
+                 ARRAY(SELECT graph_root_ref FROM namespaces WHERE graph_root_ref IS NOT NULL)
+                     AS namespace_roots";
+
+        /// Number revision `?2` of session `?1` as its next terminal, once,
+        /// and advance the head's terminal ordinal to it.
+        mark_terminal = "WITH marked AS (
+                 UPDATE session_revisions SET terminal_ordinal = (
+                     SELECT terminal_ordinal + 1 FROM session_head WHERE session_id = ?1
+                 ) WHERE session_id = ?1 AND head_revision = ?2 AND terminal_ordinal IS NULL
+                 RETURNING terminal_ordinal
+             )
+             UPDATE session_head SET terminal_ordinal = marked.terminal_ordinal
+             FROM marked WHERE session_head.session_id = ?1";
+
+        /// Whether session `?1`'s retention releases revisions at a commit
+        /// (`until_gc` does not). No row when it recorded no policy.
+        retention_releases = "SELECT retention_kind <> 'until_gc' AS releases
+             FROM session_meta WHERE session_id = ?1";
 
         /// Record each plugin `?3[i]`'s namespace entry `?4[i]` for run `?2`
         /// of session `?1` with values root `?5[i]`, as the neutral
@@ -166,9 +183,190 @@ pub(super) static NAMESPACE_ROOTS: Entry = Entry::new(
 )
 .retiring("graph_root_ref");
 
+/// A terminal's statements (FIG-5942): the run ends on the session's
+/// published head, read by the statement; its revision is numbered and the
+/// retention's release follows the session's own policy; the rows the run
+/// still holds are settled; its execution's local edges end; and its
+/// cells, phase and namespaces go, their roots retired.
+pub(super) static END_RUN: Entry = Entry::new(
+    || &SQL.end_run,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Int, Ty::Now],
+    Shape::Returning,
+);
+pub(super) static MARK_TERMINAL: Entry = Entry::new(
+    || &POSTGRES_SQL.mark_terminal,
+    &[Ty::Text, Ty::Int],
+    Shape::Exec,
+);
+pub(super) static RETENTION: Entry = Entry::new(
+    || &POSTGRES_SQL.retention_releases,
+    &[Ty::Text],
+    Shape::Select,
+);
+pub(super) static SETTLE_HELD_INPUTS: Entry = Entry::new(
+    || &super::SQL.session_mail.settle_held_inputs,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Now],
+    Shape::Exec,
+);
+pub(super) static SETTLE_HELD_BATCHES: Entry = Entry::new(
+    || &super::SQL.session_mail.settle_held_batches,
+    &[Ty::Text, Ty::Text, Ty::Now],
+    Shape::Exec,
+);
+pub(super) static END_LOCAL: Entry = Entry::new(
+    || &crate::artifact_store::artifact_sql().postgres.end_local,
+    &[
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Now,
+        Ty::Texts,
+        Ty::Text,
+    ],
+    Shape::EndLocal,
+);
+pub(super) static TERMINAL_STATE: Entry = Entry::new(
+    || &POSTGRES_SQL.delete_terminal_state,
+    &[Ty::Text, Ty::Text],
+    Shape::Select,
+)
+.collecting(Collect::PhaseEnd("checkpoint_ref"))
+.collecting(Collect::Closure("working_execution_ref"))
+.collecting(Collect::Closures("namespace_roots"));
+/// A referrer's or an artifact's advisory lock, by its key.
+pub(super) static LOCK_KEY: Entry = Entry::new(
+    || &crate::connection_sql::connection_sql().lock_xact_by_text,
+    &[Ty::Text],
+    Shape::Select,
+);
+
+/// The capture slot of a terminal's retention read.
+const TERMINAL_RETENTION: u8 = 2;
+
+/// The end of `referrer`'s local edges, gated on `gate`, as a step.
+pub(super) fn end_local_step(
+    referrer: &lash_core_execution::ArtifactReferrer,
+    gate: Option<&lash_sansio::EffectJournalIdentity>,
+) -> Result<Step, lash_core_execution::StoreError> {
+    let end = crate::artifact_store::LocalEndArguments::of(referrer, gate)?;
+    Ok(Step::one(
+        &END_LOCAL,
+        vec![
+            Value::text(end.kind),
+            Value::text(end.id),
+            Value::Text(end.gate),
+            Value::Text(end.pattern),
+            Value::Now,
+            Value::texts(end.namespaces),
+            Value::Text(end.gated_body),
+        ],
+    ))
+}
+
+/// The locks of the executions `writes` end, as steps, in key order:
+/// taken before a head commit takes frame and artifact locks, as
+/// publication takes them referrer first.
+pub(super) fn lock_ending_executions(
+    writes: &[lash_durable::DomainWrite],
+) -> Result<Vec<Step>, lash_core_execution::StoreError> {
+    Ok(crate::obligation_ledger::ending_executions(writes)?
+        .iter()
+        .map(|referrer| {
+            Step::any(
+                &LOCK_KEY,
+                vec![Value::text(crate::artifact_store::referrer_lock_key(
+                    referrer,
+                ))],
+            )
+        })
+        .collect())
+}
+
+/// A terminal's program: run `run` of `session` ends with `cause` at head
+/// revision `head_revision`.
+fn terminal_steps(
+    session: &SessionId,
+    run: &TurnId,
+    cause: &RunTerminalCause,
+    head_revision: Option<u64>,
+) -> Result<Vec<Step>, DurableError> {
+    let turn = || vec![Value::text(session.as_str()), Value::text(run.as_str())];
+    let mut ended = turn();
+    ended.extend([
+        Value::text(cause.kind().as_str()),
+        Value::text(cause.to_stored().map_err(|error| encoding(&error))?),
+        Value::Int(head_revision.map(integer::<i64>).transpose()?),
+        Value::Now,
+    ]);
+    let mut program = vec![Step::one(&END_RUN, ended)];
+    if let Some(revision) = head_revision {
+        // The terminal is numbered once within its publishing transaction,
+        // then the session's retention applies.
+        program.push(Step::any(
+            &MARK_TERMINAL,
+            vec![
+                Value::text(session.as_str()),
+                Value::int(integer(revision)?),
+            ],
+        ));
+        program.push(
+            Step::any(&RETENTION, vec![Value::text(session.as_str())])
+                .capturing(TERMINAL_RETENTION),
+        );
+        program.push(
+            Step::any(
+                &super::head_commit::PRUNE,
+                vec![Value::int(0), Value::text(session.as_str())],
+            )
+            .when_flag(TERMINAL_RETENTION, "releases", true),
+        );
+    }
+    // What the run still holds as it ends is settled: a turn whose commit
+    // settled its rows holds none, and a turn that ends with no commit (a
+    // cancel) leaves its inputs and batches cancelled (ADR 0132 §11).
+    let mut inputs = turn();
+    inputs.extend([
+        Value::text(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str()),
+        Value::Now,
+    ]);
+    program.push(Step::any(&SETTLE_HELD_INPUTS, inputs));
+    let mut batches = turn();
+    batches.push(Value::Now);
+    program.push(Step::any(&SETTLE_HELD_BATCHES, batches));
+    let journal = lash_sansio::ExecutionScope::turn(session.clone(), run.clone())
+        .journal_identity()
+        .map_err(|error| corrupt("turn journal", &error.to_string()))?;
+    program.push(
+        end_local_step(
+            &lash_core_execution::ArtifactReferrer::Execution(journal.clone()),
+            Some(&journal),
+        )
+        .map_err(|error| encoding(&error))?,
+    );
+    // The cells the turn stopped in are never resumed, and the turn's
+    // cancel request is answered by its terminal: neither has a reader
+    // left. The turn's own facts stay as its ledger.
+    let cells = ExecKey::turn_cells(session, run);
+    for entry in [
+        &super::snapshots::CLEAR_UNDER,
+        &super::graph::ADMISSIONS_UNDER,
+        &super::run_records::DELETE_UNDER,
+    ] {
+        program.push(Step::any(entry, vec![Value::text(cells.as_str())]));
+    }
+    // The turn's phase row and namespaces go with it, and their roots with
+    // them: its working execution and namespace values whole, its
+    // PhaseRoot alone (the TurnContent ordering constraint,
+    // [`super::Retired`]).
+    program.push(Step::any(&TERMINAL_STATE, turn()));
+    Ok(program)
+}
+
 /// `write`'s step program at `epoch`: each write is guarded on its turn,
-/// the admission on the session having none open. A terminal has none: its
-/// session window and its inputs' settlement are read.
+/// the admission on the session having none open. A cancelled terminal has
+/// none: its stored cause names the inputs its stop settled, which are
+/// read.
 pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>, DurableError> {
     let turn = |session: &SessionId, run: &TurnId| {
         vec![Value::text(session.as_str()), Value::text(run.as_str())]
@@ -307,7 +505,17 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
                     .retiring(expected.map(|expected| expected.to_hex())),
             ]
         }
-        TurnWrite::Terminal { .. } => return Ok(None),
+        TurnWrite::Terminal {
+            cause,
+            session,
+            run,
+            head_revision,
+        } => {
+            if matches!(cause.as_ref(), RunTerminalCause::Cancelled { .. }) {
+                return Ok(None);
+            }
+            terminal_steps(session, run, cause, *head_revision)?
+        }
     }))
 }
 
@@ -319,7 +527,7 @@ pub(super) async fn apply(
     match write {
         TurnWrite::Admit { session, .. } => {
             let program = steps(commit.epoch, write)?.unwrap_or_default();
-            match steps::run(tx, &program, &commit.retired).await? {
+            match steps::run(tx, &program, &commit.steps()).await? {
                 None => Ok(()),
                 Some(_) => refuse(DomainRefusal::OpenTurnExists {
                     session: session.clone(),
@@ -331,7 +539,7 @@ pub(super) async fn apply(
         | TurnWrite::Namespaces { session, run, .. }
         | TurnWrite::Working { session, run, .. } => {
             let program = steps(commit.epoch, write)?.unwrap_or_default();
-            match steps::run(tx, &program, &commit.retired).await? {
+            match steps::run(tx, &program, &commit.steps()).await? {
                 None => Ok(()),
                 Some(_) => refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
@@ -353,78 +561,27 @@ pub(super) async fn apply(
             {
                 *input_outcome = super::session_mail::cancel_inputs(
                     &mut *tx,
+                    &commit.steps(),
                     session,
                     run,
                     evidence.undelivered,
                 )
                 .await?;
             }
-            let window = super::super::session_runs::terminal_window_ref(&mut *tx, session)
-                .await
-                .map_err(|error| encoding(&error))?;
-            let (window_revision, window_leaf, window_checkpoint, window_head) =
-                super::super::session_runs::TerminalWindowRef::columns(window.as_ref());
-            let ended: Option<String> = crate::observed_sql::query_scalar(SQL.end_run.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .bind(cause.kind().as_str())
-                .bind(cause.to_stored().map_err(|error| encoding(&error))?)
-                .bind(head_revision.map(integer::<i64>).transpose()?)
-                .bind(commit.now.0)
-                .bind(window_revision)
-                .bind(window_leaf)
-                .bind(window_checkpoint)
-                .bind(window_head)
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            if ended.is_none() {
-                return refuse(DomainRefusal::TurnNotOpen {
-                    session: session.clone(),
-                    run: run.clone(),
-                });
+            let program = terminal_steps(session, run, &cause, *head_revision)?;
+            match steps::run(tx, &program, &commit.steps()).await? {
+                None => Ok(()),
+                Some(refused) if std::ptr::eq(program[refused.index].entry, &END_RUN) => {
+                    refuse(DomainRefusal::TurnNotOpen {
+                        session: session.clone(),
+                        run: run.clone(),
+                    })
+                }
+                Some(refused) => Err(corrupt(
+                    "terminal step",
+                    program[refused.index].entry.name(),
+                )),
             }
-            if let Some(revision) = head_revision {
-                crate::revisions::record_terminal_conn(tx, session, *revision)
-                    .await
-                    .map_err(|error| encoding(&error))?;
-            }
-            super::session_mail::settle_held(&mut *tx, session, run, commit.now.0).await?;
-            crate::obligation_ledger::end_execution_tx(
-                tx,
-                &lash_sansio::ExecutionScope::turn(session.clone(), run.clone()),
-                integer(commit.now.0)?,
-            )
-            .await
-            .map_err(super::store_failure)?;
-            // The cells the turn stopped in are never resumed, and the
-            // turn's cancel request is answered by its terminal: neither has
-            // a reader left. The turn's own facts stay as its ledger.
-            let cells =
-                super::snapshots::retire_under(&mut *tx, &ExecKey::turn_cells(session, run))
-                    .await
-                    .map_err(sqlx_failure)?;
-            for root in cells {
-                commit.retired.stored(root);
-            }
-            // The turn's phase row and namespaces go with it, and their
-            // roots with them: its working execution and namespace values
-            // whole, its PhaseRoot alone (the TurnContent ordering
-            // constraint, [`super::Retired`]).
-            let (checkpoint, working, namespaces): (Option<String>, Option<String>, Vec<String>) =
-                crate::observed_sql::query_as(POSTGRES_SQL.delete_terminal_state.sql())
-                    .bind(session.as_str())
-                    .bind(run.as_str())
-                    .fetch_one(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-            if let Some(checkpoint) = checkpoint {
-                commit.retired.phase_end(checkpoint);
-            }
-            for root in working.into_iter().chain(namespaces) {
-                commit.retired.stored(root);
-            }
-            Ok(())
         }
     }
 }
@@ -458,13 +615,12 @@ pub(super) async fn apply_session_commit(
     let planner =
         lash_core_execution::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet())
             .map_err(|error| refused(&error))?;
-    let now = integer::<u64>(commit.now.0)?;
     let writer = head_writer(commit.actor, &write.session);
-    crate::runtime_persistence::apply_runtime_commit_tx(
+    super::head_commit::apply(
         tx,
         &planner,
         writer,
-        now,
+        &commit.steps(),
         commit.checkpoint_ref_chunk,
     )
     .await
@@ -472,10 +628,24 @@ pub(super) async fn apply_session_commit(
     .map_err(|error| refused(&error))
 }
 
+/// The commit `write` carries, prepared under `fleet`: `None` when it does
+/// not decode or names another session or head than its write, which the
+/// explicit form refuses.
+pub(super) fn prepared(
+    write: &SessionCommitWrite,
+    fleet: lash_core_execution::FleetFormat,
+) -> Option<lash_core_execution::store::RuntimeCommitPlanner> {
+    let commit = lash_core_execution::store::decode_session_commit(&write.commit_json).ok()?;
+    if commit.session_id != write.session || commit.expected_head_revision != write.expected_head {
+        return None;
+    }
+    lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, fleet).ok()
+}
+
 /// Who writes a session head commit fenced by `actor`: the session's own
 /// actor, whose epoch fences every head write it makes (FIG-5355), or any
 /// other owner, which the head's ownership gate checks as a store writer.
-fn head_writer(actor: &ActorKey, session: &SessionId) -> HeadWriter {
+pub(super) fn head_writer(actor: &ActorKey, session: &SessionId) -> HeadWriter {
     if ActorKey::session(session.as_str()).is_ok_and(|own| &own == actor) {
         HeadWriter::SessionActor
     } else {

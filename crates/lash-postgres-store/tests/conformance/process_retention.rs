@@ -208,12 +208,15 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
     // parent-end pending-cancel scan - whose vocabulary FIG-2811 owns.
     // `store_statements_never_retype_a_lifecycle_literal` (lash-sim) is the
     // gate that keeps a query-site literal from coming back; this count is the
-    // inventory that keeps a new DDL literal from arriving unnoticed.
+    // inventory that keeps a new DDL literal from arriving unnoticed. The
+    // third site is no hand-written literal: `lash_owner_commit` is generated
+    // from the registry's statements, and carries a turn close's read of its
+    // scope's live children as that statement renders it (FIG-5942).
     assert_eq!(
-        live_sites, 2,
-        "expected exactly two live-status list literal sites in the PostgreSQL backend, \
-         all partial process indexes in schema.sql; a query-site literal belongs in a \
-         generated fragment, not here"
+        live_sites, 3,
+        "expected exactly three live-status list literal sites in the PostgreSQL backend: \
+         the two partial process indexes in schema.sql and the generated owner commit's \
+         copy of a turn close; a query-site literal belongs in a generated fragment, not here"
     );
     assert_eq!(
         vocabulary_sites, 1,

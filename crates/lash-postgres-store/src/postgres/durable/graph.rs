@@ -772,6 +772,13 @@ pub(super) fn admission_steps(
     })
 }
 
+/// Every admission of the executions under a key: a terminal's cells.
+pub(super) static ADMISSIONS_UNDER: Entry = Entry::new(
+    || &SQL.graph.admissions_clear_under,
+    &[Ty::Text],
+    Shape::Returning,
+)
+.retiring("admission_ref");
 pub(super) static CLEAR_ADMISSIONS: Entry = Entry::new(
     || &SQL.graph.admissions_clear,
     &[Ty::Text],
@@ -788,7 +795,7 @@ pub(super) async fn apply_admission(
     write: &EffectAdmissionWrite,
 ) -> Result<(), DurableError> {
     let program = admission_steps(commit.epoch, write)?;
-    match steps::run(tx, &program, &commit.retired).await? {
+    match steps::run(tx, &program, &commit.steps()).await? {
         None => Ok(()),
         Some(_) => Err(graph_refused(GraphRefusal::RevisionConflict)),
     }

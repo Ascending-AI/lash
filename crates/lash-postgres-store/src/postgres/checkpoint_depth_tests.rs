@@ -101,14 +101,15 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
     let mut observed = Vec::new();
     for depth in [10, 100, 1_000, 4_000] {
         let mut tx = storage.pool().begin().await.expect("begin checkpoint test");
-        let (_, seed_manifest) = support::put_checkpoint_tx(
+        let seed_manifest = support::put_checkpoint_tx(
             &mut tx,
             &checkpoint_with_changed_components(depth),
             lash_core_execution::FleetFormat::current(),
             crate::host::MaintenancePolicy::default().checkpoint_ref_chunk as usize,
         )
         .await
-        .expect("seed checkpoint component bodies");
+        .expect("seed checkpoint component bodies")
+        .manifest;
         let unchanged = checkpoint_with_unchanged_components(&seed_manifest);
 
         let commit_started = std::time::Instant::now();
@@ -121,7 +122,9 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
             ))
             .await;
         let commit_elapsed = commit_started.elapsed();
-        let (checkpoint_ref, _) = committed.expect("commit unchanged checkpoint refs");
+        let checkpoint_ref = committed
+            .expect("commit unchanged checkpoint refs")
+            .checkpoint_ref;
 
         let load_started = std::time::Instant::now();
         let (loaded, load_statements) =

@@ -35,7 +35,7 @@ use lash_store_sql::Dialect;
 use lash_store_sql::durable::prompts::{PromptStatements, REQUEST_PART, SNAPSHOT_PART};
 use sqlx::PgConnection;
 
-use super::steps::{Entry, Shape, Step, Ty, Value};
+use super::steps::{Collect, Entry, Shape, Step, Ty, Value};
 use super::{Committing, HeldTexts, get, sqlx_failure};
 use crate::connection_sql::connection_sql;
 
@@ -138,7 +138,17 @@ static POSTGRES_SQL: LazyLock<PostgresPromptStatements> =
     LazyLock::new(|| PostgresPromptStatements::render(Dialect::postgres()));
 
 /// The advisory-lock seed of prompt-text retention (`connection_sql`).
-const TEXT_LOCK_SEED: i64 = 2;
+pub(super) const TEXT_LOCK_SEED: i64 = 2;
+
+/// The reclaim's closure read and its children read, which the one-call
+/// commit runs as its own mechanics beside [`RECLAIM`]'s delete.
+pub(super) fn closure() -> &'static lash_store_sql::Rendered {
+    &POSTGRES_SQL.closure
+}
+
+pub(super) fn read_children() -> &'static lash_store_sql::Rendered {
+    &SQL.read_children
+}
 
 #[cfg(test)]
 lash_store_sql::statements! {
@@ -182,13 +192,66 @@ pub(super) static INSERT_EDGES: Entry = Entry::new(
     Shape::Exec,
 );
 
+/// A settlement's and a prefix reset's statements (FIG-5942): each answers
+/// the texts it released, a settlement keeps the session's prefix, and the
+/// reclaim peels what no root references any more.
+pub(super) static SETTLE: Entry = Entry::new(
+    || &POSTGRES_SQL.settle,
+    &[Ty::Text, Ty::Text, Ty::Text],
+    Shape::Select,
+)
+.collecting(Collect::Text("hash"));
+pub(super) static HOLD_PREFIX: Entry =
+    Entry::new(|| &POSTGRES_SQL.hold_prefix, &[Ty::Text], Shape::Select)
+        .collecting(Collect::Protect("hash"));
+pub(super) static RELEASE_PREFIX: Entry =
+    Entry::new(|| &SQL.release_prefix, &[Ty::Text], Shape::Returning)
+        .collecting(Collect::Text("hash"));
+pub(super) static RECLAIM: Entry =
+    Entry::new(|| &POSTGRES_SQL.reclaim_texts, &[], Shape::TextReclaim);
+
+/// The capture slot of a settlement's released texts.
+const SETTLED: u8 = 4;
+
+/// Release the request of every call of turn `run` in `session` but `open`,
+/// and reclaim every text no remaining edge references: the session's
+/// prefix is held, and kept, only when the settlement released a text.
+fn settle_steps(session: &SessionId, run: &TurnId, open: Option<u32>) -> Vec<Step> {
+    vec![
+        Step::any(
+            &SETTLE,
+            vec![
+                Value::text(session.as_str()),
+                Value::text(ModelCallId::turn_owner(run)),
+                Value::Text(open.map(|call| call.to_string())),
+            ],
+        )
+        .capturing(SETTLED),
+        Step::any(&HOLD_PREFIX, vec![Value::text(session.as_str())]).when_row(SETTLED, true),
+        Step::any(&RECLAIM, Vec::new()),
+    ]
+}
+
 /// `write`'s one-call step program at `epoch`: a record's root, which must
 /// be the call's first, then its distinct texts, locked shared in text
 /// order, the bodies stored that `held` does not name, and its edges. A text
 /// sent without its body that the store does not hold refuses the call, and
 /// the record runs in the explicit form, which reads what the store holds.
-/// A settlement or a release has none: what it reclaims is read.
+/// A settlement or a prefix reset releases what its statement answers and
+/// reclaims it in the commit's reclaim step. A release has none.
 pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Option<Vec<Step>> {
+    match write {
+        PromptWrite::Settle { session, run, open } => {
+            return Some(settle_steps(session, run, *open));
+        }
+        PromptWrite::ResetPrefix { session } => {
+            return Some(vec![
+                Step::any(&RELEASE_PREFIX, vec![Value::text(session.as_str())]),
+                Step::any(&RECLAIM, Vec::new()),
+            ]);
+        }
+        PromptWrite::Record { .. } | PromptWrite::Release { .. } => {}
+    }
     let PromptWrite::Record {
         call,
         snapshot,
@@ -408,11 +471,12 @@ pub(super) async fn apply(
             }
             Ok(())
         }
-        PromptWrite::ResetPrefix { session } => {
-            reset_prefix(tx, session).await.map_err(sqlx_failure)
-        }
-        PromptWrite::Settle { session, run, open } => {
-            settle(tx, session, run, *open).await.map_err(sqlx_failure)
+        PromptWrite::ResetPrefix { .. } | PromptWrite::Settle { .. } => {
+            // A release answers what it released: no step of it refuses.
+            let program = steps(commit.epoch, write, &HeldTexts::default()).unwrap_or_default();
+            super::steps::run(tx, &program, &commit.steps())
+                .await
+                .map(drop)
         }
         PromptWrite::Release { session, run } => release(tx, session, run.as_ref())
             .await
@@ -435,33 +499,6 @@ fn edges<'a>(
                 .map(|hash| (REQUEST_PART, hash)),
         )
         .collect()
-}
-
-/// Release the request of every call of turn `run` in `session` but `open`,
-/// and reclaim every text no remaining edge references.
-async fn settle(
-    tx: &mut PgConnection,
-    session: &SessionId,
-    run: &TurnId,
-    open: Option<u32>,
-) -> Result<(), sqlx::Error> {
-    let released: Vec<String> = crate::observed_sql::query_scalar(POSTGRES_SQL.settle.sql())
-        .bind(session.as_str())
-        .bind(ModelCallId::turn_owner(run))
-        .bind(open.map(|call| call.to_string()))
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await?;
-    if released.is_empty() {
-        return Ok(());
-    }
-    let protected: BTreeSet<String> =
-        crate::observed_sql::query_scalar(POSTGRES_SQL.hold_prefix.sql())
-            .bind(session.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await?
-            .into_iter()
-            .collect();
-    reclaim_with_protection(tx, released, &protected).await
 }
 
 /// Release every snapshot root of `session`, or of its turn `run` alone, and
@@ -512,20 +549,12 @@ pub(crate) async fn release(
     reclaim(tx, released).await
 }
 
-async fn reset_prefix(tx: &mut PgConnection, session: &SessionId) -> Result<(), sqlx::Error> {
-    let old = crate::observed_sql::query_scalar(SQL.release_prefix.sql())
-        .bind(session.as_str())
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await?;
-    reclaim(tx, old).await
-}
-
 /// Reclaim every text among `released` no remaining edge references.
 async fn reclaim(tx: &mut PgConnection, released: Vec<String>) -> Result<(), sqlx::Error> {
     reclaim_with_protection(tx, released, &BTreeSet::new()).await
 }
 
-async fn reclaim_with_protection(
+pub(super) async fn reclaim_with_protection(
     tx: &mut PgConnection,
     released: Vec<String>,
     protected: &BTreeSet<String>,

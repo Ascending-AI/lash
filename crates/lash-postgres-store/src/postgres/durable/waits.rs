@@ -20,6 +20,7 @@ use lash_store_sql::durable::waits::WaitStatements;
 use sqlx::PgConnection;
 use sqlx::postgres::PgRow;
 
+use super::steps::{Collect, Entry, Shape, Step, Ty, Value};
 use super::{Committing, actor_key, corrupt, get, sqlx_failure, wake_within};
 
 lash_store_sql::statements! {
@@ -80,70 +81,86 @@ pub(super) async fn apply(
                 .map_err(sqlx_failure)?;
             Ok(())
         }
-        WaitWrite::RevokeScope(scope) => {
-            let owners: Vec<String> =
-                crate::observed_sql::query_scalar(SQL.waits.revoke_scope.sql())
-                    .bind(scope.stored())
-                    .bind(commit.now.0)
-                    .fetch_all(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-            wake_owners(tx, commit.actor, owners, commit.now).await
-        }
-        WaitWrite::RetireScope(scope) => {
-            let owners: Vec<String> =
-                crate::observed_sql::query_scalar(SQL.waits.revoke_scope.sql())
-                    .bind(scope.stored())
-                    .bind(commit.now.0)
-                    .fetch_all(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-            wake_owners(tx, commit.actor, owners, commit.now).await?;
-            crate::observed_sql::query(SQL.waits.compact_scope.sql())
-                .bind(scope.stored())
-                .execute(crate::observed_sql::executor(&mut *tx))
+        WaitWrite::RevokeScope(_)
+        | WaitWrite::RetireScope(_)
+        | WaitWrite::ResolveProcessTerminal { .. }
+        | WaitWrite::ResolveChildSession { .. } => {
+            // A scope's or a target's waits settle wherever they stand: no
+            // step of these programs refuses.
+            let program = steps(write).unwrap_or_default();
+            super::steps::run(tx, &program, &commit.steps())
                 .await
-                .map_err(sqlx_failure)?;
-            Ok(())
-        }
-        WaitWrite::ResolveProcessTerminal {
-            process,
-            digest,
-            resolution_ref,
-        } => {
-            let owners: Vec<String> =
-                crate::observed_sql::query_scalar(SQL.waits.resolve_process_terminal.sql())
-                    .bind(process.as_str())
-                    .bind(digest)
-                    .bind(resolution_ref)
-                    .bind(commit.now.0)
-                    .fetch_all(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-            wake_owners(tx, commit.actor, owners, commit.now).await
-        }
-        WaitWrite::ResolveChildSession {
-            process,
-            digest,
-            resolution_ref,
-        } => {
-            let owners: Vec<String> =
-                crate::observed_sql::query_scalar(SQL.waits.resolve_child_session.sql())
-                    .bind(process.as_str())
-                    .bind(digest)
-                    .bind(resolution_ref)
-                    .bind(commit.now.0)
-                    .fetch_all(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-            wake_owners(tx, commit.actor, owners, commit.now).await
+                .map(drop)
         }
     }
 }
 
+/// The settlements of a scope's or a target's waits, each waking the
+/// owners it settled but the committing actor.
+pub(super) static REVOKE_SCOPE: Entry = Entry::new(
+    || &SQL.waits.revoke_scope,
+    &[Ty::Text, Ty::Now],
+    Shape::Returning,
+)
+.collecting(Collect::Wake("owner_actor"));
+pub(super) static COMPACT_SCOPE: Entry =
+    Entry::new(|| &SQL.waits.compact_scope, &[Ty::Text], Shape::Exec);
+pub(super) static RESOLVE_PROCESS_TERMINAL: Entry = Entry::new(
+    || &SQL.waits.resolve_process_terminal,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Now],
+    Shape::Returning,
+)
+.collecting(Collect::Wake("owner_actor"));
+pub(super) static RESOLVE_CHILD_SESSION: Entry = Entry::new(
+    || &SQL.waits.resolve_child_session,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Now],
+    Shape::Returning,
+)
+.collecting(Collect::Wake("owner_actor"));
+
+/// `write`'s step program: a scope's revocation or retirement, or a
+/// target's resolution. A pin or a due timer has none.
+pub(super) fn steps(write: &WaitWrite) -> Option<Vec<Step>> {
+    let resolved = |entry: &'static Entry,
+                    process: &lash_sansio::ProcessId,
+                    digest: &str,
+                    resolution_ref: &str| {
+        vec![Step::any(
+            entry,
+            vec![
+                Value::text(process.as_str()),
+                Value::text(digest),
+                Value::text(resolution_ref),
+                Value::Now,
+            ],
+        )]
+    };
+    Some(match write {
+        WaitWrite::Pin { .. } | WaitWrite::Due { .. } => return None,
+        WaitWrite::RevokeScope(scope) => vec![Step::any(
+            &REVOKE_SCOPE,
+            vec![Value::text(scope.stored()), Value::Now],
+        )],
+        WaitWrite::RetireScope(scope) => vec![
+            Step::any(&REVOKE_SCOPE, vec![Value::text(scope.stored()), Value::Now]),
+            Step::any(&COMPACT_SCOPE, vec![Value::text(scope.stored())]),
+        ],
+        WaitWrite::ResolveProcessTerminal {
+            process,
+            digest,
+            resolution_ref,
+        } => resolved(&RESOLVE_PROCESS_TERMINAL, process, digest, resolution_ref),
+        WaitWrite::ResolveChildSession {
+            process,
+            digest,
+            resolution_ref,
+        } => resolved(&RESOLVE_CHILD_SESSION, process, digest, resolution_ref),
+    })
+}
+
 /// Wake each owner but the committing actor. An owner that has ended or is
 /// gone has nothing to wake, and never rolls the commit back.
-async fn wake_owners(
+pub(super) async fn wake_owners(
     tx: &mut PgConnection,
     committing: &ActorKey,
     mut owners: Vec<String>,

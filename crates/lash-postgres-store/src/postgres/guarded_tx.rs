@@ -320,6 +320,19 @@ fn plugin_writer_bounds(plugin: &str, range: VersionRange) -> Result<(i32, i32),
     }
 }
 
+/// Whether `publication` is admitted against the `recorded` writer ranges
+/// as they stand, provisioning none: what a commit planned on an earlier
+/// read of them needs. A refusal is the admission's own.
+pub(crate) fn admits_without_provisioning(
+    recorded: &[(String, i32, i32)],
+    publication: &PluginPublication,
+) -> Result<bool, StoreError> {
+    Ok(plugin_writer_ranges(recorded.to_vec())?
+        .admit(publication)
+        .map_err(plugin_writer_refusal)?
+        .is_empty())
+}
+
 /// Every recorded writer range, read on `connection`. The caller holds the
 /// fleet-format row's lock, or reads for inspection only.
 pub(crate) async fn read_plugin_writers(
@@ -482,6 +495,14 @@ impl GuardedTx<'_> {
             self.wrote_turn_change = true;
         }
         Ok(())
+    }
+
+    /// A statement of this transaction staged a change of the turn feed.
+    pub(crate) fn staged_turn_change(&mut self) {
+        #[cfg(any(test, feature = "testing"))]
+        {
+            self.wrote_turn_change = true;
+        }
     }
 
     /// `COMMIT`.

@@ -20,8 +20,9 @@ use lash_durable::{
     Woken,
 };
 use lash_sansio::{CancelOrigin, ProcessId};
-use sqlx::{PgConnection, Row};
+use sqlx::PgConnection;
 
+use super::steps::{Entry, Shape, Step, Ty, Value};
 use super::{Committing, SQL, corrupt, get, integer, sqlx_failure, wake_within};
 use crate::process_helpers::{
     CancelRecorded, record_cancel_tx, record_event_tx, record_terminal_tx,
@@ -328,6 +329,95 @@ pub(super) async fn apply(
     }
 }
 
+/// A turn scope's close (FIG-5942): the turn's run is locked against a
+/// registration under it, and the one read of its marks decides the rest
+/// in the statements' own answers. A turn with holds releases them and
+/// forgets their marks; a turn with an `Until` child left is recorded as
+/// ending.
+pub(super) static LOCK_TURN: Entry = Entry::new(
+    || &crate::process_sql::process_sql().plan_postgres.lock_turn,
+    &[Ty::Text, Ty::Text],
+    Shape::Select,
+);
+pub(super) static TURN_CLOSE: Entry = Entry::new(
+    || &crate::process_sql::process_sql().plan.turn_close,
+    &[Ty::Text, Ty::Text, Ty::Text],
+    Shape::Select,
+);
+pub(super) static RELEASE_HOLDS: Entry = Entry::new(
+    || {
+        &crate::process_sql::process_sql()
+            .process
+            .release_consumer_holds_owned_by
+    },
+    &[Ty::Text, Ty::Text],
+    Shape::Exec,
+);
+pub(super) static FORGET_HOLDS: Entry = Entry::new(
+    || {
+        &crate::process_sql::process_sql()
+            .abandoned_hold
+            .forget_owned_by
+    },
+    &[Ty::Text, Ty::Text],
+    Shape::Exec,
+);
+
+/// The capture slot of a turn close's marks.
+const TURN_MARKS: u8 = 3;
+
+/// The program of turn scope `scope`'s close at `epoch`: `None` for any
+/// other scope.
+fn turn_close_steps(scope: &ScopeKey, epoch: Epoch) -> Option<Vec<Step>> {
+    let ScopeKey::Turn(session, run) = scope else {
+        return None;
+    };
+    let closed = scope_id(scope)?;
+    let turn = || vec![Value::text(session.as_str()), Value::text(run.as_str())];
+    let owner = || {
+        vec![
+            Value::text(closed.storage_kind()),
+            Value::text(closed.storage_id()),
+        ]
+    };
+    let mut marks = turn();
+    marks.push(Value::text(closed.storage_id()));
+    Some(vec![
+        Step::any(&LOCK_TURN, turn()),
+        Step::any(&TURN_CLOSE, marks).capturing(TURN_MARKS),
+        Step::any(&RELEASE_HOLDS, owner()).when_flag(TURN_MARKS, "has_holds", true),
+        Step::any(&FORGET_HOLDS, owner()).when_flag(TURN_MARKS, "has_holds", true),
+        Step::any(
+            &super::session_close::SCOPE_ENDING,
+            vec![
+                Value::text(session.as_str()),
+                Value::text(scope.stored()),
+                Value::Now,
+                Value::int(epoch.0),
+            ],
+        )
+        .when_flag(TURN_MARKS, "has_until", true),
+    ])
+}
+
+/// `write`'s step program by `actor` at `epoch`: a turn scope's close, or
+/// a cascade batch that cancels no child and moves no cursor. Any other
+/// write has none.
+pub(super) fn steps(write: &ProcessWrite, actor: &ActorKey, epoch: Epoch) -> Option<Vec<Step>> {
+    match write {
+        ProcessWrite::ScopeClosed { scope } => turn_close_steps(scope, epoch),
+        ProcessWrite::CascadeBatch {
+            scope, children, ..
+        } if children.is_empty()
+            && !matches!(scope, ScopeKey::Process(owner)
+                if ActorKey::process(owner.as_str()).is_ok_and(|own| &own == actor)) =>
+        {
+            Some(Vec::new())
+        }
+        _ => None,
+    }
+}
+
 /// Write `scope`'s closure fact under the scope's advisory lock, then read
 /// its unmarked `Until` children in this transaction. A registration under
 /// the scope holds the same lock until it commits, so a child that
@@ -339,6 +429,12 @@ async fn close_scope(
     commit: &Committing<'_>,
     scope: &ScopeKey,
 ) -> Result<(), DurableError> {
+    if let Some(program) = turn_close_steps(scope, commit.epoch) {
+        // A turn's close reads its own marks: no step of it refuses.
+        return super::steps::run(tx, &program, &commit.steps())
+            .await
+            .map(drop);
+    }
     if let ScopeKey::Operation(session, operation) = scope {
         crate::obligation_ledger::end_execution_tx(
             tx,
@@ -354,27 +450,7 @@ async fn close_scope(
     crate::process_registry::parent_end::record_tx(tx, &closed, millis(commit.now)?, commit.fleet)
         .await
         .map_err(|error| registry_failure(&error))?;
-    if let ScopeKey::Turn(session, run) = scope {
-        let row =
-            crate::observed_sql::query(crate::process_sql::process_sql().plan.turn_close.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .bind(closed.storage_id())
-                .fetch_one(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-        if row.get::<bool, _>(0) {
-            crate::process_registry::parent_end::release_holds_tx(tx, &closed)
-                .await
-                .map_err(|error| registry_failure(&error))?;
-        }
-        return if row.get::<bool, _>(1) {
-            super::session_close::record_ending(tx, commit, session, scope).await
-        } else {
-            Ok(())
-        };
-    }
-    let (ScopeKey::Turn(session, _) | ScopeKey::Operation(session, _)) = scope else {
+    let ScopeKey::Operation(session, _) = scope else {
         return Ok(());
     };
     if until_children(tx, scope, None, 1).await?.is_empty() {

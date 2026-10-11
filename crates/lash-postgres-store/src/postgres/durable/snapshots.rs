@@ -50,6 +50,9 @@ pub(super) static PUT_NEXT: Entry = Entry::new(
 );
 pub(super) static RETIRE: Entry =
     Entry::new(|| &SQL.retire, &[Ty::Text, Ty::Text], Shape::Returning);
+/// Every root of the executions under a key: a terminal's cells.
+pub(super) static CLEAR_UNDER: Entry =
+    Entry::new(|| &SQL.clear_under, &[Ty::Text], Shape::Returning).retiring("root_ref");
 pub(super) static CLEAR: Entry =
     Entry::new(|| &SQL.clear, &[Ty::Text], Shape::Returning).retiring("root_ref");
 
@@ -131,7 +134,7 @@ pub(super) async fn apply(
     write: &ExecRootWrite,
 ) -> Result<(), DurableError> {
     if let Some(program) = steps(commit.epoch, write)?
-        && steps::run(tx, &program, &commit.retired).await?.is_none()
+        && steps::run(tx, &program, &commit.steps()).await?.is_none()
     {
         return Ok(());
     }

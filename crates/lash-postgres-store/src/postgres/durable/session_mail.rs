@@ -144,6 +144,7 @@ fn undecodable(what: &str, detail: impl std::fmt::Display) -> DurableError {
 /// them for `settle_held`; deferral keeps their original ingress position.
 pub(super) async fn cancel_inputs(
     tx: &mut PgConnection,
+    context: &steps::Context<'_>,
     session: &SessionId,
     run: &TurnId,
     disposition: lash_core_execution::TurnCancelUndeliveredInputPolicy,
@@ -174,7 +175,7 @@ pub(super) async fn cancel_inputs(
                 inputs: vec![affected.input_id.clone()],
                 batches: Vec::new(),
             };
-            admit(&mut *tx, &write).await?;
+            admit(&mut *tx, context, &write).await?;
         }
         outcome.affected_inputs.push(affected);
     }
@@ -377,34 +378,6 @@ pub(super) async fn request_operation_cancel(
     ))
 }
 
-/// Settle what run `run` of `session` still holds as it ends: a turn whose
-/// commit settled its rows holds none, and a turn that ends with no commit
-/// (a cancel) leaves its inputs `cancelled` and its batches cancelled, so no
-/// row stays bound to an ended run (ADR 0132 §11).
-pub(super) async fn settle_held(
-    tx: &mut PgConnection,
-    session: &SessionId,
-    run: &TurnId,
-    now_ms: i64,
-) -> Result<(), DurableError> {
-    crate::observed_sql::query(SQL.session_mail.settle_held_inputs.sql())
-        .bind(session.as_str())
-        .bind(run.as_str())
-        .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
-        .bind(now_ms)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    crate::observed_sql::query(SQL.session_mail.settle_held_batches.sql())
-        .bind(session.as_str())
-        .bind(run.as_str())
-        .bind(now_ms)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    Ok(())
-}
-
 /// Withdraw the input session `session` would admit as run `run`, while it
 /// is still open and unbound session mail: into its `cancelled` tombstone at
 /// `now_ms`, so no run ever takes it (FIG-5262). `None` when no open input
@@ -450,7 +423,7 @@ pub(super) async fn apply(
     write: &SessionMailWrite,
 ) -> Result<(), DurableError> {
     match write {
-        SessionMailWrite::Admit { .. } => admit(tx, write).await,
+        SessionMailWrite::Admit { .. } => admit(tx, &commit.steps(), write).await,
         SessionMailWrite::Enqueue {
             session,
             draft_json,
@@ -580,7 +553,11 @@ pub(super) fn steps(write: &SessionMailWrite) -> Option<Vec<Step>> {
 
 /// Bind the admitted mail to its run, each row still open and unbound. The
 /// first item, in the order named, that did not bind refuses the commit.
-async fn admit(tx: &mut PgConnection, write: &SessionMailWrite) -> Result<(), DurableError> {
+async fn admit(
+    tx: &mut PgConnection,
+    context: &steps::Context<'_>,
+    write: &SessionMailWrite,
+) -> Result<(), DurableError> {
     let SessionMailWrite::Admit {
         session,
         inputs,
@@ -591,7 +568,7 @@ async fn admit(tx: &mut PgConnection, write: &SessionMailWrite) -> Result<(), Du
         return Ok(());
     };
     let program = steps(write).unwrap_or_default();
-    let Some(refused) = steps::run(tx, &program, &super::Retired::default()).await? else {
+    let Some(refused) = steps::run(tx, &program, context).await? else {
         return Ok(());
     };
     let bound: std::collections::HashSet<String> = refused

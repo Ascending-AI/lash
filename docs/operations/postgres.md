@@ -181,6 +181,14 @@ settled by its token in `lash_owner_commit_latches`, whose rows each call
 sweeps after fifteen minutes. A commit the function refuses, and every other
 commit, runs as an explicit guarded transaction.
 
+A turn's commit with its terminal is such a call (FIG-5942): two round trips
+with the owner's open. The open reads the session's head, and the head commit
+is planned on that read; the call guards every fact of the plan under the
+session's write lock, so a head that moved, a commit that needs a fact the
+open did not read (a requested ancestor, a cancel's released rows, a frame
+the commit leaves) or a cancelled terminal is refused by the call and runs as
+the explicit transaction, which reads those facts under its locks.
+
 Validation: `lock < statement <= operation` where both are limits; every
 runtime profile has an operation deadline; `roles.renewal.acquire_timeout <
 guards.renewal.operation_deadline < node.lease.heartbeat_every`, and

@@ -87,7 +87,7 @@ crate::statements! {
                 WHERE pti.session_id = ?1
                   AND {{undelivered_turn_input_state(pti.state)}}
                   AND pti.admitted_run IS NULL
-             )";
+             ) AS work_remaining";
 
         /// The earliest open session command and open turn input of session
         /// `?1`, with `?2` naming the control work kind.

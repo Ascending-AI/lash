@@ -2,8 +2,8 @@
 //!
 //! An owner commit whose every domain write is a step program
 //! ([`super::steps`]) is one server call: `lash_owner_commit`, a PL/pgSQL
-//! function generated from this build's statements by [`function_ddl`] and
-//! declared in `schema.sql`. It runs the commit's envelope (the writer fence
+//! function generated from this build's statements by
+//! [`super::generator`] and declared in `schema.sql`. It runs the commit's envelope (the writer fence
 //! shared, the owner fence and its turn-cancel read, the database clock),
 //! installs the commit's graph, key-share locking every staged node another
 //! writer stored, runs each step's statement as static SQL dispatched by the
@@ -11,6 +11,12 @@
 //! formats stamp, the acknowledgement and the release, in one autocommit
 //! transaction. Every statement keeps a cached plan: none is text the
 //! function executes.
+//!
+//! A session head commit rides the same call (FIG-5942): it is planned by
+//! the store's shared planner over what the owner's open read of the head
+//! ([`super::head_commit`]), every fact it was planned on is a guard among
+//! its steps, and its checkpoint's bodies and graph are installed with the
+//! commit's own.
 //!
 //! The function decides nothing a domain owns. A step that answers another
 //! number of rows than it must, an envelope that does not admit the commit
@@ -29,8 +35,6 @@
 
 use std::sync::LazyLock;
 
-#[cfg(test)]
-use lash_durable::domain::CANCEL_MAIL;
 use lash_durable::domain::DomainWrite;
 use lash_durable::{
     ActorCommit, ActorTx, CommitLabel, DurableError, Epoch, Release, StoreFailure, StoreFailureKind,
@@ -38,14 +42,13 @@ use lash_durable::{
 use lash_store_sql::Dialect;
 
 use super::steps::{Entry, Step};
-#[cfg(test)]
-use super::steps::{Shape, Ty};
 use super::{
-    PostgresDurableStore, SQL, get, graph, park, prompts, replay, run_records, session_mail,
-    snapshots, sqlx_failure, turns,
+    PostgresDurableStore, SQL, get, graph, head_commit, park, processes, prompts, replay,
+    run_records, session_close, session_mail, snapshots, sqlx_failure, turns, waits,
 };
 use crate::connection_sql::connection_sql;
 use crate::replayable::Attempt;
+use crate::session_sql::session_sql;
 
 lash_store_sql::statements! {
     /// The statements of the one-call owner commit's own mechanics.
@@ -102,10 +105,10 @@ lash_store_sql::statements! {
 pub(crate) static EXECUTOR_SQL: LazyLock<ExecutorStatements> =
     LazyLock::new(|| ExecutorStatements::render(Dialect::postgres()));
 
-#[cfg(test)]
 /// How long a recorded answer is kept: far past the reconciliation of a
 /// lost call, which reads it within its operation's retries.
-const LATCH_HORIZON_MS: i64 = 900_000;
+#[cfg(test)]
+pub(super) const LATCH_HORIZON_MS: i64 = 900_000;
 
 /// How many prompt texts a storage remembers it holds.
 const HELD_TEXTS: usize = 4096;
@@ -165,8 +168,8 @@ impl HeldTexts {
 pub(crate) const FUNCTION: &str = "lash_owner_commit";
 
 /// Every statement a step may name: what the function dispatches on.
-pub(super) fn entries() -> [&'static Entry; 27] {
-    [
+pub(super) fn entries() -> Vec<&'static Entry> {
+    vec![
         &run_records::APPEND,
         &run_records::PRUNE,
         &snapshots::PUT_FIRST,
@@ -194,11 +197,71 @@ pub(super) fn entries() -> [&'static Entry; 27] {
         &run_records::DELETE_OWNER,
         &graph::CLEAR_ADMISSIONS,
         &park::SET_PARK,
+        // A turn's terminal (FIG-5942).
+        &turns::LOCK_KEY,
+        &turns::END_RUN,
+        &turns::MARK_TERMINAL,
+        &turns::RETENTION,
+        &turns::SETTLE_HELD_INPUTS,
+        &turns::SETTLE_HELD_BATCHES,
+        &turns::END_LOCAL,
+        &snapshots::CLEAR_UNDER,
+        &graph::ADMISSIONS_UNDER,
+        &run_records::DELETE_UNDER,
+        &turns::TERMINAL_STATE,
+        // What ends with a turn: its scope, its waits, its prompt texts.
+        &waits::REVOKE_SCOPE,
+        &waits::COMPACT_SCOPE,
+        &waits::RESOLVE_PROCESS_TERMINAL,
+        &waits::RESOLVE_CHILD_SESSION,
+        &processes::LOCK_TURN,
+        &processes::TURN_CLOSE,
+        &processes::RELEASE_HOLDS,
+        &processes::FORGET_HOLDS,
+        &session_close::SCOPE_ENDING,
+        &prompts::SETTLE,
+        &prompts::HOLD_PREFIX,
+        &prompts::RELEASE_PREFIX,
+        &prompts::RECLAIM,
+        // A session head commit.
+        &head_commit::PLUGIN_WRITERS,
+        &head_commit::LOCK_SESSION,
+        &head_commit::DELETED,
+        &head_commit::MATERIALIZED,
+        &head_commit::RECEIPT,
+        &head_commit::HEAD_AT,
+        &head_commit::HEAD_ABSENT,
+        &head_commit::LEAF,
+        &head_commit::OCCUPIED,
+        &head_commit::NODES,
+        &head_commit::CONFIG,
+        &head_commit::REVISION,
+        &head_commit::HEAD_CAS,
+        &head_commit::TOUCH,
+        &head_commit::PRUNE,
+        &head_commit::SETTLE_COMMAND,
+        &head_commit::SETTLE_INPUT,
+        &head_commit::RELEASE_INPUT,
+        &head_commit::SETTLE_BATCH,
+        &head_commit::RELEASE_BATCH,
+        &head_commit::REFERRER_FENCED,
+        &head_commit::LOCK_ATTACHMENT,
+        &head_commit::ATTACHMENT_DELETING,
+        &head_commit::ATTACHMENT_UPLOADED,
+        &head_commit::ATTACHMENT_CLAIMED,
+        &head_commit::ATTACHMENT_EDGE,
+        &head_commit::WORK_REMAINING,
+        &head_commit::RECORD_RECEIPT,
+        &head_commit::FENCE_REFERRER,
+        &head_commit::CLEANUP_INSERT,
+        &head_commit::CLEANUP_REPLACE,
+        &head_commit::CARRY_EDGE,
     ]
 }
 
 /// `write`'s step program at `epoch`: `None` when it has none, and its
-/// commit takes the explicit-transaction form.
+/// commit takes the explicit-transaction form. A session head commit's is
+/// planned by [`Call::of`], over its owner's hint.
 pub(super) fn program(
     actor: &lash_durable::ActorKey,
     epoch: Epoch,
@@ -215,10 +278,10 @@ pub(super) fn program(
         DomainWrite::ActorPark { reason_json } => {
             Ok(Some(vec![park::step(actor.as_str(), reason_json)]))
         }
+        DomainWrite::Wait(write) => Ok(waits::steps(write)),
+        DomainWrite::Process(write) => Ok(processes::steps(write, actor, epoch)),
         DomainWrite::SessionCommit(_)
         | DomainWrite::ReleasePin(_)
-        | DomainWrite::Wait(_)
-        | DomainWrite::Process(_)
         | DomainWrite::SessionClose(_) => Ok(None),
     }
 }
@@ -250,6 +313,7 @@ fn mechanics() -> Vec<&'static str> {
     vec![
         connection_sql().lock_xact_fleet_fence_shared.sql(),
         SQL.postgres.owner_envelope.sql(),
+        crate::blobs::blob_sql().postgres.insert_chunk.sql(),
         graph::lock_nodes().sql(),
         executor.external_absent.sql(),
         graph::insert_nodes().sql(),
@@ -257,6 +321,13 @@ fn mechanics() -> Vec<&'static str> {
         executor.held_conflicts.sql(),
         graph::insert_edges().sql(),
         executor.installed_bytes.sql(),
+        session_sql().graph_postgres.select_parent_for_update.sql(),
+        session_sql().graph_postgres.exists_reachable.sql(),
+        session_sql().graph_postgres.retire.sql(),
+        SQL.actor.wake.sql(),
+        prompts::closure().sql(),
+        connection_sql().lock_xact_by_text_batch_seeded.sql(),
+        prompts::read_children().sql(),
         graph::peel_lock().sql(),
         graph::peel_level().sql(),
         SQL.actor.stamp_formats.sql(),
@@ -270,351 +341,14 @@ fn mechanics() -> Vec<&'static str> {
     ]
 }
 
-#[cfg(test)]
-/// `sql` with each placeholder `$N` replaced by `args[N - 1]`, outside
-/// string literals and quoted identifiers.
-fn inline(sql: &str, args: &[&str]) -> String {
-    let mut out = String::with_capacity(sql.len());
-    let mut chars = sql.chars().peekable();
-    let mut quote: Option<char> = None;
-    while let Some(c) = chars.next() {
-        if let Some(open) = quote {
-            out.push(c);
-            if c == open {
-                quote = None;
-            }
-            continue;
-        }
-        match c {
-            '\'' | '"' => {
-                quote = Some(c);
-                out.push(c);
-            }
-            '$' if chars.peek().is_some_and(char::is_ascii_digit) => {
-                let mut digits = String::new();
-                while let Some(digit) = chars.peek().copied().filter(char::is_ascii_digit) {
-                    digits.push(digit);
-                    chars.next();
-                }
-                let index: usize = digits.parse().unwrap_or(0);
-                match index.checked_sub(1).and_then(|index| args.get(index)) {
-                    Some(arg) => {
-                        out.push('(');
-                        out.push_str(arg);
-                        out.push(')');
-                    }
-                    None => panic!("statement placeholder ${index} has no argument: {sql}"),
-                }
-            }
-            _ => out.push(c),
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-/// What the function reads parameter `index` of a step as, typed `ty`. An
-/// array keeps its elements' order, which parallel arrays pair by.
-fn param(index: usize, ty: Ty) -> String {
-    let array = |cast: &str| {
-        format!(
-            "ARRAY(SELECT element{cast} FROM jsonb_array_elements_text(v_p->{index}) \
-             WITH ORDINALITY AS listed(element, position) ORDER BY position)"
-        )
-    };
-    match ty {
-        Ty::Text => format!("v_p->>{index}"),
-        Ty::Int => format!("(v_p->>{index})::BIGINT"),
-        Ty::Bytes => format!("decode(v_p->>{index}, 'hex')"),
-        Ty::Texts => array(""),
-        Ty::Bools => array("::BOOLEAN"),
-    }
-}
-
-#[cfg(test)]
-/// One step's branch of the dispatch: its statement, with its rows counted.
-fn branch(entry: &Entry) -> String {
-    let args: Vec<String> = entry
-        .params
-        .iter()
-        .enumerate()
-        .map(|(index, ty)| param(index, *ty))
-        .collect();
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let sql = inline(entry.statement().sql(), &args);
-    // A retiring step also collects the roots its rows name (FIG-5949).
-    let (counted, into) = match entry.retires {
-        None => ("count(*)".to_owned(), "v_rows"),
-        Some(column) => (
-            format!(
-                "count(*), COALESCE(array_agg(answered.{column}) \
-                 FILTER (WHERE answered.{column} IS NOT NULL), '{{}}')"
-            ),
-            "v_rows, v_held",
-        ),
-    };
-    let retire = if entry.retires.is_some() {
-        "\n            v_retired := v_retired || v_held;"
-    } else {
-        ""
-    };
-    let run = match entry.shape {
-        Shape::Exec => format!("{sql};\n            GET DIAGNOSTICS v_rows = ROW_COUNT;"),
-        Shape::Returning => {
-            assert!(
-                !sql.trim_start().to_ascii_uppercase().starts_with("WITH"),
-                "step {} has its own WITH: it cannot be counted in one",
-                entry.name()
-            );
-            format!(
-                "WITH answered AS ({sql})\n            SELECT {counted} INTO {into} FROM answered;{retire}"
-            )
-        }
-        Shape::Select => {
-            format!("SELECT {counted} INTO {into} FROM ({sql}) AS answered;{retire}")
-        }
-    };
-    format!("        WHEN '{}' THEN\n            {run}\n", entry.name())
-}
-
-#[cfg(test)]
-/// `sql`, a query, run for its effect.
-fn perform(sql: &str) -> String {
-    let sql = sql.trim_start();
-    match sql.get(..6) {
-        Some(select) if select.eq_ignore_ascii_case("SELECT") => format!("PERFORM{}", &sql[6..]),
-        _ => panic!("not a query: {sql}"),
-    }
-}
-
-#[cfg(test)]
-/// A function's peel of `v_frontier` (FIG-5949): each level locks what of
-/// it no other transaction holds, then deletes what of that no root names
-/// and no edge reaches, and the children those reached are the next level.
-/// It needs `v_frontier` and `v_locked` (`TEXT[]`) and `v_rows` (`BIGINT`).
-pub(crate) fn peel_loop() -> String {
-    let peel_lock = inline(graph::peel_lock().sql(), &["v_frontier"]);
-    let peel_level = inline(graph::peel_level().sql(), &["v_locked"]);
-    format!(
-        "WHILE cardinality(v_frontier) > 0 LOOP
-        {peel_lock}
-        INTO v_locked;
-        EXIT WHEN cardinality(v_locked) = 0;
-        {peel_level}
-        INTO v_rows, v_frontier;
-    END LOOP;"
-    )
-}
-
-#[cfg(test)]
-/// The function's DDL, as `schema.sql` declares it.
-pub(crate) fn function_ddl() -> String {
-    let executor = &*EXECUTOR_SQL;
-    let envelope = inline(
-        SQL.postgres.owner_envelope.sql(),
-        &["p_actor", "p_epoch", "p_session"],
-    );
-    let lock_nodes = perform(&inline(
-        graph::lock_nodes().sql(),
-        &["p_named", "p_digests"],
-    ));
-    let external_absent = inline(executor.external_absent.sql(), &["p_named", "p_roots"]);
-    let insert_nodes = inline(graph::insert_nodes().sql(), &["p_digests", "p_contents"]);
-    let held_conflicts = inline(
-        executor.held_conflicts.sql(),
-        &["p_digests", "p_contents", "v_inserted"],
-    );
-    let insert_edges = inline(graph::insert_edges().sql(), &["v_parents", "v_children"]);
-    let lock_held = perform(&inline(
-        graph::stored_nodes().sql(),
-        &[
-            "ARRAY(SELECT encode(staged.digest, 'hex') FROM unnest(p_digests) AS staged(digest) \
-           WHERE NOT (encode(staged.digest, 'hex') = ANY(v_inserted)))",
-        ],
-    ));
-    let peel = peel_loop();
-    let installed_bytes = inline(
-        executor.installed_bytes.sql(),
-        &["p_digests", "p_contents", "v_inserted"],
-    );
-    let stamp_formats = inline(SQL.actor.stamp_formats.sql(), &["p_actor", "p_formats"]);
-    let ack_through = inline(SQL.postgres.ack_through.sql(), &["p_actor", "p_ack"]);
-    let park = inline(
-        SQL.postgres.park_unless_pending.sql(),
-        &[
-            "p_actor",
-            "v_now",
-            &format!("'{}'", CANCEL_MAIL.replace('\'', "''")),
-        ],
-    );
-    let delete_mail = inline(SQL.mail.delete_all.sql(), &["p_actor"]);
-    let end = inline(SQL.actor.end.sql(), &["p_actor"]);
-    let release = inline(
-        SQL.actor.release.sql(),
-        &["p_actor", "p_release", "p_due", "v_now"],
-    );
-    let latch_record = inline(
-        executor.latch_record.sql(),
-        &[
-            "p_token",
-            "v_clock",
-            "jsonb_build_object('revision', v_rev, 'state', v_state, 'cancel', \
-             jsonb_build_array(v_cancel_turn, v_cancel_request, v_cancel_origin, \
-             v_cancel_reason, v_cancel_disposition, v_cancel_mode))",
-        ],
-    );
-    let latch_sweep = inline(
-        executor.latch_sweep.sql(),
-        &[&format!("v_clock - {LATCH_HORIZON_MS}")],
-    );
-    let branches: String = entries().iter().map(|entry| branch(entry)).collect();
-    let registry = &*REGISTRY;
-    let fleet_fence = perform(connection_sql().lock_xact_fleet_fence_shared.sql());
-    format!(
-        "CREATE OR REPLACE FUNCTION {FUNCTION}(
-    p_registry TEXT, p_actor TEXT, p_epoch BIGINT, p_session TEXT,
-    p_fleet_low INTEGER, p_fleet_high INTEGER, p_token TEXT,
-    p_lock_timeout TEXT, p_statement_ms BIGINT,
-    p_named TEXT[], p_roots TEXT[], p_digests BYTEA[], p_contents BYTEA[],
-    p_parents BYTEA[], p_children BYTEA[], p_steps JSONB,
-    p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT)
-RETURNS TABLE (o_revision BIGINT, o_now BIGINT, o_fleet INTEGER, o_state TEXT,
-    o_installed BIGINT, o_cancel_turn TEXT, o_cancel_request TEXT, o_cancel_origin TEXT,
-    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT)
-LANGUAGE plpgsql
-AS $lash_owner_commit$
-#variable_conflict use_column
-DECLARE
-    v_fleet INTEGER;
-    v_now BIGINT;
-    v_xact TEXT;
-    v_rev BIGINT;
-    v_cancel_turn TEXT;
-    v_cancel_request TEXT;
-    v_cancel_origin TEXT;
-    v_cancel_reason TEXT;
-    v_cancel_disposition TEXT;
-    v_cancel_mode TEXT;
-    v_clock BIGINT;
-    v_inserted TEXT[] := '{{}}';
-    v_parents BYTEA[];
-    v_children BYTEA[];
-    v_installed BIGINT := 0;
-    v_rows BIGINT;
-    v_index INTEGER := 0;
-    v_step JSONB;
-    v_p JSONB;
-    v_state TEXT := 'owned';
-    v_held TEXT[];
-    v_retired TEXT[] := '{{}}';
-    v_frontier TEXT[];
-    v_locked TEXT[];
-BEGIN
-    -- Generated from this build's statements (registry {registry}); a call
-    -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '{registry}'
-        OR current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
-    END IF;
-    IF p_lock_timeout IS NOT NULL THEN
-        PERFORM set_config('lock_timeout', p_lock_timeout, true);
-    END IF;
-    {fleet_fence};
-    {envelope}
-    INTO v_fleet, v_clock, v_xact, v_rev, v_cancel_turn, v_cancel_request, v_cancel_origin,
-        v_cancel_reason, v_cancel_disposition, v_cancel_mode;
-    v_now := COALESCE(p_now, v_clock);
-    IF v_fleet IS NULL OR v_fleet < p_fleet_low OR v_fleet > p_fleet_high THEN
-        RAISE EXCEPTION 'lash_owner_commit: the writer fence refused' USING ERRCODE = 'LX002';
-    END IF;
-    IF v_rev IS NULL THEN
-        RAISE EXCEPTION 'lash_owner_commit: the owner fence refused' USING ERRCODE = 'LX003';
-    END IF;
-    IF cardinality(p_named) > 0 THEN
-        {lock_nodes};
-        {external_absent} INTO v_rows;
-        IF v_rows > 0 THEN
-            RAISE EXCEPTION 'lash_owner_commit: the graph refused' USING ERRCODE = 'LX004';
-        END IF;
-    END IF;
-    IF cardinality(p_digests) > 0 THEN
-        WITH inserted AS ({insert_nodes})
-        SELECT COALESCE(array_agg(hash), '{{}}') INTO v_inserted FROM inserted;
-        -- A staged node another writer stored is held against a peel; one a
-        -- peel took first is a conflict, which the explicit form installs
-        -- again (FIG-5949).
-        {lock_held};
-        {held_conflicts} INTO v_rows;
-        IF v_rows > 0 THEN
-            RAISE EXCEPTION 'lash_owner_commit: the graph refused' USING ERRCODE = 'LX004';
-        END IF;
-        SELECT COALESCE(array_agg(staged.parent), '{{}}'), COALESCE(array_agg(staged.child), '{{}}')
-        INTO v_parents, v_children
-        FROM unnest(p_parents, p_children) AS staged(parent, child)
-        WHERE encode(staged.parent, 'hex') = ANY(v_inserted);
-        IF cardinality(v_parents) > 0 THEN
-            {insert_edges};
-        END IF;
-        {installed_bytes} INTO v_installed;
-    END IF;
-    FOR v_step IN SELECT value FROM jsonb_array_elements(p_steps) LOOP
-        v_p := v_step->'p';
-        CASE v_step->>'s'
-{branches}        ELSE
-            RAISE EXCEPTION 'lash_owner_commit: no step %', v_step->>'s' USING ERRCODE = 'LX000';
-        END CASE;
-        IF v_step ? 'n' AND v_rows <> (v_step->>'n')::BIGINT THEN
-            RAISE EXCEPTION 'lash_owner_commit: step % refused', v_index USING ERRCODE = 'LX001';
-        END IF;
-        IF p_statement_ms IS NOT NULL
-            AND clock_timestamp() - statement_timestamp() > p_statement_ms * INTERVAL '1 millisecond' THEN
-            RAISE EXCEPTION 'canceling statement due to statement timeout' USING ERRCODE = '57014';
-        END IF;
-        IF v_step ? 'r' THEN
-            v_retired := v_retired || ARRAY(SELECT jsonb_array_elements_text(v_step->'r'));
-        END IF;
-        v_index := v_index + 1;
-    END LOOP;
-    -- Peel what the steps retired: each level deletes what no root names
-    -- and no edge reaches, skipping what another transaction holds
-    -- (FIG-5949).
-    v_frontier := ARRAY(SELECT DISTINCT unnest(v_retired));
-    {peel}
-    IF p_formats IS NOT NULL THEN
-        {stamp_formats};
-    END IF;
-    IF p_ack IS NOT NULL THEN
-        {ack_through};
-    END IF;
-    CASE p_release
-    WHEN 'parked' THEN
-        {park}
-        INTO v_state;
-    WHEN 'terminal' THEN
-        {delete_mail};
-        {end}
-        INTO v_state;
-    WHEN 'idle', 'waiting', 'ready' THEN
-        {release}
-        INTO v_state;
-    ELSE
-        NULL;
-    END CASE;
-    {latch_record};
-    {latch_sweep};
-    RETURN QUERY SELECT v_rev, v_now, v_fleet, v_state, v_installed, v_cancel_turn,
-        v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode;
-END
-$lash_owner_commit$;
-"
-    ) + &crate::artifact_store::local_end_function_ddl()
-}
-
 /// The call's arguments for `tx`, unless the commit takes the
 /// explicit-transaction form: a write that is not a step program, or a
 /// graph or budget the explicit form refuses.
 pub(super) struct Call {
     pub(super) steps: serde_json::Value,
+    /// The checkpoint bodies a head commit supplies, by content address.
+    pub(super) body_hashes: Vec<String>,
+    pub(super) bodies: Vec<Vec<u8>>,
     pub(super) named: Vec<String>,
     pub(super) roots: Vec<String>,
     pub(super) digests: Vec<Vec<u8>>,
@@ -623,33 +357,49 @@ pub(super) struct Call {
     pub(super) children: Vec<Vec<u8>>,
     pub(super) release: Option<&'static str>,
     pub(super) due: Option<i64>,
+    /// The fleet format a head commit was planned under: the call is
+    /// refused under any other.
+    pub(super) planned_fleet: Option<lash_core_execution::FleetFormat>,
+    /// The hint the call's head commit planned on, and what the head is
+    /// once the call commits.
+    pub(super) hint: Option<((String, i64), Option<head_commit::SessionFacts>)>,
+}
+
+/// `step` as the function reads it.
+fn step_json(step: &Step) -> serde_json::Value {
+    let mut json = serde_json::json!({
+        "s": step.entry.name(),
+        "p": step.values.iter().map(super::steps::Value::json).collect::<Vec<_>>(),
+    });
+    if let Some(expect) = step.expect {
+        json["n"] = expect.into();
+    }
+    if !step.retired.is_empty() {
+        json["r"] = step.retired.clone().into();
+    }
+    if !step.ancestry.is_empty() {
+        json["a"] = step.ancestry.clone().into();
+    }
+    if let Some(slot) = step.capture {
+        json["c"] = slot.to_string().into();
+    }
+    if let Some(when) = &step.when {
+        json["w"] = serde_json::json!([when.slot.to_string(), when.column, when.holds]);
+    }
+    json
 }
 
 impl Call {
-    pub(super) fn of(tx: &ActorTx, held: &HeldTexts) -> Option<Self> {
-        let mut steps = Vec::new();
-        for write in tx.domain() {
-            for step in program(tx.actor(), tx.epoch(), write, held).ok()?? {
-                let mut json = serde_json::json!({
-                    "s": step.entry.name(),
-                    "p": step.values.iter().map(super::steps::Value::json).collect::<Vec<_>>(),
-                });
-                if let Some(expect) = step.expect {
-                    json["n"] = expect.into();
-                }
-                if !step.retired.is_empty() {
-                    json["r"] = step.retired.clone().into();
-                }
-                steps.push(json);
-            }
-        }
-        let publications: Vec<_> = tx
-            .domain()
-            .iter()
-            .flat_map(DomainWrite::publications)
-            .collect();
+    pub(super) fn of(
+        tx: &ActorTx,
+        held: &HeldTexts,
+        hints: &head_commit::SessionHints,
+        fleet: lash_core_execution::FleetFormat,
+    ) -> Option<Self> {
         let mut call = Self {
-            steps: serde_json::Value::Array(steps),
+            steps: serde_json::Value::Null,
+            body_hashes: Vec::new(),
+            bodies: Vec::new(),
             named: Vec::new(),
             roots: Vec::new(),
             digests: Vec::new(),
@@ -658,19 +408,86 @@ impl Call {
             children: Vec::new(),
             release: None,
             due: None,
+            planned_fleet: None,
+            hint: None,
         };
-        if !tx.graph().is_empty() || !tx.reads().is_empty() || !publications.is_empty() {
-            let checked = lash_durable::domain::graph_commit::check_graph(
-                tx.graph(),
-                tx.reads(),
-                &publications,
-            )
-            .ok()?;
+        // The executions the commit ends are locked first, as publication
+        // locks them: referrer, then artifact.
+        let mut steps: Vec<serde_json::Value> = turns::lock_ending_executions(tx.domain())
+            .ok()?
+            .iter()
+            .map(step_json)
+            .collect();
+        // A head commit's checkpoint graph is installed with the commit's.
+        let mut checkpoint_nodes = std::collections::BTreeMap::new();
+        for write in tx.domain() {
+            let program = match write {
+                DomainWrite::SessionCommit(write) => {
+                    // One head commit a call, by the session's own actor,
+                    // over what its open read.
+                    if call.hint.is_some()
+                        || turns::head_writer(tx.actor(), &write.session)
+                            != lash_core_execution::store::HeadWriter::SessionActor
+                    {
+                        return None;
+                    }
+                    let key = (tx.actor().as_str().to_owned(), tx.epoch().0);
+                    let facts = hints.get(&key)?;
+                    let planner = turns::prepared(write, fleet)?;
+                    let program = head_commit::program(
+                        &planner,
+                        &facts.head,
+                        Some(&facts.plugin_writers),
+                        None,
+                        0,
+                    )
+                    .ok()??;
+                    for (hash, body) in &program.checkpoint.supplied {
+                        call.body_hashes.push(hash.clone());
+                        call.bodies.push(body.to_vec());
+                    }
+                    checkpoint_nodes = program.checkpoint.nodes;
+                    call.planned_fleet = Some(fleet);
+                    call.hint = Some((
+                        key,
+                        program.after.map(|head| head_commit::SessionFacts {
+                            head,
+                            plugin_writers: facts.plugin_writers,
+                        }),
+                    ));
+                    program.steps
+                }
+                write => program(tx.actor(), tx.epoch(), write, held).ok()??,
+            };
+            steps.extend(program.iter().map(step_json));
+        }
+        call.steps = serde_json::Value::Array(steps);
+        let publications: Vec<_> = tx
+            .domain()
+            .iter()
+            .flat_map(DomainWrite::publications)
+            .collect();
+        if !tx.graph().is_empty()
+            || !tx.reads().is_empty()
+            || !publications.is_empty()
+            || !checkpoint_nodes.is_empty()
+        {
             if let Some(budget) = tx.budget() {
                 lash_durable::domain::graph_commit::measure_owner_commit(tx.graph(), tx.domain())
                     .and_then(|measured| budget.admit(&measured))
                     .ok()?;
             }
+            let staged;
+            let graph = if checkpoint_nodes.is_empty() {
+                tx.graph()
+            } else {
+                checkpoint_nodes.extend(tx.graph().iter().map(|(id, node)| (*id, node.clone())));
+                staged = checkpoint_nodes;
+                &staged
+            };
+            let checked =
+                lash_durable::domain::graph_commit::check_graph(graph, tx.reads(), &publications)
+                    .ok()?;
             let named: std::collections::BTreeSet<_> = checked
                 .external
                 .iter()
@@ -705,7 +522,7 @@ impl Call {
 
 /// The call's SQL.
 pub(super) static CALL: LazyLock<String> = LazyLock::new(|| {
-    let params: Vec<String> = (1..=21).map(|index| format!("${index}")).collect();
+    let params: Vec<String> = (1..=23).map(|index| format!("${index}")).collect();
     format!("SELECT * FROM {FUNCTION}({})", params.join(", "))
 });
 
@@ -758,6 +575,17 @@ impl PostgresDurableStore {
             .map_err(Attempt::Failed)?;
         let writable = self.fence.writable();
         let bound = |version: u32| i32::try_from(version).unwrap_or(i32::MAX);
+        // A head commit was planned under one fleet format: the call is
+        // refused under any other, and the explicit form plans again.
+        let (fleet_low, fleet_high) = match call.planned_fleet {
+            Some(planned)
+                if planned.version() < writable.min() || planned.version() > writable.max() =>
+            {
+                return Ok(None);
+            }
+            Some(planned) => (bound(planned.version()), bound(planned.version())),
+            None => (bound(writable.min()), bound(writable.max())),
+        };
         let session = match tx.actor().kind() {
             lash_durable::ActorKind::Session => Some(tx.actor().id()),
             lash_durable::ActorKind::Process => None,
@@ -768,11 +596,13 @@ impl PostgresDurableStore {
             .bind(tx.actor().as_str())
             .bind(tx.epoch().0)
             .bind(session)
-            .bind(bound(writable.min()))
-            .bind(bound(writable.max()))
+            .bind(fleet_low)
+            .bind(fleet_high)
             .bind(&token)
             .bind(lock_timeout)
             .bind(statement_ms)
+            .bind(&call.body_hashes)
+            .bind(&call.bodies)
             .bind(&call.named)
             .bind(&call.roots)
             .bind(&call.digests)
@@ -803,16 +633,33 @@ impl PostgresDurableStore {
         };
         let row = match sent {
             Ok(row) => row,
-            Err(error) if declined(&error) => return Ok(None),
+            Err(error) if declined(&error) => {
+                // The hint a declined head commit planned on is not kept:
+                // the owner's next open reads the head again.
+                if let Some((key, _)) = &call.hint {
+                    self.pools.session_hints.forget(key);
+                }
+                return Ok(None);
+            }
             Err(error) if answered(&error) => return Err(replay::attempt(sqlx_failure(error))),
             Err(lost) => {
                 drop(connection);
+                if let Some((key, _)) = &call.hint {
+                    self.pools.session_hints.forget(key);
+                }
                 return self
                     .reconcile_call(label, tx, &token, lost, deadline)
                     .await
                     .map(Some);
             }
         };
+        // The head the call published is what the owner's next head commit
+        // plans on.
+        match &call.hint {
+            Some((key, Some(after))) => self.pools.session_hints.note(key.clone(), after.clone()),
+            Some((key, None)) => self.pools.session_hints.forget(key),
+            None => {}
+        }
         let fleet: i32 = get(&row, 2).map_err(Attempt::Failed)?;
         if let Ok(fleet) = u32::try_from(fleet) {
             self.fence.observe(fleet);
@@ -965,49 +812,4 @@ pub(super) fn answer(
         state,
         turn_cancel,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    // Test tooling: reading and regenerating the committed artifact is
-    // sanctioned here.
-    #![allow(clippy::disallowed_methods)]
-
-    const BEGIN: &str = "-- BEGIN GENERATED lash_owner_commit\n";
-    const END: &str = "-- END GENERATED lash_owner_commit\n";
-
-    /// `schema` with its generated block replaced by `block`.
-    fn with_block(schema: &str, block: &str) -> String {
-        let start = schema
-            .find(BEGIN)
-            .expect("schema.sql marks the generated function")
-            + BEGIN.len();
-        let end = schema
-            .find(END)
-            .expect("schema.sql ends the generated function");
-        format!("{}{block}{}", &schema[..start], &schema[end..])
-    }
-
-    /// The function `schema.sql` declares is the one this build's statements
-    /// generate: a statement edited without regenerating it fails here.
-    #[test]
-    fn the_declared_owner_commit_is_generated_from_this_builds_statements() {
-        let schema = crate::schema::SCHEMA_DDL;
-        assert!(
-            schema == with_block(schema, &super::function_ddl()),
-            "schema.sql's lash_owner_commit is stale: regenerate it with \
-             LASH_REGENERATE=1 and the ignored regenerate_owner_commit test"
-        );
-    }
-
-    #[test]
-    #[ignore = "regenerates lash_owner_commit in crates/lash-postgres-store/schema.sql"]
-    fn regenerate_owner_commit() {
-        assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-        let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
-        let path = std::path::PathBuf::from(root).join("crates/lash-postgres-store/schema.sql");
-        let schema = std::fs::read_to_string(&path).expect("read schema.sql");
-        std::fs::write(&path, with_block(&schema, &super::function_ddl()))
-            .expect("rewrite schema.sql");
-    }
 }

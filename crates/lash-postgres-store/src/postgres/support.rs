@@ -362,34 +362,47 @@ async fn checkpoint_component_bodies_tx(
     Ok(bodies)
 }
 
-/// Persist the complete checkpoint root and every changed leaf inside the
-/// caller's commit transaction. Keeping both writes under the same transaction
-/// is the GC-safety argument: no orphan audit can observe a git-loose-object-style
-/// leaf that is not yet reachable from its root, or a root whose leaf is absent.
-pub(crate) async fn put_checkpoint_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+/// What a checkpoint's put writes: its manifest and the manifest's root,
+/// the component bodies the checkpoint supplies by digest, and the graph
+/// the put installs (the manifest's nodes beside the execution's).
+pub(crate) struct CheckpointParts {
+    pub(crate) checkpoint_ref: BlobRef,
+    pub(crate) manifest: SessionCheckpoint,
+    pub(crate) supplied: std::collections::BTreeMap<String, std::sync::Arc<[u8]>>,
+    pub(crate) nodes: std::collections::BTreeMap<
+        lash_core_store::checkpoint_graph::NodeId,
+        lash_core_store::checkpoint_graph::EncodedNode,
+    >,
+}
+
+/// A checkpoint's manifest with the component bodies it supplies and its
+/// components' lock order: what its put writes before its graph.
+type CheckpointComponents = (
+    SessionCheckpoint,
+    std::collections::BTreeMap<String, std::sync::Arc<[u8]>>,
+    Vec<(String, Option<String>)>,
+);
+
+/// The parts of `checkpoint`'s put under `fleet_format`.
+pub(crate) fn checkpoint_parts(
     checkpoint: &HydratedSessionCheckpoint,
     fleet_format: lash_core_execution::FleetFormat,
-    chunk_size: usize,
-) -> Result<(BlobRef, SessionCheckpoint), StoreError> {
-    let manifest = checkpoint.manifest(fleet_format)?;
+) -> Result<CheckpointParts, StoreError> {
+    checkpoint_graph_parts(checkpoint, checkpoint_components(checkpoint, fleet_format)?)
+}
 
-    // Global PostgreSQL checkpoint lock order:
-    // 1. session-history advisory locks, ascending by session id;
-    // 2. component blob rows, ascending by content hash;
-    // 3. the manifest's graph nodes and edges, then session heads.
-    //
-    // This transaction bulk-inserts every supplied body in hash order, then acquires the
-    // complete component set with one ordered FOR KEY SHARE query.
-    // Concurrent reclaim that wins first is a typed missing-component refusal, never a
-    // resurrection or a later foreign-key error.
+fn checkpoint_components(
+    checkpoint: &HydratedSessionCheckpoint,
+    fleet_format: lash_core_execution::FleetFormat,
+) -> Result<CheckpointComponents, StoreError> {
+    let manifest = checkpoint.manifest(fleet_format)?;
     let mut acquisition_order = manifest
         .components
         .iter()
         .map(|(key, descriptor)| (descriptor.blob_ref.as_str().to_string(), Some(key.clone())))
         .collect::<Vec<_>>();
     acquisition_order.sort();
-    let mut supplied_blobs = std::collections::BTreeMap::new();
+    let mut supplied = std::collections::BTreeMap::new();
     for (key, descriptor) in &manifest.components {
         let component =
             checkpoint
@@ -414,12 +427,17 @@ pub(crate) async fn put_checkpoint_tx(
             &stored_ref,
             &descriptor.blob_ref,
         )?;
-        supplied_blobs
+        supplied
             .entry(stored_ref.0)
             .or_insert_with(|| std::sync::Arc::clone(body));
     }
-    put_checkpoint_blobs_tx(tx, &supplied_blobs, chunk_size).await?;
-    lock_checkpoint_blobs_tx(tx, &acquisition_order, chunk_size).await?;
+    Ok((manifest, supplied, acquisition_order))
+}
+
+fn checkpoint_graph_parts(
+    checkpoint: &HydratedSessionCheckpoint,
+    (manifest, supplied, _): CheckpointComponents,
+) -> Result<CheckpointParts, StoreError> {
     // The manifest is a SessionManifest node over its components' opaque
     // blobs and its SessionExecution root, staged and installed with its
     // edges once every component exists, beside the execution nodes no
@@ -428,13 +446,44 @@ pub(crate) async fn put_checkpoint_tx(
     if let Some(execution) = &checkpoint.execution {
         nodes.extend(execution.nodes.iter().map(|(id, node)| (*id, node.clone())));
     }
-    let checkpoint_ref = BlobRef(root.to_hex());
+    Ok(CheckpointParts {
+        checkpoint_ref: BlobRef(root.to_hex()),
+        manifest,
+        supplied,
+        nodes,
+    })
+}
+
+/// Persist the complete checkpoint root and every changed leaf inside the
+/// caller's commit transaction, answering what it put. Keeping both writes
+/// under the same transaction is the GC-safety argument: no orphan audit can
+/// observe a git-loose-object-style leaf that is not yet reachable from its
+/// root, or a root whose leaf is absent.
+pub(crate) async fn put_checkpoint_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    checkpoint: &HydratedSessionCheckpoint,
+    fleet_format: lash_core_execution::FleetFormat,
+    chunk_size: usize,
+) -> Result<CheckpointParts, StoreError> {
+    // Global PostgreSQL checkpoint lock order:
+    // 1. session-history advisory locks, ascending by session id;
+    // 2. component blob rows, ascending by content hash;
+    // 3. the manifest's graph nodes and edges, then session heads.
+    //
+    // This transaction bulk-inserts every supplied body in hash order, then acquires the
+    // complete component set with one ordered FOR KEY SHARE query.
+    // Concurrent reclaim that wins first is a typed missing-component refusal, never a
+    // resurrection or a later foreign-key error.
+    let components = checkpoint_components(checkpoint, fleet_format)?;
+    put_checkpoint_blobs_tx(tx, &components.1, chunk_size).await?;
+    lock_checkpoint_blobs_tx(tx, &components.2, chunk_size).await?;
+    let parts = checkpoint_graph_parts(checkpoint, components)?;
     // The install key-share locks a root that is already stored, and stores
     // it again from these bytes when a reclaim took it first (FIG-5949).
-    crate::durable::install_staged(tx, &nodes)
+    crate::durable::install_staged(tx, &parts.nodes)
         .await
         .map_err(graph_store_error)?;
-    Ok((checkpoint_ref, manifest))
+    Ok(parts)
 }
 
 /// A checkpoint graph refusal on the session path, as the store reports it.

@@ -45,11 +45,11 @@ crate::statements! {
         /// a turn with no holds pays no hold-release or mark-forget statement.
         turn_close = "SELECT
                  COALESCE((SELECT scope_has_holds FROM session_runs
-                     WHERE session_id = ?1 AND run = ?2), FALSE),
+                     WHERE session_id = ?1 AND run = ?2), FALSE) AS has_holds,
                  EXISTS(SELECT 1 FROM processes
                      WHERE lifetime = 'until' AND lifetime_scope_kind = 'turn'
                        AND lifetime_scope_id = ?3 AND cancel_requested_at_ms IS NULL
-                       AND status IN ('running', 'waiting'))";
+                       AND status IN ('running', 'waiting')) AS has_until";
 
         exists = "SELECT 1 FROM parent_end_plans WHERE parent_kind = ?1 AND parent_id = ?2";
 

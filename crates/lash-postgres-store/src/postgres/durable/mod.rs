@@ -58,11 +58,15 @@ mod admission;
 mod executor;
 pub(crate) use executor::HeldTexts;
 #[cfg(test)]
-pub(crate) use executor::peel_loop;
+mod generator;
+#[cfg(test)]
+pub(crate) use generator::peel_loop;
 mod graph;
+mod head_commit;
 pub(crate) use graph::{
     AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
 };
+pub(crate) use head_commit::{SessionHints, apply_store_commit};
 mod park;
 pub(crate) mod processes;
 mod prompts;
@@ -100,6 +104,17 @@ pub(crate) struct Committing<'a> {
     pub(crate) fleet: lash_core_execution::FleetFormat,
     /// The roots its writes retired, peeled before it commits.
     pub(crate) retired: Retired,
+}
+
+impl Committing<'_> {
+    /// What the commit's step programs run under.
+    fn steps(&self) -> steps::Context<'_> {
+        steps::Context {
+            retired: &self.retired,
+            actor: self.actor,
+            now: self.now,
+        }
+    }
 }
 
 /// The roots a transaction's writes retired: what it peels before it
@@ -233,16 +248,27 @@ lash_store_sql::statements! {
         /// The owner's open of actor `?1`: its row, its pending mail oldest
         /// first, the database clock and, when `?2` names its session, that
         /// session's unfinished turn's accepted cancel request, in one read.
+        /// It also reads what a head commit of that session plans on
+        /// (FIG-5942): the published head's revision and leaf, the leaf's
+        /// generation, frame and liveness, and every plugin writer range.
         open = "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     m.seq, m.kind, m.body, m.appended_at_ms,
                     (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
-                    c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode
+                    c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode,
+                    h.head_revision, v.leaf_node_id, leaf.generation, leaf.frame_node_id,
+                    NOT leaf.tombstoned,
+                    (SELECT jsonb_agg(jsonb_build_array(plugin_id, min_format, max_format))
+                       FROM fleet_plugin_writers)
              FROM actors a
              LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq > a.acked_seq
              LEFT JOIN session_runs r ON r.session_id = ?2 AND r.admission_json IS NOT NULL
                  AND r.terminal_kind IS NULL
              LEFT JOIN turn_phases p ON p.session_id = r.session_id AND p.run = r.run
              LEFT JOIN turn_cancel_requests c ON c.session_id = p.session_id AND c.turn_id = p.run
+             LEFT JOIN session_head h ON h.session_id = ?2
+             LEFT JOIN session_revisions v ON v.session_id = h.session_id
+                 AND v.head_revision = h.head_revision
+             LEFT JOIN graph_nodes leaf ON leaf.node_id = v.leaf_node_id
              WHERE a.actor_key = ?1
              ORDER BY m.seq";
 
@@ -1350,6 +1376,15 @@ impl DurableStore for PostgresDurableStore {
             _ => None,
         };
         let at = self.instant_or(get(first, 9)?)?;
+        // What a session's owner read of its head: the hint its one-call
+        // head commit plans on (FIG-5942).
+        if session.is_some()
+            && let Some(facts) = head_commit::SessionFacts::of(first, 16)
+        {
+            self.pools
+                .session_hints
+                .note((actor.as_str().to_owned(), epoch.0), facts);
+        }
         let mut opened = OpenedActor {
             actor: actor.clone(),
             epoch,

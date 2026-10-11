@@ -65,7 +65,12 @@ impl PostgresDurableStore {
                                 });
                             }
                             let tx = &tx;
-                            let call = executor::Call::of(tx, &self.pools.held_texts);
+                            let call = executor::Call::of(
+                                tx,
+                                &self.pools.held_texts,
+                                &self.pools.session_hints,
+                                self.fence.fleet(),
+                            );
                             let call = &call;
                             self.replay(label, deadline, || async move {
                                 if let Some(call) = call

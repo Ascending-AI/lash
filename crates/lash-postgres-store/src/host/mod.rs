@@ -645,6 +645,9 @@ pub(crate) struct RolePools {
     /// The prompt texts this storage's commits recorded, which a one-call
     /// commit sends without their bodies.
     pub(crate) held_texts: crate::durable::HeldTexts,
+    /// What each session owner's open read of its head, which its one-call
+    /// head commit plans on.
+    pub(crate) session_hints: crate::durable::SessionHints,
 }
 
 impl RolePools {
@@ -674,6 +677,7 @@ impl RolePools {
             durable_retry: config.retry.durable,
             wait_retry: config.retry.wait_resolution,
             held_texts: crate::durable::HeldTexts::default(),
+            session_hints: crate::durable::SessionHints::default(),
         }
     }
 

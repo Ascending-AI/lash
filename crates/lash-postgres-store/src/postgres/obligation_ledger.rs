@@ -66,6 +66,30 @@ fn cleanup_row(row: &PgRow) -> Result<(ObligationId, ArtifactCleanup), StoreErro
     Ok((id, cleanup))
 }
 
+/// The cleanup obligation statements.
+pub(crate) fn cleanup_sql() -> &'static CleanupObligationStatements {
+    &CLEANUP
+}
+
+/// How `cleanup` arms over its referrer's row as it stands, under the
+/// referrer's lock, which the caller holds.
+pub(crate) async fn cleanup_decision_tx(
+    conn: &mut sqlx::PgConnection,
+    cleanup: &ArtifactCleanup,
+) -> Result<CleanupUpsert, StoreError> {
+    let existing = crate::observed_sql::query(CLEANUP.select_by_referrer.sql())
+        .bind(cleanup.referrer().kind().as_str())
+        .bind(cleanup.referrer().canonical_id())
+        .fetch_optional(crate::observed_sql::executor(&mut *conn))
+        .await
+        .map_err(store_sqlx_error)?;
+    let decoded = existing.as_ref().map(cleanup_row).transpose()?;
+    Ok(CleanupUpsert::decide(
+        decoded.as_ref().map(|(_, body)| body),
+        cleanup,
+    ))
+}
+
 pub(crate) async fn arm_cleanup_tx(
     conn: &mut sqlx::PgConnection,
     cleanup: &ArtifactCleanup,
@@ -152,6 +176,18 @@ pub(crate) async fn lock_ending_executions_tx(
     tx: &mut sqlx::PgConnection,
     writes: &[lash_durable::DomainWrite],
 ) -> Result<(), StoreError> {
+    for referrer in ending_executions(writes)? {
+        crate::artifact_store::lock_referrer_tx(tx, &referrer)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    Ok(())
+}
+
+/// The executions `writes` end, as referrers in lock order.
+pub(crate) fn ending_executions(
+    writes: &[lash_durable::DomainWrite],
+) -> Result<Vec<ArtifactReferrer>, StoreError> {
     use lash_durable::{
         DomainWrite,
         domain::{ProcessWrite, ScopeKey, TurnWrite},
@@ -179,12 +215,7 @@ pub(crate) async fn lock_ending_executions_tx(
     }
     referrers.sort_by_key(|referrer| referrer.canonical_id());
     referrers.dedup();
-    for referrer in referrers {
-        crate::artifact_store::lock_referrer_tx(tx, &referrer)
-            .await
-            .map_err(store_sqlx_error)?;
-    }
-    Ok(())
+    Ok(referrers)
 }
 
 /// End an execution's local edges with its terminal, including the SQL

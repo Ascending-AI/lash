@@ -533,7 +533,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                         self.pools.maintenance.checkpoint_ref_chunk as usize,
                     )
                     .await?
-                    .0
+                    .checkpoint_ref
                     .as_str()
                     .to_owned(),
                 );

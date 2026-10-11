@@ -38,6 +38,9 @@ pub(super) static APPEND: Entry = Entry::new(
 );
 pub(super) static DELETE_OWNER: Entry =
     Entry::new(|| &SQL.delete_owner, &[Ty::Text], Shape::Returning).retiring("record_ref");
+/// Every fact of the owners under a key: a terminal's cells.
+pub(super) static DELETE_UNDER: Entry =
+    Entry::new(|| &SQL.delete_under, &[Ty::Text], Shape::Returning).retiring("record_ref");
 pub(super) static PRUNE: Entry =
     Entry::new(|| &SQL.prune, &[Ty::Text, Ty::Int], Shape::Returning).retiring("record_ref");
 
@@ -80,7 +83,7 @@ pub(super) async fn apply(
     write: &RunFactWrite,
 ) -> Result<(), DurableError> {
     let program = steps(commit.epoch, write)?.unwrap_or_default();
-    if steps::run(tx, &program, &commit.retired).await?.is_none() {
+    if steps::run(tx, &program, &commit.steps()).await?.is_none() {
         return Ok(());
     }
     match write {

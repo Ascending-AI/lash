@@ -11,10 +11,11 @@ neutral statement set and one module per dialect. Since I0 (FIG-5194) each
 of those is a directory: the core in `durable/mod.rs` and one file per
 domain (`turns`, `run_records`, `snapshots`, `waits`, `processes`,
 `session_close`, `session_mail`, `park`, `prompts`, `graph`), each owned by its lane.
-PostgreSQL's one-call owner commit (FIG-5936) adds two engine modules beside
-them: `steps`, a domain write's statements as a step program, and
-`executor`, which generates the server function that runs those programs
-and owns `owner_commit_latches`. This check fails
+PostgreSQL's one-call owner commit (FIG-5936, FIG-5942) adds four engine
+modules beside them: `steps`, a domain write's statements as a step program;
+`executor`, which builds the call and owns `owner_commit_latches`;
+`generator`, which writes the server function that runs those programs; and
+`head_commit`, a session head commit as a step program. This check fails
 when:
 
 - SQL naming an engine table appears in any tracked Rust or SQL file outside
@@ -52,6 +53,8 @@ DOMAINS = (
     "graph",
     "steps",
     "executor",
+    "generator",
+    "head_commit",
 )
 NEUTRAL_DIR = "crates/lash-store-sql/src/durable"
 DIALECT_DIRS = (

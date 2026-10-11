@@ -3,7 +3,7 @@
 
 use super::*;
 
-pub(super) fn requested_append_ancestor(
+pub(crate) fn requested_append_ancestor(
     stamp: &lash_core_execution::RuntimeTurnCommitStamp,
 ) -> Option<&str> {
     match &stamp.append_request_identity {
@@ -16,9 +16,9 @@ pub(super) fn requested_append_ancestor(
     }
 }
 
-pub(super) type AppendIdentityColumns<'a> = (Option<&'a str>, Option<i64>, Option<i32>);
+pub(crate) type AppendIdentityColumns<'a> = (Option<&'a str>, Option<i64>, Option<i32>);
 
-pub(super) fn append_identity_columns(
+pub(crate) fn append_identity_columns(
     identity: &lash_core_execution::AppendRequestIdentity,
 ) -> Result<AppendIdentityColumns<'_>, StoreError> {
     // A semantic-boundary identity persists without a node count; the NULL
