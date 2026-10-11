@@ -123,6 +123,10 @@ pub struct Service {
     config: Arc<PoolConfig>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
     pub(crate) budget: Option<ExecutionBudget>,
+    /// One execution's worker, kept from lowering its document until the
+    /// run starts on it: the lowering and the run share one lease, with no
+    /// reset between them (FIG-5921). Only an execution's service has one.
+    retained: Option<Arc<Mutex<Option<crate::Checkout>>>>,
 }
 impl Service {
     /// Select the helper executable explicitly, using the code mode/process bounds.
@@ -139,6 +143,7 @@ impl Service {
             config: Arc::new(config),
             pool: Arc::new(Mutex::new(None)),
             budget: None,
+            retained: None,
         }
     }
     #[cfg(feature = "testing")]
@@ -218,6 +223,28 @@ impl Service {
     pub fn config(&self) -> &PoolConfig {
         &self.config
     }
+
+    /// The worker this execution kept from lowering its document, when its
+    /// lease runs under these epochs.
+    pub(crate) fn take_retained(
+        &self,
+        owner_epoch: OwnerEpoch,
+        frame_epoch: FrameEpoch,
+    ) -> Option<crate::Checkout> {
+        let mut slot = self
+            .retained
+            .as_ref()?
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot
+            .as_ref()
+            .is_some_and(|checkout| checkout.epochs() == (owner_epoch, frame_epoch))
+        {
+            slot.take()
+        } else {
+            None
+        }
+    }
 }
 impl Default for Service {
     fn default() -> Self {
@@ -277,6 +304,20 @@ pub mod runtime_ops {
             request: Request,
         ) -> impl Future<Output = Result<Response, PoolError>> + Send;
 
+        /// [`ServiceRuntimeOps::request_accounted`] for the lowering of the
+        /// document this execution runs next: the worker that lowers it is
+        /// kept for the run, which starts on the same lease with no reset
+        /// between (FIG-5921). The execution gives back a worker it kept
+        /// and did not start with [`ServiceRuntimeOps::release_retained`].
+        fn request_for_run(
+            &self,
+            request: Request,
+        ) -> impl Future<Output = Result<Response, PoolError>> + Send;
+
+        /// Resets the worker this execution kept for a run that never
+        /// started on it, and returns it to the pool.
+        fn release_retained(&self) -> impl Future<Output = ()> + Send;
+
         fn pool_accounted(&self) -> impl Future<Output = Result<WorkerPool, PoolError>> + Send;
     }
 
@@ -289,23 +330,30 @@ pub mod runtime_ops {
         fn begin_execution(&self) -> Service {
             let mut service = self.clone();
             service.budget = Some(ExecutionBudget::default());
+            service.retained = Some(Arc::new(Mutex::new(None)));
             service
         }
 
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "the accounted async seam isolates blocking checkout and IPC on Tokio's blocking pool"
-        )]
         async fn request_accounted(&self, request: Request) -> Result<Response, PoolError> {
-            let service = self.clone();
+            self.request_off_runtime(request, false).await
+        }
+
+        async fn request_for_run(&self, request: Request) -> Result<Response, PoolError> {
+            self.request_off_runtime(request, true).await
+        }
+
+        async fn release_retained(&self) {
+            let Some(checkout) = self.retained.as_ref().and_then(|slot| {
+                slot.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take()
+            }) else {
+                return;
+            };
             let _held = CallHeld::of(Some(self));
-            tokio::task::spawn_blocking(move || service.request_blocking(request))
-                .await
-                .map_err(|error| {
-                    PoolError::breach(lash_vm_protocol::ProtocolBreach::Panicked {
-                        detail: lash_vm_protocol::Detail::new(error),
-                    })
-                })?
+            // A reset that fails has discarded the worker; the execution's
+            // answer is already decided.
+            let _ = tokio::task::spawn_blocking(move || checkout.release()).await;
         }
 
         async fn pool_accounted(&self) -> Result<WorkerPool, PoolError> {
@@ -322,7 +370,27 @@ pub mod runtime_ops {
     }
 
     impl Service {
-        fn request_blocking(&self, request: Request) -> Result<Response, PoolError> {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the accounted async seam isolates blocking checkout and IPC on Tokio's blocking pool"
+        )]
+        async fn request_off_runtime(
+            &self,
+            request: Request,
+            for_run: bool,
+        ) -> Result<Response, PoolError> {
+            let service = self.clone();
+            let _held = CallHeld::of(Some(self));
+            tokio::task::spawn_blocking(move || service.request_blocking(request, for_run))
+                .await
+                .map_err(|error| {
+                    PoolError::breach(lash_vm_protocol::ProtocolBreach::Panicked {
+                        detail: lash_vm_protocol::Detail::new(error),
+                    })
+                })?
+        }
+
+        fn request_blocking(&self, request: Request, for_run: bool) -> Result<Response, PoolError> {
             if let Request::Lower { source, .. } = &request
                 && source.len() as u64 > self.config.protocol.max_source_bytes
             {
@@ -357,6 +425,19 @@ pub mod runtime_ops {
             let response = rmp_serde::from_slice(&response.0).map_err(|error| {
                 PoolError::payload(lash_vm_protocol::PayloadKind::ServiceResponse, error)
             })?;
+            // The worker that lowered the run's document starts the run.
+            if for_run
+                && matches!(response, Response::Lowered { .. })
+                && let Some(slot) = &self.retained
+            {
+                let mut slot = slot
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if slot.is_none() {
+                    *slot = Some(worker);
+                    return Ok(response);
+                }
+            }
             worker.release()?;
             Ok(response)
         }

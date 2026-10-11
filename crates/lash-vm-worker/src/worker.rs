@@ -34,6 +34,14 @@ struct Hosted {
     /// The release manifest the run pins, once it resumed from graph state;
     /// a run started here pins the release the build writes.
     release: Option<lash_kernel_doc::graph_tokens::ChildRef>,
+    /// The execution the run's state is bound to at each park that requests
+    /// something, as its start named it.
+    export: Option<EncodedPayload>,
+    /// The export of the run's last park that its `Parked` did not carry:
+    /// one that failed, or that did not fit one frame with the park. The
+    /// parent's `ExportGraph` takes it, failure included, as if the export
+    /// ran then.
+    staged: Option<Result<SealedGraphState, PoolError>>,
 }
 
 pub(crate) struct Server<'embedding> {
@@ -49,6 +57,8 @@ pub(crate) struct Server<'embedding> {
     hosted: Option<Hosted>,
     fences: Arc<Mutex<Fences>>,
     owner: Option<VmOwner>,
+    /// Whether the lease's one `Prepare` crossed, and no run started since.
+    prepared: bool,
     cpu_ceiling: Option<libc::rlim_t>,
 }
 
@@ -104,9 +114,15 @@ impl<'embedding> Server<'embedding> {
         embedding: &'embedding Embedding,
     ) -> Result<Self, PoolError> {
         // A ready worker can publish and restore checkpoints without first
-        // staging its immutable helper catalog during a guest turn.
+        // staging its immutable helper catalog during a guest turn, and runs
+        // its first document over a library compiled here, before the
+        // parent hands it one: its first turn costs what a warm one does
+        // (FIG-5922).
         embedding
             .release_manifests()
+            .map_err(|error| machine_breach(error.to_string()))?;
+        embedding
+            .prepared_for(lash_kernel_doc::KERNEL_VERSION)
             .map_err(|error| machine_breach(error.to_string()))?;
         let tuning = bootstrap.tuning;
         let mut server = Self {
@@ -125,6 +141,7 @@ impl<'embedding> Server<'embedding> {
                 next_read: 0,
             })),
             owner: None,
+            prepared: false,
             cpu_ceiling: None,
         };
         server.send(WorkerMessage::Ready {
@@ -211,6 +228,7 @@ impl<'embedding> Server<'embedding> {
                 if !matches!(
                     frame.message,
                     ParentMessage::Start(_)
+                        | ParentMessage::Run { start: Some(_), .. }
                         | ParentMessage::Prepare { .. }
                         | ParentMessage::Reset
                         | ParentMessage::Cancel
@@ -241,10 +259,7 @@ impl<'embedding> Server<'embedding> {
             }
             match frame.message {
                 ParentMessage::Start(start) => {
-                    if self.owner.is_some() {
-                        return Err(PoolError::breach(SequenceFault::StartBeforeReset));
-                    }
-                    self.owner = Some(start.owner.clone());
+                    self.admit_start(&start)?;
                     self.progress(WorkerPhase::Computing)?;
                     self.hosted = Some(self.start(*start)?);
                     self.progress(WorkerPhase::Serializing)?;
@@ -255,14 +270,29 @@ impl<'embedding> Server<'embedding> {
                         return Err(PoolError::breach(SequenceFault::PrepareBeforeReset));
                     }
                     self.owner = Some(owner);
+                    self.prepared = true;
                     self.progress(WorkerPhase::Computing)?;
                     self.codec.check_payload(&request.0)?;
                     let response = crate::service::perform(self.embedding, &request)?;
                     self.progress(WorkerPhase::Serializing)?;
                     self.respond(WorkerMessage::Prepared { response })?;
                 }
-                ParentMessage::Run { slice, cancel } => {
+                ParentMessage::Run {
+                    start,
+                    deliveries,
+                    slice,
+                    cancel,
+                } => {
+                    if let Some(start) = &start {
+                        self.admit_start(start)?;
+                    }
                     self.progress(WorkerPhase::Computing)?;
+                    if let Some(start) = start {
+                        self.hosted = Some(self.start(*start)?);
+                    }
+                    for delivery in deliveries {
+                        self.deliver(delivery)?;
+                    }
                     let message = match self.slice(slice, cancel) {
                         Err(PoolError::Infrastructure(
                             InfrastructureOutcome::WorkerLimitExceeded { limit },
@@ -273,20 +303,17 @@ impl<'embedding> Server<'embedding> {
                 }
                 ParentMessage::Deliver { wait, outcome } => {
                     self.progress(WorkerPhase::Computing)?;
-                    let outcome: OutcomeWire = self.decode(PayloadKind::Outcome, &outcome)?;
-                    let delivered = self
-                        .running()?
-                        .machine
-                        .deliver(lash_kernel_vm::WaitId(wait), outcome.into())
-                        .map_err(machine_breach)?;
+                    self.deliver(Delivery { wait, outcome })?;
                     self.progress(WorkerPhase::Serializing)?;
-                    self.respond(WorkerMessage::Delivered {
-                        dropped: delivered == lash_kernel_vm::Delivered::Dropped,
-                    })?;
+                    self.respond(WorkerMessage::Delivered)?;
                 }
                 ParentMessage::ExportGraph { binding } => {
                     self.progress(WorkerPhase::Computing)?;
-                    let message = match self.export_graph(&binding) {
+                    let exported = match self.staged_export(&binding) {
+                        Some(staged) => staged,
+                        None => self.export_graph(&binding),
+                    };
+                    let message = match exported {
                         Err(PoolError::Infrastructure(
                             InfrastructureOutcome::WorkerLimitExceeded { limit },
                         )) => WorkerMessage::LimitExceeded { limit },
@@ -310,6 +337,7 @@ impl<'embedding> Server<'embedding> {
                     self.hosted = None;
                     self.wire = None;
                     self.owner = None;
+                    self.prepared = false;
                     #[cfg(feature = "dhat-heap")]
                     crate::heap_profile::finish().map_err(PoolError::io)?;
                     self.fences
@@ -327,6 +355,44 @@ impl<'embedding> Server<'embedding> {
                 ParentMessage::Shutdown => return Ok(()),
             }
         }
+    }
+    /// Admits the lease's one run: on a worker that served nothing under
+    /// the lease, or right after the lease's `Prepare`. A reset between the
+    /// two would drop no machine and no wire; it would drop the owner and
+    /// the CPU ceiling, so the run takes its own owner and its ceiling
+    /// counts from its own start, as after a reset.
+    fn admit_start(&mut self, start: &Start) -> Result<(), PoolError> {
+        if self.owner.is_some() && !self.prepared {
+            return Err(PoolError::breach(SequenceFault::StartBeforeReset));
+        }
+        if std::mem::take(&mut self.prepared) {
+            self.cpu_ceiling = None;
+        }
+        self.owner = Some(start.owner.clone());
+        Ok(())
+    }
+    /// Hands the run one committed outcome.
+    fn deliver(&mut self, delivery: Delivery) -> Result<(), PoolError> {
+        let outcome: OutcomeWire = self.decode(PayloadKind::Outcome, &delivery.outcome)?;
+        let hosted = self.running()?;
+        hosted.staged = None;
+        hosted
+            .machine
+            .deliver(lash_kernel_vm::WaitId(delivery.wait), outcome.into())
+            .map_err(machine_breach)?;
+        Ok(())
+    }
+    /// The export the run's last park made under `binding`, if it made one
+    /// its `Parked` did not carry.
+    fn staged_export(
+        &mut self,
+        binding: &EncodedPayload,
+    ) -> Option<Result<SealedGraphState, PoolError>> {
+        let hosted = self.hosted.as_mut()?;
+        if hosted.export.as_ref() != Some(binding) {
+            return None;
+        }
+        hosted.staged.take()
     }
     /// The run's host wire, on this socket and under this run's fences.
     fn wire(&mut self) -> Result<Arc<Wire>, PoolError> {
@@ -468,6 +534,8 @@ impl<'embedding> Server<'embedding> {
             memory: start.bounds.memory,
             ended: false,
             release,
+            export: start.export,
+            staged: None,
         })
     }
     /// Runs the machine one slice and says where the run stands. What it
@@ -479,6 +547,7 @@ impl<'embedding> Server<'embedding> {
             printed: Vec::new(),
         };
         let hosted = self.running()?;
+        hosted.staged = None;
         let step = hosted
             .machine
             .run(&mut host, slice)
@@ -493,6 +562,20 @@ impl<'embedding> Server<'embedding> {
             memory: meters.memory,
             live_tasks: meters.live_tasks,
         };
+        // A park that requests something is saved as it stands, so its
+        // state is exported now, where the parent would ask for it next.
+        let export = match &step {
+            Step::Parked(park) if requests_something(park) => hosted.export.clone(),
+            _ => None,
+        };
+        let state = match export.map(|binding| self.export_graph(&binding)) {
+            Some(Ok(state)) => Some(state),
+            Some(Err(failure)) => {
+                self.running()?.staged = Some(Err(failure));
+                None
+            }
+            None => None,
+        };
         self.progress(WorkerPhase::Serializing)?;
         let Some(chunks) = self.printed_chunks(&host.printed, memory)? else {
             return Ok(WorkerMessage::LimitExceeded {
@@ -506,6 +589,7 @@ impl<'embedding> Server<'embedding> {
             Step::Parked(park) => WorkerMessage::Parked {
                 park: self.encode(PayloadKind::Park, &ParkWire::from(park))?,
                 meters,
+                state,
             },
             Step::Slice => WorkerMessage::Slice { meters },
             Step::Ended(end) => {
@@ -634,6 +718,39 @@ impl<'embedding> Server<'embedding> {
         fence.next_header();
         let header = fence.next_header();
         let (message, bytes) = match encode_worker(&self.codec, header, message) {
+            // A state that does not fit one frame with its park waits for
+            // the parent's `ExportGraph`, which then carries it alone.
+            (
+                WorkerMessage::Parked {
+                    park,
+                    meters,
+                    state: Some(state),
+                },
+                bytes,
+            ) if !bytes
+                .as_ref()
+                .is_ok_and(|bytes| self.codec.check_frame(bytes).is_ok()) =>
+            {
+                self.running()?.staged = Some(Ok(state));
+                let parked = WorkerMessage::Parked {
+                    park,
+                    meters,
+                    state: None,
+                };
+                match encode_worker(&self.codec, header, parked) {
+                    (
+                        message,
+                        Err(PoolError::Infrastructure(
+                            InfrastructureOutcome::WorkerLimitExceeded { limit },
+                        )),
+                    ) => (
+                        message,
+                        encode_worker(&self.codec, header, WorkerMessage::LimitExceeded { limit })
+                            .1?,
+                    ),
+                    (message, bytes) => (message, bytes?),
+                }
+            }
             (
                 message,
                 Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
@@ -670,6 +787,18 @@ impl<'embedding> Server<'embedding> {
         )?;
         Ok(message)
     }
+}
+
+/// Whether a park requests an effect or a sleep it has not withdrawn: a
+/// park the parent saves.
+fn requests_something(park: &lash_kernel_vm::Park) -> bool {
+    park.requests.iter().any(|request| {
+        let wait = match request {
+            lash_kernel_vm::Request::Effect(effect) => effect.wait,
+            lash_kernel_vm::Request::Sleep(sleep) => sleep.wait,
+        };
+        !park.withdrawn.contains(&wait)
+    })
 }
 
 pub(crate) fn cpu_nanos() -> Result<u64, PoolError> {

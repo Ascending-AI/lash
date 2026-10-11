@@ -10,6 +10,9 @@
 //! the cell on a replacement worker: the turn finishes with the cell's own
 //! result, the model is asked once and never sees a failure, and the cell's
 //! tool runs once.
+//!
+//! The same served turn, with no worker killed, is what a cell costs the
+//! worker boundary: one lease and a counted number of frames (FIG-5921).
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 #[path = "support/served.rs"]
@@ -235,6 +238,64 @@ async fn setup_crash_case(tier: Tier, request: Request) {
     world.shutdown().await;
 }
 
+/// FIG-5921: a cell that calls one tool and finishes crosses the worker
+/// boundary on one lease, in at most 25 frames with one reset: its lowering
+/// and its run share the lease, the run's start crosses with its first
+/// slice, each park's outcome with the next slice, and each park's state
+/// with the park. It took two leases, two resets and 49 frames when each
+/// crossed alone.
+async fn a_tool_and_finish_cell_crosses_the_worker_boundary_on_one_lease(tier: Tier) {
+    let workers = lash::vm::WorkerService::default();
+    let warming = AtomicBool::new(true);
+    let model = lash_core::testing::TestProvider::builder()
+        .kind("worker-exchanges")
+        .complete(move |_request: LlmRequest| {
+            let response = if warming.swap(false, Ordering::SeqCst) {
+                served::cell("await control.finish(\"warm\");")
+            } else {
+                served::cell(CELL)
+            };
+            async move { Ok(response) }
+        })
+        .build()
+        .into_handle();
+    let runs = Arc::new(AtomicUsize::new(0));
+    let Some(world) = World::with_model(tier, Vec::new(), model, |backend| {
+        lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, None, workers.clone()))
+            .tools(count(&runs))
+    })
+    .await
+    else {
+        return;
+    };
+    // A first cell starts the pool and warms its worker.
+    let warm = world
+        .session("worker-exchanges-warm", served::spec(8))
+        .await;
+    world.send(&warm, "warm the worker").await;
+    let counters = || workers.pool().expect("the pool").measurements().counters;
+    let before = counters();
+    let session = world.session("worker-exchanges", served::spec(8)).await;
+    let output = world.send(&session, "count once").await;
+    let after = counters();
+    assert_eq!(
+        output.finished().map(|(_, value)| value),
+        Some(&serde_json::json!({ "first": { "result": "counted" } }))
+    );
+    assert_eq!(runs.load(Ordering::SeqCst), 1, "the cell's tool runs once");
+    let frames = after.ipc_sent_messages + after.ipc_received_messages
+        - before.ipc_sent_messages
+        - before.ipc_received_messages;
+    assert_eq!(
+        after.checkouts - before.checkouts,
+        1,
+        "one lease: {after:?}"
+    );
+    assert_eq!(after.resets - before.resets, 1, "one reset: {after:?}");
+    assert!(frames <= 25, "{frames} frames: {after:?}");
+    world.shutdown().await;
+}
+
 async fn a_lowering_worker_crash_is_never_a_recorded_host_cell_failure(tier: Tier) {
     setup_crash_case(tier, Request::Lower).await;
 }
@@ -246,4 +307,5 @@ async fn a_cell_start_worker_crash_is_never_a_recorded_host_cell_failure(tier: T
 tiered_laws!(
     a_lowering_worker_crash_is_never_a_recorded_host_cell_failure,
     a_cell_start_worker_crash_is_never_a_recorded_host_cell_failure,
+    a_tool_and_finish_cell_crosses_the_worker_boundary_on_one_lease,
 );

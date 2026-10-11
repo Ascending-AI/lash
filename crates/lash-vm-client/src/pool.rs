@@ -339,7 +339,20 @@ pub struct Checkout {
     outgoing: MessageFence,
     incoming: MessageFence,
     reservation: usize,
+    /// Whether the lease's one `Prepare` crossed.
+    prepared: bool,
     started: bool,
+    /// The run's start, until it crosses with the run's first slice.
+    unsent_start: Option<Box<Start>>,
+    /// Committed outcomes for the run, until they cross with its next
+    /// slice.
+    deliveries: Vec<Delivery>,
+    /// The execution the run's start asked each saved park's state to be
+    /// bound to.
+    export: Option<EncodedPayload>,
+    /// The state the run's last park carried, until `export_graph` takes
+    /// it.
+    staged: Option<SealedGraphState>,
     /// The host read the worker waits on.
     pending: Option<HostReadId>,
     /// Whether the worker stands at a safe point, where it can be reset.
@@ -388,6 +401,11 @@ impl Checkout {
     pub fn lease(&self) -> ExecutionLease {
         self.outgoing.next_header_copy().lease
     }
+    /// The owner and frame epochs the lease runs under.
+    pub(crate) fn epochs(&self) -> (OwnerEpoch, FrameEpoch) {
+        let header = self.outgoing.next_header_copy();
+        (header.owner_epoch, header.frame_epoch)
+    }
     pub fn interruptor(&self) -> Result<std::os::unix::net::UnixStream, PoolError> {
         self.worker
             .as_ref()
@@ -403,11 +421,14 @@ impl Checkout {
         &self.budget
     }
 
-    /// Hands the worker the run: it validates and compiles `start`'s
-    /// document and builds a machine that has executed nothing, or one
-    /// rebuilt from the parked state. `document` is the identity the parent
-    /// knows the document by, which a parked state must name; `class` is
-    /// what the pool's receipts call the execution.
+    /// Takes the run for the worker: with the run's first slice, it
+    /// validates and compiles `start`'s document and builds a machine that
+    /// has executed nothing, or one rebuilt from the parked state; what it
+    /// refuses, that slice answers (FIG-5921). `document` is the identity
+    /// the parent knows the document by, which a parked state must name;
+    /// `class` is what the pool's receipts call the execution. A lease
+    /// whose `prepare` lowered the run's document starts it with no reset
+    /// between.
     pub fn start(
         &mut self,
         mut start: Start,
@@ -436,32 +457,109 @@ impl Checkout {
         bounds.live_tasks = bounds.live_tasks.min(ceiling.live_tasks);
         bounds.requests_per_park = bounds.requests_per_park.min(ceiling.requests_per_park);
         bounds.join_members = bounds.join_members.min(ceiling.join_members);
+        // The start crosses within what the checkout reserved for it, as
+        // if it crossed alone.
+        let worker = self.worker.as_ref().ok_or_else(PoolError::eof)?;
+        let size = worker
+            .codec
+            .borrowed_frame_len(&BorrowedParentFrame {
+                header: self.outgoing.next_header_copy(),
+                message: BorrowedParentMessage::Start(&start),
+            })
+            .map_err(PoolError::from);
+        match size {
+            Ok(size) if size <= self.reservation as u64 => {}
+            Ok(size) => {
+                self.discard();
+                return Err(PoolError::QueueFull {
+                    bytes: usize::try_from(size).unwrap_or(usize::MAX),
+                });
+            }
+            Err(error) => {
+                self.discard();
+                return Err(error);
+            }
+        }
         self.execution_class = Some(class);
+        self.execution_recorded = false;
         self.owner = Some(start.owner.clone());
         self.document = Some(document.to_owned());
-        self.print_budget = bounds.memory;
+        self.print_budget = start.bounds.memory;
+        self.export = start.export.clone();
         self.started = true;
-        match self.exchange(
-            ParentMessage::Start(Box::new(start)),
-            self.pool.config.protocol.no_response_watchdog,
-        )? {
-            WorkerMessage::Started => Ok(()),
-            message => Err(self.unexpected(Exchange::Run, &message)),
-        }
+        self.unsent_start = Some(Box::new(start));
+        Ok(())
+    }
+
+    /// Admits the run a checkout kept from its lowering starts next, as a
+    /// checkout of its own would be admitted: under the execution's budget,
+    /// holding `reservation` bytes for its input.
+    pub(crate) fn readmit(&mut self, reservation: usize) -> Result<(), PoolError> {
+        self.budget.admit(&self.pool.config)?;
+        self.reservation = reservation;
+        Ok(())
     }
 
     /// Runs ready tasks until the machine reads its host, parks, spends
     /// `slice` charge units or ends. With `cancel` the machine observes a
-    /// run cancel at its next safe point.
+    /// run cancel at its next safe point. The run's start, when it has not
+    /// crossed, and the outcomes delivered since the last slice cross with
+    /// it, in one exchange (FIG-5921).
     pub fn run(&mut self, slice: u64, cancel: bool) -> Result<RunStep, PoolError> {
         if self.pending.is_some() || !self.started {
             return Err(PoolError::breach(SequenceFault::NoRun));
         }
-        let message = self.exchange(
-            ParentMessage::Run { slice, cancel },
-            self.pool.config.protocol.no_response_watchdog,
-        )?;
+        self.staged = None;
+        let message = self.drive(slice, cancel)?;
         self.step(message)
+    }
+
+    /// The exchange of one slice, its start and its deliveries: in one
+    /// frame, or, when they outgrow one, the start and each delivery in an
+    /// exchange of its own before the slice.
+    fn drive(&mut self, slice: u64, cancel: bool) -> Result<WorkerMessage, PoolError> {
+        let timeout = self.pool.config.protocol.no_response_watchdog;
+        let start = self.unsent_start.take();
+        let deliveries = std::mem::take(&mut self.deliveries);
+        let together = self.worker.as_ref().and_then(|worker| {
+            worker
+                .codec
+                .encode_borrowed(&BorrowedParentFrame {
+                    header: self.outgoing.next_header_copy(),
+                    message: BorrowedParentMessage::Run {
+                        start: start.as_deref(),
+                        deliveries: &deliveries,
+                        slice,
+                        cancel,
+                    },
+                })
+                .ok()
+                .filter(|bytes| worker.codec.check_frame(bytes).is_ok())
+        });
+        if let Some(bytes) = together {
+            return self.exchange_encoded(&bytes, timeout);
+        }
+        if let Some(start) = start {
+            match self.exchange(ParentMessage::Start(start), timeout)? {
+                WorkerMessage::Started => {}
+                message => return Err(self.unexpected(Exchange::Run, &message)),
+            }
+        }
+        for Delivery { wait, outcome } in deliveries {
+            match self.exchange(ParentMessage::Deliver { wait, outcome }, timeout)? {
+                WorkerMessage::Delivered => {}
+                message => return Err(self.unexpected(Exchange::Deliver, &message)),
+            }
+        }
+        self.exchange(
+            ParentMessage::Run {
+                start: None,
+                deliveries: Vec::new(),
+                slice,
+                cancel,
+            },
+            timeout,
+        )
     }
 
     /// Answers the machine's pending host read; the slice runs on. The
@@ -492,16 +590,24 @@ impl Checkout {
             WorkerMessage::HostRead { id, kind, request } => {
                 RunStep::HostRead { id, kind, request }
             }
-            WorkerMessage::Parked { park, meters } => RunStep::Parked { park, meters },
+            WorkerMessage::Parked {
+                park,
+                meters,
+                state,
+            } => {
+                self.staged = state;
+                RunStep::Parked { park, meters }
+            }
             WorkerMessage::Slice { meters } => RunStep::Slice { meters },
             WorkerMessage::Ended { end, meters } => RunStep::Ended { end, meters },
             message => return Err(self.unexpected(Exchange::Run, &message)),
         })
     }
 
-    /// Hands the machine one committed outcome; `true` when its wait had
-    /// been withdrawn and the outcome was dropped.
-    pub fn deliver(&mut self, wait: u64, outcome: EncodedPayload) -> Result<bool, PoolError> {
+    /// Hands the machine one committed outcome, with the run's next slice:
+    /// the machine takes it before it runs on, or drops it when its wait
+    /// had been withdrawn.
+    pub fn deliver(&mut self, wait: u64, outcome: EncodedPayload) -> Result<(), PoolError> {
         if self.pending.is_some() || !self.started {
             return Err(PoolError::breach(SequenceFault::NoRun));
         }
@@ -509,23 +615,45 @@ impl Checkout {
             self.discard();
             return Err(error);
         }
-        match self.exchange(
-            ParentMessage::Deliver { wait, outcome },
-            self.pool.config.protocol.no_response_watchdog,
-        )? {
-            WorkerMessage::Delivered { dropped } => Ok(dropped),
-            message => Err(self.unexpected(Exchange::Deliver, &message)),
-        }
+        self.staged = None;
+        self.deliveries.push(Delivery { wait, outcome });
+        Ok(())
     }
 
     /// The run's state at this park as checkpoint graph state, sealed by the
-    /// worker and checked here.
+    /// worker and checked here: the state the park carried, when `binding`
+    /// is the one the run's start named, and otherwise the worker's answer
+    /// to an `ExportGraph`.
     pub fn export_graph(
         &mut self,
         binding: lash_vm_protocol::EncodedPayload,
     ) -> Result<lash_vm_protocol::SealedGraphState, PoolError> {
         if self.pending.is_some() || !self.started {
             return Err(PoolError::breach(SequenceFault::NoRun));
+        }
+        if self.export.as_ref() == Some(&binding)
+            && let Some(state) = self.staged.take()
+        {
+            let checked = self
+                .owner
+                .as_ref()
+                .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))
+                .and_then(|owner| {
+                    state
+                        .check(&graph_expectation(
+                            owner,
+                            self.document.as_deref(),
+                            self.pool.config.protocol.max_vm_state_bytes,
+                        ))
+                        .map_err(|refusal| {
+                            InfrastructureOutcome::output_graph_state(refusal).into()
+                        })
+                });
+            if let Err(error) = checked {
+                self.discard();
+                return Err(error);
+            }
+            return Ok(state);
         }
         match self.exchange(
             ParentMessage::ExportGraph { binding },
@@ -560,11 +688,11 @@ impl Checkout {
         owner: VmOwner,
         request: EncodedPayload,
     ) -> Result<EncodedPayload, PoolError> {
-        if self.started {
+        if self.started || self.prepared {
             return Err(PoolError::breach(SequenceFault::CheckoutAlreadyStarted));
         }
         self.owner = Some(owner.clone());
-        self.started = true;
+        self.prepared = true;
         match self.exchange(
             ParentMessage::Prepare { owner, request },
             self.pool.config.protocol.no_response_watchdog,
@@ -589,7 +717,7 @@ impl Checkout {
     /// Call once the run stands at a safe point the broker stops at: its end,
     /// or a park that outlives this activation.
     pub fn release(mut self) -> Result<(), PoolError> {
-        if self.started && !self.resettable {
+        if (self.started || self.prepared) && !self.resettable {
             self.discard();
             return Err(PoolError::breach(SequenceFault::FailedWorkerReset));
         }
@@ -655,8 +783,13 @@ impl Checkout {
         {
             return Err(PoolError::QueueFull { bytes: bytes.len() });
         }
+        self.send_encoded(&bytes, timeout)
+    }
+    /// Sends a frame encoded under the next outgoing header.
+    fn send_encoded(&mut self, bytes: &[u8], timeout: Duration) -> Result<(), PoolError> {
+        let worker = self.worker.as_mut().ok_or_else(PoolError::eof)?;
         self.outgoing.next_header();
-        worker.send_encoded(&bytes, timeout)
+        worker.send_encoded(bytes, timeout)
     }
     fn receive_control(&mut self, timeout: Duration) -> Result<WorkerMessage, PoolError> {
         let frame = self
@@ -674,7 +807,32 @@ impl Checkout {
         message: ParentMessage,
         timeout: Duration,
     ) -> Result<WorkerMessage, PoolError> {
-        let result = self.exchange_inner(message, timeout);
+        self.resettable = false;
+        self.printed_bytes = 0;
+        let result = self
+            .send(message, timeout)
+            .and_then(|()| self.answer(timeout));
+        self.settle(result)
+    }
+    /// [`Checkout::exchange`] of a frame already encoded under the next
+    /// outgoing header.
+    fn exchange_encoded(
+        &mut self,
+        bytes: &[u8],
+        timeout: Duration,
+    ) -> Result<WorkerMessage, PoolError> {
+        self.resettable = false;
+        self.printed_bytes = 0;
+        let result = self
+            .send_encoded(bytes, timeout)
+            .and_then(|()| self.answer(timeout));
+        self.settle(result)
+    }
+    /// An exchange's result: a failed one discards the worker.
+    fn settle(
+        &mut self,
+        result: Result<WorkerMessage, PoolError>,
+    ) -> Result<WorkerMessage, PoolError> {
         if result.is_err() {
             self.discard();
             #[cfg(feature = "testing")]
@@ -695,14 +853,9 @@ impl Checkout {
         }
         result
     }
-    fn exchange_inner(
-        &mut self,
-        message: ParentMessage,
-        timeout: Duration,
-    ) -> Result<WorkerMessage, PoolError> {
-        self.resettable = false;
-        self.printed_bytes = 0;
-        self.send(message, timeout)?;
+    /// The worker's answer to the request just sent, its progress and
+    /// prints taken on the way.
+    fn answer(&mut self, timeout: Duration) -> Result<WorkerMessage, PoolError> {
         let mut deadline = Instant::now() + timeout;
         let mut phase = None;
         #[cfg(feature = "testing")]
@@ -836,7 +989,7 @@ impl Checkout {
                 | WorkerMessage::Parked { .. }
                 | WorkerMessage::Slice { .. }
                 | WorkerMessage::Ended { .. }
-                | WorkerMessage::Delivered { .. }
+                | WorkerMessage::Delivered
                 | WorkerMessage::Prepared { .. }) => {
                     self.resettable = true;
                     return Ok(message);
@@ -863,7 +1016,7 @@ impl Checkout {
             let cpu = self.pool.discard(worker, failed);
             let _ = self.charge_cpu(cpu);
             self.credited_cpu = cpu;
-            if self.started {
+            if self.started || self.prepared {
                 lock(&self.budget.0).replacement = true;
             }
         }
@@ -1025,9 +1178,16 @@ pub mod runtime_ops {
                         outgoing: MessageFence::new(lease, owner_epoch, frame_epoch),
                         incoming: MessageFence::new(lease, owner_epoch, frame_epoch),
                         reservation: queued_bytes,
+                        prepared: false,
                         started: false,
+                        unsent_start: None,
+                        deliveries: Vec::new(),
+                        export: None,
+                        staged: None,
                         pending: None,
-                        resettable: false,
+                        // Nothing has crossed: the worker stands where its
+                        // last reset left it.
+                        resettable: true,
                         owner: None,
                         document: None,
                         printed: Vec::new(),

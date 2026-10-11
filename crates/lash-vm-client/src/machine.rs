@@ -13,7 +13,7 @@ use std::sync::Arc;
 use lash_core_store::checkpoint_graph::bodies::OwnerBinding;
 use lash_core_store::checkpoint_graph::{DecodeLimits, NodeKind};
 use lash_kernel_doc::{Datum, Document, DocumentId, ErrorDatum, Handle, KernelVersion, Timestamp};
-use lash_kernel_vm::{Bounds, Delivered, End, Outcome, Start, Step, WaitId};
+use lash_kernel_vm::{Bounds, End, Outcome, Start, Step, WaitId};
 use lash_sansio::VersionRange;
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::state::{GraphStateFailure, ReleaseGraph, WholeState};
@@ -110,7 +110,14 @@ impl RemoteMachines {
         })
     }
 
-    async fn checkout(&self, from: StartFrom) -> Result<RemoteMachine, KernelFailure> {
+    /// A checkout holding the run: the one that lowered its document when
+    /// the execution kept it, and otherwise one from the pool. Its state at
+    /// each park that requests something is bound to `binding`.
+    async fn checkout(
+        &self,
+        from: StartFrom,
+        binding: &OwnerBinding,
+    ) -> Result<RemoteMachine, KernelFailure> {
         let start = lash_vm_protocol::Start {
             owner: self.owner.clone(),
             document: EncodedPayload(self.encoded.as_ref().clone()),
@@ -123,6 +130,9 @@ impl RemoteMachines {
                 requests_per_park: self.bounds.requests_per_park,
                 join_members: self.bounds.join_members,
             },
+            export: Some(EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(
+                binding,
+            ))),
         };
         let reservation = start.document.0.len()
             + match &start.from {
@@ -146,12 +156,24 @@ impl RemoteMachines {
         };
         let held = CallHeld::of(Some(&self.service));
         let checkout = blocking(move || {
-            let mut checkout = service.pool()?.checkout(
-                reservation,
-                owner_epoch,
-                frame_epoch,
-                service.budget.clone().unwrap_or_default(),
-            )?;
+            let mut checkout = match service.take_retained(owner_epoch, frame_epoch) {
+                Some(mut retained) => match retained.readmit(reservation) {
+                    Ok(()) => retained,
+                    Err(refused) => {
+                        // The worker goes back to the pool, as a checkout
+                        // refused under the budget leaves it; a reset that
+                        // fails has discarded it instead.
+                        let _ = retained.release();
+                        return Err(refused);
+                    }
+                },
+                None => service.pool()?.checkout(
+                    reservation,
+                    owner_epoch,
+                    frame_epoch,
+                    service.budget.clone().unwrap_or_default(),
+                )?,
+            };
             #[cfg(feature = "testing")]
             service.record_worker(
                 match class {
@@ -187,10 +209,10 @@ impl Machines for RemoteMachines {
         self.bounds
     }
 
-    async fn start(&self) -> Result<RemoteMachine, KernelFailure> {
+    async fn start(&self, binding: &OwnerBinding) -> Result<RemoteMachine, KernelFailure> {
         let start = wire::encode(PayloadKind::Start, &StartWire::from(self.start.clone()))
             .map_err(worker)?;
-        self.checkout(StartFrom::Fresh(start)).await
+        self.checkout(StartFrom::Fresh(start), binding).await
     }
 
     fn releases(&self) -> Result<&ReleaseGraph, KernelFailure> {
@@ -202,15 +224,21 @@ impl Machines for RemoteMachines {
 
     /// Resumes a parked run from its checkpoint graph state and the
     /// admission of each wait it holds (FIG-5887 §3).
-    async fn resume(&self, parked: &ParkedState) -> Result<RemoteMachine, KernelFailure> {
-        self.resume_sealed(parked.sealed(self.owner.clone())).await
+    async fn resume(
+        &self,
+        parked: &ParkedState,
+        binding: &OwnerBinding,
+    ) -> Result<RemoteMachine, KernelFailure> {
+        self.resume_sealed(parked.sealed(self.owner.clone()), binding)
+            .await
     }
 }
 
 impl RemoteMachines {
     /// Resumes a parked run from sealed graph state and the admission of
     /// each wait it holds: a holder that keeps the state sealed, such as a
-    /// kernel process's engine.
+    /// kernel process's engine. Its state at each park that requests
+    /// something is bound to `binding`.
     ///
     /// # Errors
     ///
@@ -218,8 +246,9 @@ impl RemoteMachines {
     pub async fn resume_sealed(
         &self,
         parked: lash_vm_protocol::ParkedGraph,
+        binding: &OwnerBinding,
     ) -> Result<RemoteMachine, KernelFailure> {
-        self.checkout(StartFrom::ParkedGraph(parked)).await
+        self.checkout(StartFrom::ParkedGraph(parked), binding).await
     }
 
     /// Whose runs these machines are.
@@ -356,21 +385,11 @@ impl DrivenMachine for RemoteMachine {
         }
     }
 
-    async fn deliver(
-        &mut self,
-        wait: WaitId,
-        outcome: Outcome,
-    ) -> Result<Delivered, KernelFailure> {
+    async fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<(), KernelFailure> {
         let outcome =
             wire::encode(PayloadKind::Outcome, &OutcomeWire::from(outcome)).map_err(worker)?;
-        let dropped = self
-            .with(move |checkout| checkout.deliver(wait.0, outcome))
-            .await?;
-        Ok(if dropped {
-            Delivered::Dropped
-        } else {
-            Delivered::Accepted
-        })
+        self.with(move |checkout| checkout.deliver(wait.0, outcome))
+            .await
     }
 
     /// The run's state at this park as checkpoint graph state, bound to the

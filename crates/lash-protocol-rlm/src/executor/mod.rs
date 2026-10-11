@@ -367,9 +367,10 @@ async fn link_cell(
             .map_err(|error| Refused::Helpers(Box::new(error)))?,
         None => lash_vm_runtime::KERNEL_HELPER_RELEASE,
     };
+    // The worker that lowers the cell starts its run (FIG-5921).
     let lowered = services
         .workers
-        .request_accounted(Request::Lower {
+        .request_for_run(Request::Lower {
             dialect: state.dialect().to_owned(),
             source: code.to_owned(),
             effects: boundary.signatures(),
@@ -518,10 +519,40 @@ async fn run_cell(
 ) -> ExecResponse {
     state.begin_code_execution();
     let workers = services.workers.begin_execution();
-    let services = &CellServices {
+    let services = CellServices {
         workers,
         ..services.clone()
     };
+    let response = Box::pin(run_linked_cell(
+        state,
+        ctx,
+        code,
+        &services,
+        session_projected_bindings,
+        identities,
+        prints,
+        snapshots,
+        resumed,
+    ))
+    .await;
+    // The worker that lowered a cell whose run never started on it goes
+    // back to the pool.
+    services.workers.release_retained().await;
+    response
+}
+
+#[expect(clippy::too_many_arguments, reason = "one cell's whole run")]
+async fn run_linked_cell(
+    state: &mut CodeModeExecutionState,
+    ctx: RuntimeExecutionContext<'_>,
+    code: &str,
+    services: &CellServices,
+    session_projected_bindings: CodeModeProjectedBindings,
+    identities: lash_vm_broker::CodeCallIdentities,
+    prints: Arc<Mutex<Vec<Datum>>>,
+    snapshots: &Arc<lash_vm_broker::DurableSnapshotStore>,
+    resumed: Option<envelope::ResumedCell>,
+) -> ExecResponse {
     let linked = match link_cell(
         state,
         &ctx,

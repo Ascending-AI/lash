@@ -11,6 +11,7 @@ use std::cell::Cell;
 use lash_vm_protocol::{
     CodecRefusal, DecodeLimits, EncodedPayload, ExecutionLease, FRAME_MAGIC, FrameCodec,
     FrameEpoch, HostReadId, HostReadKind, MessageFence, OwnerEpoch, WorkerFrame, WorkerMessage,
+    WorkerPhase,
 };
 
 struct CountingAllocator;
@@ -148,5 +149,28 @@ fn a_frame_is_encoded_into_one_allocation_of_its_size() {
         allocated < (VALUE_BYTES + VALUE_BYTES / 2) as u64,
         "encoding a {}-byte frame allocated {allocated} bytes",
         bytes.len()
+    );
+}
+
+/// FIG-5921: checking a frame's structure allocates nothing for the
+/// protocol's own nesting, so a control frame that carries no data, such
+/// as a progress report, decodes without allocating. Its check took a
+/// 1,032-byte scratch stack sized for the deepest payload the bounds admit.
+#[test]
+fn a_control_frame_decodes_without_allocating() {
+    let frame = WorkerFrame {
+        header: MessageFence::new(ExecutionLease(1), OwnerEpoch(1), FrameEpoch(1)).next_header(),
+        message: WorkerMessage::Progress {
+            phase: WorkerPhase::Computing,
+            cpu_nanos: 1_000_000,
+        },
+    };
+    let codec = codec();
+    let bytes = codec.encode_worker(&frame).expect("the frame encodes");
+    let (decoded, allocated) = allocated_during(|| codec.decode_worker(&bytes));
+    assert_eq!(decoded.expect("the frame decodes"), frame);
+    assert_eq!(
+        allocated, 0,
+        "decoding a progress frame allocated {allocated} bytes"
     );
 }

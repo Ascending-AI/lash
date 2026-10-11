@@ -34,16 +34,25 @@ Before guest work an owned child installs a CPU ceiling (`RLIMIT_CPU`) from
 the configured execution budget.
 
 `checkout` reserves the complete encoded input size and bounds its wait. A
-checkout owns one execution lease. `start` hands the worker the admitted
-document's encoding, a fresh start or opaque parked state, and the run's
-bounds; the worker validates and compiles the document. `run` runs ready tasks
-for one slice of charge units and answers `Parked`, `Slice` or `Ended`.
-Host reads (clock, random, projection reads) arrive mid-slice and are answered
-with `host_answer`; prints are collected with `take_printed`. `deliver` hands
-the machine one committed outcome, and `export` writes its state between
-slices. Parked state is opaque in the parent: only a worker imports it, under
-the document it names. Descriptions carry no grants or backing host handles;
-the broker admits every effect against its admitted context.
+checkout owns one execution lease. `start` takes the admitted document's
+encoding, a fresh start or opaque parked state, the run's bounds and the
+execution its parks are saved under; it crosses with the first `run`, where the
+worker validates and compiles the document. `run` runs ready tasks for one
+slice of charge units and answers `Parked`, `Slice` or `Ended`. Host reads
+(clock, random, projection reads) arrive mid-slice and are answered with
+`host_answer`; prints are collected with `take_printed`. `deliver` hands the
+machine one committed outcome, which crosses with the next slice, and `export`
+takes the state a park that requests something carried, or asks the worker for
+it. Parts that do not fit one frame together cross in exchanges of their own.
+Parked state is opaque in the parent: only a worker imports it, under the
+document it names. Descriptions carry no grants or backing host handles; the
+broker admits every effect against its admitted context.
+
+A cell's lowering and its run share one lease: the worker that lowered the
+document starts the run with no reset between, so a cell that calls a tool and
+finishes crosses the boundary in 22 frames (FIG-5921). A worker compiles its
+helper library before it reports ready, so its first run costs what a warm one
+does (FIG-5922).
 
 `prepare` runs pure work in a worker: `Request::Lower` lowers source in a
 dialect to a kernel document against the effects the host supplies and the

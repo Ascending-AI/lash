@@ -63,8 +63,8 @@ pub struct Embedding {
     /// no successor's document never redeclares (FIG-5796).
     interpreted: OnceLock<Result<Arc<FunctionRegistry>, EmbedError>>,
     /// `written` and `interpreted` with every library body compiled, once
-    /// for all the runs of the worker, made when a document first runs
-    /// against each.
+    /// for all the runs of the worker: `written` before the worker is
+    /// ready, `interpreted` when a successor's document first runs.
     prepared_written: OnceLock<PreparedLibrary>,
     prepared_interpreted: OnceLock<PreparedLibrary>,
     pub(crate) library: NamedLibrary,

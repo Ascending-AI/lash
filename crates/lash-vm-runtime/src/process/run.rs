@@ -277,23 +277,26 @@ async fn drive(
     slice: u64,
     stop: &CancellationToken,
 ) -> Result<(Step, Option<SealedRun>), KernelFailure> {
+    let binding = lash_core_store::checkpoint_graph::bodies::OwnerBinding::Process {
+        process: process.as_str().to_owned(),
+    };
     let mut machine = match input.parked {
         Some(parked) => {
             machines
-                .resume_sealed(lash_vm_protocol::ParkedGraph {
-                    state: parked.0,
-                    admissions: input
-                        .admissions
-                        .iter()
-                        .map(|admission| lash_vm_client::graph::admission(&admission.0))
-                        .collect(),
-                })
+                .resume_sealed(
+                    lash_vm_protocol::ParkedGraph {
+                        state: parked.0,
+                        admissions: input
+                            .admissions
+                            .iter()
+                            .map(|admission| lash_vm_client::graph::admission(&admission.0))
+                            .collect(),
+                    },
+                    &binding,
+                )
                 .await?
         }
-        None => machines.start().await?,
-    };
-    let binding = lash_core_store::checkpoint_graph::bodies::OwnerBinding::Process {
-        process: process.as_str().to_owned(),
+        None => machines.start(&binding).await?,
     };
     for delivery in input.deliver {
         machine

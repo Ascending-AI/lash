@@ -55,23 +55,35 @@ fn main() {
     }
     let mut started = false;
     let mut hook = |message: &lash_vm_protocol::ParentMessage| {
+        use lash_vm_protocol::ParentMessage;
+        // A run starts alone, or with its first slice.
+        let starts = matches!(
+            message,
+            ParentMessage::Start(_) | ParentMessage::Run { start: Some(_), .. }
+        );
         // `abort` dies in the middle of a run: at the first outcome the
-        // parent hands back.
-        if mode == "abort" && matches!(message, lash_vm_protocol::ParentMessage::Deliver { .. }) {
+        // parent hands back, alone or with the slice it precedes.
+        if mode == "abort"
+            && match message {
+                ParentMessage::Deliver { .. } => true,
+                ParentMessage::Run { deliveries, .. } => !deliveries.is_empty(),
+                _ => false,
+            }
+        {
             std::process::abort();
         }
-        if matches!(message, lash_vm_protocol::ParentMessage::Reset) {
+        if matches!(message, ParentMessage::Reset) {
             if mode == "reset_abort" && started {
                 std::process::abort();
             }
             started = false;
         }
-        if matches!(message, lash_vm_protocol::ParentMessage::Start(_)) {
+        if starts {
             started = true;
         }
         // A run's first act is a system call the worker's confinement
         // forbids: a socket, or memory both writable and executable.
-        if matches!(message, lash_vm_protocol::ParentMessage::Start(_)) {
+        if starts {
             #[expect(
                 unsafe_code,
                 reason = "the fixture makes system calls its confinement must kill"
@@ -96,8 +108,7 @@ fn main() {
         // `panic_backtrace` panics as a worker started with RUST_BACKTRACE=1
         // would: the pool clears the environment, so the fixture sets it
         // here, once confined and before the panic hook first reads it.
-        if mode == "panic_backtrace" && matches!(message, lash_vm_protocol::ParentMessage::Start(_))
-        {
+        if mode == "panic_backtrace" && starts {
             // SAFETY: the serving thread is the fixture's only thread here.
             #[expect(
                 unsafe_code,
@@ -108,7 +119,7 @@ fn main() {
             }
             panic!("a panic with a backtrace requested");
         }
-        if mode == "hang" && matches!(message, lash_vm_protocol::ParentMessage::Start(_)) {
+        if mode == "hang" && starts {
             std::thread::sleep(std::time::Duration::from_secs(60));
         }
         if mode == "probe" {

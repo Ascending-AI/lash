@@ -1,10 +1,12 @@
 //! The typed messages a parent and its worker exchange.
 //!
 //! The worker hosts one kernel machine per execution, and the parent drives
-//! it through the machine's own interface: [`ParentMessage::Start`] compiles
-//! the document, [`ParentMessage::Run`] runs ready tasks until the run parks,
-//! spends its slice or ends, [`ParentMessage::Deliver`] hands it one
-//! committed outcome and [`ParentMessage::ExportGraph`] asks for its state. While
+//! it through the machine's own interface: [`ParentMessage::Run`] compiles
+//! the document when it starts the run, hands the machine the committed
+//! outcomes it waits on and runs ready tasks until the run parks, spends
+//! its slice or ends, and a park that requests something answers with the
+//! run's state ([`ParentMessage::Start`], [`ParentMessage::Deliver`] and
+//! [`ParentMessage::ExportGraph`] do each part alone). While
 //! a slice runs the worker asks the parent what the machine reads from its
 //! host ([`WorkerMessage::HostRead`]) and hands over what it prints
 //! ([`WorkerMessage::Printed`]). Every message travels under a
@@ -269,6 +271,20 @@ pub struct Start {
     pub document: EncodedPayload,
     pub from: StartFrom,
     pub bounds: RunBounds,
+    /// The execution the run's parked state is bound to (an OwnerBinding
+    /// body in the graph's token encoding), when the parent saves the
+    /// state at every park that requests something: the worker exports it
+    /// there and [`WorkerMessage::Parked`] carries it, so no separate
+    /// [`ParentMessage::ExportGraph`] exchange asks for it (FIG-5921).
+    pub export: Option<EncodedPayload>,
+}
+
+/// One committed outcome, for the wait the machine named.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Delivery {
+    pub wait: u64,
+    pub outcome: EncodedPayload,
 }
 
 /// Names one host read within a run, so its answer answers exactly it.
@@ -301,21 +317,32 @@ pub struct RunMeters {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParentMessage {
+    /// Build the run's machine. A run's start crosses with its first
+    /// [`ParentMessage::Run`], and on its own only when the two outgrow one
+    /// frame.
     Start(Box<Start>),
     /// Pure compiler or state work. The payload has no parent authority.
+    /// A lease's one `Prepare` may be followed by the `Start` of the run it
+    /// prepared, with no reset between them (FIG-5921).
     Prepare {
         owner: VmOwner,
         request: EncodedPayload,
     },
-    /// Run ready tasks until none is ready, the run ends, or `slice` charge
-    /// units are spent. With `cancel`, the machine observes a run cancel at
-    /// its next safe point and ends cancelled; the durable winner is still
-    /// the parent's to decide (ADR 0039).
+    /// Build the run's machine from `start` when this exchange begins the
+    /// run, hand it `deliveries` in order, then run ready tasks until none
+    /// is ready, the run ends, or `slice` charge units are spent. With
+    /// `cancel`, the machine observes a run cancel at its next safe point
+    /// and ends cancelled; the durable winner is still the parent's to
+    /// decide (ADR 0039). One exchange does what a start, its deliveries
+    /// and a slice need, under one compute deadline (FIG-5921).
     Run {
+        start: Option<Box<Start>>,
+        deliveries: Vec<Delivery>,
         slice: u64,
         cancel: bool,
     },
-    /// One committed outcome, for the wait the machine named.
+    /// One committed outcome, for the wait the machine named: a delivery
+    /// that does not fit one frame with the slice it precedes.
     Deliver {
         wait: u64,
         outcome: EncodedPayload,
@@ -374,10 +401,14 @@ pub enum WorkerMessage {
         payload: EncodedPayload,
     },
     /// No task is ready: the effects and sleeps requested since the last
-    /// park, and the waits withdrawn since.
+    /// park, and the waits withdrawn since. `state` is the run's state at
+    /// the park, bound to its start's `export`, when the park requests
+    /// something and the two fit one frame; otherwise the parent asks for
+    /// it with [`ParentMessage::ExportGraph`].
     Parked {
         park: EncodedPayload,
         meters: RunMeters,
+        state: Option<SealedGraphState>,
     },
     /// The slice is spent and a task is still ready.
     Slice {
@@ -389,10 +420,9 @@ pub enum WorkerMessage {
         end: EncodedPayload,
         meters: RunMeters,
     },
-    /// The outcome was taken; `dropped` when its wait had been withdrawn.
-    Delivered {
-        dropped: bool,
-    },
+    /// The outcome was taken, or dropped when its wait had been
+    /// withdrawn.
+    Delivered,
     ExportedGraph {
         state: SealedGraphState,
     },
@@ -420,7 +450,7 @@ impl WorkerMessage {
             Self::Parked { .. } => WorkerFrameKind::Parked,
             Self::Slice { .. } => WorkerFrameKind::Slice,
             Self::Ended { .. } => WorkerFrameKind::Ended,
-            Self::Delivered { .. } => WorkerFrameKind::Delivered,
+            Self::Delivered => WorkerFrameKind::Delivered,
             Self::ExportedGraph { .. } => WorkerFrameKind::Exported,
             Self::Cancelled => WorkerFrameKind::Cancelled,
             Self::ResetDone { .. } => WorkerFrameKind::ResetDone,
@@ -434,6 +464,29 @@ impl WorkerMessage {
 pub struct ParentFrame {
     pub header: MessageHeader,
     pub message: ParentMessage,
+}
+
+/// A [`ParentFrame`] whose message borrows what it carries: how a parent
+/// encodes or measures a message whose parts it keeps, to send them apart
+/// should they not fit one frame together. It encodes exactly as the owned
+/// frame does.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct BorrowedParentFrame<'a> {
+    pub header: MessageHeader,
+    pub message: BorrowedParentMessage<'a>,
+}
+
+/// The [`ParentMessage`]s a parent encodes from parts it keeps.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BorrowedParentMessage<'a> {
+    Start(&'a Start),
+    Run {
+        start: Option<&'a Start>,
+        deliveries: &'a [Delivery],
+        slice: u64,
+        cancel: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

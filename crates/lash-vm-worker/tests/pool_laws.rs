@@ -83,6 +83,7 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
             .expect("start"),
         ),
         bounds: bounds(),
+        export: Some(binding()),
     }
 }
 
@@ -124,18 +125,20 @@ fn ended(step: RunStep) -> End {
     })
 }
 
-/// The run's state at its park, bound to one cell.
+/// The one cell every run here is bound to.
+fn binding() -> EncodedPayload {
+    EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(
+        &lash_core_store::checkpoint_graph::bodies::OwnerBinding::Cell {
+            session: "session-A".into(),
+            turn: "turn-1".into(),
+            cell: "cell-1".into(),
+        },
+    ))
+}
+
+/// The run's state at its park, bound to its cell.
 fn export(checkout: &mut Checkout) -> SealedGraphState {
-    let binding = lash_core_store::checkpoint_graph::bodies::OwnerBinding::Cell {
-        session: "session-A".into(),
-        turn: "turn-1".into(),
-        cell: "cell-1".into(),
-    };
-    checkout
-        .export_graph(EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(
-            &binding,
-        )))
-        .expect("export graph")
+    checkout.export_graph(binding()).expect("export graph")
 }
 
 fn int(value: i64) -> Datum {
@@ -173,7 +176,7 @@ fn killed_at_a_park_and_resumed(
         .expect("start");
     let (wait, argument) = requested(first.run(SLICE, false).expect("run"));
     asked.push(argument.clone());
-    assert!(!first.deliver(wait, completed(argument)).expect("deliver"));
+    first.deliver(wait, completed(argument)).expect("deliver");
     let (wait, argument, admission) = admitted(first.run(SLICE, false).expect("run"));
     asked.push(argument.clone());
     let state = export(&mut first);
@@ -193,15 +196,16 @@ fn killed_at_a_park_and_resumed(
                     admissions: vec![admission],
                 }),
                 bounds: bounds(),
+                export: Some(binding()),
             },
             identity,
             ExecutionClass::Cell,
         )
         .expect("resume");
-    assert!(!second.deliver(wait, completed(argument)).expect("deliver"));
+    second.deliver(wait, completed(argument)).expect("deliver");
     let (wait, argument) = requested(second.run(SLICE, false).expect("run"));
     asked.push(argument.clone());
-    assert!(!second.deliver(wait, completed(argument)).expect("deliver"));
+    second.deliver(wait, completed(argument)).expect("deliver");
     let End::Finished(finished) = ended(second.run(SLICE, false).expect("run")) else {
         panic!("the run finishes")
     };
@@ -222,6 +226,82 @@ fn a_parked_run_carries_on_in_another_worker_without_asking_again() {
     let (finished, asked) = killed_at_a_park_and_resumed(&pool, &identity, &document);
     assert_eq!(finished.result, int(6));
     assert_eq!(asked, [int(1), int(2), int(3)], "each effect is asked once");
+}
+
+/// FIG-5921: a run's start crosses with its first slice, the outcomes it
+/// waits on with its next, and a saved park's state with the park, each in
+/// one frame. Parts that outgrow one frame together cross apart, and the
+/// run goes on the same: a resumed run's start and a large outcome each
+/// cross alone before the slice, and a park whose state and request
+/// together outgrow a frame hands the state over when the parent asks for
+/// it.
+#[test]
+fn parts_that_outgrow_one_frame_cross_apart_and_the_run_goes_on_the_same() {
+    const FRAME: u32 = 64 * 1024;
+    let mut config = config("");
+    config.protocol.decode.max_frame_bytes = FRAME;
+    let pool = WorkerPool::new(config).expect("pool");
+    let sent = || pool.measurements().counters.ipc_sent_messages;
+    // Never run: it makes the document, and so each start, large.
+    let padding = "p".repeat(30 * 1024);
+    let (identity, document) = document(&format!(
+        r#"
+main {{
+  if num.lt(1, 0) {{ let unused = "{padding}" }}
+  let kept = perform echo("a") as Any
+  let again = perform echo(kept) as Any
+  return again
+}}"#
+    ));
+    let large = Datum::Text("y".repeat(40 * 1024));
+
+    let mut first = checkout(&pool);
+    first
+        .start(
+            fresh(&document, Target::Main, Vec::new()),
+            &identity,
+            ExecutionClass::Cell,
+        )
+        .expect("start");
+    let (wait, _, admission) = admitted(first.run(SLICE, false).expect("run"));
+    let before = sent();
+    let state = export(&mut first);
+    assert_eq!(sent(), before, "a small park carries its state");
+    drop(first);
+
+    let mut second = checkout(&pool);
+    second
+        .start(
+            Start {
+                owner: owner(),
+                document: document.clone(),
+                from: StartFrom::ParkedGraph(ParkedGraph {
+                    state,
+                    admissions: vec![admission],
+                }),
+                bounds: bounds(),
+                export: Some(binding()),
+            },
+            &identity,
+            ExecutionClass::Cell,
+        )
+        .expect("resume");
+    second
+        .deliver(wait, completed(large.clone()))
+        .expect("deliver");
+    let before = sent();
+    let (_, argument) = requested(second.run(SLICE, false).expect("run"));
+    assert_eq!(argument, large, "the large outcome was delivered");
+    assert_eq!(
+        sent() - before,
+        3,
+        "the start, the outcome and the slice cross apart"
+    );
+    let before = sent();
+    let state = export(&mut second);
+    assert_eq!(state.document(), identity);
+    assert_eq!(sent() - before, 1, "the parent asks for the large state");
+    second.release().expect("release at the park");
 }
 
 /// The one effect the park requests, as the parent's admission freezes it.
@@ -262,7 +342,7 @@ fn a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission() 
         )
         .expect("start");
     let (wait, argument) = requested(first.run(SLICE, false).expect("run"));
-    assert!(!first.deliver(wait, completed(argument)).expect("deliver"));
+    first.deliver(wait, completed(argument)).expect("deliver");
     let (wait, argument, admission) = admitted(first.run(SLICE, false).expect("run"));
     let state = export(&mut first);
     assert_eq!(state.document(), identity);
@@ -276,10 +356,14 @@ fn a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission() 
             admissions,
         }),
         bounds: bounds(),
+        export: Some(binding()),
     };
     let mut refused = checkout(&pool);
-    let refusal = refused
+    refused
         .start(resume(Vec::new()), &identity, ExecutionClass::Cell)
+        .expect("the parent takes the state");
+    let refusal = refused
+        .run(SLICE, false)
         .expect_err("a wait with no admission");
     assert!(
         matches!(
@@ -297,10 +381,10 @@ fn a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission() 
     second
         .start(resume(vec![admission]), &identity, ExecutionClass::Cell)
         .expect("resume from graph state");
-    assert!(!second.deliver(wait, completed(argument)).expect("deliver"));
+    second.deliver(wait, completed(argument)).expect("deliver");
     let (wait, argument) = requested(second.run(SLICE, false).expect("run"));
     assert_eq!(argument, int(3), "the answered effects are not asked again");
-    assert!(!second.deliver(wait, completed(argument)).expect("deliver"));
+    second.deliver(wait, completed(argument)).expect("deliver");
     let End::Finished(finished) = ended(second.run(SLICE, false).expect("run")) else {
         panic!("the run finishes")
     };
@@ -397,6 +481,7 @@ fn a_parked_run_is_refused_under_another_document() {
                     admissions: vec![admission],
                 }),
                 bounds: bounds(),
+                export: Some(binding()),
             },
             &other,
             ExecutionClass::Cell,
@@ -574,8 +659,11 @@ fn worker_crash_mid_run_leaves_the_parent_running() {
         )
         .expect("start");
     let (wait, argument) = requested(worker.run(SLICE, false).expect("run"));
+    worker
+        .deliver(wait, completed(argument))
+        .expect("the outcome waits for the next slice");
     assert!(matches!(
-        worker.deliver(wait, completed(argument)),
+        worker.run(SLICE, false),
         Err(PoolError::Infrastructure(
             InfrastructureOutcome::WorkerCrashed { .. }
         ))
@@ -596,11 +684,14 @@ fn a_forbidden_syscall_kills_the_worker_with_typed_evidence() {
         let pool = WorkerPool::new(config(mode)).expect("pool");
         let mut worker = checkout(&pool);
         let pid = worker.pid().expect("pid");
-        let started = worker.start(
-            fresh(&document, Target::Main, Vec::new()),
-            &identity,
-            ExecutionClass::Cell,
-        );
+        worker
+            .start(
+                fresh(&document, Target::Main, Vec::new()),
+                &identity,
+                ExecutionClass::Cell,
+            )
+            .expect("the parent takes the run");
+        let started = worker.run(SLICE, false);
         assert!(
             matches!(
                 started,
@@ -628,11 +719,14 @@ fn a_panic_with_a_backtrace_requested_is_typed_not_a_forbidden_syscall() {
     let pool = WorkerPool::new(config("panic_backtrace")).expect("pool");
     let (identity, document) = document(TOOL_LOOP);
     let mut worker = checkout(&pool);
-    let started = worker.start(
-        fresh(&document, Target::Main, Vec::new()),
-        &identity,
-        ExecutionClass::Cell,
-    );
+    worker
+        .start(
+            fresh(&document, Target::Main, Vec::new()),
+            &identity,
+            ExecutionClass::Cell,
+        )
+        .expect("the parent takes the run");
+    let started = worker.run(SLICE, false);
     let Err(PoolError::Infrastructure(InfrastructureOutcome::ProtocolViolation {
         breach: ProtocolBreach::Panicked { detail },
     })) = started

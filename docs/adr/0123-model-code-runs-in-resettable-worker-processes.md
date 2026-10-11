@@ -64,6 +64,14 @@ in the middle of a slice as `HostRead` and are answered by `HostAnswer`;
 prints arrive in order as `Printed`, with no authority. A run cancel is the
 flag sent with a slice and is observed at the machine's next safe point.
 
+These cross in as few exchanges as fit one frame (FIG-5921): a `Run` carries
+the run's `Start` when it begins the run and the outcomes delivered since the
+last slice, and a `Parked` whose requests the parent saves carries the run's
+state, exported under the execution the start named. Parts that outgrow one
+frame together cross alone, as `Start`, `Deliver` and `Export`. A cell's
+lowering `Prepare` and its run's start share one lease with no reset between:
+a reset there would drop no machine, and the start drops what it would.
+
 A parked run names sites and identities, never code positions, so it
 resumes in another worker, after a rebuilt executable, under the same
 document. Laws in `crates/lash-vm-worker/tests/pool_laws.rs`:

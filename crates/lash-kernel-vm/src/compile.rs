@@ -203,7 +203,11 @@ impl PreparedLibrary {
                 compiler.unit_code(code, unit, &params, &body.block, charged);
             }
         }
-        let tables = compiler.finish();
+        let mut tables = compiler.finish();
+        // A prepared library lives as long as its worker: its tables keep
+        // what they hold, not what growing them reserved.
+        tables.blocks.shrink_to_fit();
+        tables.stmts.shrink_to_fit();
         let libs = library
             .iter()
             .map(|(function, registered)| {

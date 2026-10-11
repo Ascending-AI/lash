@@ -14,6 +14,8 @@ mod heap_profile;
 /// the helpers against them.
 #[path = "../../lash-vm-releases/src/library.rs"]
 mod library;
+#[cfg(all(test, unix))]
+mod turn_laws;
 pub use embedding::{EmbedError, Embedder, Embedding, standard, typescript};
 
 #[cfg(unix)]

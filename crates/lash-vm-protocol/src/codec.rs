@@ -25,7 +25,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::message::{ParentFrame, WorkerFrame};
+use crate::message::{BorrowedParentFrame, ParentFrame, WorkerFrame};
 use crate::outcome::Detail;
 
 pub const FRAME_MAGIC: [u8; 4] = *b"LVMP";
@@ -115,6 +115,14 @@ impl FrameCodec {
         self.encode(frame)
     }
 
+    /// The bytes of the [`ParentFrame`] `frame` borrows its message for.
+    pub fn encode_borrowed(
+        &self,
+        frame: &BorrowedParentFrame<'_>,
+    ) -> Result<Vec<u8>, CodecRefusal> {
+        self.encode(frame)
+    }
+
     /// Decodes exactly one parent frame; bytes past it are refused.
     pub fn decode_parent(&self, bytes: &[u8]) -> Result<ParentFrame, CodecRefusal> {
         self.decode_exact(bytes)
@@ -186,6 +194,36 @@ impl FrameCodec {
         Ok(Some(FRAME_HEADER_BYTES + declared as usize))
     }
 
+    /// How many bytes `frame` encodes to, its envelope included, counted
+    /// without writing them: what a parent holds a reservation to before
+    /// the message crosses inside another.
+    pub fn borrowed_frame_len(&self, frame: &BorrowedParentFrame<'_>) -> Result<u64, CodecRefusal> {
+        let mut counted = CountingWriter(FRAME_HEADER_BYTES as u64);
+        frame
+            .serialize(&mut rmp_serde::Serializer::new(&mut counted).with_struct_map())
+            .map_err(|error| CodecRefusal::Malformed {
+                reason: Detail::new(format_args!("frame does not encode: {error}")),
+            })?;
+        Ok(counted.0)
+    }
+
+    /// Whether a frame this side encoded is one the other side decodes:
+    /// its declared length and its payload's structure within the bounds.
+    /// A sender that may carry two messages' contents in one frame checks
+    /// the frame here, and sends them apart when it is refused.
+    pub fn check_frame(&self, frame: &[u8]) -> Result<(), CodecRefusal> {
+        let Some(total) = self.frame_len(frame)? else {
+            return Err(CodecRefusal::Truncated {
+                needed: FRAME_HEADER_BYTES as u64,
+                available: frame.len() as u64,
+            });
+        };
+        charge_structure(
+            &frame[FRAME_HEADER_BYTES..total.min(frame.len())],
+            self.limits,
+        )
+    }
+
     /// Bounds an embedded MessagePack payload before typed decoding.
     pub fn check_payload(&self, payload: &[u8]) -> Result<(), CodecRefusal> {
         if payload.len() > self.limits.max_frame_bytes as usize {
@@ -254,6 +292,18 @@ impl std::io::Write for CappedWriter {
             self.bytes.reserve_exact(capacity - self.bytes.len());
         }
         self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Counts what serialization writes, and keeps none of it.
+struct CountingWriter(u64);
+impl std::io::Write for CountingWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 = self.0.saturating_add(bytes.len() as u64);
         Ok(bytes.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
@@ -541,7 +591,7 @@ fn measure_structure(payload: &[u8], limits: DecodeLimits) -> Result<Charge, Cod
         limits,
     };
     // One count of values still to read per open container, the root first.
-    let mut open: Vec<u64> = Vec::with_capacity(limits.max_depth.min(128) as usize + 1);
+    let mut open = OpenCounts::default();
     open.push(1);
     while let Some(remaining) = open.last_mut() {
         if *remaining == 0 {
@@ -569,6 +619,48 @@ fn measure_structure(payload: &[u8], limits: DecodeLimits) -> Result<Charge, Cod
         allocation: walk.charged,
         depth,
     })
+}
+
+/// The structural walk's open containers: the protocol's own nesting is
+/// held inline, so checking a frame allocates nothing, and only a payload
+/// nested deeper spills onto the heap (FIG-5921).
+#[derive(Default)]
+struct OpenCounts {
+    inline: [u64; OPEN_INLINE],
+    len: usize,
+    spilled: Vec<u64>,
+}
+
+/// How deep a payload nests before its walk allocates: past every message
+/// the protocol defines, whose state crosses as opaque bytes.
+const OPEN_INLINE: usize = 16;
+
+impl OpenCounts {
+    fn len(&self) -> usize {
+        self.len + self.spilled.len()
+    }
+
+    fn push(&mut self, count: u64) {
+        if self.len < OPEN_INLINE {
+            self.inline[self.len] = count;
+            self.len += 1;
+        } else {
+            self.spilled.push(count);
+        }
+    }
+
+    fn pop(&mut self) {
+        if self.spilled.pop().is_none() {
+            self.len = self.len.saturating_sub(1);
+        }
+    }
+
+    fn last_mut(&mut self) -> Option<&mut u64> {
+        match self.spilled.last_mut() {
+            Some(count) => Some(count),
+            None => self.len.checked_sub(1).map(|top| &mut self.inline[top]),
+        }
+    }
 }
 
 struct StructureWalk<'a> {

@@ -29,9 +29,9 @@ use lash_durable::DurableInstant;
 use lash_kernel_doc::graph_tokens::ChildRef;
 use lash_kernel_doc::{DocumentId, EncodeError, ErrorDatum};
 use lash_kernel_vm::{
-    Bound, BoundExceeded, Bounds, DeliverError, Delivered, EffectRequest, End, ExportError, Host,
-    ImportError, KernelMachine, Machine, MachineError, Outcome, Program, Request, RunError, Start,
-    StartError, Step, WaitId,
+    Bound, BoundExceeded, Bounds, DeliverError, EffectRequest, End, ExportError, Host, ImportError,
+    KernelMachine, Machine, MachineError, Outcome, Program, Request, RunError, Start, StartError,
+    Step, WaitId,
 };
 use lash_vm_protocol::InfrastructureOutcome;
 use tokio_util::sync::CancellationToken;
@@ -128,12 +128,14 @@ pub trait DrivenMachine: Send {
     /// next safe point and ends [`End::Cancelled`].
     async fn run(&mut self, slice: u64, cancel: bool) -> Result<Step, KernelFailure>;
 
-    /// Hands the machine one committed outcome.
-    async fn deliver(&mut self, wait: WaitId, outcome: Outcome)
-    -> Result<Delivered, KernelFailure>;
+    /// Hands the machine one committed outcome: the machine takes it, or
+    /// drops it when its wait was withdrawn, at the latest before the next
+    /// `run` runs anything.
+    async fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<(), KernelFailure>;
 
     /// The run's state as it stands at a park: a KernelWhole bound to the
-    /// execution `binding` names.
+    /// execution `binding` names, the one its machine was started or
+    /// resumed with when the park requested something.
     async fn export(&mut self, binding: &OwnerBinding) -> Result<WholeState, KernelFailure>;
 
     /// Gives the machine up at a clean stop: the run ended, or it stays
@@ -161,11 +163,19 @@ pub trait Machines: Send + Sync {
     /// [`KernelFailure::State`] when the build's releases do not stage.
     fn releases(&self) -> Result<&ReleaseGraph, KernelFailure>;
 
-    /// A machine that has executed nothing.
-    async fn start(&self) -> Result<Self::Machine, KernelFailure>;
+    /// A machine that has executed nothing, whose state at each park is
+    /// bound to the execution `binding` names. It may refuse its start at
+    /// its first `run`.
+    async fn start(&self, binding: &OwnerBinding) -> Result<Self::Machine, KernelFailure>;
 
-    /// A machine rebuilt from the run's saved state.
-    async fn resume(&self, parked: &ParkedState) -> Result<Self::Machine, KernelFailure>;
+    /// A machine rebuilt from the run's saved state, whose state at each
+    /// later park is bound to `binding`. It may refuse the state at its
+    /// first `run`.
+    async fn resume(
+        &self,
+        parked: &ParkedState,
+        binding: &OwnerBinding,
+    ) -> Result<Self::Machine, KernelFailure>;
 }
 
 /// The build's helper releases, staged once.
@@ -265,12 +275,9 @@ where
         )?)
     }
 
-    async fn deliver(
-        &mut self,
-        wait: WaitId,
-        outcome: Outcome,
-    ) -> Result<Delivered, KernelFailure> {
-        Ok(self.machine.deliver(wait, outcome)?)
+    async fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<(), KernelFailure> {
+        self.machine.deliver(wait, outcome)?;
+        Ok(())
     }
 
     async fn export(&mut self, binding: &OwnerBinding) -> Result<WholeState, KernelFailure> {
@@ -302,7 +309,7 @@ where
         held_releases(&self.releases)
     }
 
-    async fn start(&self) -> Result<Self::Machine, KernelFailure> {
+    async fn start(&self, _binding: &OwnerBinding) -> Result<Self::Machine, KernelFailure> {
         let release = self.releases()?.manifests.current().ok_or_else(|| {
             KernelFailure::State(GraphStateFailure::Unwritable(
                 "the build holds no helper release".to_owned(),
@@ -315,7 +322,11 @@ where
         })
     }
 
-    async fn resume(&self, parked: &ParkedState) -> Result<Self::Machine, KernelFailure> {
+    async fn resume(
+        &self,
+        parked: &ParkedState,
+        _binding: &OwnerBinding,
+    ) -> Result<Self::Machine, KernelFailure> {
         let registry = std::sync::Arc::clone(self.program.library.registry());
         let (machine, release) = super::state::import_whole_state(
             self.program.clone(),
@@ -481,10 +492,10 @@ impl KernelBroker<'_> {
             Some(Checkpoint::Parked { state, ledger, .. }) => {
                 saved = true;
                 self.effects.resumed(&self.store.open_requests(&ledger))?;
-                let machine = machines.resume(&state).await?;
+                let machine = machines.resume(&state, &binding).await?;
                 (machine, ledger)
             }
-            None => (machines.start().await?, EffectLedger::new()),
+            None => (machines.start(&binding).await?, EffectLedger::new()),
         };
         let mut machine = Some(machine);
         loop {
@@ -492,7 +503,7 @@ impl KernelBroker<'_> {
                 Some(running) => running,
                 None => {
                     let state = resting.as_ref().ok_or(KernelFailure::EmptyCheckpoint)?;
-                    machine.insert(machines.resume(state).await?)
+                    machine.insert(machines.resume(state, &binding).await?)
                 }
             };
             let park = match running.run(self.slice, cancel.is_cancelled()).await? {

@@ -614,7 +614,10 @@ async fn two_orders(
     let document = machines.document();
     let releases = machines.releases().map_err(|error| refused(&error))?;
     let binding = lash_vm_broker::kernel::graph::owner_binding(&exec());
-    let mut machine = machines.start().await.map_err(|error| refused(&error))?;
+    let mut machine = machines
+        .start(&binding)
+        .await
+        .map_err(|error| refused(&error))?;
     let Step::Parked(park) = machine
         .run(u64::MAX, false)
         .await
@@ -691,7 +694,7 @@ async fn two_orders(
     let mut parked = Vec::new();
     for order in [[0_usize, 1, 2], [2, 1, 0]] {
         let mut machine = machines
-            .resume(&parked_state)
+            .resume(&parked_state, &binding)
             .await
             .map_err(|error| refused(&error))?;
         let mut ledger = saved_ledger.clone();
