@@ -1,0 +1,28 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "concurrent-16",
+  "description": "W6: 16 sessions of W1 at once on one store, in lockstep rounds: every round sends each session its next turn together.",
+  "protocol": "standard",
+  "sessions": 16,
+  "turns": [
+    {
+      "repeat": 20,
+      "user": "Turn {turn}: here is the next part of the brief. Please check the record for item {turn} and tell me what changed since the last update, in two short paragraphs.",
+      "replies": [
+        {
+          "tool_calls": [
+            {
+              "tool": "fixture_lookup",
+              "args": {
+                "key": "item-{turn}"
+              }
+            }
+          ]
+        },
+        {
+          "text": "Turn {turn} summary. The record for item {turn} shows the same owner and a revised estimate; the main change since the last update is the status moving from review to active. Nothing else in the brief contradicts it.\n\nNext, I would confirm the revised estimate with the owner and note the dependency on the previous item before closing this step. Let me know if you want the full record quoted."
+        }
+      ]
+    }
+  ]
+}

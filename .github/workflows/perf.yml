@@ -182,6 +182,18 @@ jobs:
             --iterations 3 --rounds 3 --out .benchmarks/perf-guard/kernel \
             --history .benchmarks/perf-history/kernel.jsonl)
 
+      # The standard replay corpus (FIG-5934): wall time and counted per-turn
+      # costs of every workload enter their own advisory duration series.
+      - name: Replay standard sessions and record their trend
+        if: '!cancelled()'
+        run: |
+          set -euo pipefail
+          reader="$(python3 tools/buck2/outputs.py --report .benchmarks/perf-guard/build-report.json --label //crates/lash-perf:lash-perf__bin --single)"
+          (ulimit -v 8388608; /usr/bin/time -v "$reader" replay \
+            --store-dir "$RUNNER_TEMP/replay-stores" \
+            --out .benchmarks/perf-guard/replay.json \
+            --history .benchmarks/perf-history/replay.jsonl)
+
       # Only trunk extends the durable series. It runs before the summary and
       # upload steps rather than after them so a later step's failure cannot
       # cost the observation this run already measured.

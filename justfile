@@ -114,6 +114,47 @@ latency-gate *args:
     exit "$status"
   fi
 
+# Standard replayable sessions (FIG-5934): replay committed workload scripts
+# (crates/lash-perf/workloads/replay/) end to end through `send()` and
+# `outcome()` with the scripted provider, on SQLite file stores, and write
+# per-turn counted metrics and depth slopes to `replay-receipt.json`.
+# Workload names select from the corpus (default: all of it); flags are
+# forwarded to `lash-perf replay`, e.g. `just perf-replay ts-codemode --turns 20`,
+# `--store postgres` (needs LASH_POSTGRES_DATABASE_URL), or
+# `--history <file.jsonl>` to append main's trend. See
+# docs/perf/instruments/replay-workloads.md.
+perf-replay *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  artifacts="${LASH_REPLAY_ARTIFACT_DIR:-{{repo}}/target/perf-replay}"
+  mkdir -p "$artifacts"
+  kiln build //crates/lash-perf:lash-perf__bin //crates/lash-vm-worker:lash-vm-worker__bin \
+    --materializations final --build-report "$artifacts/build-report.json"
+  binary="$(python3 "{{repo}}/tools/buck2/outputs.py" \
+    --report "$artifacts/build-report.json" --label //crates/lash-perf:lash-perf__bin --single)"
+  LASH_VM_WORKER="$(python3 "{{repo}}/tools/buck2/outputs.py" \
+    --report "$artifacts/build-report.json" --label //crates/lash-vm-worker:lash-vm-worker__bin --single)"
+  export LASH_VM_WORKER
+  "$binary" replay --store-dir "$artifacts/stores" --out "$artifacts/replay-receipt.json" {{args}}
+
+# Re-bless the per-merge replay gate's baseline from a fresh run of its
+# subset, in the build the gate test uses. Commit the rewritten
+# crates/lash-perf/workloads/replay/baseline.json with the change that moved it.
+perf-replay-bless:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  artifacts="${LASH_REPLAY_ARTIFACT_DIR:-{{repo}}/target/perf-replay}"
+  mkdir -p "$artifacts"
+  kiln build //crates/lash-perf:lash-perf__bin //crates/lash-vm-worker:lash-vm-worker__bin \
+    --materializations final --build-report "$artifacts/build-report.json"
+  binary="$(python3 "{{repo}}/tools/buck2/outputs.py" \
+    --report "$artifacts/build-report.json" --label //crates/lash-perf:lash-perf__bin --single)"
+  LASH_VM_WORKER="$(python3 "{{repo}}/tools/buck2/outputs.py" \
+    --report "$artifacts/build-report.json" --label //crates/lash-vm-worker:lash-vm-worker__bin --single)"
+  export LASH_VM_WORKER
+  "$binary" replay-gate --store-dir "$artifacts/gate-stores" --out "$artifacts/gate-receipt.json" \
+    --bless "{{repo}}/crates/lash-perf/workloads/replay/baseline.json"
+
 # Opt-in full local diagnostic for unusual risk, release work, or an explicit
 # request. It is not a routine push or merge prerequisite; focused local checks
 # plus CI's aggregate conclusion are the default proof path.

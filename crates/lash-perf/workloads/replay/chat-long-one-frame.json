@@ -1,0 +1,17 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "chat-long-one-frame",
+  "description": "W2: 600 plain-text standard turns in one frame, never compacted: the latency gate's fast-case shape.",
+  "protocol": "standard",
+  "turns": [
+    {
+      "repeat": 600,
+      "user": "Turn {turn}: continue with the brief.",
+      "replies": [
+        {
+          "text": "Turn {turn}. Noted: the brief continues as before. The plan stays the same and the next step is to review the following section once it arrives."
+        }
+      ]
+    }
+  ]
+}

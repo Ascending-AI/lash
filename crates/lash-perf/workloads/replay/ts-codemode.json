@@ -1,0 +1,38 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "ts-codemode",
+  "description": "W4: 50 TypeScript code-mode turns. Turn 1 loads a 1 MB value into a session global and saves a function; every later turn awaits a lookup and a slow tool (each await parks the cell) with the 1 MB value live, and calls the saved function.",
+  "protocol": "typescript",
+  "turns": [
+    {
+      "repeat": 1,
+      "setup": true,
+      "user": "Turn {turn}: load the corpus and keep it.",
+      "replies": [
+        {
+          "cell": [
+            "const big = await tools.fixture_large({ key: \"corpus\", bytes: 1000000 });",
+            "const describe = (record, size) => record.title + \" / \" + size + \" bytes kept\";",
+            "let last = \"none\";",
+            "await control.finish({ loaded: big.bytes, length: big.text.length });"
+          ]
+        }
+      ]
+    },
+    {
+      "repeat": 49,
+      "user": "Turn {turn}: check item {turn} against the corpus.",
+      "replies": [
+        {
+          "cell": [
+            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixture_slow({ key: \"wait-{turn}\", ms: 5 });",
+            "const head = big.text.slice(0, 4096);",
+            "last = describe(record, big.text.length);",
+            "await control.finish({ turn: {turn}, last: last, head: head.length, waited: waited.waited_ms, score: record.score });"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -862,8 +862,12 @@ impl SqliteConnection {
             if observed {
                 crate::observed_sql::enable(c);
             }
+            #[cfg(feature = "perf-witness")]
+            let writes = crate::observed_sql::WriteWitness::start(c);
             let result =
                 lash_core_execution::facade_support::sql::Window::on_worker(window, || f(c));
+            #[cfg(feature = "perf-witness")]
+            writes.finish(c);
             if observed {
                 c.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
             }

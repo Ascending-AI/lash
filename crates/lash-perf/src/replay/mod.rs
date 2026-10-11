@@ -1,0 +1,194 @@
+//! Standard replayable sessions (FIG-5934): a committed corpus of workload
+//! scripts, replayed end to end through the public facade with a scripted
+//! provider and deterministic tool fixtures, each turn's counted costs
+//! measured, and a per-merge gate over a fast subset.
+//!
+//! See `docs/perf/instruments/replay-workloads.md`.
+
+pub mod gate;
+pub mod meter;
+pub mod provider;
+pub mod receipt;
+pub mod recorder;
+pub mod runner;
+pub mod script;
+mod workers;
+
+pub use workers::python_worker_entry;
+
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+
+use receipt::{Identity, RECEIPT_FORMAT, ReplayReceipt};
+use runner::{RunOptions, StoreChoice};
+
+/// The store a replay runs on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum StoreKind {
+    /// A SQLite file store set under `--store-dir`.
+    Sqlite,
+    /// An isolated database on `LASH_POSTGRES_DATABASE_URL`'s server.
+    Postgres,
+}
+
+/// `lash-perf replay`: run workloads and write their receipt.
+#[derive(Debug, clap::Args)]
+pub struct ReplayArgs {
+    /// Corpus workloads or script paths; default the whole corpus.
+    #[arg(value_delimiter = ',')]
+    pub workloads: Vec<String>,
+    /// Run only the first this many turns of each workload.
+    #[arg(long)]
+    pub turns: Option<usize>,
+    #[arg(long, value_enum, default_value = "sqlite")]
+    pub store: StoreKind,
+    /// Where SQLite store sets live (one directory per workload).
+    #[arg(long)]
+    pub store_dir: PathBuf,
+    /// The PostgreSQL server for `--store postgres`.
+    #[arg(long, env = "LASH_POSTGRES_DATABASE_URL", hide_env_values = true)]
+    pub postgres_url: Option<String>,
+    /// Where the JSON receipt lands.
+    #[arg(long)]
+    pub out: PathBuf,
+    /// Append each workload's wall time and counted results to this
+    /// duration history (main's trend).
+    #[arg(long)]
+    pub history: Option<PathBuf>,
+}
+
+/// `lash-perf replay-gate`: the per-merge counted gate.
+#[derive(Debug, clap::Args)]
+pub struct GateArgs {
+    /// Where the subset's SQLite store sets live.
+    #[arg(long)]
+    pub store_dir: PathBuf,
+    /// Where the JSON receipt lands.
+    #[arg(long)]
+    pub out: PathBuf,
+    /// Write the run's medians as the new baseline here instead of checking
+    /// the committed one (the re-bless command).
+    #[arg(long)]
+    pub bless: Option<PathBuf>,
+}
+
+/// Run `workloads` in order, rewriting the receipt at `out` after each one so
+/// a later failure keeps the finished workloads' evidence.
+async fn run_workloads(
+    workloads: &[(script::Workload, Option<usize>)],
+    store: &StoreChoice,
+    out: &std::path::Path,
+) -> Result<ReplayReceipt> {
+    let mut receipt = ReplayReceipt {
+        format: RECEIPT_FORMAT.to_owned(),
+        identity: Identity::current(),
+        workloads: Vec::with_capacity(workloads.len()),
+    };
+    for (workload, turns) in workloads {
+        let options = RunOptions {
+            store: store.clone(),
+            turns: *turns,
+        };
+        eprintln!(
+            "replay: {} ({} turns x {} session(s))",
+            workload.name,
+            turns.unwrap_or(workload.turn_count()),
+            workload.sessions
+        );
+        receipt.workloads.push(
+            runner::run(workload, &options)
+                .await
+                .with_context(|| format!("workload `{}`", workload.name))?,
+        );
+        write_receipt(&receipt, out)?;
+    }
+    Ok(receipt)
+}
+
+fn write_receipt(receipt: &ReplayReceipt, out: &std::path::Path) -> Result<()> {
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(out, serde_json::to_string_pretty(receipt)? + "\n")
+        .with_context(|| format!("write {}", out.display()))
+}
+
+/// Run `lash-perf replay`.
+pub async fn run(args: &ReplayArgs) -> Result<()> {
+    let names = if args.workloads.is_empty() {
+        script::CORPUS
+            .iter()
+            .map(|(name, _)| (*name).to_owned())
+            .collect()
+    } else {
+        args.workloads.clone()
+    };
+    let workloads = names
+        .iter()
+        .map(|name| Ok((script::resolve(name)?, args.turns)))
+        .collect::<Result<Vec<_>>>()?;
+    let store = match args.store {
+        StoreKind::Sqlite => StoreChoice::SqliteFile(args.store_dir.clone()),
+        StoreKind::Postgres => StoreChoice::Postgres(
+            args.postgres_url
+                .clone()
+                .context("--store postgres needs LASH_POSTGRES_DATABASE_URL or --postgres-url")?,
+        ),
+    };
+    let receipt = run_workloads(&workloads, &store, &args.out).await?;
+    print!("{}", receipt::table(&receipt));
+    if let Some(history) = &args.history {
+        crate::runtime_perf::record_replay_receipt(&receipt, history)?;
+    }
+    println!("replay: receipt {}", args.out.display());
+    Ok(())
+}
+
+/// Run `lash-perf replay-gate`; the exit code is the verdict.
+pub async fn run_gate(args: &GateArgs) -> Result<i32> {
+    let budgets = gate::Budgets::committed()?;
+    let corpus = script::corpus()?;
+    let workloads = budgets
+        .subset
+        .iter()
+        .map(|entry| {
+            corpus
+                .get(&entry.workload)
+                .cloned()
+                .map(|workload| (workload, entry.turns))
+                .with_context(|| format!("the gate names unknown workload `{}`", entry.workload))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let receipt = run_workloads(
+        &workloads,
+        &StoreChoice::SqliteFile(args.store_dir.clone()),
+        &args.out,
+    )
+    .await?;
+    print!("{}", receipt::table(&receipt));
+    if let Some(path) = &args.bless {
+        let baseline = gate::Baseline::bless(&receipt);
+        std::fs::write(path, serde_json::to_string_pretty(&baseline)? + "\n")
+            .with_context(|| format!("write {}", path.display()))?;
+        println!("replay gate: blessed baseline {}", path.display());
+        return Ok(0);
+    }
+    let verdict = gate::evaluate(&receipt, &budgets, &gate::Baseline::committed()?);
+    for line in &verdict.known_breaches {
+        println!("replay gate: KNOWN BREACH {line}");
+    }
+    for line in &verdict.improvements {
+        println!("replay gate: improved {line}");
+    }
+    for line in &verdict.violations {
+        println!("replay gate: VIOLATION {line}");
+    }
+    println!(
+        "replay gate: {} ({} violation(s), {} known breach(es))",
+        if verdict.passed() { "passed" } else { "failed" },
+        verdict.violations.len(),
+        verdict.known_breaches.len()
+    );
+    Ok(if verdict.passed() { 0 } else { 1 })
+}

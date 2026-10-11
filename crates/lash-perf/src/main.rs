@@ -154,6 +154,13 @@ enum Command {
     /// Sweep scheduled arrival rates over one population and write the
     /// offered-load receipt and its operation ledger.
     OfferedLoad(lash_perf::offered_load::Args),
+    /// Replay standard sessions end to end and write their counted receipt.
+    Replay(lash_perf::replay::ReplayArgs),
+    /// The per-merge counted replay gate: the fast subset against the
+    /// committed budgets and baseline; `--bless` re-blesses the baseline.
+    ReplayGate(lash_perf::replay::GateArgs),
+    /// Capture a real session's transcript as a replay script.
+    ReplayRecord(lash_perf::replay::recorder::RecordArgs),
     /// Regenerate the strict synthetic workload v1 JSON Schema.
     WorkloadSchema {
         #[arg(long, value_name = "SCHEMA.json")]
@@ -260,6 +267,10 @@ fn tokio_thread_stack_bytes(args: &Args) -> usize {
 }
 
 fn main() -> anyhow::Result<()> {
+    // A replay's Python cells run in workers that re-execute this binary.
+    if lash_perf::replay::python_worker_entry()? {
+        return Ok(());
+    }
     lash_core::perf_witness::startup::initialize_epoch();
     let capture = lash_perf::perf_support::async_operations::Capture::from_env()?;
     let result = run_main();
@@ -336,6 +347,28 @@ fn run_main() -> anyhow::Result<()> {
                 .build()?;
             runtime.block_on(lash_perf::offered_load::run(options))?;
             return Ok(());
+        }
+        Some(Command::Replay(options)) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(tokio_thread_stack_bytes(&args))
+                .build()?;
+            return runtime.block_on(lash_perf::replay::run(options));
+        }
+        Some(Command::ReplayGate(options)) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(tokio_thread_stack_bytes(&args))
+                .build()?;
+            let code = runtime.block_on(lash_perf::replay::run_gate(options))?;
+            drop(runtime);
+            std::process::exit(code);
+        }
+        Some(Command::ReplayRecord(options)) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            return runtime.block_on(lash_perf::replay::recorder::record(options));
         }
         Some(Command::WorkloadSchema { out }) => {
             let schema = serde_json::to_string_pretty(&lash_perf::workload::schema())?;

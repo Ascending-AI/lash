@@ -34,6 +34,9 @@ static SQL_STATEMENTS: AtomicU64 = AtomicU64::new(0);
 static SQL_RECEIPTS: LazyLock<Mutex<Vec<SqlStatementReceipt>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 static SQL_RECEIPTS_ENABLED: AtomicBool = AtomicBool::new(false);
+static SQL_ROWS_READ: AtomicU64 = AtomicU64::new(0);
+static SQL_ROWS_WRITTEN: AtomicU64 = AtomicU64::new(0);
+static STORE_PAGES_WRITTEN: AtomicU64 = AtomicU64::new(0);
 
 /// Statement text and expanded byte length, without retaining bound values.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -149,6 +152,14 @@ pub struct Snapshot {
     /// `sql_statements`.
     pub sql_statements_by_verb: BTreeMap<&'static str, u64>,
     pub sql_receipts: Vec<SqlStatementReceipt>,
+    /// Result rows SQL statements returned to the store.
+    pub sql_rows_read: u64,
+    /// Rows SQL statements inserted, updated or deleted (SQLite's
+    /// `total_changes` difference across each connection call).
+    pub sql_rows_written: u64,
+    /// Database pages the store's connections wrote to the WAL (SQLite's
+    /// `DBSTATUS_CACHE_WRITE`); bytes are pages times the page size.
+    pub store_pages_written: u64,
 }
 
 /// Exclusive process-global runtime-work witness.
@@ -188,6 +199,9 @@ impl Collector {
         HASH_PASSES.store(0, Ordering::Relaxed);
         HASHED_BYTES.store(0, Ordering::Relaxed);
         SQL_STATEMENTS.store(0, Ordering::Relaxed);
+        SQL_ROWS_READ.store(0, Ordering::Relaxed);
+        SQL_ROWS_WRITTEN.store(0, Ordering::Relaxed);
+        STORE_PAGES_WRITTEN.store(0, Ordering::Relaxed);
         SQL_RECEIPTS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -216,6 +230,9 @@ impl Collector {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone(),
+            sql_rows_read: SQL_ROWS_READ.load(Ordering::Relaxed),
+            sql_rows_written: SQL_ROWS_WRITTEN.load(Ordering::Relaxed),
+            store_pages_written: STORE_PAGES_WRITTEN.load(Ordering::Relaxed),
             sql_statements_by_verb: SqlVerb::ALL
                 .iter()
                 .map(|verb| {
@@ -294,6 +311,25 @@ pub fn record_sql_statement_bytes(sql: &str, expanded_bytes: usize) {
                 expanded_bytes,
             });
     }
+}
+
+/// Record one result row a SQL statement returned.
+#[inline]
+pub fn record_sql_row_read() {
+    if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {
+        return;
+    }
+    SQL_ROWS_READ.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Record the rows one connection call changed and the pages it wrote.
+#[inline]
+pub fn record_sql_writes(rows: u64, pages: u64) {
+    if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {
+        return;
+    }
+    SQL_ROWS_WRITTEN.fetch_add(rows, Ordering::Relaxed);
+    STORE_PAGES_WRITTEN.fetch_add(pages, Ordering::Relaxed);
 }
 
 pub fn sql_receipts_enabled() -> bool {

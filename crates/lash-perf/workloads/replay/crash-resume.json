@@ -1,0 +1,121 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "crash-resume",
+  "description": "W7: W4's setup, then 10 turns; every third turn's cell is parked on a slow tool while every code-mode worker is killed, and resumes on a fresh worker with its 1 MB global. Three crashes stay under the pool's restart-storm bound (8 restarts a minute).",
+  "protocol": "typescript",
+  "turns": [
+    {
+      "repeat": 1,
+      "setup": true,
+      "user": "Turn {turn}: load the corpus and keep it.",
+      "replies": [
+        {
+          "cell": [
+            "const big = await tools.fixture_large({ key: \"corpus\", bytes: 1000000 });",
+            "const describe = (record, size) => record.title + \" / \" + size + \" bytes kept\";",
+            "let last = \"none\";",
+            "await control.finish({ loaded: big.bytes, length: big.text.length });"
+          ]
+        }
+      ]
+    },
+    {
+      "repeat": 2,
+      "user": "Turn {turn}: check item {turn} against the corpus.",
+      "replies": [
+        {
+          "cell": [
+            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixture_slow({ key: \"wait-{turn}\", ms: 20 });",
+            "last = describe(record, big.text.length);",
+            "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
+          ]
+        }
+      ]
+    },
+    {
+      "repeat": 1,
+      "user": "Turn {turn}: check item {turn} while the workers crash.",
+      "replies": [
+        {
+          "cell": [
+            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixture_slow({ key: \"crash-{turn}\", ms: 20, kill_workers: true });",
+            "last = describe(record, big.text.length);",
+            "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
+          ]
+        }
+      ]
+    },
+    {
+      "repeat": 2,
+      "user": "Turn {turn}: check item {turn} against the corpus.",
+      "replies": [
+        {
+          "cell": [
+            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixture_slow({ key: \"wait-{turn}\", ms: 20 });",
+            "last = describe(record, big.text.length);",
+            "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
+          ]
+        }
+      ]
+    },
+    {
+      "repeat": 1,
+      "user": "Turn {turn}: check item {turn} while the workers crash.",
+      "replies": [
+        {
+          "cell": [
+            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixture_slow({ key: \"crash-{turn}\", ms: 20, kill_workers: true });",
+            "last = describe(record, big.text.length);",
+            "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
+          ]
+        }
+      ]
+    },
+    {
+      "repeat": 2,
+      "user": "Turn {turn}: check item {turn} against the corpus.",
+      "replies": [
+        {
+          "cell": [
+            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixture_slow({ key: \"wait-{turn}\", ms: 20 });",
+            "last = describe(record, big.text.length);",
+            "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
+          ]
+        }
+      ]
+    },
+    {
+      "repeat": 1,
+      "user": "Turn {turn}: check item {turn} while the workers crash.",
+      "replies": [
+        {
+          "cell": [
+            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixture_slow({ key: \"crash-{turn}\", ms: 20, kill_workers: true });",
+            "last = describe(record, big.text.length);",
+            "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
+          ]
+        }
+      ]
+    },
+    {
+      "repeat": 1,
+      "user": "Turn {turn}: check item {turn} against the corpus.",
+      "replies": [
+        {
+          "cell": [
+            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixture_slow({ key: \"wait-{turn}\", ms: 20 });",
+            "last = describe(record, big.text.length);",
+            "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
+          ]
+        }
+      ]
+    }
+  ]
+}

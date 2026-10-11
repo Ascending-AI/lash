@@ -293,6 +293,10 @@ pub(crate) struct DurationHistoryRecord {
     /// Raw kernel samples and integer allocator/charge records, retained with this observation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) kernel: Option<super::kernel_history::KernelObservation>,
+    /// A replay workload's counted per-turn medians and depth slopes, retained
+    /// beside its wall time (FIG-5934).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) replay: Option<super::replay_history::ReplayCounts>,
 }
 
 /// A history read leniently: what parsed, what could not, and what this build
@@ -395,6 +399,7 @@ pub(crate) fn records_for_run(
         })
         .map(|(summary, total)| DurationHistoryRecord {
             kernel: None,
+            replay: None,
             version: HISTORY_RECORD_VERSION,
             identity: identity.for_scenario(&summary.scenario),
             scenario: summary.scenario.clone(),
@@ -1229,13 +1234,13 @@ pub fn export_duration_history_csv(
     std::fs::write(out, csv).context("writing duration history CSV")
 }
 
-fn history_commit() -> String {
+pub(crate) fn history_commit() -> String {
     non_empty_env("GITHUB_SHA")
         .or_else(git::head_commit)
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-fn history_run_id() -> String {
+pub(crate) fn history_run_id() -> String {
     non_empty_env("GITHUB_RUN_ID").unwrap_or_else(|| "local".to_string())
 }
 

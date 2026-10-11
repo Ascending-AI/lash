@@ -1,0 +1,307 @@
+{
+  "format": "lash-perf-replay-budgets/1",
+  "rebless": "just perf-replay-bless",
+  "subset": [
+    {
+      "workload": "chat-short"
+    },
+    {
+      "workload": "chat-long-compacting",
+      "turns": 200
+    },
+    {
+      "workload": "ts-codemode",
+      "turns": 12
+    },
+    {
+      "workload": "py-codemode",
+      "turns": 12
+    }
+  ],
+  "baseline_tolerance": {
+    "relative": 0.25,
+    "absolute": {
+      "graph_nodes_written": 1,
+      "model_calls": 0,
+      "workers_killed": 0,
+      "worker_executions": 1
+    },
+    "depth_slope": {
+      "allocations": {
+        "relative": 0.02,
+        "absolute": 10
+      },
+      "allocated_bytes": {
+        "relative": 0.03,
+        "absolute": 4096
+      },
+      "graph_nodes_decoded": {
+        "relative": 0.0,
+        "absolute": 0.5
+      },
+      "graph_nodes_written": {
+        "relative": 0.0,
+        "absolute": 0.25
+      },
+      "sql_rows_written": {
+        "relative": 0.1,
+        "absolute": 0.5
+      },
+      "sql_rows_read": {
+        "relative": 0.25,
+        "absolute": 12
+      },
+      "sql_statements": {
+        "relative": 0.5,
+        "absolute": 8
+      },
+      "store_bytes_written": {
+        "relative": 0.5,
+        "absolute": 32768
+      },
+      "py-codemode/allocations": {
+        "relative": 0.05,
+        "absolute": 50
+      },
+      "py-codemode/allocated_bytes": {
+        "relative": 0.12,
+        "absolute": 4096
+      }
+    }
+  },
+  "budgets": [
+    {
+      "workload": "chat-short",
+      "metric": "store_bytes_written",
+      "check": "history_slope",
+      "max": 512,
+      "why": "a turn writes what it adds, not a copy of its history"
+    },
+    {
+      "workload": "ts-codemode",
+      "metric": "store_bytes_written",
+      "check": "history_slope",
+      "max": 512,
+      "why": "a turn writes what it adds, not a copy of its history"
+    },
+    {
+      "workload": "py-codemode",
+      "metric": "store_bytes_written",
+      "check": "history_slope",
+      "max": 512,
+      "why": "a turn writes what it adds, not a copy of its history"
+    },
+    {
+      "workload": "chat-long-compacting",
+      "metric": "store_bytes_written",
+      "check": "frame_slope",
+      "max": 512,
+      "why": "a turn writes what it adds, not a copy of its history or its frame"
+    },
+    {
+      "workload": "chat-short",
+      "metric": "graph_nodes_decoded",
+      "check": "history_slope",
+      "max": 0.5,
+      "why": "a turn decodes a bounded window, independent of depth"
+    },
+    {
+      "workload": "ts-codemode",
+      "metric": "graph_nodes_decoded",
+      "check": "history_slope",
+      "max": 0.5,
+      "why": "a turn decodes a bounded window, independent of depth"
+    },
+    {
+      "workload": "py-codemode",
+      "metric": "graph_nodes_decoded",
+      "check": "history_slope",
+      "max": 0.5,
+      "why": "a turn decodes a bounded window, independent of depth"
+    },
+    {
+      "workload": "chat-long-compacting",
+      "metric": "graph_nodes_decoded",
+      "check": "frame_slope",
+      "max": 0.5,
+      "why": "a turn decodes a bounded window, independent of its frame's depth"
+    },
+    {
+      "workload": "chat-short",
+      "metric": "sql_rows_read",
+      "check": "history_slope",
+      "max": 2,
+      "why": "a turn reads what it adds, not its history's rows"
+    },
+    {
+      "workload": "chat-long-compacting",
+      "metric": "sql_rows_read",
+      "check": "frame_slope",
+      "max": 2,
+      "why": "a turn reads what it adds, not its frame's rows"
+    },
+    {
+      "workload": "*",
+      "metric": "sql_statements",
+      "check": "history_slope",
+      "max": 12,
+      "why": "statements per turn are independent of depth"
+    },
+    {
+      "workload": "chat-short",
+      "metric": "allocated_bytes",
+      "check": "history_slope",
+      "max": 65536,
+      "why": "host allocation per turn is independent of depth"
+    },
+    {
+      "workload": "chat-long-compacting",
+      "metric": "allocated_bytes",
+      "check": "frame_slope",
+      "max": 65536,
+      "why": "host allocation per turn is independent of its frame's depth"
+    },
+    {
+      "workload": "*",
+      "metric": "graph_nodes_written",
+      "check": "per_turn_max",
+      "max": 8,
+      "why": "a scripted turn adds at most its user input, replies and tool results"
+    },
+    {
+      "workload": "chat-short",
+      "metric": "sql_statements",
+      "check": "per_turn_median",
+      "max": 2400,
+      "why": "about twice today's standard turn"
+    },
+    {
+      "workload": "chat-long-compacting",
+      "metric": "sql_statements",
+      "check": "per_turn_median",
+      "max": 2400,
+      "why": "about twice today's standard turn"
+    },
+    {
+      "workload": "ts-codemode",
+      "metric": "sql_statements",
+      "check": "per_turn_median",
+      "max": 26000,
+      "why": "about twice today's code-mode turn"
+    },
+    {
+      "workload": "py-codemode",
+      "metric": "sql_statements",
+      "check": "per_turn_median",
+      "max": 26000,
+      "why": "about twice today's code-mode turn"
+    },
+    {
+      "workload": "ts-codemode",
+      "metric": "ipc_frames",
+      "check": "per_turn_median",
+      "max": 128,
+      "why": "about twice today's worker exchange per cell"
+    },
+    {
+      "workload": "py-codemode",
+      "metric": "ipc_frames",
+      "check": "per_turn_median",
+      "max": 160,
+      "why": "about twice today's worker exchange per cell"
+    },
+    {
+      "workload": "ts-codemode",
+      "metric": "ipc_bytes",
+      "check": "per_turn_median",
+      "max": 262144,
+      "why": "a parked cell's 1 MB global is not resent per turn"
+    }
+  ],
+  "known_breaches": [
+    {
+      "workload": "chat-short",
+      "metric": "store_bytes_written",
+      "check": "history_slope",
+      "owner": "FIG-5946, FIG-5940",
+      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946), and each turn writes about seven history-sized message-list blobs ({\"prev\":null,\"items\":[...]}, every message since turn 1) to the graph (FIG-5940); the FIG-5501 window copy is gone (FIG-5931)"
+    },
+    {
+      "workload": "ts-codemode",
+      "metric": "store_bytes_written",
+      "check": "history_slope",
+      "owner": "FIG-5946, FIG-5940",
+      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946), and each turn writes about seven history-sized message-list blobs ({\"prev\":null,\"items\":[...]}, every message since turn 1) to the graph (FIG-5940); the FIG-5501 window copy is gone (FIG-5931)"
+    },
+    {
+      "workload": "py-codemode",
+      "metric": "store_bytes_written",
+      "check": "history_slope",
+      "owner": "FIG-5946, FIG-5940",
+      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946), and each turn writes about seven history-sized message-list blobs ({\"prev\":null,\"items\":[...]}, every message since turn 1) to the graph (FIG-5940); the FIG-5501 window copy is gone (FIG-5931)"
+    },
+    {
+      "workload": "chat-long-compacting",
+      "metric": "store_bytes_written",
+      "check": "frame_slope",
+      "owner": "FIG-5946, FIG-5940",
+      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946), and each turn writes about seven history-sized message-list blobs ({\"prev\":null,\"items\":[...]}, every message since turn 1) to the graph (FIG-5940); the FIG-5501 window copy is gone (FIG-5931)"
+    },
+    {
+      "workload": "chat-short",
+      "metric": "graph_nodes_decoded",
+      "check": "history_slope",
+      "owner": "FIG-5930",
+      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
+    },
+    {
+      "workload": "ts-codemode",
+      "metric": "graph_nodes_decoded",
+      "check": "history_slope",
+      "owner": "FIG-5930",
+      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
+    },
+    {
+      "workload": "py-codemode",
+      "metric": "graph_nodes_decoded",
+      "check": "history_slope",
+      "owner": "FIG-5930",
+      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
+    },
+    {
+      "workload": "chat-long-compacting",
+      "metric": "graph_nodes_decoded",
+      "check": "frame_slope",
+      "owner": "FIG-5930",
+      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
+    },
+    {
+      "workload": "chat-short",
+      "metric": "sql_rows_read",
+      "check": "history_slope",
+      "owner": "FIG-5930",
+      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
+    },
+    {
+      "workload": "chat-long-compacting",
+      "metric": "sql_rows_read",
+      "check": "frame_slope",
+      "owner": "FIG-5930",
+      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
+    },
+    {
+      "workload": "chat-short",
+      "metric": "allocated_bytes",
+      "check": "history_slope",
+      "owner": "FIG-5930",
+      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
+    },
+    {
+      "workload": "chat-long-compacting",
+      "metric": "allocated_bytes",
+      "check": "frame_slope",
+      "owner": "FIG-5930",
+      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
+    }
+  ]
+}

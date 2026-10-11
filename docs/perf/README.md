@@ -52,6 +52,7 @@ results; their old launchers have been retired.
 - [offered-load](instruments/offered-load.md): how the scheduled-arrival generator measures offered-load latency and the saturation knee.
 - [otel-export](instruments/otel-export.md): how a host exports lash spans and metrics through its own OTel providers.
 - [pg-statements](instruments/pg-statements.md): what the PostgreSQL server executed for one facade workload.
+- [replay-workloads](instruments/replay-workloads.md): what standard replayed sessions cost per turn, how that grows with history, and which counted budgets every merge holds them to.
 - [runtime-profiles](instruments/runtime-profiles.md): what runtime, stack and allocation profiles of a scenario record.
 - [send-to-completion-latency](instruments/send-to-completion-latency.md): what send-to-completion latency the diagnostic cases measure.
 - [sql-operation-windows](instruments/sql-operation-windows.md): what physical SQL work one operation window performed.

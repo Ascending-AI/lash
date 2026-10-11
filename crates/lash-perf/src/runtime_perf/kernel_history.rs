@@ -115,6 +115,7 @@ fn records(receipt: KernelReceipt) -> anyhow::Result<Vec<DurationHistoryRecord>>
             total_p95_ms: Some(whole.p95_ms),
             duration_metrics_ms: BTreeMap::from([("kernel_run_ms".to_string(), run)]),
             kernel: Some(row),
+            replay: None,
         })
     }).collect()
 }

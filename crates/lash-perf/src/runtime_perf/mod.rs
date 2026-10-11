@@ -1,6 +1,8 @@
 mod duration_trend;
 mod kernel_history;
 pub use kernel_history::record_kernel_receipt;
+mod replay_history;
+pub use replay_history::record_replay_receipt;
 mod harness;
 mod measurement;
 pub(crate) mod openai_compat;

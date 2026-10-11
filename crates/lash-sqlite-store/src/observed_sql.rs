@@ -44,6 +44,59 @@ pub(crate) fn enable(connection: &rusqlite::Connection) {
     }
 }
 
+/// What one connection call wrote, for the performance witness: the rows its
+/// statements changed and the pages its transactions wrote to the WAL.
+#[cfg(feature = "perf-witness")]
+pub(crate) struct WriteWitness {
+    changes: u64,
+}
+
+#[cfg(feature = "perf-witness")]
+impl WriteWitness {
+    pub(crate) fn start(connection: &rusqlite::Connection) -> Self {
+        // Pages written before this call belong to no measured caller.
+        let _ = pages_written(connection);
+        Self {
+            changes: connection.total_changes(),
+        }
+    }
+
+    pub(crate) fn finish(self, connection: &rusqlite::Connection) {
+        lash_core_execution::perf_witness::record_sql_writes(
+            connection.total_changes().saturating_sub(self.changes),
+            pages_written(connection),
+        );
+    }
+}
+
+/// The pages `connection` wrote to the WAL since the last read, which resets
+/// the count (`SQLITE_DBSTATUS_CACHE_WRITE`).
+#[cfg(feature = "perf-witness")]
+fn pages_written(connection: &rusqlite::Connection) -> u64 {
+    let mut current = 0;
+    let mut highwater = 0;
+    // SAFETY: the handle is this live connection's, used on its own thread
+    // for one status read that neither retains nor closes it.
+    #[expect(
+        unsafe_code,
+        reason = "rusqlite exposes no safe sqlite3_db_status; perf-witness builds only"
+    )]
+    let status = unsafe {
+        rusqlite::ffi::sqlite3_db_status(
+            connection.handle(),
+            rusqlite::ffi::SQLITE_DBSTATUS_CACHE_WRITE,
+            &mut current,
+            &mut highwater,
+            1,
+        )
+    };
+    if status == rusqlite::ffi::SQLITE_OK {
+        u64::try_from(current).unwrap_or_default()
+    } else {
+        0
+    }
+}
+
 #[expect(
     unsafe_code,
     reason = "all callback pointers are borrowed from SQLite until this callback returns"
@@ -116,6 +169,8 @@ unsafe extern "C" fn trace(
                         .sum();
                     window.payload(&sql, 0, 0, bytes);
                 }
+                #[cfg(feature = "perf-witness")]
+                lash_core_execution::perf_witness::record_sql_row_read();
             }
             ffi::SQLITE_TRACE_PROFILE => {
                 if let Some((before, changes)) =
