@@ -484,6 +484,8 @@ mod turn_cancel_modes;
 #[cfg(feature = "rlm")]
 mod turn_cancel_waits;
 mod turn_checkpoints;
+#[cfg(feature = "rlm")]
+mod turn_retirement;
 mod turn_streaming;
 #[cfg(feature = "codemode")]
 mod workflow_reads;

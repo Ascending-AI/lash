@@ -83,6 +83,88 @@ pub(crate) use turns::TABLES as TURN_PHASES_TABLES;
 pub(crate) use waits::TABLES as WAITS_TABLES;
 
 /// The engine's tables, carried by the durable core.
+/// The graph roots `session`'s engine rows hold: its turns' and cells' run
+/// facts, its cells' roots and admissions. What its delete may reclaim once
+/// [`retire_session_rows`] removed them.
+pub(crate) fn session_engine_roots(
+    tx: &Connection,
+    session: &lash_sansio::SessionId,
+) -> rusqlite::Result<std::collections::BTreeSet<String>> {
+    use lash_durable::domain::{ExecKey, OwnerKey};
+
+    let cells = ExecKey::session_cells(session);
+    let mut roots = std::collections::BTreeSet::new();
+    roots.extend(run_records::roots_under(
+        tx,
+        &OwnerKey::session_turns(session),
+    )?);
+    roots.extend(run_records::roots_under(tx, &cells)?);
+    roots.extend(snapshots::roots_under(tx, &cells)?);
+    roots.extend(graph::admission_roots_under(tx, &cells)?);
+    Ok(roots)
+}
+
+/// Delete every engine row `session` owns, in its physical delete: its
+/// turns' run facts (their tool-call ledgers), its cells' roots, admissions
+/// and facts, the waits its actor owns and its turns' wait tombstones. The
+/// session's actor row stays, its terminal fence.
+pub(crate) fn retire_session_rows(
+    tx: &Connection,
+    session: &lash_sansio::SessionId,
+) -> rusqlite::Result<()> {
+    use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
+
+    run_records::delete_under(tx, &OwnerKey::session_turns(session))?;
+    snapshots::retire_under(tx, &ExecKey::session_cells(session))?;
+    if let Ok(actor) = ActorKey::session(session.as_str()) {
+        waits::delete_owned(tx, &actor)?;
+    }
+    waits::delete_under(tx, &ScopeKey::session_turns(session))
+}
+
+/// Delete `process`'s run facts and the waits it owns, in its prune: the
+/// process host API's tool calls go with its record.
+pub(crate) fn retire_process_rows(
+    tx: &Connection,
+    process: &lash_sansio::ProcessId,
+) -> rusqlite::Result<()> {
+    run_records::delete_owner(
+        tx,
+        &lash_durable::domain::OwnerKey::Process(process.clone()).stored(),
+    )?;
+    if let Ok(actor) = ActorKey::process(process.as_str()) {
+        waits::delete_owned(tx, &actor)?;
+    }
+    Ok(())
+}
+
+/// Every per-owner engine row in `conn`'s database, one rendered line each:
+/// run facts, execution roots, effect admissions, waits (whole or
+/// tombstone), turn cancel requests and actors. What a law reads to show
+/// an owner's rows are gone (FIG-5939).
+#[cfg(feature = "testing")]
+pub(crate) fn engine_rows_for_testing(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut rows = Vec::new();
+    for sql in [
+        "SELECT 'run_records ' || owner_key || ' ' || run_seq || '/' || ordinal || ' ' || record_ref
+             FROM run_records",
+        "SELECT 'exec_snapshots ' || exec_key FROM exec_snapshots",
+        "SELECT 'effect_admissions ' || exec_key FROM effect_admissions",
+        "SELECT 'waits ' || owner_scope || ' ' || COALESCE(owner_actor, '-') || ' ' || state
+             || CASE WHEN compacted THEN ' tombstone' ELSE ' whole' END FROM waits",
+        "SELECT 'turn_cancel_requests ' || session_id || ' ' || turn_id FROM turn_cancel_requests",
+        "SELECT 'actors ' || actor_key || ' ' || state FROM actors",
+    ] {
+        let mut statement = conn.prepare(sql)?;
+        let read = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.extend(read);
+    }
+    rows.sort();
+    Ok(rows)
+}
+
 pub(crate) const DURABLE_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS nodes (
     node_id TEXT PRIMARY KEY,

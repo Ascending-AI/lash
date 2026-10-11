@@ -7,7 +7,10 @@
 //!
 //! A wait's `deadline_ms`, `kind`, `owner_actor` and what it waits for (`call_id`,
 //! `tool_id`, `key_name`, `target_process`) are written once, by `pin`; every other statement changes a row only while it
-//! is `pending`, so the first resolution wins.
+//! is `pending`, so the first resolution wins. The one exception is
+//! `compact_scope`, at its turn's end: it reduces each settled wait of the
+//! turn to its tombstone (`compacted`), the id, kind, state, digest and
+//! settlement time a late resolution is answered from.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "waits";
@@ -38,6 +41,24 @@ crate::statements! {
              WHERE owner_scope = ?1 AND state = 'pending'
              RETURNING owner_actor";
 
+        /// Compact every settled wait of scope `?1` to its tombstone: its
+        /// owner, purpose and resolution go, its id, kind, state, digest,
+        /// settlement time and scope stay.
+        compact_scope = "UPDATE waits
+             SET compacted = TRUE, owner_actor = NULL, target_process = NULL,
+                 deadline_ms = NULL, resolution_ref = NULL, call_id = NULL, tool_id = NULL,
+                 key_name = NULL
+             WHERE owner_scope = ?1 AND state <> 'pending' AND NOT compacted";
+
+        /// Delete every wait owner `?1` owns: a session's at its delete, a
+        /// process's at its prune.
+        delete_owned = "DELETE FROM waits WHERE owner_actor = ?1";
+
+        /// Delete every wait whose scope starts with `?1`: the tombstones of
+        /// one session's turns, which own nothing, at its delete.
+        delete_under = "DELETE FROM waits
+             WHERE substr(owner_scope, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)";
+
         /// Resolve every pending process-terminal wait on process `?1` with
         /// digest `?2` and resolution `?3` at `?4`, returning each owner.
         resolve_process_terminal = "UPDATE waits
@@ -65,14 +86,14 @@ crate::statements! {
         /// Owner `?1`'s pending waits.
         pending = "SELECT wait_id, owner_actor, owner_scope, kind, target_process, state,
                     deadline_ms, resolution_digest, resolution_ref, resolved_at_ms,
-                    created_epoch, call_id, tool_id, key_name
+                    created_epoch, call_id, tool_id, key_name, compacted
              FROM waits WHERE owner_actor = ?1 AND state = 'pending'
              ORDER BY wait_id";
 
         /// Wait `?1`.
         one = "SELECT wait_id, owner_actor, owner_scope, kind, target_process, state,
                     deadline_ms, resolution_digest, resolution_ref, resolved_at_ms,
-                    created_epoch, call_id, tool_id, key_name
+                    created_epoch, call_id, tool_id, key_name, compacted
              FROM waits WHERE wait_id = ?1";
     }
 }

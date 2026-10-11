@@ -71,6 +71,20 @@ crate::statements! {
         admission_root = "SELECT admission_ref FROM effect_admissions
              WHERE exec_key = ?1 AND effect_id = ?2";
 
+        /// Drop every admission of execution `?1`: the cell its consumer
+        /// retired.
+        admissions_clear = "DELETE FROM effect_admissions WHERE exec_key = ?1";
+
+        /// Drop every admission whose execution key starts with `?1`: the
+        /// cells of one turn at its end, or of one session at its delete.
+        admissions_clear_under = "DELETE FROM effect_admissions
+             WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)";
+
+        /// The Admission node of every admission whose execution key starts
+        /// with `?1`.
+        admission_roots_under = "SELECT admission_ref FROM effect_admissions
+             WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)";
+
         /// Every admission of execution `?1`, by effect identity.
         admissions = "SELECT effect_id, owner_key, run_seq, member_ordinal, admission_ref,
                     written_epoch

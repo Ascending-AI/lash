@@ -181,6 +181,7 @@ fn prune_process_rows_conn(
     }
 
     for process_id in prunable {
+        crate::durable::retire_process_rows(conn, process_id).map_err(process_sqlite_error)?;
         let cleanup = lash_core_execution::ArtifactCleanup::ended(
             lash_core_execution::ArtifactReferrer::ProcessRecord(process_id.clone()),
             Vec::new(),

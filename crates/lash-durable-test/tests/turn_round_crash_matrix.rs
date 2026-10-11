@@ -43,6 +43,10 @@
 //!   held for its commit at most once, and only once its `turn.commit` was
 //!   acknowledged: a refused commit publishes none of it.
 //! - **F1:** a zombie's writes after its reap are refused.
+//! - **The ledger (FIG-5939):** once the turn ended its run facts are its
+//!   whole tool-call ledger: every wait it pinned is a tombstone no full read
+//!   accepts, and its report, read from the facts alone, is the uncut run's
+//!   after a cut at `turn.commit` or `turn.cancel`.
 
 // Test code.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -919,8 +923,14 @@ impl RoundTools for Catalog {
 }
 
 /// The scenario on SQLite in memory, fresh for every matrix cell.
+/// What a turn's tool-call report folds: each admitted call of its ledger,
+/// in admission order, with its settled outcome.
+type Report = Vec<(ToolCallId, Option<SettledOutput>)>;
+
 struct L4 {
     mode: Mode,
+    /// The uncut run's report, which every cell of one matrix shares.
+    baseline: Arc<Mutex<Option<Report>>>,
     seen: Arc<Mutex<Seen>>,
     world: Arc<ExternalWorld>,
     tripwire: Arc<Tripwire>,
@@ -930,8 +940,15 @@ struct L4 {
 
 impl L4 {
     fn new(mode: Mode) -> Self {
+        Self::sharing(mode, Arc::default())
+    }
+
+    /// A cell of a matrix whose cells share `baseline`, the uncut run's
+    /// report.
+    fn sharing(mode: Mode, baseline: Arc<Mutex<Option<Report>>>) -> Self {
         Self {
             mode,
+            baseline,
             seen: Arc::default(),
             world: Arc::default(),
             tripwire: Arc::default(),
@@ -1055,14 +1072,48 @@ impl Scenario for L4 {
             Ok(rows) => rows,
             Err(error) => return vec![format!("the run facts do not read: {error}")],
         };
-        let waits = match round::PinnedWaits::read(database.as_ref(), &rows).await {
-            Ok(waits) => waits,
-            Err(error) => return vec![format!("the pinned waits do not read: {error}")],
-        };
-        let fold = match round::fold(&rows, &PolicyView::default(), &waits) {
+        // The turn ended, so its run facts are its whole ledger: they fold
+        // alone, and every wait its members pinned is a tombstone no full
+        // read accepts (FIG-5939).
+        let fold = match round::fold(&rows, &PolicyView::default(), &round::PinnedWaits::ledger()) {
             Ok(fold) => fold,
             Err(refusal) => return vec![format!("the run records do not fold: {refusal}")],
         };
+        for member in fold.rounds().flat_map(|view| view.members()) {
+            if let Some(pinned) = member.draft().pinned_wait()
+                && database.wait(&pinned.id).await.is_ok()
+            {
+                violations.push(format!(
+                    "the ended turn kept {}'s wait {} whole",
+                    member.call(),
+                    pinned.id
+                ));
+            }
+        }
+        // The report folds the ledger alone: after a cut at the commit that
+        // ends the turn, the redriven ledger reports what the uncut run's did.
+        let report: Report = fold
+            .rounds()
+            .flat_map(|view| view.members())
+            .map(|member| (member.call().clone(), member.outcome().cloned()))
+            .collect();
+        {
+            let mut baseline = self.baseline.lock_recover();
+            match (cut, baseline.as_ref()) {
+                (None, _) => *baseline = Some(report),
+                (Some(cut), Some(uncut))
+                    if [CommitLabel::TURN_COMMIT, CommitLabel::TURN_CANCEL]
+                        .contains(&cut.point.label)
+                        && report != *uncut =>
+                {
+                    violations.push(format!(
+                        "the ledger after a cut at {} reports {report:?}, not the uncut {uncut:?}",
+                        cut.point.label.as_str()
+                    ));
+                }
+                _ => {}
+            }
+        }
 
         // Durable result before tool admission: a body runs only for an
         // x_start that committed, and every first x_start committed with
@@ -1100,7 +1151,7 @@ impl Scenario for L4 {
                 }
             }
             Mode::ApprovalExpires => {
-                violations.extend(expiry_laws(&fold, database.as_ref()).await);
+                violations.extend(expiry_laws(&fold, &trace));
                 let commits = committed(CommitLabel::TURN_COMMIT);
                 if commits != 1 {
                     violations.push(format!("the turn committed {commits} times"));
@@ -1390,51 +1441,37 @@ fn pending_laws(
 }
 
 /// FIG-5410 law 2 over [`Mode::ApprovalExpires`]: the approval's park
-/// deadline is the one its admission pinned, [`PARK_MS`] after the admission
-/// instant, whichever node read it back, and its wait carries that same
-/// deadline; the park expires `TimedOut` on its wait deadline, never on its
-/// body's limit, and not before that deadline. An approval whose owner died
-/// before its park committed is `Interrupted`.
-async fn expiry_laws(fold: &RunFold, database: &dyn DurableStore) -> Vec<String> {
+/// expires `TimedOut` on its wait deadline, [`PARK_MS`] after the admission
+/// instant, never on its body's limit, and not before that deadline,
+/// whichever node expired it. An approval whose owner died before its park
+/// committed is `Interrupted`. Once the turn ended its wait is a tombstone
+/// (FIG-5939): the expiry is read from the committed `wait.timeout`.
+fn expiry_laws(fold: &RunFold, trace: &[lash_durable_test::Write]) -> Vec<String> {
     let mut violations = Vec::new();
     let Some((run, _)) = declared(fold) else {
         return vec!["the round was never admitted".to_owned()];
     };
+    let expired = trace
+        .iter()
+        .filter(|write| write.point.label == CommitLabel::WAIT_TIMEOUT && write.committed())
+        .map(|write| SimClock::timestamp_ms_at(write.at_ms))
+        .min();
     for member in fold.round(run).unwrap().members() {
         let draft = member.draft();
         let admitted_at = draft.limit().expires_at - BODY_MS;
-        let pinned = i64::try_from(admitted_at + PARK_MS).unwrap();
-        match draft.park() {
-            Some(ParkDeadline::At(deadline)) if deadline.at().0 == pinned => {}
-            other => violations.push(format!(
-                "the park pinned {other:?}, not {pinned} ms ({PARK_MS} ms after its admission)"
-            )),
-        }
-        let wait = match draft.pinned_wait() {
-            Some(pinned) => database.wait(&pinned.id).await.ok().flatten(),
-            None => None,
-        };
-        let Some(wait) = wait else {
-            violations.push("the park pinned no wait".to_owned());
-            continue;
-        };
-        if wait.purpose.deadline().map(|at| at.0) != Some(pinned) {
-            violations.push(format!(
-                "the park's wait carries {:?}, not the admission's {pinned}",
-                wait.purpose.deadline()
-            ));
-        }
-        match (member.outcome(), &wait.lifecycle) {
+        let pinned = admitted_at + PARK_MS;
+        match (member.outcome(), expired) {
             (
                 Some(SettledOutput::TimedOut {
                     cause: LimitCause::WaitDeadline,
                     ..
                 }),
-                lash_durable::domain::WaitLifecycle::TimedOut { at },
-            ) if at.0 >= pinned => {}
+                Some(at),
+            ) if at >= pinned => {}
             (Some(SettledOutput::Interrupted), _) => {}
-            (other, lifecycle) => violations.push(format!(
-                "the expired park settled {other:?} with its wait {lifecycle:?}"
+            (other, at) => violations.push(format!(
+                "the expired park settled {other:?}, its wait timed out at {at:?} ms, \
+                 its deadline {pinned} ms"
             )),
         }
     }
@@ -1551,7 +1588,10 @@ fn matrix() -> Matrix {
 }
 
 async fn prove(mode: Mode, labels: &[CommitLabel]) {
-    let report = matrix().run_test(|| L4::new(mode)).await;
+    let baseline = Arc::default();
+    let report = matrix()
+        .run_test(|| L4::sharing(mode, Arc::clone(&baseline)))
+        .await;
     eprintln!(
         "L4 turn {mode:?}: {} cells over labels {:?}",
         report.cells.len(),
@@ -1767,12 +1807,17 @@ fn approval(scenario: &L4) -> (ToolCallId, String) {
         .expect("the approval handed out its key")
 }
 
-/// The run records' one round's only member, folded.
+/// The run records' one round's only member, folded: over its waits while
+/// the turn runs, over its ledger alone once it ended.
 async fn only_member(nodes: &SimNodes) -> round::RoundMember {
     let rows = nodes.database().run_facts(&owner()).await.unwrap();
-    let waits = round::PinnedWaits::read(nodes.database().as_ref(), &rows)
-        .await
-        .unwrap();
+    let waits = if nodes.database().turn(&session()).await.unwrap().is_some() {
+        round::PinnedWaits::read(nodes.database().as_ref(), &rows)
+            .await
+            .unwrap()
+    } else {
+        round::PinnedWaits::ledger()
+    };
     let fold = round::fold(&rows, &PolicyView::default(), &waits).unwrap();
     let (run, _) = declared(&fold).expect("the round was admitted");
     let mut members = fold.round(run).unwrap().members().to_vec();
@@ -1808,6 +1853,36 @@ async fn a_parked_call_outlives_its_body_bound() {
     }
     let violations = scenario.check(&nodes, None).await;
     assert!(violations.is_empty(), "{violations:#?}");
+
+    // FIG-5939: the turn's end compacted the approval's wait to its
+    // tombstone, which still answers the host as its full row did (ADR 0132
+    // §6): a retry whose acknowledgement was lost is `AlreadyResolved`, and
+    // another answer is a `Conflict`.
+    let pinned = only_member(&nodes)
+        .await
+        .draft()
+        .pinned_wait()
+        .expect("the approval's wait");
+    assert!(
+        nodes.database().wait(&pinned.id).await.is_err(),
+        "the ended turn kept the approval's wait whole"
+    );
+    let retried = waits::resolve_host(&backend, &key, waits::Resolution::Ok(host_answer(&call)))
+        .await
+        .unwrap();
+    assert_eq!(
+        retried,
+        lash_durable::domain::ResolveAnswer::AlreadyResolved,
+        "a lost acknowledgement's retry"
+    );
+    let other = waits::resolve_host(&backend, &key, waits::Resolution::Ok(serde_json::json!(2)))
+        .await
+        .unwrap();
+    assert_eq!(
+        other,
+        lash_durable::domain::ResolveAnswer::Conflict,
+        "another answer after the first won"
+    );
 }
 
 /// FIG-5410 law 2: an approval parked [`PARK_MS`] from its admission keeps
@@ -1873,15 +1948,12 @@ async fn an_until_scope_end_park_is_revoked_when_its_turn_ends() {
     }
     nodes.quiesce().await;
 
-    let wait = nodes.database().wait(&pinned.id).await.unwrap().unwrap();
+    // The turn's end revoked the park's wait and compacted it to its
+    // tombstone (FIG-5939): no full read accepts it once the turn ended.
+    let wait = nodes.database().wait(&pinned.id).await;
     assert!(
-        matches!(
-            wait.lifecycle,
-            lash_durable::domain::WaitLifecycle::Revoked { .. }
-        ),
-        "the turn's end left the park's wait {:?} (scope {:?}, member {:?})",
-        wait.lifecycle,
-        wait.scope,
+        wait.is_err(),
+        "the turn's end left the park's wait whole: {wait:?} (member {:?})",
         only_member(&nodes).await.outcome()
     );
     match only_member(&nodes).await.outcome() {
@@ -1893,9 +1965,9 @@ async fn an_until_scope_end_park_is_revoked_when_its_turn_ends() {
     let late = waits::resolve_host(&backend, &key, waits::Resolution::Ok(serde_json::json!(1)))
         .await
         .unwrap();
-    assert_ne!(
+    assert_eq!(
         late,
-        lash_durable::domain::ResolveAnswer::Resolved,
-        "a revoked park took a resolution"
+        lash_durable::domain::ResolveAnswer::Revoked,
+        "a late resolution of the revoked park's tombstone answers Revoked"
     );
 }

@@ -10,8 +10,9 @@
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitLifecycle, WaitPurpose,
-    WaitPurposeColumns, WaitResolution, WaitRow, WaitState, WaitWrite,
+    ResolveAnswer, ScopeKey, StoredWait, TIMER_DIGEST, WaitId, WaitKind, WaitLifecycle,
+    WaitPurpose, WaitPurposeColumns, WaitResolution, WaitRow, WaitSettlement, WaitState,
+    WaitTombstone, WaitWrite,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, Woken};
 use lash_store_sql::durable::waits::WaitStatements;
@@ -24,7 +25,8 @@ use crate::conn::cached_execute;
 pub(crate) const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS waits (
     wait_id TEXT PRIMARY KEY,
-    owner_actor TEXT NOT NULL,
+    -- NULL exactly on a tombstone: its turn ended, and it wakes nobody.
+    owner_actor TEXT,
     owner_scope TEXT NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_waits_kind CHECK (kind IN
         ('tool_completion', 'engine_key', 'process_terminal', 'timer', 'child_session')),
@@ -40,17 +42,28 @@ CREATE TABLE IF NOT EXISTS waits (
     call_id TEXT,
     tool_id TEXT,
     key_name TEXT,
+    -- A tombstone: the id, kind, state, digest and settlement time a late
+    -- resolution is answered from, once its turn ended. Never pending.
+    compacted INTEGER NOT NULL DEFAULT FALSE CONSTRAINT ck_waits_compacted_bool
+        CHECK (compacted IN (FALSE, TRUE)),
+    CONSTRAINT ck_waits_compacted CHECK (NOT compacted OR (state <> 'pending'
+        AND owner_actor IS NULL AND target_process IS NULL AND deadline_ms IS NULL
+        AND resolution_ref IS NULL AND call_id IS NULL AND tool_id IS NULL
+        AND key_name IS NULL)),
+    CONSTRAINT ck_waits_owner CHECK (compacted OR owner_actor IS NOT NULL),
     CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'engine_key'))),
-    CONSTRAINT ck_waits_target
-        CHECK ((target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
+    CONSTRAINT ck_waits_target CHECK (compacted
+        OR (target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
     CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL)),
-    CONSTRAINT ck_waits_timer_deadline CHECK (kind <> 'timer' OR deadline_ms IS NOT NULL),
+    CONSTRAINT ck_waits_timer_deadline
+        CHECK (compacted OR kind <> 'timer' OR deadline_ms IS NOT NULL),
     CONSTRAINT ck_waits_settled_at CHECK ((state <> 'pending') = (resolved_at_ms IS NOT NULL)),
-    CONSTRAINT ck_waits_resolution_ref
-        CHECK ((state = 'resolved' AND kind <> 'timer') = (resolution_ref IS NOT NULL)),
-    CONSTRAINT ck_waits_call CHECK ((call_id IS NOT NULL) = (kind = 'tool_completion')
+    CONSTRAINT ck_waits_resolution_ref CHECK (compacted
+        OR (state = 'resolved' AND kind <> 'timer') = (resolution_ref IS NOT NULL)),
+    CONSTRAINT ck_waits_call CHECK (compacted OR (call_id IS NOT NULL) = (kind = 'tool_completion')
         AND (tool_id IS NOT NULL) = (kind = 'tool_completion')),
-    CONSTRAINT ck_waits_key_name CHECK ((key_name IS NOT NULL) = (kind = 'engine_key'))
+    CONSTRAINT ck_waits_key_name
+        CHECK (compacted OR (key_name IS NOT NULL) = (kind = 'engine_key'))
 );
 CREATE INDEX IF NOT EXISTS ix_waits_owner ON waits (owner_actor) WHERE state = 'pending';
 CREATE INDEX IF NOT EXISTS ix_waits_scope ON waits (owner_scope);
@@ -106,6 +119,19 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite)
                 rusqlite::params![scope.stored(), commit.now.0],
             )?;
             wake_owners(tx, commit.actor, owners, commit.now)
+        }
+        WaitWrite::RetireScope(scope) => {
+            let owners = owners_of(
+                tx,
+                SQL.revoke_scope.sql(),
+                rusqlite::params![scope.stored(), commit.now.0],
+            )?;
+            match wake_owners(tx, commit.actor, owners, commit.now)? {
+                Ok(()) => {}
+                Err(error) => return Ok(Err(error)),
+            }
+            cached_execute(tx, SQL.compact_scope.sql(), [scope.stored()])?;
+            Ok(Ok(()))
         }
         WaitWrite::ResolveProcessTerminal {
             process,
@@ -180,16 +206,24 @@ pub(super) fn resolve(
     resolution: &WaitResolution,
     now: DurableInstant,
 ) -> Answer<(ResolveAnswer, Option<Woken>)> {
-    let Some(row) = read_one(tx, &resolution.id)? else {
+    let Some(row) = tx
+        .prepare_cached(SQL.one.sql())?
+        .query_row([resolution.id.to_hex()], stored_row)
+        .optional()?
+    else {
         return Ok(Ok((ResolveAnswer::Unknown, None)));
     };
-    let row = match row {
+    let row = match decode_stored(row) {
         Ok(row) => row,
         Err(error) => return Ok(Err(error)),
     };
-    if let Some(answer) = settled_answer(&row, resolution) {
+    if let Some(answer) = row.settled_answer(resolution) {
         return Ok(Ok((answer, None)));
     }
+    // A wait that may resolve is pending, so never a tombstone.
+    let StoredWait::Full(row) = row else {
+        return Ok(Err(corrupt("pending wait", &resolution.id.to_hex())));
+    };
     let owner: Option<String> = tx
         .prepare_cached(SQL.resolve.sql())?
         .query_row(
@@ -214,27 +248,14 @@ pub(super) fn resolve(
     }
 }
 
-/// The answer a resolution gets without writing: a reserved kind for a host,
-/// or a wait that is no longer pending. `None` when it may resolve.
-pub(super) fn settled_answer(row: &WaitRow, resolution: &WaitResolution) -> Option<ResolveAnswer> {
-    if resolution.by_host && !row.purpose.kind().host_resolvable() {
-        return Some(ResolveAnswer::ReservedKind);
-    }
-    match &row.lifecycle {
-        WaitLifecycle::Pending => None,
-        WaitLifecycle::Resolved { digest, .. } if digest == &resolution.digest => {
-            Some(ResolveAnswer::AlreadyResolved)
-        }
-        WaitLifecycle::TimerElapsed { .. } if resolution.digest == TIMER_DIGEST => {
-            Some(ResolveAnswer::AlreadyResolved)
-        }
-        WaitLifecycle::Resolved { .. } | WaitLifecycle::TimerElapsed { .. } => {
-            Some(ResolveAnswer::Conflict)
-        }
-        WaitLifecycle::TimedOut { .. } | WaitLifecycle::Revoked { .. } => {
-            Some(ResolveAnswer::Revoked)
-        }
-    }
+/// Delete every wait `owner` owns.
+pub(super) fn delete_owned(tx: &Connection, owner: &ActorKey) -> rusqlite::Result<()> {
+    cached_execute(tx, SQL.delete_owned.sql(), [owner.as_str()]).map(drop)
+}
+
+/// Delete every wait whose scope starts with `prefix`.
+pub(super) fn delete_under(tx: &Connection, prefix: &str) -> rusqlite::Result<()> {
+    cached_execute(tx, SQL.delete_under.sql(), [prefix]).map(drop)
 }
 
 pub(super) fn pending(tx: &Connection, owner: &ActorKey) -> Answer<Vec<WaitRow>> {
@@ -246,24 +267,18 @@ pub(super) fn pending(tx: &Connection, owner: &ActorKey) -> Answer<Vec<WaitRow>>
 }
 
 pub(super) fn wait(tx: &Connection, id: &WaitId) -> Answer<Option<WaitRow>> {
-    Ok(read_one(tx, id)?.transpose())
-}
-
-fn read_one(
-    tx: &Connection,
-    id: &WaitId,
-) -> rusqlite::Result<Option<Result<WaitRow, DurableError>>> {
     Ok(tx
         .prepare_cached(SQL.one.sql())?
         .query_row([id.to_hex()], stored_row)
         .optional()?
-        .map(decode))
+        .map(decode)
+        .transpose())
 }
 
 /// One row as stored, before it is decoded.
 struct Stored {
     id: String,
-    owner: String,
+    owner: Option<String>,
     scope: String,
     kind: String,
     target: Option<String>,
@@ -276,6 +291,7 @@ struct Stored {
     call: Option<String>,
     tool: Option<String>,
     key_name: Option<String>,
+    compacted: bool,
 }
 
 fn stored_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stored> {
@@ -294,13 +310,41 @@ fn stored_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stored> {
         call: row.get(11)?,
         tool: row.get(12)?,
         key_name: row.get(13)?,
+        compacted: row.get(14)?,
     })
 }
 
+/// A full read of a wait: a tombstone is refused, since nothing folds an
+/// ended turn's waits.
 fn decode(stored: Stored) -> Result<WaitRow, DurableError> {
+    match decode_stored(stored)? {
+        StoredWait::Full(row) => Ok(row),
+        StoredWait::Compacted(tombstone) => Err(corrupt(
+            "wait read in full after its turn ended",
+            &tombstone.id.to_hex(),
+        )),
+    }
+}
+
+/// A wait as a resolver reads it: in full, or its tombstone.
+fn decode_stored(stored: Stored) -> Result<StoredWait, DurableError> {
     let kind = WaitKind::parse(&stored.kind).ok_or_else(|| corrupt("wait kind", &stored.kind))?;
     let state =
         WaitState::parse(&stored.state).ok_or_else(|| corrupt("wait state", &stored.state))?;
+    let id = WaitId::parse_hex(&stored.id).ok_or_else(|| corrupt("wait id", &stored.id))?;
+    if stored.compacted {
+        let settlement =
+            WaitSettlement::decode(state, stored.resolved_at.map(DurableInstant), stored.digest)
+                .ok_or_else(|| corrupt("wait tombstone", &stored.id))?;
+        return Ok(StoredWait::Compacted(WaitTombstone {
+            id,
+            kind,
+            settlement,
+        }));
+    }
+    let owner = stored
+        .owner
+        .ok_or_else(|| corrupt("wait owner", &stored.id))?;
     let purpose = WaitPurpose::decode(
         kind,
         WaitPurposeColumns {
@@ -331,12 +375,12 @@ fn decode(stored: Stored) -> Result<WaitRow, DurableError> {
         stored.resolution_ref,
     )
     .ok_or_else(|| corrupt("wait lifecycle", &stored.id))?;
-    Ok(WaitRow {
-        id: WaitId::parse_hex(&stored.id).ok_or_else(|| corrupt("wait id", &stored.id))?,
-        owner: actor_key(&stored.owner)?,
+    Ok(StoredWait::Full(WaitRow {
+        id,
+        owner: actor_key(&owner)?,
         scope: ScopeKey::parse(&stored.scope).map_err(|_| corrupt("wait scope", &stored.scope))?,
         purpose,
         lifecycle,
         created_epoch: Epoch(stored.created_epoch),
-    })
+    }))
 }

@@ -153,3 +153,32 @@ pub(super) async fn read(
         })
         .collect()
 }
+
+/// Delete every fact of the owner stored as `key`.
+pub(super) async fn delete_owner(tx: &mut PgConnection, key: &str) -> Result<(), sqlx::Error> {
+    crate::observed_sql::query(SQL.delete_owner.sql())
+        .bind(key)
+        .execute(crate::observed_sql::executor(tx))
+        .await
+        .map(drop)
+}
+
+/// Delete every fact whose owner key starts with `key`.
+pub(super) async fn delete_under(tx: &mut PgConnection, key: &str) -> Result<(), sqlx::Error> {
+    crate::observed_sql::query(SQL.delete_under.sql())
+        .bind(key)
+        .execute(crate::observed_sql::executor(tx))
+        .await
+        .map(drop)
+}
+
+/// The RoundFact node of every fact whose owner key starts with `prefix`.
+pub(super) async fn roots_under(
+    tx: &mut PgConnection,
+    prefix: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    crate::observed_sql::query_scalar(SQL.roots_under.sql())
+        .bind(prefix)
+        .fetch_all(crate::observed_sql::executor(tx))
+        .await
+}

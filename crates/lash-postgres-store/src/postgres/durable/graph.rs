@@ -121,6 +121,17 @@ lash_store_sql::statements! {
              SELECT blobs.hash, blobs.encoding, blobs.content
              FROM blobs JOIN reach ON blobs.hash = reach.hash";
 
+        /// Every hash roots `?1` reach along stored edges, the roots
+        /// included: an owner-scoped delete's reclaim candidates, in one
+        /// statement.
+        reach_from = "WITH RECURSIVE reach AS (
+                 SELECT UNNEST(?1::text[]) AS hash
+                 UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge
+                 JOIN reach ON edge.parent_hash = reach.hash
+             )
+             SELECT hash FROM reach";
+
         /// [`Self::walk_reach`] without any opaque blob's bytes but the
         /// roots' bytes: what a reader of the graph alone reads.
         walk_reach_graph = "WITH RECURSIVE reach AS (
@@ -938,19 +949,22 @@ pub(crate) async fn install_staged(
 }
 
 /// Every blob reachable from `roots` along stored edges, the roots included:
-/// what an owner-scoped delete may reclaim once its roots are gone.
+/// what an owner-scoped delete may reclaim once its roots are gone. One
+/// recursive statement, whatever the graph's size.
 pub(crate) async fn reachable_from(
     tx: &mut PgConnection,
     roots: &BTreeSet<String>,
 ) -> Answer<BTreeSet<String>> {
-    let mut seen = BTreeSet::new();
-    let mut stack: Vec<String> = roots.iter().cloned().collect();
-    while let Some(hash) = stack.pop() {
-        if seen.insert(hash.clone()) {
-            stack.extend(stored_edges(tx, &hash).await?);
-        }
+    if roots.is_empty() {
+        return Ok(BTreeSet::new());
     }
-    Ok(seen)
+    let roots: Vec<&str> = roots.iter().map(String::as_str).collect();
+    let reached: Vec<String> = crate::observed_sql::query_scalar(SQL.postgres.reach_from.sql())
+        .bind(&roots)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(db)?;
+    Ok(reached.into_iter().collect())
 }
 
 async fn insert_pin(tx: &mut PgConnection, pin: &ReadPin) -> Answer<()> {
@@ -1367,6 +1381,39 @@ pub(crate) const OWNER_ROW_NOWAIT: &str =
 #[cfg(test)]
 #[path = "../graph_store_tests.rs"]
 mod graph_store_tests;
+
+/// Drop every admission of the execution stored as `key`.
+pub(super) async fn clear_admissions(tx: &mut PgConnection, key: &str) -> Result<(), sqlx::Error> {
+    crate::observed_sql::query(SQL.graph.admissions_clear.sql())
+        .bind(key)
+        .execute(crate::observed_sql::executor(tx))
+        .await
+        .map(drop)
+}
+
+/// Drop every admission whose execution key starts with `key`.
+pub(super) async fn clear_admissions_under(
+    tx: &mut PgConnection,
+    key: &str,
+) -> Result<(), sqlx::Error> {
+    crate::observed_sql::query(SQL.graph.admissions_clear_under.sql())
+        .bind(key)
+        .execute(crate::observed_sql::executor(tx))
+        .await
+        .map(drop)
+}
+
+/// The Admission node of every admission whose execution key starts with
+/// `prefix`.
+pub(super) async fn admission_roots_under(
+    tx: &mut PgConnection,
+    prefix: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    crate::observed_sql::query_scalar(SQL.graph.admission_roots_under.sql())
+        .bind(prefix)
+        .fetch_all(crate::observed_sql::executor(tx))
+        .await
+}
 
 #[cfg(test)]
 mod run_fact_tests {

@@ -686,6 +686,27 @@ pub(super) fn apply_admission(
     Ok(Ok(()))
 }
 
+/// Drop every admission of the execution stored as `exec_key`.
+pub(super) fn clear_admissions(tx: &Connection, exec_key: &str) -> rusqlite::Result<()> {
+    cached_execute(tx, SQL.graph.admissions_clear.sql(), [exec_key]).map(drop)
+}
+
+/// Drop every admission whose execution key starts with `prefix`.
+pub(super) fn clear_admissions_under(tx: &Connection, prefix: &str) -> rusqlite::Result<()> {
+    cached_execute(tx, SQL.graph.admissions_clear_under.sql(), [prefix]).map(drop)
+}
+
+/// The Admission node of every admission whose execution key starts with
+/// `prefix`.
+pub(super) fn admission_roots_under(
+    tx: &Connection,
+    prefix: &str,
+) -> rusqlite::Result<Vec<String>> {
+    tx.prepare_cached(SQL.graph.admission_roots_under.sql())?
+        .query_map([prefix], |row| row.get(0))?
+        .collect()
+}
+
 /// Applies a read pin write.
 pub(super) fn apply_read_pin(tx: &Connection, write: &ReadPinWrite) -> Answer<()> {
     match write {

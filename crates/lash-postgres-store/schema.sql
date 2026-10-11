@@ -1063,7 +1063,8 @@ CREATE INDEX IF NOT EXISTS idx_lash_turn_namespaces_graph_root_ref
 -- is the wait id, 128 random bits.
 CREATE TABLE IF NOT EXISTS lash_waits (
     wait_id TEXT COLLATE "C" PRIMARY KEY,
-    owner_actor TEXT COLLATE "C" NOT NULL,
+    -- NULL exactly on a tombstone: its turn ended, and it wakes nobody.
+    owner_actor TEXT COLLATE "C",
     owner_scope TEXT COLLATE "C" NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_waits_kind CHECK (kind IN
         ('tool_completion', 'engine_key', 'process_terminal', 'timer', 'child_session')),
@@ -1079,17 +1080,27 @@ CREATE TABLE IF NOT EXISTS lash_waits (
     call_id TEXT COLLATE "C",
     tool_id TEXT COLLATE "C",
     key_name TEXT COLLATE "C",
+    -- A tombstone: the id, kind, state, digest and settlement time a late
+    -- resolution is answered from, once its turn ended. Never pending.
+    compacted BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT ck_waits_compacted CHECK (NOT compacted OR (state <> 'pending'
+        AND owner_actor IS NULL AND target_process IS NULL AND deadline_ms IS NULL
+        AND resolution_ref IS NULL AND call_id IS NULL AND tool_id IS NULL
+        AND key_name IS NULL)),
+    CONSTRAINT ck_waits_owner CHECK (compacted OR owner_actor IS NOT NULL),
     CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'engine_key'))),
-    CONSTRAINT ck_waits_target
-        CHECK ((target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
+    CONSTRAINT ck_waits_target CHECK (compacted
+        OR (target_process IS NOT NULL) = (kind IN ('process_terminal', 'child_session'))),
     CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL)),
-    CONSTRAINT ck_waits_timer_deadline CHECK (kind <> 'timer' OR deadline_ms IS NOT NULL),
+    CONSTRAINT ck_waits_timer_deadline
+        CHECK (compacted OR kind <> 'timer' OR deadline_ms IS NOT NULL),
     CONSTRAINT ck_waits_settled_at CHECK ((state <> 'pending') = (resolved_at_ms IS NOT NULL)),
-    CONSTRAINT ck_waits_resolution_ref
-        CHECK ((state = 'resolved' AND kind <> 'timer') = (resolution_ref IS NOT NULL)),
-    CONSTRAINT ck_waits_call CHECK ((call_id IS NOT NULL) = (kind = 'tool_completion')
+    CONSTRAINT ck_waits_resolution_ref CHECK (compacted
+        OR (state = 'resolved' AND kind <> 'timer') = (resolution_ref IS NOT NULL)),
+    CONSTRAINT ck_waits_call CHECK (compacted OR (call_id IS NOT NULL) = (kind = 'tool_completion')
         AND (tool_id IS NOT NULL) = (kind = 'tool_completion')),
-    CONSTRAINT ck_waits_key_name CHECK ((key_name IS NOT NULL) = (kind = 'engine_key'))
+    CONSTRAINT ck_waits_key_name
+        CHECK (compacted OR (key_name IS NOT NULL) = (kind = 'engine_key'))
 );
 
 CREATE INDEX IF NOT EXISTS ix_lash_waits_owner ON lash_waits (owner_actor)

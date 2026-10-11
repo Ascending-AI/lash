@@ -5,8 +5,9 @@
 //!
 //! - **The closure and the first batch ride the ending transaction.** L3's
 //!   `turn.commit` and `turn.cancel` transactions call [`end_turn_scope`] on
-//!   their own `tx`: it revokes the turn's waits, marks the first batch of
-//!   the turn's `Until` children for cancel through L6's `end_scope`, and
+//!   their own `tx`: it revokes the turn's waits and compacts each to its
+//!   tombstone, marks the first batch of the turn's `Until` children for
+//!   cancel through L6's `end_scope`, and
 //!   closes the turn's scope (`ProcessWrite::ScopeClosed`), so no process
 //!   registers under it once `tx` commits. The closure reads the children
 //!   again inside `tx`, after it: when one is left unmarked, the same `tx`
@@ -74,9 +75,9 @@ pub(super) async fn mark_until_children(
 
 /// End `run`'s scope on `tx`, the transaction that ended the turn
 /// (`turn.commit` or `turn.cancel`): settle its model calls, revoke the
-/// turn's waits, mark the first batch of its `Until` children for cancel
-/// and close the scope. When a child is left unmarked the scope is recorded
-/// as ending, for [`continue_scope_ends`].
+/// turn's waits and compact them to tombstones, mark the first batch of its
+/// `Until` children for cancel and close the scope. When a child is left
+/// unmarked the scope is recorded as ending, for [`continue_scope_ends`].
 ///
 /// A run named by a process id is that `SessionTurn` process's child turn
 /// (FIG-5208): its end resolves the process's child-session wait, which
@@ -95,7 +96,7 @@ pub async fn end_turn_scope(
     // No call of an ended turn is sent again.
     super::phases::settle_model_calls(tx, session, run, None);
     mark_until_children(cx, tx, &scope).await?;
-    waits::revoke_scope(tx, &scope);
+    waits::retire_scope(tx, &scope);
     if let Ok(process) = crate::ProcessId::parse(run.as_str()) {
         waits::resolve_child_session_waits(tx, &process)?;
     }

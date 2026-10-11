@@ -165,14 +165,21 @@ async fn once(
                 continue;
             }
         };
-        let waits = match PinnedWaits::read(nodes.database().as_ref(), &rows).await {
-            Ok(waits) => waits,
-            Err(error) => {
-                violations.push(format!(
-                    "fold: {owner:?}'s pinned waits do not read: {error}"
-                ));
-                continue;
+        // A turn's waits are tombstones once it ended, and its ledger alone
+        // folds its recoveries; a process's stay whole until its prune.
+        let waits = match &owner {
+            OwnerKey::Process(_) => {
+                match PinnedWaits::read(nodes.database().as_ref(), &rows).await {
+                    Ok(waits) => waits,
+                    Err(error) => {
+                        violations.push(format!(
+                            "fold: {owner:?}'s pinned waits do not read: {error}"
+                        ));
+                        continue;
+                    }
+                }
             }
+            OwnerKey::Turn(..) | OwnerKey::Cell(..) => PinnedWaits::ledger(),
         };
         let folded = match fold(&rows, &PolicyView::new([]), &waits) {
             Ok(folded) => folded,

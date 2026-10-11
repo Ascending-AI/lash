@@ -699,6 +699,13 @@ pub fn revoke_scope(tx: &mut ActorTx, scope: &ScopeKey) {
     tx.write(DomainWrite::Wait(WaitWrite::RevokeScope(scope.clone())));
 }
 
+/// End a turn's `scope` on `tx`, the transaction that ends the turn: revoke
+/// its pending waits, then compact every wait of the scope to the tombstone
+/// a late resolution is answered from (ADR 0132 §6).
+pub fn retire_scope(tx: &mut ActorTx, scope: &ScopeKey) {
+    tx.write(DomainWrite::Wait(WaitWrite::RetireScope(scope.clone())));
+}
+
 /// The host key of `wait`, as [`pin`] minted it: what an owner hands a body
 /// that runs again under the wait it pinned before. `None` for a kind no
 /// host resolves.

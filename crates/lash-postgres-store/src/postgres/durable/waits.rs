@@ -10,8 +10,9 @@
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    ResolveAnswer, ScopeKey, TIMER_DIGEST, WaitId, WaitKind, WaitLifecycle, WaitPurpose,
-    WaitPurposeColumns, WaitResolution, WaitRow, WaitState, WaitWrite,
+    ResolveAnswer, ScopeKey, StoredWait, TIMER_DIGEST, WaitId, WaitKind, WaitLifecycle,
+    WaitPurpose, WaitPurposeColumns, WaitResolution, WaitRow, WaitSettlement, WaitState,
+    WaitTombstone, WaitWrite,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, Woken};
 use lash_store_sql::Dialect;
@@ -27,7 +28,7 @@ lash_store_sql::statements! {
         /// Wait `?1`, locked for the rest of the transaction.
         lock = "SELECT wait_id, owner_actor, owner_scope, kind, target_process, state,
                     deadline_ms, resolution_digest, resolution_ref, resolved_at_ms,
-                    created_epoch, call_id, tool_id, key_name
+                    created_epoch, call_id, tool_id, key_name, compacted
              FROM waits WHERE wait_id = ?1
              FOR UPDATE";
     }
@@ -88,6 +89,22 @@ pub(super) async fn apply(
                     .await
                     .map_err(sqlx_failure)?;
             wake_owners(tx, commit.actor, owners, commit.now).await
+        }
+        WaitWrite::RetireScope(scope) => {
+            let owners: Vec<String> =
+                crate::observed_sql::query_scalar(SQL.waits.revoke_scope.sql())
+                    .bind(scope.stored())
+                    .bind(commit.now.0)
+                    .fetch_all(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+            wake_owners(tx, commit.actor, owners, commit.now).await?;
+            crate::observed_sql::query(SQL.waits.compact_scope.sql())
+                .bind(scope.stored())
+                .execute(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+            Ok(())
         }
         WaitWrite::ResolveProcessTerminal {
             process,
@@ -160,12 +177,16 @@ pub(super) async fn resolve(
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    let Some(row) = row.as_ref().map(decode).transpose()? else {
+    let Some(row) = row.as_ref().map(decode_stored).transpose()? else {
         return Ok((ResolveAnswer::Unknown, None));
     };
-    if let Some(answer) = settled_answer(&row, resolution) {
+    if let Some(answer) = row.settled_answer(resolution) {
         return Ok((answer, None));
     }
+    // A wait that may resolve is pending, so never a tombstone.
+    let StoredWait::Full(row) = row else {
+        return Err(corrupt("pending wait", &resolution.id.to_hex()));
+    };
     let owner: Option<String> = crate::observed_sql::query_scalar(SQL.waits.resolve.sql())
         .bind(resolution.id.to_hex())
         .bind(&resolution.digest)
@@ -186,27 +207,25 @@ pub(super) async fn resolve(
     }
 }
 
-/// The answer a resolution gets without writing: a reserved kind for a host,
-/// or a wait that is no longer pending. `None` when it may resolve.
-fn settled_answer(row: &WaitRow, resolution: &WaitResolution) -> Option<ResolveAnswer> {
-    if resolution.by_host && !row.purpose.kind().host_resolvable() {
-        return Some(ResolveAnswer::ReservedKind);
-    }
-    match &row.lifecycle {
-        WaitLifecycle::Pending => None,
-        WaitLifecycle::Resolved { digest, .. } if digest == &resolution.digest => {
-            Some(ResolveAnswer::AlreadyResolved)
-        }
-        WaitLifecycle::TimerElapsed { .. } if resolution.digest == TIMER_DIGEST => {
-            Some(ResolveAnswer::AlreadyResolved)
-        }
-        WaitLifecycle::Resolved { .. } | WaitLifecycle::TimerElapsed { .. } => {
-            Some(ResolveAnswer::Conflict)
-        }
-        WaitLifecycle::TimedOut { .. } | WaitLifecycle::Revoked { .. } => {
-            Some(ResolveAnswer::Revoked)
-        }
-    }
+/// Delete every wait `owner` owns.
+pub(super) async fn delete_owned(
+    tx: &mut PgConnection,
+    owner: &ActorKey,
+) -> Result<(), sqlx::Error> {
+    crate::observed_sql::query(SQL.waits.delete_owned.sql())
+        .bind(owner.as_str())
+        .execute(crate::observed_sql::executor(tx))
+        .await
+        .map(drop)
+}
+
+/// Delete every wait whose scope starts with `prefix`.
+pub(super) async fn delete_under(tx: &mut PgConnection, prefix: &str) -> Result<(), sqlx::Error> {
+    crate::observed_sql::query(SQL.waits.delete_under.sql())
+        .bind(prefix)
+        .execute(crate::observed_sql::executor(tx))
+        .await
+        .map(drop)
 }
 
 pub(super) async fn pending(
@@ -233,7 +252,20 @@ pub(super) async fn wait(
     row.as_ref().map(decode).transpose()
 }
 
+/// A full read of a wait: a tombstone is refused, since nothing folds an
+/// ended turn's waits.
 fn decode(row: &PgRow) -> Result<WaitRow, DurableError> {
+    match decode_stored(row)? {
+        StoredWait::Full(row) => Ok(row),
+        StoredWait::Compacted(tombstone) => Err(corrupt(
+            "wait read in full after its turn ended",
+            &tombstone.id.to_hex(),
+        )),
+    }
+}
+
+/// A wait as a resolver reads it: in full, or its tombstone.
+fn decode_stored(row: &PgRow) -> Result<StoredWait, DurableError> {
     let id: String = get(row, 0)?;
     let scope: String = get(row, 2)?;
     let kind: String = get(row, 3)?;
@@ -241,6 +273,20 @@ fn decode(row: &PgRow) -> Result<WaitRow, DurableError> {
     let target: Option<String> = get(row, 4)?;
     let state: String = get(row, 5)?;
     let state = WaitState::parse(&state).ok_or_else(|| corrupt("wait state", &state))?;
+    let wait_id = WaitId::parse_hex(&id).ok_or_else(|| corrupt("wait id", &id))?;
+    if get::<bool>(row, 14)? {
+        let settlement = WaitSettlement::decode(
+            state,
+            get::<Option<i64>>(row, 9)?.map(DurableInstant),
+            get(row, 7)?,
+        )
+        .ok_or_else(|| corrupt("wait tombstone", &id))?;
+        return Ok(StoredWait::Compacted(WaitTombstone {
+            id: wait_id,
+            kind,
+            settlement,
+        }));
+    }
     let call: Option<String> = get(row, 11)?;
     let purpose = WaitPurpose::decode(
         kind,
@@ -270,12 +316,14 @@ fn decode(row: &PgRow) -> Result<WaitRow, DurableError> {
         get(row, 8)?,
     )
     .ok_or_else(|| corrupt("wait lifecycle", &id))?;
-    Ok(WaitRow {
-        id: WaitId::parse_hex(&id).ok_or_else(|| corrupt("wait id", &id))?,
-        owner: actor_key(&get::<String>(row, 1)?)?,
+    let owner: Option<String> = get(row, 1)?;
+    let owner = owner.ok_or_else(|| corrupt("wait owner", &id))?;
+    Ok(StoredWait::Full(WaitRow {
+        id: wait_id,
+        owner: actor_key(&owner)?,
         scope: ScopeKey::parse(&scope).map_err(|_| corrupt("wait scope", &scope))?,
         purpose,
         lifecycle,
         created_epoch: Epoch(get(row, 10)?),
-    })
+    }))
 }

@@ -106,10 +106,8 @@ async fn outcomes(
         .run_facts(&owner)
         .await
         .map_err(|error| format!("the round's records do not read: {error}"))?;
-    let waits = PinnedWaits::read(nodes.database().as_ref(), &rows)
-        .await
-        .map_err(|error| format!("the round's pinned waits do not read: {error}"))?;
-    let folded = fold(&rows, &PolicyView::new([]), &waits)
+    // The turn ended: its waits are tombstones, and its ledger folds alone.
+    let folded = fold(&rows, &PolicyView::new([]), &PinnedWaits::ledger())
         .map_err(|refusal| format!("the round's records do not fold: {refusal:?}"))?;
     let mut settled = Vec::new();
     for (id, recovery) in folded.recoveries() {

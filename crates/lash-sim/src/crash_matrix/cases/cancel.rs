@@ -163,10 +163,7 @@ async fn interrupted_hang(
     let Ok(rows) = nodes.database().run_facts(&owner).await else {
         return false;
     };
-    let Ok(waits) = PinnedWaits::read(nodes.database().as_ref(), &rows).await else {
-        return false;
-    };
-    let Ok(folded) = fold(&rows, &PolicyView::new([]), &waits) else {
+    let Ok(folded) = fold(&rows, &PolicyView::new([]), &PinnedWaits::ledger()) else {
         return false;
     };
     folded.recoveries().iter().any(|(id, recovery)| {

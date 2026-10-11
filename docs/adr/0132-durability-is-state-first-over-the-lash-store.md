@@ -134,8 +134,15 @@ effect the checkpoint names.
   completed response commits with the next checkpoint and the round's
   admission in one transaction.
 - The turn commit is one transaction: the session head compare-and-set,
-  terminal evidence, the parent-end of `Until(turn)` processes and pruning of
-  the turn's phase rows. The head compare-and-set makes it idempotent.
+  terminal evidence, the parent-end of `Until(turn)` processes and the
+  retirement of the turn's working state. The head compare-and-set makes it
+  idempotent. The turn's commit and its cancel retire the same state: the
+  exec root, effect admissions and run records of every cell the turn stopped
+  in, the turn's cancel request, and the turn's waits, compacted to tombstones
+  (§6). The turn's own run records stay. They are its one tool-call ledger:
+  its report folds them alone and reads no wait after the turn ended, so a
+  report read after a crash and a redrive is the report the live turn gave
+  (FIG-5939). Recovery of a live turn still reads its full waits.
 - A preparation hook recomputes from committed state when its phase did not
   commit, so hooks are repeat-safe. An at-most-once external mutation is an
   admitted `Once` execution, not a hook.
@@ -189,6 +196,13 @@ The execution record splits into a start and an outcome.
   second resolution with the same digest answers `AlreadyResolved`; with a
   different digest, `Conflict`; on a revoked or timed-out wait, `Revoked`;
   with a key that names no wait, `Unknown`.
+- **Tombstones.** When its turn ends, a wait the turn scoped is compacted to a
+  tombstone: its id, kind, final state, resolution digest and resolution time,
+  with its owner scope kept for the session's delete. The tombstone is marked
+  by a checked column, and a full read of a wait refuses it. A late or
+  repeated resolution is answered from the tombstone as above. The rows of a
+  deleted session or a pruned process are deleted with their owner, and a key
+  of theirs then answers `Unknown` (FIG-5939).
 - **Completion keys.** A host-resolvable key is its wait's id: 128 random
   bits from the operating system's CSPRNG. It is a bearer capability, and
   lash keeps no completion secret: who may finish a pending wait is

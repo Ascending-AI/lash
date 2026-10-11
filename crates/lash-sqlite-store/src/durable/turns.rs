@@ -15,8 +15,8 @@ use lash_core_execution::store_backend_support::turn_cancel::{
 use lash_durable::domain::graph::OWNER_READ_LIMITS;
 use lash_durable::domain::namespace_value::NamespaceValue;
 use lash_durable::domain::{
-    DomainRefusal, SessionCommitWrite, StoredValues, TurnCancelAnswer, TurnCancelRequest, TurnEnd,
-    TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
+    DomainRefusal, ExecKey, SessionCommitWrite, StoredValues, TurnCancelAnswer, TurnCancelRequest,
+    TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -346,6 +346,15 @@ pub(super) fn apply(
                 rusqlite::params![session.as_str(), run.as_str()],
             )?;
             super::session_mail::settle_held(tx, session, run, commit.now.0)?;
+            // The cells the turn stopped in are never resumed, and the
+            // turn's cancel request is answered by its terminal: neither has
+            // a reader left. The turn's own facts stay as its ledger.
+            super::snapshots::retire_under(tx, &ExecKey::turn_cells(session, run))?;
+            cached_execute(
+                tx,
+                SQL.delete_cancel.sql(),
+                rusqlite::params![session.as_str(), run.as_str()],
+            )?;
             Ok(Ok(()))
         }
     }

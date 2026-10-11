@@ -44,5 +44,10 @@ crate::statements! {
 
         /// Delete execution `?1`'s row, whichever root it holds.
         clear = "DELETE FROM exec_snapshots WHERE exec_key = ?1";
+
+        /// Delete every row whose execution key starts with `?1`: the cells
+        /// one turn stopped in, at its end, or one session's, at its delete.
+        clear_under = "DELETE FROM exec_snapshots
+             WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)";
     }
 }

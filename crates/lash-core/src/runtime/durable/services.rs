@@ -85,6 +85,10 @@ impl RuntimeTurnServices {
     /// without material have no retained request/output record and remain
     /// accounted for in the omitted-call summary.
     ///
+    /// The turn's run facts are its whole tool-call ledger: the report reads
+    /// no wait (its end compacts them) and no cell's own facts (its
+    /// consumption or its turn's end deletes them).
+    ///
     /// # Errors
     ///
     /// [`lash_durable::DurableError`] when the records do not read, fold or decode.
@@ -108,10 +112,9 @@ impl RuntimeTurnServices {
         let owner = OwnerKey::Turn(session.clone(), run.clone());
         let reads = cx.durable_reads()?;
         let facts = reads.run_facts(&owner).await?;
-        let waits = round::PinnedWaits::read(reads, &facts).await?;
         // Reporting folds only settled facts and never consults live policies
         // to run a recovery. The empty policy view executes nothing.
-        let fold = round::fold(&facts, &PolicyView::new([]), &waits)
+        let fold = round::fold(&facts, &PolicyView::new([]), &round::PinnedWaits::ledger())
             .map_err(|error| corrupt(format!("the turn's tool records: {error}")))?;
         let mut calls = Vec::new();
         let mut omitted = None;

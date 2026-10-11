@@ -832,7 +832,8 @@ impl PinnedMember {
             .transpose()?;
         let park = pinned
             .map(|pinned| waits.park(owner, &self.call, &tool, pinned))
-            .transpose()?;
+            .transpose()?
+            .flatten();
         Ok(super::ExecutionDraft::new(
             self.call.clone(),
             tool,

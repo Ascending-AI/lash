@@ -994,6 +994,13 @@ pub(crate) async fn delete_session_tx(
     .chain(session_texts(tx, runs.select_session_window_leaves.sql(), session_id).await?)
     .collect();
     checkpoint_refs.extend(checkpoint_ref);
+    // Its engine rows go too, every turn's ledger and every cell's working
+    // state, and each root they hold is a candidate.
+    checkpoint_refs.extend(
+        crate::durable::session_engine_roots(tx, session_id)
+            .await
+            .map_err(store_sqlx_error)?,
+    );
     retained_leaves.extend(leaf_node_id);
     let candidates =
         crate::session_blob_reclaim::enumerate_checkpoint_blob_candidates_tx(tx, &checkpoint_refs)
@@ -1020,6 +1027,9 @@ pub(crate) async fn delete_session_tx(
     // its ancestry retires: a terminal window roots its leaf while its row
     // lives. A `close_session` intent stays as its deletion tombstone.
     crate::session_runs::delete_session_runs_conn(tx, session_id).await?;
+    crate::durable::retire_session_rows(tx, session_id)
+        .await
+        .map_err(store_sqlx_error)?;
     for leaf_node_id in &retained_leaves {
         crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, leaf_node_id).await?;
     }

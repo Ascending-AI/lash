@@ -104,6 +104,16 @@ pub(super) async fn apply(
             if retired.is_none() {
                 return Err(conflict(exec, None, None));
             }
+            // The consumer took the cell's report and state: its own facts
+            // and admissions have no reader left.
+            if let ExecKey::Cell(..) = exec {
+                super::run_records::delete_owner(&mut *tx, &exec.stored())
+                    .await
+                    .map_err(sqlx_failure)?;
+                super::graph::clear_admissions(&mut *tx, &exec.stored())
+                    .await
+                    .map_err(sqlx_failure)?;
+            }
             Ok(())
         }
         ExecRootWrite::Clear { exec } => {
@@ -184,4 +194,27 @@ pub(super) async fn under(
             )
         })
         .collect()
+}
+
+/// Delete every execution root whose key starts with `prefix`, with the
+/// admissions and run facts of each: the cells one turn stopped in, at its
+/// end, or one session's, at its delete.
+pub(super) async fn retire_under(tx: &mut PgConnection, prefix: &str) -> Result<(), sqlx::Error> {
+    crate::observed_sql::query(SQL.clear_under.sql())
+        .bind(prefix)
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await?;
+    super::graph::clear_admissions_under(&mut *tx, prefix).await?;
+    super::run_records::delete_under(tx, prefix).await
+}
+
+/// The root of every execution whose key starts with `prefix`.
+pub(super) async fn roots_under(
+    tx: &mut PgConnection,
+    prefix: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    crate::observed_sql::query_scalar::<_, String>(SQL.under.sql())
+        .bind(prefix)
+        .fetch_all(crate::observed_sql::executor(tx))
+        .await
 }

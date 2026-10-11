@@ -168,6 +168,15 @@ impl OwnerKey {
         }
     }
 
+    /// The stored spelling every turn of `session` starts with, and no
+    /// other key.
+    #[must_use]
+    pub fn session_turns(session: &SessionId) -> String {
+        let mut prefix = stored("t", &[session.as_str()]);
+        prefix.push('/');
+        prefix
+    }
+
     /// The actor whose owner writes these records: the turn's or cell's
     /// session, or the process.
     ///
@@ -208,6 +217,15 @@ impl ExecKey {
     #[must_use]
     pub fn turn_cells(session: &SessionId, run: &TurnId) -> String {
         let mut prefix = stored("c", &[session.as_str(), run.as_str()]);
+        prefix.push('/');
+        prefix
+    }
+
+    /// The stored spelling every cell of `session` starts with, and no
+    /// other key.
+    #[must_use]
+    pub fn session_cells(session: &SessionId) -> String {
+        let mut prefix = stored("c", &[session.as_str()]);
         prefix.push('/');
         prefix
     }
@@ -256,6 +274,13 @@ impl ScopeKey {
                 stored("c", &[session.as_str(), run.as_str(), cell.as_str()])
             }
         }
+    }
+
+    /// The stored spelling every turn scope of `session` starts with, and
+    /// no other key.
+    #[must_use]
+    pub fn session_turns(session: &SessionId) -> String {
+        OwnerKey::session_turns(session)
     }
 
     /// A stored spelling read back.

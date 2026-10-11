@@ -23,6 +23,7 @@ pub const CANCEL_MAIL: &str = "cancel";
 ///     items(
 ///         path = "crates/lash-durable/src/domain/waits.rs",
 ///         WaitRow, WaitPurpose, WaitLifecycle, WaitKind, WaitState, WaitId,
+///         WaitTombstone, WaitSettlement,
 ///     ),
 /// )
 /// version_surface = "drain"
@@ -428,6 +429,12 @@ pub enum WaitWrite {
     },
     /// Revoke every pending wait of `scope`, and wake each other owner.
     RevokeScope(ScopeKey),
+    /// End a turn's `scope` in the transaction that ends the turn: revoke
+    /// its pending waits as [`Self::RevokeScope`] does, then compact every
+    /// wait of the scope to its [`WaitTombstone`]. Once its turn ended no
+    /// fold reads a turn's waits: the outcomes they settled are among the
+    /// turn's run facts, and a late resolution reads only the tombstone.
+    RetireScope(ScopeKey),
     /// Resolve every pending process-terminal wait on `process` with
     /// `resolution`, and wake each owner.
     ResolveProcessTerminal {
@@ -465,6 +472,109 @@ pub struct WaitResolution {
     pub digest: String,
     /// The resolution, by reference.
     pub resolution_ref: String,
+}
+
+/// What a wait keeps once the turn whose scope it belongs to ended (ADR 0132
+/// §6): enough to answer a late or repeated resolution exactly as the full
+/// row did, and nothing a fold reads. Its owner, purpose and resolution are
+/// gone; only its scope stays, the key its session's delete finds it by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WaitTombstone {
+    /// Its identity.
+    pub id: WaitId,
+    /// What it waited for: a host may still resolve only its own kinds.
+    pub kind: WaitKind,
+    /// How it settled.
+    pub settlement: WaitSettlement,
+}
+
+/// How a compacted wait settled: a tombstone is never pending.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WaitSettlement {
+    /// A resolution won, a timer's with [`TIMER_DIGEST`].
+    Resolved {
+        /// When it won.
+        at: DurableInstant,
+        /// The winner's digest.
+        digest: String,
+    },
+    /// Its deadline passed first.
+    TimedOut {
+        /// When this settlement won.
+        at: DurableInstant,
+    },
+    /// Its scope ended first.
+    Revoked {
+        /// When this settlement won.
+        at: DurableInstant,
+    },
+}
+
+impl WaitSettlement {
+    /// Decode a tombstone's SQL columns; `None` for a pending state, or a
+    /// digest present on anything but a resolution.
+    #[must_use]
+    pub fn decode(
+        state: WaitState,
+        at: Option<DurableInstant>,
+        digest: Option<String>,
+    ) -> Option<Self> {
+        match (state, at?, digest) {
+            (WaitState::Resolved, at, Some(digest)) => Some(Self::Resolved { at, digest }),
+            (WaitState::TimedOut, at, None) => Some(Self::TimedOut { at }),
+            (WaitState::Revoked, at, None) => Some(Self::Revoked { at }),
+            _ => None,
+        }
+    }
+}
+
+/// A wait as a resolver reads it: in full while its owner may still consume
+/// it, or its tombstone once its turn ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StoredWait {
+    /// The full row.
+    Full(WaitRow),
+    /// The tombstone its turn's end compacted it to.
+    Compacted(WaitTombstone),
+}
+
+impl StoredWait {
+    /// The answer `resolution` gets without writing: a reserved kind for a
+    /// host, or a wait that is no longer pending (ADR 0132 §6). `None` when
+    /// it may resolve. A tombstone answers exactly as its full row did.
+    #[must_use]
+    pub fn settled_answer(&self, resolution: &WaitResolution) -> Option<ResolveAnswer> {
+        let kind = match self {
+            Self::Full(row) => row.purpose.kind(),
+            Self::Compacted(tombstone) => tombstone.kind,
+        };
+        if resolution.by_host && !kind.host_resolvable() {
+            return Some(ResolveAnswer::ReservedKind);
+        }
+        let won = |digest: &str| {
+            Some(if digest == resolution.digest {
+                ResolveAnswer::AlreadyResolved
+            } else {
+                ResolveAnswer::Conflict
+            })
+        };
+        match self {
+            Self::Full(row) => match &row.lifecycle {
+                WaitLifecycle::Pending => None,
+                WaitLifecycle::Resolved { digest, .. } => won(digest),
+                WaitLifecycle::TimerElapsed { .. } => won(TIMER_DIGEST),
+                WaitLifecycle::TimedOut { .. } | WaitLifecycle::Revoked { .. } => {
+                    Some(ResolveAnswer::Revoked)
+                }
+            },
+            Self::Compacted(tombstone) => match &tombstone.settlement {
+                WaitSettlement::Resolved { digest, .. } => won(digest),
+                WaitSettlement::TimedOut { .. } | WaitSettlement::Revoked { .. } => {
+                    Some(ResolveAnswer::Revoked)
+                }
+            },
+        }
+    }
 }
 
 /// The answer to a [`WaitResolution`].

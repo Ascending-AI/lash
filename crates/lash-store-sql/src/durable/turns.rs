@@ -141,6 +141,10 @@ crate::statements! {
         cancel_of = "SELECT request_id, origin, reason, disposition, mode
              FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2";
 
+        /// Drop the cancel request run `?2` of session `?1` accepted, in the
+        /// transaction that ends it.
+        delete_cancel = "DELETE FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2";
+
         /// Record run `?2` of session `?1`'s first cancel request: request id
         /// `?3`, origin `?4`, reason `?5`, disposition `?6`, mode `?7`.
         insert_cancel = "INSERT INTO turn_cancel_requests

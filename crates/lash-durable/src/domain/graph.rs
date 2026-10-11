@@ -271,7 +271,9 @@ pub enum ExecRootWrite {
         root: NodeId,
         commit_id: CommitId,
     },
-    /// Delete the execution's row, whose root must be `expected`.
+    /// Delete the execution's row, whose root must be `expected`: its
+    /// consumer took what it ended with. A cell's own run facts and effect
+    /// admissions go with it; its report is among its turn's facts.
     Retire { exec: ExecKey, expected: NodeId },
     /// Delete the execution's row, whichever root it holds, if it has one:
     /// its owner's terminal, under the owner's fence. An owner commit only.

@@ -24,6 +24,8 @@ use served::{Tier, World};
 
 /// The probe a process body calls.
 const PROBE: &str = "process_probe";
+/// The probe that parks on its completion key and resolves it itself.
+const DEFERRED: &str = "process_deferred";
 
 /// One execution of the probe's body.
 #[derive(Clone, Debug)]
@@ -35,6 +37,8 @@ struct Execution {
     owner: String,
     /// The process the call names as the one it runs inside.
     enclosing: Option<lash_core::ProcessId>,
+    /// The completion key a deferred probe parked on.
+    completion_key: Option<String>,
 }
 
 /// Everything the probe did, and the gate a held call waits on.
@@ -74,42 +78,79 @@ impl Witness {
     }
 }
 
-fn probe_definition() -> lash_core::ToolDefinition {
+fn probe_definition(name: &str) -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
-        format!("tool:{PROBE}"),
-        PROBE,
+    let definition = lash_core::ToolDefinition::raw(
+        format!("tool:{name}"),
+        name,
         "Records its call and answers its label; a held call waits for the law.",
         object.clone(),
         object,
     )
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], PROBE))
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name));
+    if name != DEFERRED {
+        return definition;
+    }
+    definition
+        .with_declaration(
+            lash_core::ToolDeclaration::deferring(),
+            Some(lash_core::ParkBound::Within(
+                std::time::Duration::from_secs(120),
+            )),
+        )
+        .expect("a deferring tool declares its park bound")
 }
 
 struct Probe {
     witness: Arc<Witness>,
+    backend: lash::Backend,
 }
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Probe {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![probe_definition().manifest()]
+        [PROBE, DEFERRED]
+            .into_iter()
+            .map(|name| probe_definition(name).manifest())
+            .collect()
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == PROBE).then(|| Arc::new(probe_definition().contract()))
+        [PROBE, DEFERRED]
+            .contains(&name)
+            .then(|| Arc::new(probe_definition(name).contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let label = call.args["label"].as_str().unwrap_or_default().to_owned();
+        let completion_key = (call.name() == DEFERRED).then(|| {
+            call.context
+                .completion_key()
+                .expect("a deferring call's completion wait is pinned")
+        });
         self.witness.executions.lock_recover().push(Execution {
             label: label.clone(),
             call_id: call.context.call_id().clone(),
             owner: call.context.owner().runtime_owner().to_string(),
             enclosing: call.context.enclosing_process().cloned(),
+            completion_key: completion_key.as_ref().map(|key| key.as_str().to_owned()),
         });
+        // A deferred call resolves its own key with its own label.
+        if let Some(key) = completion_key {
+            let backend = self.backend.clone();
+            tokio::spawn(async move {
+                lash_core::waits::resolve_host(
+                    &backend,
+                    key.as_str(),
+                    lash_core::Resolution::Ok(serde_json::json!({ "label": label })),
+                )
+                .await
+                .expect("the deferred probe's wait resolves");
+            });
+            return lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::new());
+        }
         if call.args["hold"].as_bool().unwrap_or_default() {
             let mut gate = self.witness.gate.subscribe();
             let _ = gate.wait_for(|open| *open).await;
@@ -132,7 +173,10 @@ async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
                 lash_core::lifetime::starter,
             ),
         ))
-        .tools(Arc::new(Probe { witness }))
+        .tools(Arc::new(Probe {
+            witness,
+            backend: backend.clone(),
+        }))
     })
     .await
 }
@@ -450,7 +494,75 @@ async fn typescript_process_body_resolves_journaled_clock_and_randomness(tier: T
     world.shutdown().await;
 }
 
+/// A pruned process takes its ledger and its waits with it (FIG-5939): the
+/// run facts of the call its body parked, and the completion wait it parked
+/// on, are gone once the process is pruned, and so is the call the host
+/// read back from them before.
+async fn a_pruned_process_leaves_no_run_fact_or_wait(tier: Tier) {
+    let witness = Arc::new(Witness::default());
+    let Some(world) = world(tier, &witness).await else {
+        return;
+    };
+    let body = format!(
+        "const body = async (label: string) => {{\n  return await tools.{DEFERRED}({{ label: label }});\n}};\n\
+         const handle = await processes.start({{ definition: body, args: {{ label: \"pruned\" }} }});\n\
+         await control.finish(await handle);"
+    );
+    let output = world
+        .run(
+            "pruned-process",
+            served::spec(64),
+            vec![served::cell(&body)],
+        )
+        .await;
+    served::assert_answered("the turn that awaits a parked process", &output);
+    let call = witness.only("pruned");
+    let process = call.enclosing.clone().expect("the call names its process");
+    let wait = lash_durable::domain::WaitId::parse_hex(
+        call.completion_key.as_deref().expect("the call parked"),
+    )
+    .expect("a completion key is its wait's id");
+    let owner = lash_durable::domain::OwnerKey::Process(process.clone());
+    let durable = world.backend.durable();
+    let processes = world.core.processes();
+    assert!(
+        processes
+            .tool_call(&process, &call.call_id)
+            .await
+            .unwrap()
+            .is_some(),
+        "the host reads the ended process's call"
+    );
+    assert!(!durable.run_facts(&owner).await.unwrap().rows.is_empty());
+    assert!(durable.wait(&wait).await.unwrap().is_some());
+
+    let now = world.backend.clock().timestamp_ms();
+    let report = processes
+        .prune(now + 1, None, lash_core::ProjectionWatermark::NoProjector)
+        .await
+        .unwrap();
+    assert_eq!(report.pruned_processes, 1, "{report:?}");
+    assert!(
+        durable.run_facts(&owner).await.unwrap().rows.is_empty(),
+        "the pruned process's run facts remain"
+    );
+    assert!(
+        durable.wait(&wait).await.unwrap().is_none(),
+        "the pruned process's wait remains"
+    );
+    assert!(
+        processes
+            .tool_call(&process, &call.call_id)
+            .await
+            .unwrap()
+            .is_none(),
+        "the pruned process's call still reads"
+    );
+    world.shutdown().await;
+}
+
 tiered_laws!(
+    a_pruned_process_leaves_no_run_fact_or_wait,
     process_admission_names_each_call,
     tool_call_limit_counts_what_a_process_holds,
     process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,

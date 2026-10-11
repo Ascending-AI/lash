@@ -15,8 +15,8 @@ use lash_core_execution::store_backend_support::turn_cancel::{
 use lash_durable::domain::graph::OWNER_READ_LIMITS;
 use lash_durable::domain::namespace_value::NamespaceValue;
 use lash_durable::domain::{
-    DomainRefusal, SessionCommitWrite, StoredValues, TurnCancelAnswer, TurnCancelRequest, TurnEnd,
-    TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
+    DomainRefusal, ExecKey, SessionCommitWrite, StoredValues, TurnCancelAnswer, TurnCancelRequest,
+    TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -252,7 +252,20 @@ pub(super) async fn apply(
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
-            super::session_mail::settle_held(&mut *tx, session, run, commit.now.0).await
+            super::session_mail::settle_held(&mut *tx, session, run, commit.now.0).await?;
+            // The cells the turn stopped in are never resumed, and the
+            // turn's cancel request is answered by its terminal: neither has
+            // a reader left. The turn's own facts stay as its ledger.
+            super::snapshots::retire_under(&mut *tx, &ExecKey::turn_cells(session, run))
+                .await
+                .map_err(sqlx_failure)?;
+            crate::observed_sql::query(SQL.delete_cancel.sql())
+                .bind(session.as_str())
+                .bind(run.as_str())
+                .execute(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+            Ok(())
         }
     }
 }

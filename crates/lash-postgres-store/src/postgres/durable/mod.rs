@@ -297,6 +297,61 @@ impl std::fmt::Debug for PostgresDurableStore {
 
 type Tx = GuardedTx<'static>;
 
+/// The graph roots `session`'s engine rows hold: its turns' and cells' run
+/// facts, its cells' roots and admissions. What its delete may reclaim once
+/// [`retire_session_rows`] removed them.
+pub(crate) async fn session_engine_roots(
+    tx: &mut PgConnection,
+    session: &lash_sansio::SessionId,
+) -> Result<std::collections::BTreeSet<String>, sqlx::Error> {
+    use lash_durable::domain::{ExecKey, OwnerKey};
+
+    let cells = ExecKey::session_cells(session);
+    let mut roots = std::collections::BTreeSet::new();
+    roots.extend(run_records::roots_under(&mut *tx, &OwnerKey::session_turns(session)).await?);
+    roots.extend(run_records::roots_under(&mut *tx, &cells).await?);
+    roots.extend(snapshots::roots_under(&mut *tx, &cells).await?);
+    roots.extend(graph::admission_roots_under(tx, &cells).await?);
+    Ok(roots)
+}
+
+/// Delete every engine row `session` owns, in its physical delete: its
+/// turns' run facts (their tool-call ledgers), its cells' roots, admissions
+/// and facts, the waits its actor owns and its turns' wait tombstones. The
+/// session's actor row stays: its terminal fence, which session write
+/// locking takes first.
+pub(crate) async fn retire_session_rows(
+    tx: &mut PgConnection,
+    session: &lash_sansio::SessionId,
+) -> Result<(), sqlx::Error> {
+    use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
+
+    let cells = ExecKey::session_cells(session);
+    run_records::delete_under(&mut *tx, &OwnerKey::session_turns(session)).await?;
+    snapshots::retire_under(&mut *tx, &cells).await?;
+    if let Ok(actor) = ActorKey::session(session.as_str()) {
+        waits::delete_owned(&mut *tx, &actor).await?;
+    }
+    waits::delete_under(tx, &ScopeKey::session_turns(session)).await
+}
+
+/// Delete `process`'s run facts and the waits it owns, in its prune: the
+/// process host API's tool calls go with its record.
+pub(crate) async fn retire_process_rows(
+    tx: &mut PgConnection,
+    process: &lash_sansio::ProcessId,
+) -> Result<(), sqlx::Error> {
+    run_records::delete_owner(
+        &mut *tx,
+        &lash_durable::domain::OwnerKey::Process(process.clone()).stored(),
+    )
+    .await?;
+    if let Ok(actor) = ActorKey::process(process.as_str()) {
+        waits::delete_owned(tx, &actor).await?;
+    }
+    Ok(())
+}
+
 /// Model a shared server's scheduling delay at registration and claim,
 /// even when a claim finds no actors. The crash fixture's guard law uses
 /// real statements rather than delaying before a statement's timer starts.

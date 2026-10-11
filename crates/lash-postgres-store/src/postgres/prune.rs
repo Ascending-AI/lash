@@ -14,6 +14,9 @@ pub(super) async fn prune_process_rows_tx(
         .map_err(|_| PluginError::Session("process prune time cannot be negative".into()))?;
 
     for process_id in process_ids {
+        crate::durable::retire_process_rows(tx, process_id)
+            .await
+            .map_err(plugin_sqlx_error)?;
         let referrer = ArtifactReferrer::ProcessRecord(process_id.clone());
         crate::artifact_store::lock_referrer_tx(tx, &referrer)
             .await

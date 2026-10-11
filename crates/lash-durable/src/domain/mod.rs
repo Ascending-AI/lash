@@ -70,8 +70,9 @@ pub use turns::{
     TurnWrite, UnfinishedPhase,
 };
 pub use waits::{
-    CANCEL_MAIL, ResolveAnswer, TIMER_DIGEST, WAIT_ROW_FORMAT_VERSION, WaitId, WaitKind,
-    WaitLifecycle, WaitPurpose, WaitPurposeColumns, WaitResolution, WaitRow, WaitState, WaitWrite,
+    CANCEL_MAIL, ResolveAnswer, StoredWait, TIMER_DIGEST, WAIT_ROW_FORMAT_VERSION, WaitId,
+    WaitKind, WaitLifecycle, WaitPurpose, WaitPurposeColumns, WaitResolution, WaitRow,
+    WaitSettlement, WaitState, WaitTombstone, WaitWrite,
 };
 
 use crate::error::DurableError;
@@ -498,7 +499,8 @@ pub trait DurableReads: Send + Sync {
     /// L5: every pending wait `owner` owns.
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError>;
 
-    /// L5: one wait.
+    /// L5: one wait, in full. A wait its turn's end compacted
+    /// ([`WaitTombstone`]) is refused: nothing folds an ended turn's waits.
     async fn wait(&self, id: &WaitId) -> Result<Option<WaitRow>, DurableError>;
 
     /// L6: one process actor's row.

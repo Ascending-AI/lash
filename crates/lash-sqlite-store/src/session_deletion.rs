@@ -105,6 +105,11 @@ pub(super) async fn delete_session_from_catalog(
                     .chain(text_column(runs.select_session_window_checkpoints.sql())?)
                     .collect();
             roots.extend(checkpoint_ref);
+            // Its engine rows go too, every turn's ledger and every cell's
+            // working state, and each root they held is a candidate.
+            roots.extend(
+                crate::durable::session_engine_roots(tx, &session_id).map_err(sqlite_error)?,
+            );
             let mut retained_leaves: std::collections::BTreeSet<String> =
                 text_column(session_sql().revisions.select_session_leaves.sql())?
                     .into_iter()
@@ -146,6 +151,7 @@ pub(super) async fn delete_session_from_catalog(
             // leaf while its row lives. A `close_session` intent stays as
             // its deletion tombstone.
             crate::session_runs::delete_session_runs_conn(tx, &session_id)?;
+            crate::durable::retire_session_rows(tx, &session_id).map_err(sqlite_error)?;
             for leaf_node_id in &retained_leaves {
                 persistence::retire_unreachable_ancestry_conn(tx, leaf_node_id)?;
             }

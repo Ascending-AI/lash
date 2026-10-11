@@ -117,7 +117,15 @@ admitted or realized again (FIG-1509).
 | Released event metadata and digest | Process lifecycle identity evidence | Terminal process pruning. Prefix release keeps these fences. |
 | Process event horizon | The retained process | Process deletion cascades the horizon. |
 | VM snapshot | The process actor | Replaced by the next snapshot revision, or terminal process pruning. |
-| Run records and phase rows | The owning turn or process actor | A turn's rows are pruned by its turn commit; a process's are compacted into its next snapshot, or pruned with the process. |
+| Run records and phase rows | The owning turn, cell or process actor | A turn's own records are its tool-call ledger and live as long as its run row: its session's delete removes them. A cell's records and effect admissions go with its root: when the cell is consumed, or when its turn's commit or cancel retires a cell the turn stopped in. A process's are compacted into its next snapshot, or deleted when the process is pruned. |
+| Wait row | The owning turn scope or actor | The turn's commit or cancel revokes its pending waits and compacts every wait it scoped to a tombstone (id, kind, final state, resolution digest and time) that answers a late resolution. A session's delete removes its waits and tombstones; a process prune removes the process's waits. |
+| Turn cancel request | Its turn | The turn's commit or cancel deletes it. |
+
+A session's delete removes its run records, waits, exec snapshots, effect
+admissions and turn cancel requests in one transaction and keeps the session's
+terminal actor row. The roots those rows held are reclaim candidates of the
+delete's targeted blob reclaim; no row of the deleted session outlives the
+delete except that actor (FIG-5939).
 
 Event release preserves execution state and releases host-selected history
 payloads. It cannot delete a live continuation or its dependencies. The

@@ -113,6 +113,12 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
             if retired.is_none() {
                 return conflict(exec, None, None);
             }
+            // The consumer took the cell's report and state: its own facts
+            // and admissions have no reader left.
+            if let ExecKey::Cell(..) = exec {
+                super::run_records::delete_owner(tx, &exec.stored())?;
+                super::graph::clear_admissions(tx, &exec.stored())?;
+            }
             Ok(Ok(()))
         }
         ExecRootWrite::Clear { exec } => {
@@ -163,6 +169,22 @@ pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<ExecRootRow
             Ok(row_of(exec.clone(), rev, &root, epoch, &commit_id)?.map(Some))
         }
     }
+}
+
+/// Delete every execution root whose key starts with `prefix`, with the
+/// admissions and run facts of each: the cells one turn stopped in, at its
+/// end, or one session's, at its delete.
+pub(super) fn retire_under(tx: &Connection, prefix: &str) -> rusqlite::Result<()> {
+    cached_execute(tx, SQL.clear_under.sql(), [prefix])?;
+    super::graph::clear_admissions_under(tx, prefix)?;
+    super::run_records::delete_under(tx, prefix)
+}
+
+/// The root of every execution whose key starts with `prefix`.
+pub(super) fn roots_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Vec<String>> {
+    tx.prepare_cached(SQL.under.sql())?
+        .query_map([prefix], |row| row.get(2))?
+        .collect()
 }
 
 /// Every execution root whose key starts with `prefix`, by key.

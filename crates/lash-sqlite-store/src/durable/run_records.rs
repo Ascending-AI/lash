@@ -135,6 +135,23 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &RunFactWri
     }
 }
 
+/// Delete every fact of the owner stored as `owner_key`.
+pub(super) fn delete_owner(tx: &Connection, owner_key: &str) -> rusqlite::Result<()> {
+    cached_execute(tx, SQL.delete_owner.sql(), [owner_key]).map(drop)
+}
+
+/// Delete every fact whose owner key starts with `prefix`.
+pub(super) fn delete_under(tx: &Connection, prefix: &str) -> rusqlite::Result<()> {
+    cached_execute(tx, SQL.delete_under.sql(), [prefix]).map(drop)
+}
+
+/// The RoundFact node of every fact whose owner key starts with `prefix`.
+pub(super) fn roots_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Vec<String>> {
+    tx.prepare_cached(SQL.roots_under.sql())?
+        .query_map([prefix], |row| row.get(0))?
+        .collect()
+}
+
 pub(super) fn read(
     tx: &Connection,
     owner: &OwnerKey,

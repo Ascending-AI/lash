@@ -253,7 +253,11 @@ pub enum TurnWrite {
         working: Option<NodeId>,
     },
     /// End the turn and drop its phase row and its run's namespace rows,
-    /// whether its commit promoted them or a cancel discards them. Refused with
+    /// whether its commit promoted them or a cancel discards them, and the
+    /// working state of every cell the turn stopped in: each cell's root,
+    /// effect admissions and own run facts. Its accepted cancel request
+    /// goes too. The turn's own run facts stay: they are its tool-call
+    /// ledger, which lives as long as its run row. Refused with
     /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
     /// it is not the session's unfinished turn.
     Terminal {

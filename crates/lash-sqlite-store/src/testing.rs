@@ -77,17 +77,7 @@ pub fn read_rows_for_testing(
     sql: &str,
 ) -> Result<Vec<RawRow>, String> {
     use rusqlite::types::ValueRef;
-    let target = stores.location().target();
-    let connection = rusqlite::Connection::open_with_flags(
-        target.read_only_uri(),
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-    )
-    .map_err(|error| format!("open the database read-only: {error}"))?;
-    connection
-        .busy_timeout(crate::SqliteOperationalSettings::standard().readonly_busy_timeout)
-        .map_err(|error| format!("set the busy timeout: {error}"))?;
+    let connection = read_only(stores)?;
     let mut statement = connection
         .prepare(sql)
         .map_err(|error| format!("prepare `{sql}`: {error}"))?;
@@ -125,6 +115,33 @@ pub fn read_rows_for_testing(
         read.push(columns);
     }
     Ok(read)
+}
+
+/// Every per-owner row of the durable engine in the database of `stores`,
+/// one line each (`<table> <key> …`), sorted: run facts with their run and
+/// ordinal, execution roots, effect admissions, waits with their scope,
+/// owner, state and whether they are whole or a tombstone, turn cancel
+/// requests and actors. A law filters the lines by an owner's key to show
+/// what its end or its delete left (FIG-5939).
+pub fn engine_rows_for_testing(stores: &crate::SqliteStoreSet) -> Result<Vec<String>, String> {
+    crate::durable::engine_rows_for_testing(&read_only(stores)?)
+        .map_err(|error| format!("read the engine rows: {error}"))
+}
+
+/// A fresh read-only connection to the database of `stores`.
+fn read_only(stores: &crate::SqliteStoreSet) -> Result<rusqlite::Connection, String> {
+    let target = stores.location().target();
+    let connection = rusqlite::Connection::open_with_flags(
+        target.read_only_uri(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|error| format!("open the database read-only: {error}"))?;
+    connection
+        .busy_timeout(crate::SqliteOperationalSettings::standard().readonly_busy_timeout)
+        .map_err(|error| format!("set the busy timeout: {error}"))?;
+    Ok(connection)
 }
 
 /// One stored value: where it is, its bytes, and every JSON document those

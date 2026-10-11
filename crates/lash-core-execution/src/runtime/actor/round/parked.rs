@@ -73,9 +73,25 @@ pub async fn parked(backend: &Backend, owner: CallOwner) -> Result<Vec<ParkedCal
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PinnedWaits {
     rows: BTreeMap<WaitId, WaitRow>,
+    /// A fold of the ledger alone ([`Self::ledger`]).
+    ledger: bool,
 }
 
 impl PinnedWaits {
+    /// The view of a fold that reads a turn's ledger alone: its tool-call
+    /// report, before or after its end. It reads no wait, since a turn's
+    /// waits are compacted at its end: every outcome it reports is a run
+    /// fact, a parked call's included (its won resolution, or `Cancelled`
+    /// once the turn ended first), and it resumes no park, so an admitted
+    /// park's deadline is left unread.
+    #[must_use]
+    pub fn ledger() -> Self {
+        Self {
+            rows: BTreeMap::new(),
+            ledger: true,
+        }
+    }
+
     /// The waits the admissions among `facts` pinned, read once each. An
     /// admission that does not decode names none: its fold refuses it.
     ///
@@ -112,7 +128,8 @@ impl PinnedWaits {
     }
 
     /// What `owner`'s admission of `call` of `tool` pinned for its park:
-    /// the deadline of `pinned`'s row.
+    /// the deadline of `pinned`'s row, or none for a ledger fold, which
+    /// reads no wait.
     ///
     /// # Errors
     /// The wait has no row here, wakes another actor, or is not the
@@ -123,7 +140,10 @@ impl PinnedWaits {
         call: &ToolCallId,
         tool: &ToolId,
         pinned: PinnedWait,
-    ) -> Result<ParkDeadline, &'static str> {
+    ) -> Result<Option<ParkDeadline>, &'static str> {
+        if self.ledger {
+            return Ok(None);
+        }
         let row = self
             .rows
             .get(&pinned.id)
@@ -136,10 +156,11 @@ impl PinnedWaits {
                 call: waited,
                 tool: of,
                 deadline,
-            } if waited == call && of == tool => Ok(deadline
-                .map_or(ParkDeadline::UntilScopeEnd, |at| {
+            } if waited == call && of == tool => {
+                Ok(Some(deadline.map_or(ParkDeadline::UntilScopeEnd, |at| {
                     ParkDeadline::At(WaitDeadline::at_instant(at))
-                })),
+                })))
+            }
             _ => Err("a pinned completion wait is not its call's completion"),
         }
     }
