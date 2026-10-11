@@ -198,6 +198,105 @@ fn a_fast_paths_charge_is_what_its_formula_computes() {
     assert!(fixed > 0 && shallow > 0 && whole > 0);
 }
 
+/// `K-CHG-003`: sums with a minimum pair compute the declared formula,
+/// including mixed sizes, zero, saturation, missing arguments and repeated
+/// measurements. Both a whole charge and its shallow form use this path.
+#[test]
+fn minimum_sum_charges_equal_the_declared_formula() {
+    let heap = Heap::new(u64::MAX);
+    let params: Vec<doc::Param> = ["x", "y"]
+        .into_iter()
+        .map(|name| doc::Param {
+            name: doc::Name::new(name),
+            ty: doc::Type::Any,
+            optional: false,
+        })
+        .collect();
+    let values = [
+        Value::Absent,
+        Value::Float(Float::new(f64::NAN)),
+        Value::Int(Integer::from(0)),
+        Value::Int(Integer::from(1)),
+        Value::Int(Integer::from(-1)),
+        Value::Int(Integer::new(BigInt::from(u64::MAX))),
+        Value::Int(Integer::new(-BigInt::from(u64::MAX))),
+        Value::Int(Integer::new(BigInt::from(1u8) << 64)),
+        Value::Tuple(Arc::from([Value::Null, Value::text("xy")])),
+        Value::Tuple(Arc::from([Value::Tuple(Arc::from([Value::Absent]))])),
+    ];
+    let mut draw = Draw(0x5917);
+
+    let x = doc::Operand::Param(doc::Name::new("x"));
+    let y = doc::Operand::Param(doc::Name::new("y"));
+    let pair = doc::Formula::Min(vec![
+        doc::Formula::Size(x.clone()),
+        doc::Formula::Size(y.clone()),
+    ]);
+    let mut formulas: Vec<_> = (0..600).map(|_| draw.formula(3)).collect();
+    for constant in [0, 1, u64::MAX] {
+        let tail = doc::Formula::DeepSize(doc::Operand::Result);
+        formulas.extend([
+            doc::Formula::Sum(vec![
+                pair.clone(),
+                tail.clone(),
+                doc::Formula::Constant(constant),
+            ]),
+            doc::Formula::Sum(vec![
+                tail.clone(),
+                pair.clone(),
+                doc::Formula::Constant(constant),
+            ]),
+            doc::Formula::Sum(vec![
+                pair.clone(),
+                doc::Formula::NestedSize(x.clone()),
+                doc::Formula::NestedSize(y.clone()),
+                tail.clone(),
+                doc::Formula::Constant(constant),
+            ]),
+            doc::Formula::Sum(vec![pair.clone(), pair.clone(), tail]),
+        ]);
+    }
+    for (case, formula) in formulas.into_iter().enumerate() {
+        let charge = Plan::new(&formula, &params);
+        let fast = Fast::new(&formula, &params, &charge);
+        for x in &values {
+            for y in &values {
+                for result in &values {
+                    // A missing argument measures 0, not absent's size 1.
+                    for args in [&[x.clone(), y.clone()][..], &[][..]] {
+                        let expected = formula.evaluate(&mut |operand, measure| {
+                            let value = match operand {
+                                doc::Operand::Result => Some(result),
+                                doc::Operand::Param(name) => params
+                                    .iter()
+                                    .position(|param| param.name == *name)
+                                    .and_then(|index| args.get(index)),
+                            };
+                            match (value, measure) {
+                                (None, _) => 0,
+                                (Some(value), doc::Measure::Size) => size(&heap, value),
+                                (Some(value), doc::Measure::DeepSize) => deep_size(&heap, value),
+                                (Some(value), doc::Measure::NestedSize) => {
+                                    nested_size(&heap, value)
+                                }
+                                (Some(value), doc::Measure::Magnitude) => magnitude(value),
+                            }
+                        });
+                        let actual = match fast.charge(&charge, args, result) {
+                            Charge::Units(units) => units,
+                            Charge::Plan(plan) => amount(&heap, plan, args, result),
+                        };
+                        assert_eq!(
+                            actual, expected,
+                            "case {case}: {formula:?}, {args:?}, {result:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// How many calls `probe.echo` answered through its general call.
 static GENERAL_CALLS: AtomicUsize = AtomicUsize::new(0);
 

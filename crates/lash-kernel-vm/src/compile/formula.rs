@@ -32,14 +32,24 @@ pub(crate) struct Plan {
     ops: Vec<Op>,
     measurements: Vec<(Source, doc::Measure)>,
     depth: usize,
-    /// A formula that is a constant plus each of its measurements once:
-    /// that constant, which spares the program.
-    linear: Option<u64>,
+    /// A sum of measurements, optionally with one pair combined by a
+    /// minimum: the folded constant and the pair spare the program.
+    linear: Option<Linear>,
 }
 
 /// An instruction of a plan's program. Each combining one takes the two
 /// amounts on the top of the stack: a sum of more terms is its terms
 /// combined pairwise from the left, as the saturating fold computes it.
+enum Linear {
+    Sum(u64),
+    /// A sum with one minimum of two adjacent measurements. Their
+    /// indexes and the folded constant are derived from the program.
+    Minimum {
+        constant: u64,
+        at: usize,
+    },
+}
+
 #[derive(Clone, Copy)]
 enum Op {
     Constant(u64),
@@ -59,13 +69,17 @@ enum Fold {
 
 impl Plan {
     pub(crate) fn new(formula: &doc::Formula, params: &[doc::Param]) -> Self {
+        Self::prepare(formula, params, false)
+    }
+
+    fn prepare(formula: &doc::Formula, params: &[doc::Param], shallow: bool) -> Self {
         let mut plan = Self {
             ops: Vec::new(),
             measurements: Vec::new(),
             depth: 0,
             linear: None,
         };
-        plan.term(formula, params);
+        plan.term(formula, params, shallow);
         plan.linear = plan.linear();
         let mut depth = 0usize;
         for op in &plan.ops {
@@ -78,53 +92,86 @@ impl Plan {
         plan
     }
 
-    /// The constant of a program that adds a constant to measurements it
-    /// makes once each, in their order.
-    fn linear(&self) -> Option<u64> {
-        // A sum's program is its terms, its constant, then one `Add` fewer
-        // than its terms and constant.
-        let terms = self
-            .ops
-            .iter()
-            .take_while(|op| matches!(op, Op::Measure(_)))
-            .count();
-        let (constant, rest) = match &self.ops[terms..] {
-            [Op::Constant(constant), rest @ ..] => (*constant, rest),
+    /// Recognizes a sum of measurements in order, optionally with one
+    /// minimum pair, followed by its folded constant and additions.
+    fn linear(&self) -> Option<Linear> {
+        let mut measured = 0;
+        let mut terms = 0;
+        let mut minimum = None;
+        let mut end = 0;
+        for (position, op) in self.ops.iter().enumerate() {
+            match op {
+                Op::Measure(index) if *index == measured => {
+                    measured += 1;
+                    terms += 1;
+                }
+                Op::Min
+                    if minimum.is_none()
+                        && end >= 2
+                        && matches!(self.ops[end - 1], Op::Measure(_))
+                        && matches!(self.ops[end - 2], Op::Measure(_)) =>
+                {
+                    minimum = Some(measured - 2);
+                    terms -= 1;
+                }
+                _ => break,
+            }
+            end = position + 1;
+        }
+        let (constant, rest) = match &self.ops[end..] {
+            [Op::Constant(constant), rest @ ..] => {
+                terms += 1;
+                (*constant, rest)
+            }
             rest => (0, rest),
         };
-        let operands = terms + usize::from(self.ops.len() > terms + rest.len());
-        let in_order = self.ops[..terms]
-            .iter()
-            .enumerate()
-            .all(|(position, op)| matches!(op, Op::Measure(index) if *index == position));
-        let adds = rest.len() + 1 == operands && rest.iter().all(|op| matches!(op, Op::Add));
-        (operands > 0 && in_order && adds && terms == self.measurements.len()).then_some(constant)
+        if terms == 0
+            || measured != self.measurements.len()
+            || rest.len() + 1 != terms
+            || !rest.iter().all(|op| matches!(op, Op::Add))
+        {
+            return None;
+        }
+        Some(match minimum {
+            Some(at) => Linear::Minimum { constant, at },
+            None => Linear::Sum(constant),
+        })
     }
 
     /// Appends a formula's program.
-    fn term(&mut self, formula: &doc::Formula, params: &[doc::Param]) {
+    fn term(&mut self, formula: &doc::Formula, params: &[doc::Param], shallow: bool) {
         match formula {
             doc::Formula::Constant(amount) => self.ops.push(Op::Constant(*amount)),
             doc::Formula::Size(operand) => self.measure(operand, doc::Measure::Size, params),
-            doc::Formula::DeepSize(operand) => {
-                self.measure(operand, doc::Measure::DeepSize, params)
-            }
+            doc::Formula::DeepSize(operand) => self.measure(
+                operand,
+                if shallow {
+                    doc::Measure::Size
+                } else {
+                    doc::Measure::DeepSize
+                },
+                params,
+            ),
             doc::Formula::NestedSize(operand) => {
-                self.measure(operand, doc::Measure::NestedSize, params)
+                if shallow {
+                    self.ops.push(Op::Constant(0));
+                } else {
+                    self.measure(operand, doc::Measure::NestedSize, params);
+                }
             }
             doc::Formula::Magnitude(operand) => {
                 self.measure(operand, doc::Measure::Magnitude, params)
             }
-            doc::Formula::Sum(items) => self.fold(Fold::Sum, items, params),
-            doc::Formula::Product(items) => self.fold(Fold::Product, items, params),
-            doc::Formula::Max(items) => self.extreme(Op::Max, items, params),
-            doc::Formula::Min(items) => self.extreme(Op::Min, items, params),
+            doc::Formula::Sum(items) => self.fold(Fold::Sum, items, params, shallow),
+            doc::Formula::Product(items) => self.fold(Fold::Product, items, params, shallow),
+            doc::Formula::Max(items) => self.extreme(Op::Max, items, params, shallow),
+            doc::Formula::Min(items) => self.extreme(Op::Min, items, params, shallow),
         }
     }
 
     /// Appends a sum or a product, with the terms of the sums or products
     /// it holds as its own and its constants folded into one.
-    fn fold(&mut self, fold: Fold, items: &[doc::Formula], params: &[doc::Param]) {
+    fn fold(&mut self, fold: Fold, items: &[doc::Formula], params: &[doc::Param], shallow: bool) {
         let (identity, combine): (u64, fn(u64, u64) -> u64) = match fold {
             Fold::Sum => (0, u64::saturating_add),
             Fold::Product => (1, u64::saturating_mul),
@@ -135,12 +182,13 @@ impl Plan {
         while let Some(item) = pending.pop() {
             match (fold, item) {
                 (_, doc::Formula::Constant(amount)) => constant = combine(constant, *amount),
+                (_, doc::Formula::NestedSize(_)) if shallow => constant = combine(constant, 0),
                 (Fold::Sum, doc::Formula::Sum(inner))
                 | (Fold::Product, doc::Formula::Product(inner)) => {
                     pending.extend(inner.iter().rev());
                 }
                 _ => {
-                    self.term(item, params);
+                    self.term(item, params, shallow);
                     count += 1;
                 }
             }
@@ -157,13 +205,13 @@ impl Plan {
     }
 
     /// Appends the largest or the smallest of some amounts; of none, 0.
-    fn extreme(&mut self, op: Op, items: &[doc::Formula], params: &[doc::Param]) {
+    fn extreme(&mut self, op: Op, items: &[doc::Formula], params: &[doc::Param], shallow: bool) {
         if items.is_empty() {
             self.ops.push(Op::Constant(0));
             return;
         }
         for (index, item) in items.iter().enumerate() {
-            self.term(item, params);
+            self.term(item, params, shallow);
             if index > 0 {
                 self.ops.push(op);
             }
@@ -200,13 +248,28 @@ impl Plan {
     /// measurement reads the heap as it is, which nothing changes while
     /// the formula is computed.
     pub(crate) fn evaluate(&self, mut measure: impl FnMut(Source, doc::Measure) -> u64) -> u64 {
-        if let Some(constant) = self.linear {
-            return self
-                .measurements
-                .iter()
-                .fold(constant, |sum, (source, kind)| {
-                    sum.saturating_add(measure(*source, *kind))
-                });
+        match self.linear {
+            Some(Linear::Sum(constant)) => {
+                return self
+                    .measurements
+                    .iter()
+                    .fold(constant, |sum, (source, kind)| {
+                        sum.saturating_add(measure(*source, *kind))
+                    });
+            }
+            Some(Linear::Minimum { constant, at }) => {
+                let mut sum = constant;
+                for (source, kind) in &self.measurements[..at] {
+                    sum = sum.saturating_add(measure(*source, *kind));
+                }
+                let (left, right) = (self.measurements[at], self.measurements[at + 1]);
+                sum = sum.saturating_add(measure(left.0, left.1).min(measure(right.0, right.1)));
+                for (source, kind) in &self.measurements[at + 2..] {
+                    sum = sum.saturating_add(measure(*source, *kind));
+                }
+                return sum;
+            }
+            None => {}
         }
         let mut kept = [0; KEPT_MEASUREMENTS];
         let mut more = Vec::new();
@@ -282,7 +345,7 @@ pub(crate) enum Charge<'p> {
 
 impl Fast {
     pub(crate) fn new(formula: &doc::Formula, params: &[doc::Param], charge: &Plan) -> Self {
-        let shallow = Plan::new(&formula.shallow(), params);
+        let shallow = Plan::prepare(formula, params, true);
         let unit = shallow
             .measurements
             .iter()
