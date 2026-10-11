@@ -191,6 +191,17 @@ impl Turn {
         )
     }
 
+    /// The commit that records the turn's tool outcomes: a step of plain
+    /// native calls commits them with their presentation and the next
+    /// model start (FIG-5954); a cell's, a finish's and a store-local
+    /// effect's keep their own `round.outcome`.
+    fn outcome_label(self) -> CommitLabel {
+        match self {
+            Self::LimitStep => CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+            _ => CommitLabel::ROUND_OUTCOME,
+        }
+    }
+
     /// Whether the core is served with the recording telemetry adapter.
     fn traced(self) -> bool {
         matches!(self, Self::Plain | Self::Trace | Self::CellTrace)
@@ -1926,7 +1937,7 @@ async fn prove_under(turn: Turn, tier: Tier, cut_labels: &[CommitLabel], faults:
     let expected = if cut_labels.is_empty() {
         vec![
             CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_OUTCOME,
+            turn.outcome_label(),
             CommitLabel::TURN_COMMIT,
         ]
     } else {

@@ -3,12 +3,18 @@
 use super::*;
 use lash_durable::laws::node_wakes::{Claims, CountingStore};
 
+/// A node that claims every `poll` and holds `max_active` actors. Its
+/// startup attempt gets the hang guard's bound, not production's: a
+/// registration that misses its bound is retried after `claim_backoff`,
+/// which a [`quiet`] node never reaches, and these laws assert no startup
+/// latency.
 fn holding(poll: Duration, max_active: usize) -> DurableSettings {
     let defaults = DurableSettings::default();
     DurableSettings {
         lease: LeaseSettings {
             claim_poll: poll,
             claim_backoff: poll,
+            startup: WATCHDOG,
             ..defaults.lease
         },
         max_active,

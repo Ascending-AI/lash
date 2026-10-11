@@ -366,7 +366,9 @@ async fn evidence_until(
     evidence: &mut mpsc::UnboundedReceiver<WakeEvidence>,
     reached: impl Fn(&WakeEvidence) -> bool,
 ) -> WakeEvidence {
-    tokio::time::timeout(WATCHDOG, async {
+    // What the runner produced instead, so a hang names the wait it broke.
+    let mut passed = Vec::new();
+    let found = tokio::time::timeout(WATCHDOG, async {
         loop {
             let event = evidence
                 .recv()
@@ -375,10 +377,18 @@ async fn evidence_until(
             if reached(&event) {
                 return event;
             }
+            passed.push(event);
         }
     })
-    .await
-    .expect("hang guard: the runner never produced the required node-wake evidence")
+    .await;
+    found.unwrap_or_else(|_| {
+        let last: Vec<_> = passed.iter().rev().take(4).rev().collect();
+        panic!(
+            "hang guard: the runner never produced the required node-wake evidence; \
+             its last of {} other events: {last:#?}",
+            passed.len()
+        )
+    })
 }
 
 /// Serve child node `role` over `database` until killed; the `sweeper`

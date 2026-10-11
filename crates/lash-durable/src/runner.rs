@@ -125,7 +125,8 @@ pub enum Stopped {
 struct DrainInner {
     started: AtomicBool,
     notify: Notify,
-    /// The actors released under `drain.release`, in commit order.
+    /// The actors released under `drain.release` or with a phase commit,
+    /// in commit order.
     released: Mutex<Vec<ActorKey>>,
 }
 
@@ -153,11 +154,30 @@ impl Drain {
     pub async fn release(
         &self,
         store: &dyn DurableStore,
+        tx: ActorTx,
+    ) -> Result<ActorCommit, DurableError> {
+        self.release_with(store, tx, CommitLabel::DRAIN_RELEASE, Release::Ready)
+            .await
+    }
+
+    /// Commit `tx` under `label` with its actor given up as `release`: a
+    /// draining activation's phase commit that also releases the actor, so
+    /// no `drain.release` write follows it. Recorded among the actors this
+    /// drain released, as [`Self::release`] is.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal; nothing is recorded.
+    pub async fn release_with(
+        &self,
+        store: &dyn DurableStore,
         mut tx: ActorTx,
+        label: CommitLabel,
+        release: Release,
     ) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().clone();
-        tx.give_up(Release::Ready);
-        let commit = store.commit(tx, CommitLabel::DRAIN_RELEASE).await?;
+        tx.give_up(release);
+        let commit = store.commit(tx, label).await?;
         self.inner
             .released
             .lock()
@@ -167,7 +187,7 @@ impl Drain {
     }
 
     /// The actors this drain released, in commit order: each one whose
-    /// `drain.release` commit was acknowledged.
+    /// releasing commit was acknowledged.
     #[must_use]
     pub fn released(&self) -> Vec<ActorKey> {
         self.inner

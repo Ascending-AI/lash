@@ -788,7 +788,7 @@ impl V0 {
         }
 
         if let Some(cut) = cut {
-            violations.extend(kill_laws(cut, completed, &writes));
+            violations.extend(kill_laws(self.protocol, cut, completed, &writes));
             violations.extend(zombie_laws(cut, &trace));
         }
         violations
@@ -932,14 +932,25 @@ fn retained_prints(value: &serde_json::Value, found: &mut Vec<lash_core::Attachm
     }
 }
 
-/// K1 and K2: a node killed at `round.outcome` after the body ran.
+/// The commit that records the operation's outcome: a cell's VM consumes
+/// it from `round.outcome`; the standard protocol's plain final outcome
+/// commits with its presentation and the next model start (FIG-5954).
+fn outcome_label(protocol: Protocol) -> CommitLabel {
+    match protocol {
+        Protocol::Tools => CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+        _ => CommitLabel::ROUND_OUTCOME,
+    }
+}
+
+/// K1 and K2: a node killed at the [`outcome_label`] after the body ran.
 fn kill_laws(
+    protocol: Protocol,
     cut: &Cut,
     completed: bool,
     writes: &BTreeMap<ToolCallId, Vec<serde_json::Value>>,
 ) -> Vec<String> {
     let mut violations = Vec::new();
-    if cut.point.label != CommitLabel::ROUND_OUTCOME || !cut.fault.kills() {
+    if cut.point.label != outcome_label(protocol) || !cut.fault.kills() {
         return violations;
     }
     let (name, expected) = match cut.fault {
@@ -1018,11 +1029,12 @@ async fn prove(protocol: Protocol, dialect: Dialect, postgres_url: Option<String
     for fault in [Fault::Abort, Fault::CommitThenAbort] {
         assert!(
             report.cells.iter().any(|cell| {
-                cell.point.label == CommitLabel::ROUND_OUTCOME
+                cell.point.label == outcome_label(protocol)
                     && cell.fault == fault
                     && cell.verdict == Verdict::Held
             }),
-            "{fault:?} at round.outcome was not cut"
+            "{fault:?} at {} was not cut",
+            outcome_label(protocol)
         );
     }
     report.assert_baseline_labels(&uncut_labels(protocol));
@@ -1048,7 +1060,15 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
-        Protocol::Tools | Protocol::Noted => vec![
+        Protocol::Tools => vec![
+            CommitLabel::TURN_ADMIT,
+            CommitLabel::MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+            CommitLabel::TURN_COMMIT,
+            CommitLabel::SESSION_RELEASE,
+        ],
+        Protocol::Noted => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,

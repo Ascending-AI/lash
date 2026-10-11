@@ -407,10 +407,11 @@ pub async fn run_phases(
                         iteration: current,
                     }));
                     let released = cx.draining();
-                    if released {
-                        tx.give_up(Release::Ready);
-                    }
-                    let committed = cx.commit(tx, label).await?;
+                    let committed = if released {
+                        cx.commit_draining(tx, label, Release::Ready).await?
+                    } else {
+                        cx.commit(tx, label).await?
+                    };
                     boundary.committed(cx, drive.as_mut()).await?;
                     stored.committed(drive.machine());
                     drive.run_changes_committed(&written);
@@ -680,7 +681,7 @@ pub async fn run_phases(
                 // failure: the session parks at the activation-loop budget
                 // with the turn and its input kept (FIG-5398).
                 let released = cx.draining();
-                if released {
+                let committed = if released {
                     let more = tx.domain().iter().any(|write| {
                         matches!(
                             write,
@@ -692,17 +693,19 @@ pub async fn run_phases(
                             )
                         )
                     });
-                    tx.give_up(if more { Release::Ready } else { Release::Idle });
-                }
-                cx.commit(tx, CommitLabel::TURN_COMMIT)
-                    .await
-                    .map_err(|error| {
-                        let refusal = match &error {
-                            DurableError::Domain(refusal) => refusal.session_commit_refusal(),
-                            _ => None,
-                        };
-                        refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
-                    })?;
+                    let release = if more { Release::Ready } else { Release::Idle };
+                    cx.commit_draining(tx, CommitLabel::TURN_COMMIT, release)
+                        .await
+                } else {
+                    cx.commit(tx, CommitLabel::TURN_COMMIT).await
+                };
+                committed.map_err(|error| {
+                    let refusal = match &error {
+                        DurableError::Domain(refusal) => refusal.session_commit_refusal(),
+                        _ => None,
+                    };
+                    refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
+                })?;
                 turn_trace::ended(services.tracing(), &row, traced);
                 drive.committed().await;
                 // The commit moved the head: the next turn loads it again.

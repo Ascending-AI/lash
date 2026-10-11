@@ -361,14 +361,39 @@ impl ActorContext {
     /// The store's refusal: [`DurableError::OwnershipLost`] once the actor
     /// is someone else's; unavailable for a context that owns no claim.
     pub async fn drain_release(&self) -> Result<ActorCommit, DurableError> {
-        let Some(drain) = &self.inner.drain else {
-            return Err(DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Unavailable,
-                message: "a context that owns no claim has no drain".to_owned(),
-            }));
-        };
+        let drain = self.claimed_drain()?;
         let tx = self.begin().await?;
         drain.release(self.durable()?.as_ref(), tx).await
+    }
+
+    /// Commit `tx` under `label` with the claimed actor given up as
+    /// `release`: a draining activation's phase commit that releases the
+    /// actor itself. The node's drain records it among the actors it
+    /// released, as [`Self::drain_release`] does.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal: [`DurableError::OwnershipLost`] once the actor
+    /// is someone else's, [`DurableError::Domain`] for a refused domain
+    /// write; unavailable for a context that owns no claim.
+    pub async fn commit_draining(
+        &self,
+        tx: ActorTx,
+        label: CommitLabel,
+        release: lash_durable::Release,
+    ) -> Result<ActorCommit, DurableError> {
+        self.claimed_drain()?
+            .release_with(self.durable()?.as_ref(), tx, label, release)
+            .await
+    }
+
+    fn claimed_drain(&self) -> Result<&lash_durable::runner::Drain, DurableError> {
+        self.inner.drain.as_ref().ok_or_else(|| {
+            DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Unavailable,
+                message: "a context that owns no claim has no drain".to_owned(),
+            })
+        })
     }
 
     /// Whether the claiming node still holds its lease by its own clock:

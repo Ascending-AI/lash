@@ -59,10 +59,13 @@ impl OutputBoundary {
             return Ok(false);
         }
         self.append_to(&mut tx);
-        if let Some(release) = release {
-            tx.give_up(release);
-        }
-        cx.commit(tx, CommitLabel::ROUND_OUTCOME).await?;
+        match release {
+            Some(release) => {
+                cx.commit_draining(tx, CommitLabel::ROUND_OUTCOME, release)
+                    .await?
+            }
+            None => cx.commit(tx, CommitLabel::ROUND_OUTCOME).await?,
+        };
         self.committed(cx, drive).await?;
         Ok(true)
     }

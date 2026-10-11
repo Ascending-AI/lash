@@ -792,28 +792,28 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
 /// The owner commits of the uncut run, in order.
 fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
     match arrival {
-        // Two rounds: the admission of what arrived commits with the
-        // `round.present+model.start` after the first round.
+        // Two rounds of plain outcomes, each committed with its
+        // presentation and the next model start: the admission of what
+        // arrived commits with the first round's.
         arrival if arrival.at_work() => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
             CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
         // The first finish's round, then the iteration the steer opened:
-        // its delivery commits with that iteration's `model.start`.
+        // its delivery commits with the first round's outcome and that
+        // iteration's `model.start`; the second finish's outcome ends the
+        // turn on its own.
         Arrival::Candidate => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::TURN_COMMIT,
