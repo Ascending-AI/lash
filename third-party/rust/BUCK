@@ -17184,6 +17184,7 @@ third_party_rust_library(
         "default",
         "fs",
         "std",
+        "time",
     ],
     platform = {
         "linux-x86_64": dict(),
@@ -17224,6 +17225,7 @@ third_party_rust_binary(
         "default",
         "fs",
         "std",
+        "time",
     ],
     platform = {
         "linux-x86_64": dict(),
@@ -17252,6 +17254,7 @@ third_party_buildscript_run(
         "default",
         "fs",
         "std",
+        "time",
     ],
     platform = {
         "linux-x86_64": dict(),

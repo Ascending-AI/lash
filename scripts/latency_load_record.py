@@ -115,7 +115,7 @@ def record(command: list[str], *, interval: float, case: str, cores: int,
 
     def sampler() -> None:
         while True:
-            samples.append(sample(loadavg, pressure, time.time()))
+            samples.append({**sample(loadavg, pressure, time.time()), "source": "interval"})
             if done.wait(interval):
                 break
         samples.append(sample(loadavg, pressure, time.time()))
@@ -130,12 +130,23 @@ def record(command: list[str], *, interval: float, case: str, cores: int,
         out.flush()
         marker = CASE_MARKER.match(line)
         if marker:
-            markers.append({"case": marker["name"], "edge": marker["edge"], "unix_s": time.time()})
+            edge = {"case": marker["name"], "edge": marker["edge"], "unix_s": time.time()}
+            # Both edges are sampled, even when a case is shorter than the
+            # interval. Keep their common timestamp inside the case window.
+            markers.append(edge)
+            samples.append({**sample(loadavg, pressure, edge["unix_s"]),
+                            "source": "case-edge", "case": edge["case"], "edge": edge["edge"]})
     process.stdout.close()
     status = process.wait()
     done.set()
     thread.join()
     windows = case_windows(markers)
+    samples.sort(key=lambda row: row["unix_s"])
+    for window in windows.values():
+        start, end = window["started_unix_s"], window["finished_unix_s"]
+        window["interval_samples"] = sum(
+            row.get("source") == "interval" and start is not None and end is not None
+            and start <= row["unix_s"] <= end for row in samples)
     verdict = qualify(samples, windows, case, cores)
     certification_status = status if status != 0 else (0 if verdict["qualified"] else 3)
     return certification_status, {

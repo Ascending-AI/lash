@@ -46,6 +46,18 @@ class LoadRecordTests(unittest.TestCase):
                 cores=cores, loadavg=host.loadavg, pressure=host.pressure, out=out)
             return status, result, out.getvalue()
 
+    def test_subsecond_cases_sample_both_edges_without_inventing_interval_coverage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            host = Host(directory, 1.0)
+            _, result = record.record(
+                [sys.executable, "-c", CHILD, "runs", "grace"], interval=60.0,
+                case="grace", cores=32, loadavg=host.loadavg,
+                pressure=host.pressure, out=io.StringIO())
+        edges = [row for row in result["samples"] if row.get("case") == "grace"]
+        self.assertEqual(["started", "finished"], [row["edge"] for row in edges])
+        self.assertEqual(0, result["cases"]["grace"]["interval_samples"])
+        self.assertEqual(2, result["verdict"]["samples_in_window"])
+
     def test_a_quiet_fast_case_qualifies(self):
         status, result, output = self.run_child(3.0, "fast")
         self.assertEqual(0, status)

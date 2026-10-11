@@ -163,6 +163,34 @@ pub(in crate::runtime) async fn publish_observation(
         RuntimeStreamEvent::Session(event) => emit_session_event_to_sink(events, event).await,
         RuntimeStreamEvent::Turn(activity) => match observation.turn {
             Some(turn_id) => {
+                #[cfg(feature = "perf-witness")]
+                {
+                    use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+                    let delta = matches!(
+                        &activity.event,
+                        crate::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::AssistantText | StreamBlockKind::Reasoning,
+                            ..
+                        })
+                    );
+                    let visible = delta
+                        || matches!(
+                            &activity.event,
+                            crate::TurnEvent::StreamBlock(StreamBlockEvent::Started { .. })
+                                | crate::TurnEvent::ToolCallStarted { .. }
+                                | crate::TurnEvent::Finished { .. }
+                        );
+                    crate::perf_witness::latency::activity(
+                        turn_id.as_str(),
+                        visible,
+                        delta,
+                        matches!(
+                            &activity.event,
+                            crate::TurnEvent::ModelRequestStarted { .. }
+                        ),
+                        matches!(&activity.event, crate::TurnEvent::ModelCallRecorded { .. }),
+                    );
+                }
                 emit_turn_activity_to_sink_for_turn(turn_events, &turn_id, activity).await;
             }
             None => emit_turn_activity_to_sink(turn_events, activity).await,

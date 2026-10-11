@@ -328,11 +328,57 @@ fn print_summary(report: &runner::LatencyReport) {
             "admission→run settled ms",
             &phases.shift_admission_to_run_settled,
         );
+        row(
+            "admission→first visible ms",
+            &phases.shift_admission_to_first_visible,
+        );
+        row(
+            "admission→first activity ms",
+            &phases.shift_admission_to_first_activity,
+        );
+        row(
+            "admission observation lag ms",
+            &phases.admission_observation_lag,
+        );
+        row(
+            "terminal observation lag ms",
+            &phases.terminal_observation_lag,
+        );
         row("settled→completion ms", &phases.root_settled_to_completion);
         row("send→completion ms", &phases.send_to_completion);
         row("provider ms", &phases.provider);
         row("overhead ms", &phases.overhead);
         row("poll-detect ms", &phases.poll_detect);
+        println!(
+            "  lanes configured={} actual={}; baseline={}",
+            case.lanes, case.actual_lanes, case.baseline
+        );
+        println!(
+            "  absolute clocks: {}; per-sample ledger {:?}",
+            case.clock_window, report.samples_file
+        );
+        println!(
+            "  write transactions/send {:.3}",
+            case.sqlite_work.write_transactions_per_send
+        );
+        println!(
+            "  writer busy ms/send {:.3}",
+            case.sqlite_work.writer_busy_ms_per_send
+        );
+        println!(
+            "  reader busy ms/send {:.3}",
+            case.sqlite_work.reader_busy_ms_per_send
+        );
+        for worker in &case.sqlite_work.workers {
+            println!(
+                "    pid={} {} {} busy ms/send={:.3} write transactions={}",
+                worker.pid,
+                worker.thread,
+                worker.role,
+                worker.busy_ms_per_send,
+                worker.write_transactions
+            );
+        }
     }
     println!();
     if report.verdict.pass {

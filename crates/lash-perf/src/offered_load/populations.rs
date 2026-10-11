@@ -157,6 +157,7 @@ impl Drop for Poller {
 }
 
 async fn send_and_follow(target: &Target, text: String) -> Result<ServiceMarks> {
+    let request = lash_core::perf_witness::latency::Stamp::now();
     let sent = Instant::now();
     let handle = target
         .session
@@ -168,7 +169,6 @@ async fn send_and_follow(target: &Target, text: String) -> Result<ServiceMarks> 
         Arc::clone(&target.poll_store),
         target.session_id.clone(),
         handle.input_id().clone(),
-        sent,
     )));
     let outcome = handle.outcome().await.map_err(anyhow::Error::from)?;
     let completed = sent.elapsed();
@@ -182,10 +182,12 @@ async fn send_and_follow(target: &Target, text: String) -> Result<ServiceMarks> 
         Ok(Ok(marks)) => marks,
         _ => PollMarks::default(),
     };
-    let after_send = |ms: Option<f64>| ms.map(|ms| Duration::from_secs_f64(ms.max(0.0) / 1_000.0));
+    let after_send = |stamp: Option<lash_core::perf_witness::latency::Stamp>| {
+        stamp.map(|stamp| Duration::from_secs_f64(stamp.since(request) / 1_000.0))
+    };
     Ok(ServiceMarks {
-        admitted_after_send: after_send(marks.admission_ms),
-        settled_after_send: after_send(marks.settled_ms),
+        admitted_after_send: after_send(marks.admission_observed),
+        settled_after_send: after_send(marks.terminal_observed),
         completed_after_send: Some(completed),
     })
 }

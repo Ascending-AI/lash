@@ -505,6 +505,8 @@ impl<'c> std::ops::Deref for FencedTx<'c> {
 pub(crate) struct SqliteConnection {
     pub(crate) operational: crate::SqliteOperationalSettings,
     inner: AsyncConnection,
+    #[cfg(feature = "perf-witness")]
+    reader: bool,
     catalog: Arc<catalog::StoredCatalog>,
     /// The gate every in-process writer to this connection's database queues
     /// on (FIG-3975), shared by all connections that open it.
@@ -635,6 +637,8 @@ impl SqliteConnection {
         Ok(Self {
             operational: policy.operational,
             inner,
+            #[cfg(feature = "perf-witness")]
+            reader: false,
             catalog,
             checkpoint: checkpoint_state(
                 target,
@@ -702,6 +706,8 @@ impl SqliteConnection {
         Ok(Self {
             operational,
             inner,
+            #[cfg(feature = "perf-witness")]
+            reader: true,
             catalog: Arc::new(catalog::StoredCatalog::default()),
             write_gate: gate,
             read_gate: read_gate(target),
@@ -830,7 +836,11 @@ impl SqliteConnection {
     {
         let window = lash_core_execution::facade_support::sql::Window::current();
         let catalog = Arc::clone(&self.catalog);
+        #[cfg(feature = "perf-witness")]
+        let reader = self.reader;
         let f = move |c: &mut Connection| {
+            #[cfg(feature = "perf-witness")]
+            let _busy = lash_core_execution::perf_witness::latency::Busy::enter(reader);
             let observed = window.is_some() && !cfg!(feature = "perf-witness");
             if observed {
                 crate::observed_sql::enable(c);
@@ -866,9 +876,11 @@ impl SqliteConnection {
                 #[cfg(feature = "perf-witness")]
                 let mut read_timing =
                     lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
-                let _read_gate = read_gate
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let _read_gate = timed_gate(|| {
+                    read_gate
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                });
                 #[cfg(feature = "perf-witness")]
                 if let Some(timing) = &mut read_timing {
                     timing.start_service();
@@ -901,9 +913,11 @@ impl SqliteConnection {
                 #[cfg(feature = "perf-witness")]
                 let mut read_timing =
                     lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
-                let _read_gate = read_gate
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let _read_gate = timed_gate(|| {
+                    read_gate
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                });
                 #[cfg(feature = "perf-witness")]
                 if let Some(timing) = &mut read_timing {
                     timing.start_service();
@@ -952,9 +966,11 @@ impl SqliteConnection {
                 #[cfg(feature = "perf-witness")]
                 let mut read_timing =
                     lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
-                let _read_gate = read_gate
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let _read_gate = timed_gate(|| {
+                    read_gate
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                });
                 #[cfg(feature = "perf-witness")]
                 if let Some(timing) = &mut read_timing {
                     timing.start_service();
@@ -963,15 +979,19 @@ impl SqliteConnection {
                 #[cfg(feature = "perf-witness")]
                 let mut write_timing =
                     lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.write_gate");
-                let _write_gate = write_gate
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let _write_gate = timed_gate(|| {
+                    write_gate
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                });
                 #[cfg(feature = "perf-witness")]
                 if let Some(timing) = &mut write_timing {
                     timing.start_service();
                     timing.complete();
                 }
                 let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                #[cfg(feature = "perf-witness")]
+                lash_core_execution::perf_witness::latency::began_write();
                 let fleet = f(&tx)?;
                 tx.commit()?;
                 Ok(Ok(fleet))
@@ -1030,9 +1050,11 @@ impl SqliteConnection {
                 #[cfg(feature = "perf-witness")]
                 let mut read_timing =
                     lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
-                let _read_gate = read_gate
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let _read_gate = timed_gate(|| {
+                    read_gate
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                });
                 #[cfg(feature = "perf-witness")]
                 if let Some(timing) = &mut read_timing {
                     timing.start_service();
@@ -1041,15 +1063,21 @@ impl SqliteConnection {
                 #[cfg(feature = "perf-witness")]
                 let mut write_timing =
                     lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.write_gate");
-                let write_gate = write_gate
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let write_gate = timed_gate(|| {
+                    write_gate
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                });
                 #[cfg(feature = "perf-witness")]
                 if let Some(timing) = &mut write_timing {
                     timing.start_service();
                 }
                 let result = (|| {
+                    #[cfg(feature = "perf-witness")]
+                    let witness = lash_core_execution::perf_witness::latency::Transaction::begin();
                     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                    #[cfg(feature = "perf-witness")]
+                    lash_core_execution::perf_witness::latency::began_write();
                     let fleet = fence.check(&tx)?;
                     #[cfg(feature = "testing")]
                     if let Some(pauses) = pauses.as_ref() {
@@ -1064,7 +1092,18 @@ impl SqliteConnection {
                     let outcome = f(&tx)?;
                     let value = match outcome {
                         TxOutcome::Commit(value) => {
+                            #[cfg(feature = "perf-witness")]
+                            let before = witness
+                                .as_ref()
+                                .map(|_| lash_core_execution::perf_witness::latency::Stamp::now());
                             tx.tx.commit()?;
+                            #[cfg(feature = "perf-witness")]
+                            if let Some((witness, before)) = witness.zip(before) {
+                                witness.committed(
+                                    before,
+                                    lash_core_execution::perf_witness::latency::Stamp::now(),
+                                );
+                            }
                             value
                         }
                         TxOutcome::Rollback(value) => {
@@ -1120,10 +1159,86 @@ fn flatten<T>(result: tokio_rusqlite::Result<rusqlite::Result<T>>) -> rusqlite::
     }
 }
 
+fn timed_gate<T>(f: impl FnOnce() -> T) -> T {
+    #[cfg(feature = "perf-witness")]
+    {
+        lash_core_execution::perf_witness::latency::gate(f)
+    }
+    #[cfg(not(feature = "perf-witness"))]
+    {
+        f()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// FIG-5933 counts physical write transactions, including rollback, and
+    /// never publishes a clock for a refused commit.
+    #[cfg(feature = "perf-witness")]
+    #[tokio::test]
+    async fn latency_witness_counts_rollbacks_without_publishing_their_clocks() {
+        use lash_core_execution::perf_witness::latency::{Collector, CommitMark, stage};
+        let dir = tempfile::tempdir().unwrap();
+        let target = DatabaseTarget::File(dir.path().join("witness.db"));
+        let conn = installed(
+            &target,
+            SqliteConnectionPolicy::development(SqliteSynchronous::Normal),
+        )
+        .await;
+        let reader = SqliteConnection::open_readonly_configured(
+            &target,
+            crate::SqliteOperationalSettings::development(),
+        )
+        .await
+        .unwrap();
+        let collector = Collector::install().unwrap();
+        conn.write(|_| {
+            stage(|| CommitMark::Accepted {
+                input: "committed".to_owned(),
+            });
+            Ok(())
+        })
+        .await
+        .unwrap();
+        conn.write_flow(|_| {
+            stage(|| CommitMark::Accepted {
+                input: "refused".to_owned(),
+            });
+            Ok(TxOutcome::Rollback(()))
+        })
+        .await
+        .unwrap();
+        reader
+            .call(|c| c.query_row("SELECT 1", [], |r| r.get::<_, u64>(0)))
+            .await
+            .unwrap();
+        let snapshot = collector.snapshot();
+        assert!(snapshot.inputs["committed"].accepted.is_some());
+        assert!(!snapshot.inputs.contains_key("refused"));
+        assert_eq!(
+            snapshot
+                .workers
+                .values()
+                .map(|w| w.write_transactions)
+                .sum::<u64>(),
+            2
+        );
+        assert!(
+            snapshot
+                .workers
+                .values()
+                .any(|w| w.reader && w.busy_ns > 0 && w.write_transactions == 0)
+        );
+        assert!(
+            snapshot
+                .workers
+                .values()
+                .any(|w| !w.reader && w.busy_ns > 0 && w.write_transactions == 2)
+        );
+    }
 
     /// SQL-WORK: repeated cached statements count rows and work in each window,
     /// rather than importing earlier executions of the same prepared statement.

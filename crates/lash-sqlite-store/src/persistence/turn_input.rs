@@ -524,6 +524,12 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                 .map_err(|err| {
                     crate::sqlite_pending_turn_input_insert_error(err, session_id, &input_id)
                 })?;
+                #[cfg(feature = "perf-witness")]
+                lash_core_execution::perf_witness::latency::stage(|| {
+                    lash_core_execution::perf_witness::latency::CommitMark::Accepted {
+                        input: input_id.as_str().to_owned(),
+                    }
+                });
                 input_id
             }
         };

@@ -59,6 +59,9 @@ struct TimedCall {
 
 impl ProviderTiming {
     fn record(&self, session: &str, duration_ms: f64, held: bool) {
+        if !held {
+            lash_core::perf_witness::latency::provider(session, duration_ms);
+        }
         self.calls
             .lock_recover()
             .entry(session.to_string())

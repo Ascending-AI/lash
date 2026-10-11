@@ -327,6 +327,7 @@ PACKAGE_DEPS = {
             "chrono": "//third-party/rust:p0048",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_trace": "//crates/lash-trace:lash-trace",
+            "rustix": "//third-party/rust:p0294",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
             "serde_json": "//third-party/rust:p0320",

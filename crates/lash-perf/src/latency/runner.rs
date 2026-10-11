@@ -1,24 +1,6 @@
-//! The latency case runner: topologies, lane loops and the store poller.
-//!
-//! One *sample* is a send→outcome round trip on the durable engine. The
-//! host measures the wall spans it can see; a per-sample store poller reads
-//! durable evidence so the admission, application and settlement instants do
-//! not ride the follower's own wake schedule. Every read is keyed — the
-//! input's open-set row, the input's run binding, the run's terminal —
-//! and all of them run on the lane's one observer connection, so a poll
-//! never rescans session history or opens a connection per tick. The tick
-//! backs off from a 2 ms floor toward a 50 ms ceiling while nothing changes
-//! and restarts at the floor the moment a mark lands, so clustered marks
-//! keep tick-fine precision while a quiet wait stays cheap:
-//!
-//! * `admission` — the input's pending row first reports `Admitted` (a run took
-//!   it), leaves the observed open set, or its retained run binding is readable.
-//! * `applied` — the input's durable binding names the run that took it.
-//! * `settled` — the run's terminal evidence is readable.
-//!
-//! The follower tail (`settled→complete`) includes live observation, the
-//! persisted terminal wait and the 25 ms→1 s follow poll; `poll`/`grace`
-//! isolate the current remote polling paths.
+//! Causal engine clocks, host completion, and physical SQLite work for the
+//! send-to-completion diagnostic. The observer retains discovery lag only;
+//! phase boundaries come from the serving engine's successful commits.
 
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::BTreeMap;
@@ -27,6 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use lash_core::perf_witness::latency::{Collector, Snapshot, Stamp, Worker};
 use serde::Serialize;
 
 use lash_sansio::SessionId;
@@ -104,7 +87,14 @@ impl LatencyEnv {
 
     /// What the report records about the engine under measurement.
     pub(crate) fn describe(&self) -> serde_json::Value {
+        use sha2::Digest;
+        let executable = std::env::current_exe()
+            .ok()
+            .and_then(|path| std::fs::read(path).ok());
         serde_json::json!({
+            "executable_sha256": executable.map(|bytes| format!("{:x}", sha2::Sha256::digest(bytes))),
+            "clock": "Linux CLOCK_MONOTONIC for intervals; Unix nanoseconds for load joins",
+            "engine_commit_clock": "successful COMMIT start, with terminal COMMIT return retained as the upper bound",
             "engine": "lash-durable",
             "store": "sqlite-file",
             "heap_profile_parent": self.dhat_out,
@@ -126,6 +116,13 @@ pub(crate) struct Sample {
     /// First send on a freshly opened session.
     pub(crate) cold: bool,
     pub(crate) status: String,
+    pub(crate) session_id: String,
+    pub(crate) input_id: String,
+    pub(crate) clocks: SampleClocks,
+    pub(crate) admission_to_first_visible_ms: Option<f64>,
+    pub(crate) admission_to_first_activity_ms: Option<f64>,
+    pub(crate) admission_observation_lag_ms: Option<f64>,
+    pub(crate) terminal_observation_lag_ms: Option<f64>,
     pub(crate) request_to_accept_ms: f64,
     pub(crate) accept_to_admission_ms: Option<f64>,
     pub(crate) accept_to_applied_ms: Option<f64>,
@@ -146,19 +143,40 @@ pub(crate) struct Sample {
     /// Process-wide CPU (every thread, `utime + stime`) and RSS read as the
     /// sample completes. Both are cumulative: consecutive samples' deltas
     /// give per-turn growth on a 1-lane run, not a turn's own cost.
+    pub(crate) sqlite_workers_at_request: Vec<Worker>,
+    pub(crate) sqlite_workers_at_completion: Vec<Worker>,
     pub(crate) process_cpu_ms_at_end: Option<f64>,
     pub(crate) process_rss_kb_at_end: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error: Option<String>,
 }
 
-/// The durable markers the per-sample store poller collects.
+/// Absolute clocks use a shared host monotonic clock for intervals and Unix
+/// nanoseconds for joining the load ledger. The acknowledgement can race
+/// admission; it is retained separately from durable acceptance.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SampleClocks {
+    request: Stamp,
+    accepted: Option<Stamp>,
+    acceptance_acknowledged: Stamp,
+    admission: Option<Stamp>,
+    terminal: Option<Stamp>,
+    terminal_commit_returned: Option<Stamp>,
+    completion: Stamp,
+    first_activity: Option<Stamp>,
+    first_visible: Option<Stamp>,
+    first_delta: Option<Stamp>,
+    admission_observed: Option<Stamp>,
+    terminal_observed: Option<Stamp>,
+    host_first_activity: Option<Stamp>,
+    host_first_visible: Option<Stamp>,
+    host_first_delta: Option<Stamp>,
+}
 #[derive(Default)]
 pub(crate) struct PollMarks {
-    pub(crate) admission_ms: Option<f64>,
-    pub(crate) applied_ms: Option<f64>,
-    pub(crate) settled_ms: Option<f64>,
-    pub(crate) timed_out: bool,
+    pub(crate) admission_observed: Option<Stamp>,
+    pub(crate) terminal_observed: Option<Stamp>,
+    timed_out: bool,
 }
 
 /// The sink `outcome_into` taps: first activity, first visible delta and
@@ -170,8 +188,9 @@ struct TimingSink {
 
 #[derive(Default)]
 struct TimingSinkState {
-    first_activity_ms: Option<f64>,
-    first_delta_ms: Option<f64>,
+    first_activity: Option<Stamp>,
+    first_delta: Option<Stamp>,
+    first_visible: Option<Stamp>,
     model_started_ms: Option<f64>,
     model_span_ms: f64,
 }
@@ -193,8 +212,9 @@ impl TimingSink {
 impl lash::TurnActivitySink for TimingSink {
     async fn emit(&self, activity: lash_core::TurnActivity) {
         let now = self.elapsed_ms();
+        let stamp = Stamp::now();
         let mut state = self.state.lock_recover();
-        state.first_activity_ms.get_or_insert(now);
+        state.first_activity.get_or_insert(stamp);
         match activity.event {
             lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
                 kind: StreamBlockKind::AssistantText,
@@ -203,11 +223,14 @@ impl lash::TurnActivitySink for TimingSink {
             | lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
                 kind: StreamBlockKind::Reasoning,
                 ..
-            })
-            | lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Started { .. })
+            }) => {
+                state.first_delta.get_or_insert(stamp);
+                state.first_visible.get_or_insert(stamp);
+            }
+            lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Started { .. })
             | lash_core::TurnEvent::ToolCallStarted { .. }
             | lash_core::TurnEvent::Finished { .. } => {
-                state.first_delta_ms.get_or_insert(now);
+                state.first_visible.get_or_insert(stamp);
             }
             lash_core::TurnEvent::ModelRequestStarted { .. } => {
                 state.model_started_ms = Some(now);
@@ -220,10 +243,6 @@ impl lash::TurnActivitySink for TimingSink {
             _ => {}
         }
     }
-}
-
-fn elapsed_ms(start: Instant) -> f64 {
-    start.elapsed().as_secs_f64() * 1000.0
 }
 
 /// The session handle a lane sends on: a live open session in-process, a
@@ -307,6 +326,8 @@ pub(crate) async fn run_case(
     spec: &CaseSpec,
     env: &LatencyEnv,
 ) -> Result<(CaseReport, Vec<Sample>)> {
+    let collector =
+        Collector::install().map_err(|_| anyhow::anyhow!("latency witness already installed"))?;
     let timing = Arc::new(ProviderTiming::default());
     let holds = spec.busy.then(|| Arc::new(HoldRegistry::default()));
     let compat_server = if spec.provider == LatencyProviderKind::OpenAiCompat {
@@ -361,6 +382,7 @@ pub(crate) async fn run_case(
         }
     };
 
+    let work_start = collector.snapshot();
     let started = Instant::now();
     let per_lane = spec.samples.div_ceil(spec.lanes);
     let lane_count = spec.samples.div_ceil(per_lane);
@@ -386,8 +408,33 @@ pub(crate) async fn run_case(
     }
     samples.sort_by_key(|sample| (sample.lane, sample.index));
     let wall = started.elapsed();
-    let report = CaseReport::assemble(spec, &samples, errors, wall);
+    let work_end = collector.snapshot();
+    let mut workers = worker_delta(&work_start, &work_end);
     topology.shutdown().await?;
+    let mut witness = collector.snapshot();
+    if spec.topology == Topology::CrossWorker {
+        let child: Snapshot = serde_json::from_slice(&std::fs::read(
+            case_dir.join("worker/latency-witness.json"),
+        )?)?;
+        workers.extend(child.workers.values().cloned());
+        for (input, child_input) in child.inputs {
+            let input = witness.inputs.entry(input).or_default();
+            input.run = child_input.run;
+        }
+        witness.runs.extend(child.runs);
+        witness.dropped_records += child.dropped_records;
+    }
+    anyhow::ensure!(
+        witness.dropped_records == 0,
+        "latency witness overflow: {}",
+        witness.dropped_records
+    );
+    for sample in &mut samples {
+        fill_engine_phases(sample, &witness)?;
+    }
+    let mut report = CaseReport::assemble(spec, &samples, errors, wall);
+    report.actual_lanes = lane_count;
+    report.sqlite_work = SqliteWork::assemble(workers, samples.len(), spec.busy);
     Ok((report, samples))
 }
 
@@ -647,6 +694,8 @@ async fn measure_send(
     index: usize,
     after_accept: impl FnOnce(),
 ) -> Result<Sample> {
+    let sqlite_workers_at_request = lash_core::perf_witness::latency::workers();
+    let request = Stamp::now();
     let t_request = Instant::now();
     let handle = ctx
         .session
@@ -657,63 +706,80 @@ async fn measure_send(
         .into_future()
         .await
         .map_err(anyhow::Error::from)?;
-    let request_to_accept_ms = elapsed_ms(t_request);
+    let acceptance_acknowledged = Stamp::now();
+    let request_to_accept_ms = acceptance_acknowledged.since(request);
     after_accept();
     let input_id = handle.input_id().clone();
     let poller = tokio::spawn(poll_marks(
         Arc::clone(ctx.poll_store),
         ctx.session_id.clone(),
         input_id.clone(),
-        t_request,
     ));
     let sink = TimingSink::new(t_request);
     let (status, outcome_error) = match handle.outcome_into(&sink).await {
         Ok(outcome) => (status_name(&outcome.status()), None),
         Err(error) => ("error".to_string(), Some(format!("{error:#}"))),
     };
-    let send_to_completion_ms = elapsed_ms(t_request);
+    let completion = Stamp::now();
+    let sqlite_workers_at_completion = lash_core::perf_witness::latency::workers();
+    let send_to_completion_ms = completion.since(request);
     let process_cpu_ms_at_end = process_cpu_ms();
     let process_rss_kb_at_end = process_memory_sample().rss_kb;
     let marks = poller.await.unwrap_or_default();
     let sink_state = sink.state.lock_recover();
-    let first_delta_ms = sink_state.first_delta_ms.or(sink_state.first_activity_ms);
     let model_span_ms = (sink_state.model_span_ms > 0.0).then_some(sink_state.model_span_ms);
+    let host_first_activity = sink_state.first_activity;
+    let host_first_visible = sink_state.first_visible;
+    let host_first_delta = sink_state.first_delta;
     drop(sink_state);
     let provider_ms = ctx.timing.take_ms(ctx.session_id);
     let overhead_ms = provider_ms
         .or(model_span_ms)
         .map(|provider| send_to_completion_ms - provider);
-    let poll_detect_ms = marks.settled_ms.map(simulated_poll_detect_ms);
+
     Ok(Sample {
         case: ctx.spec.name,
         lane,
         index,
         cold: index == 0,
         status,
+        session_id: ctx.session_id.as_str().to_owned(),
+        input_id: input_id.as_str().to_owned(),
+        clocks: SampleClocks {
+            request,
+            acceptance_acknowledged,
+            completion,
+            accepted: None,
+            admission: None,
+            terminal: None,
+            terminal_commit_returned: None,
+            first_activity: None,
+            first_visible: None,
+            first_delta: None,
+            admission_observed: marks.admission_observed,
+            terminal_observed: marks.terminal_observed,
+            host_first_activity,
+            host_first_visible,
+            host_first_delta,
+        },
         request_to_accept_ms,
-        accept_to_admission_ms: marks
-            .admission_ms
-            .map(|admission| admission - request_to_accept_ms),
-        accept_to_applied_ms: marks
-            .applied_ms
-            .map(|applied| applied - request_to_accept_ms),
-        admission_to_first_delta_ms: marks
-            .admission_ms
-            .zip(first_delta_ms)
-            .map(|(admission, delta)| delta - admission),
-        admission_to_settled_ms: marks
-            .admission_ms
-            .zip(marks.settled_ms)
-            .map(|(admission, settled)| settled - admission),
-        settled_to_complete_ms: marks
-            .settled_ms
-            .map(|settled| send_to_completion_ms - settled),
+        accept_to_admission_ms: None,
+        accept_to_applied_ms: None,
+        admission_to_first_delta_ms: None,
+        admission_to_first_visible_ms: None,
+        admission_to_first_activity_ms: None,
+        admission_to_settled_ms: None,
+        settled_to_complete_ms: None,
+        admission_observation_lag_ms: None,
+        terminal_observation_lag_ms: None,
         send_to_completion_ms,
         provider_ms,
         overhead_ms,
         model_span_ms,
-        poll_detect_ms,
+        poll_detect_ms: None,
         poller_timed_out: marks.timed_out,
+        sqlite_workers_at_request,
+        sqlite_workers_at_completion,
         process_cpu_ms_at_end,
         process_rss_kb_at_end,
         error: outcome_error,
@@ -732,92 +798,153 @@ pub(crate) fn status_name(status: &lash::TurnStatus) -> String {
     }
 }
 
-/// The durable-evidence poller for one send: admission, application and
-/// settlement instants read from the store itself, not the follower's wake
-/// schedule. Every read is keyed — the input's open-set row, the input's
-/// run binding, the run's terminal — on `store`'s one connection
-/// (FIG-3974, FIG-4061): `pending_turn_input` is the admission read the open-set
-/// listing used to answer, narrowed to the one tracked row, so a poll never
-/// rescans the session's pending inputs or decodes its commit history.
-///
-/// The interval starts at `STORE_POLL_FLOOR` — a fresh send's admission is
-/// imminent — and doubles each tick that observes nothing, up to
-/// `STORE_POLL_CEILING`. A tick that lands a mark or first sees the row
-/// restarts it at the floor: admission binds the row and names its run in
-/// one transaction, so the next mark is imminent whenever one just landed,
-/// and only a quiet wait pays the backoff.
+/// Keyed evidence discovery remains a diagnostic clock, never a phase
+/// boundary. Read completion is stamped after the asynchronous read.
 pub(crate) async fn poll_marks(
     store: Arc<dyn lash::persistence::RuntimeStore>,
     session_id: SessionId,
     input_id: lash_core::InputId,
-    t_request: Instant,
 ) -> PollMarks {
     let mut marks = PollMarks::default();
-    let mut run: Option<lash_core::TurnId> = None;
-    let mut row_seen = false;
+    let mut run = None;
     let mut interval = STORE_POLL_FLOOR;
     let deadline = Instant::now() + STORE_POLL_TIMEOUT;
     loop {
-        let now = elapsed_ms(t_request);
-        let mut changed = false;
-        if marks.admission_ms.is_none()
-            && let Ok(row) = store.pending_turn_input(&session_id, &input_id).await
-        {
-            match row {
-                Some(row) => {
-                    changed |= !row_seen;
-                    row_seen = true;
-                    if matches!(
-                        row.status,
-                        lash::PendingTurnInputReadStatus::Admitted { .. }
-                    ) {
-                        marks.admission_ms = Some(now);
-                        changed = true;
-                    }
-                }
-                // The row left the open set: the shift consumed it.
-                None if row_seen => {
-                    marks.admission_ms = Some(now);
-                    changed = true;
-                }
-                None => {}
-            }
-        }
-        // The admission's transaction binds the input to its run, so the keyed
-        // `run_of_input` read is the applied mark and the settled mark's
-        // key in one.
         if run.is_none()
             && let Ok(Some(bound)) = store.run_of_input(&session_id, &input_id).await
         {
-            // The binding proves admission even if the pending read missed
-            // Admitted: a fast run can settle before that read or between
-            // these two reads. Keep any earlier admission observation.
-            marks.admission_ms.get_or_insert(now);
-            marks.applied_ms = Some(now);
+            marks.admission_observed = Some(Stamp::now());
             run = Some(bound);
-            changed = true;
+            interval = STORE_POLL_FLOOR;
         }
-        if let Some(run) = &run {
-            if let Ok(Some(_)) = store.run_terminal(&session_id, run).await {
-                marks.settled_ms = Some(now);
-                break;
-            }
-        } else if marks.admission_ms.is_some() && marks.applied_ms.is_some() {
-            // Nothing left to learn without a run.
+        if let Some(run) = &run
+            && let Ok(Some(_)) = store.run_terminal(&session_id, run).await
+        {
+            marks.terminal_observed = Some(Stamp::now());
             break;
         }
         if Instant::now() >= deadline {
             marks.timed_out = true;
             break;
         }
-        interval = if changed {
-            STORE_POLL_FLOOR
-        } else {
-            (interval * 2).min(STORE_POLL_CEILING)
-        };
         tokio::time::sleep(interval).await;
+        interval = (interval * 2).min(STORE_POLL_CEILING);
     }
     marks
+}
+
+fn fill_engine_phases(sample: &mut Sample, witness: &Snapshot) -> Result<()> {
+    let input = witness
+        .inputs
+        .get(&sample.input_id)
+        .context("missing acceptance witness")?;
+    let accepted = input.accepted.context("missing durable acceptance clock")?;
+    let run = input
+        .run
+        .as_ref()
+        .and_then(|run| witness.runs.get(run))
+        .context("missing engine run witness")?;
+    let admission = run.admission.context("missing engine admission clock")?;
+    let terminal = run.terminal.context("missing engine terminal clock")?;
+    let clocks = &mut sample.clocks;
+    clocks.accepted = Some(accepted);
+    clocks.admission = Some(admission);
+    clocks.terminal = Some(terminal);
+    clocks.terminal_commit_returned = run.terminal_commit_returned;
+    clocks.first_activity = run.first_activity;
+    clocks.first_visible = run.first_visible;
+    clocks.first_delta = run.first_delta;
+    sample.request_to_accept_ms = accepted.since(clocks.request);
+    sample.accept_to_admission_ms = Some(admission.since(accepted));
+    sample.accept_to_applied_ms = sample.accept_to_admission_ms;
+    sample.admission_to_first_activity_ms = run.first_activity.map(|stamp| stamp.since(admission));
+    sample.admission_to_first_visible_ms = run.first_visible.map(|stamp| stamp.since(admission));
+    sample.admission_to_first_delta_ms = run.first_delta.map(|stamp| stamp.since(admission));
+    sample.admission_to_settled_ms = Some(terminal.since(admission));
+    sample.settled_to_complete_ms = Some(clocks.completion.since(terminal));
+    sample.admission_observation_lag_ms = clocks
+        .admission_observed
+        .map(|stamp| stamp.since(admission));
+    sample.terminal_observation_lag_ms =
+        clocks.terminal_observed.map(|stamp| stamp.since(terminal));
+    sample.provider_ms = run.provider_ms;
+    sample.model_span_ms = (run.model_span_ms > 0.0).then_some(run.model_span_ms);
+    sample.overhead_ms = sample
+        .provider_ms
+        .or(sample.model_span_ms)
+        .map(|ms| sample.send_to_completion_ms - ms);
+    sample.poll_detect_ms = Some(simulated_poll_detect_ms(terminal.since(clocks.request)));
+    Ok(())
+}
+
+fn worker_delta(start: &Snapshot, end: &Snapshot) -> Vec<Worker> {
+    end.workers
+        .iter()
+        .map(|(key, worker)| {
+            let mut worker = worker.clone();
+            if let Some(before) = start.workers.get(key) {
+                worker.busy_ns -= before.busy_ns;
+                worker.write_transactions -= before.write_transactions;
+            }
+            worker
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub(crate) struct SqliteWork {
+    pub(crate) write_transactions_per_send: f64,
+    pub(crate) writer_busy_ms_per_send: f64,
+    pub(crate) reader_busy_ms_per_send: f64,
+    /// Each physical thread keeps its own normalized cost; the reader total
+    /// overlaps in time across readers and is not a latency phase.
+    pub(crate) workers: Vec<WorkerWork>,
+    includes_held_predecessors: bool,
+}
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct WorkerWork {
+    pub(crate) pid: u32,
+    pub(crate) thread: String,
+    pub(crate) role: &'static str,
+    pub(crate) busy_ns: u64,
+    pub(crate) write_transactions: u64,
+    pub(crate) busy_ms_per_send: f64,
+}
+impl SqliteWork {
+    fn assemble(workers: Vec<Worker>, sends: usize, held: bool) -> Self {
+        let denominator = sends.max(1) as f64;
+        Self {
+            write_transactions_per_send: workers.iter().map(|w| w.write_transactions).sum::<u64>()
+                as f64
+                / denominator,
+            writer_busy_ms_per_send: workers
+                .iter()
+                .filter(|w| !w.reader)
+                .map(|w| w.busy_ns)
+                .sum::<u64>() as f64
+                / 1_000_000.0
+                / denominator,
+            reader_busy_ms_per_send: workers
+                .iter()
+                .filter(|w| w.reader)
+                .map(|w| w.busy_ns)
+                .sum::<u64>() as f64
+                / 1_000_000.0
+                / denominator,
+            workers: workers
+                .into_iter()
+                .map(|w| WorkerWork {
+                    pid: w.pid,
+                    thread: w.thread,
+                    role: if w.reader { "reader" } else { "writer" },
+                    busy_ns: w.busy_ns,
+                    write_transactions: w.write_transactions,
+                    busy_ms_per_send: w.busy_ns as f64 / 1_000_000.0 / denominator,
+                })
+                .collect(),
+            includes_held_predecessors: held,
+        }
+    }
 }
 
 /// The first instant a poll-only follower's wake schedule lands after
@@ -876,6 +1003,10 @@ pub(crate) struct PhaseSummaries {
     pub(crate) accept_to_shift_admission: Option<LatencySummary>,
     pub(crate) accept_to_applied: Option<LatencySummary>,
     pub(crate) shift_admission_to_first_delta: Option<LatencySummary>,
+    pub(crate) shift_admission_to_first_visible: Option<LatencySummary>,
+    pub(crate) shift_admission_to_first_activity: Option<LatencySummary>,
+    pub(crate) admission_observation_lag: Option<LatencySummary>,
+    pub(crate) terminal_observation_lag: Option<LatencySummary>,
     pub(crate) shift_admission_to_run_settled: Option<LatencySummary>,
     pub(crate) root_settled_to_completion: Option<LatencySummary>,
     pub(crate) send_to_completion: Option<LatencySummary>,
@@ -894,6 +1025,10 @@ fn phases_of(samples: &[&Sample]) -> PhaseSummaries {
         accept_to_shift_admission: column(&|sample| sample.accept_to_admission_ms),
         accept_to_applied: column(&|sample| sample.accept_to_applied_ms),
         shift_admission_to_first_delta: column(&|sample| sample.admission_to_first_delta_ms),
+        shift_admission_to_first_visible: column(&|sample| sample.admission_to_first_visible_ms),
+        shift_admission_to_first_activity: column(&|sample| sample.admission_to_first_activity_ms),
+        admission_observation_lag: column(&|sample| sample.admission_observation_lag_ms),
+        terminal_observation_lag: column(&|sample| sample.terminal_observation_lag_ms),
         shift_admission_to_run_settled: column(&|sample| sample.admission_to_settled_ms),
         root_settled_to_completion: column(&|sample| sample.settled_to_complete_ms),
         send_to_completion: column(&|sample| Some(sample.send_to_completion_ms)),
@@ -917,6 +1052,10 @@ pub(crate) struct CaseReport {
     pub(crate) busy: bool,
     pub(crate) samples: usize,
     pub(crate) lanes: usize,
+    pub(crate) actual_lanes: usize,
+    pub(crate) sqlite_work: SqliteWork,
+    pub(crate) baseline: serde_json::Value,
+    pub(crate) clock_window: serde_json::Value,
     pub(crate) wall_seconds: f64,
     pub(crate) statuses: BTreeMap<String, usize>,
     /// Samples that did not answer — failed and errored sends stay in the
@@ -948,6 +1087,17 @@ impl CaseReport {
             busy: spec.busy,
             samples: samples.len(),
             lanes: spec.lanes,
+            actual_lanes: 0,
+            sqlite_work: SqliteWork::default(),
+            baseline: serde_json::json!({
+                "kind": if spec.provider == LatencyProviderKind::OpenAiCompat { "same-run-engine-model-span" } else { "same-run-provider-duration" },
+                "dirty": crate::perf_support::git::git_dirty(),
+                "sha": std::env::var("GITHUB_SHA").ok().or_else(crate::perf_support::git::head_commit).unwrap_or_else(|| "unavailable".to_owned()),
+            }),
+            clock_window: serde_json::json!({
+                "first_request": samples.iter().min_by_key(|s| s.clocks.request.monotonic_ns).map(|s| s.clocks.request),
+                "last_completion": samples.iter().max_by_key(|s| s.clocks.completion.monotonic_ns).map(|s| s.clocks.completion),
+            }),
             wall_seconds: round3(wall.as_secs_f64()),
             statuses,
             non_answered: samples
@@ -1117,23 +1267,24 @@ pub(super) async fn run_worker(stores_dir: &Path) -> Result<()> {
         &None,
         None,
     )?;
+    let collector =
+        Collector::install().map_err(|_| anyhow::anyhow!("latency witness already installed"))?;
     announce_ready()?;
     tokio::task::spawn_blocking(|| {
         let mut line = String::new();
         std::io::stdin().read_line(&mut line)
     })
     .await??;
+    std::fs::write(
+        stores_dir.join("latency-witness.json"),
+        serde_json::to_vec(&collector.snapshot())?,
+    )?;
     core.shutdown().await?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use lash_core::SessionCatalogStore as _;
-
-    use super::*;
 
     #[tokio::test]
     async fn startup_store_phases_are_complete_and_ordered() {
@@ -1166,208 +1317,5 @@ mod tests {
                 .windows(2)
                 .all(|pair| pair[0].since_entry_ns <= pair[1].since_entry_ns)
         );
-    }
-
-    /// The store half of `poll_marks`' keyed-read contract (FIG-3974,
-    /// FIG-4061): the admission, applied and settled marks come from point
-    /// reads — the pending row, the input's run binding, the run's
-    /// terminal — on the one store the lane's pollers share.
-    /// `list_pending_turn_inputs` and `list_turn_input_applications`, the
-    /// open-set scan and the full-history receipt decode the poller issued
-    /// every tick before, are armed to panic: reaching either is the
-    /// regression.
-    struct PollProbeStore {
-        inner: Arc<dyn lash::persistence::RuntimeStore>,
-        row: lash::PendingTurnInput,
-        run: lash_core::TurnId,
-        terminal: lash::persistence::RunTerminal,
-        pending_input_calls: AtomicUsize,
-        applications_calls: AtomicUsize,
-        run_of_input_calls: AtomicUsize,
-        run_terminal_calls: AtomicUsize,
-    }
-
-    impl PollProbeStore {
-        fn over(
-            inner: Arc<dyn lash::persistence::RuntimeStore>,
-            session_id: &SessionId,
-            input_id: &lash_core::InputId,
-            run: &lash_core::TurnId,
-        ) -> Self {
-            Self {
-                inner,
-                row: lash::PendingTurnInput {
-                    input_id: input_id.clone(),
-                    session_id: session_id.clone(),
-                    enqueue_seq: 1,
-                    source_key: None,
-                    state: lash_core::TurnInputState::open(lash_core::TurnInputIngress::next_turn()),
-                    enqueued_at_ms: 0,
-                    input: lash::TurnInput::empty(),
-                    run_spec: None,
-                    trace_cause: Default::default(),
-                },
-                run: run.clone(),
-                terminal: lash::persistence::RunTerminal {
-                    session_id: session_id.clone(),
-                    run: run.clone(),
-                    cause: lash::persistence::RunTerminalCause::Committed {
-                        commit: lash::persistence::TurnCommitId::new(run.clone(), 0),
-                        turn: run.clone(),
-                        outcome: lash::persistence::RunCommittedOutcome::Finished {
-                            finish: lash::TurnFinish::AssistantMessage {
-                                text: String::new(),
-                            },
-                            value_schema: None,
-                        },
-                    },
-                    head_revision: None,
-                    at_ms: 1,
-                },
-                pending_input_calls: AtomicUsize::new(0),
-                applications_calls: AtomicUsize::new(0),
-                run_of_input_calls: AtomicUsize::new(0),
-                run_terminal_calls: AtomicUsize::new(0),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl lash::persistence::RuntimeStoreDecorator for PollProbeStore {
-        type Inner = dyn lash::persistence::RuntimeStore;
-
-        fn inner(&self) -> &Self::Inner {
-            self.inner.as_ref()
-        }
-
-        /// The whole open-set listing the poller used to issue every tick
-        /// (FIG-4061): armed to panic, so reaching it at all is the
-        /// regression.
-        async fn list_pending_turn_inputs(
-            &self,
-            _session_id: &SessionId,
-        ) -> Result<Vec<lash::PendingTurnInputRead>, lash::persistence::StoreError> {
-            panic!("the store poller must never list the open set");
-        }
-
-        /// The row reports `Open` on the first keyed read and `Admitted`
-        /// after, a shift's run admission landing between two ticks.
-        async fn pending_turn_input(
-            &self,
-            _session_id: &SessionId,
-            _input_id: &lash_core::InputId,
-        ) -> Result<Option<lash::PendingTurnInputRead>, lash::persistence::StoreError> {
-            let call = self.pending_input_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Some(if call == 0 {
-                lash::PendingTurnInputRead::open(self.row.clone())
-            } else {
-                lash::PendingTurnInputRead::admitted(
-                    self.row.clone(),
-                    lash_core::TurnId::from("poll-probe-run"),
-                )
-            }))
-        }
-
-        async fn list_turn_input_applications(
-            &self,
-            _session_id: &SessionId,
-        ) -> Result<Vec<lash_core::TurnInputApplication>, lash::persistence::StoreError> {
-            self.applications_calls.fetch_add(1, Ordering::SeqCst);
-            panic!("the store poller must never rescan turn-input applications");
-        }
-
-        /// The input's run binding: absent until the admission transaction
-        /// records it, keyed on `input` only.
-        async fn run_of_input(
-            &self,
-            _session_id: &SessionId,
-            _input: &lash_core::InputId,
-        ) -> Result<Option<lash_core::TurnId>, lash::persistence::StoreError> {
-            let call = self.run_of_input_calls.fetch_add(1, Ordering::SeqCst);
-            Ok((call >= 2).then(|| self.run.clone()))
-        }
-
-        /// The run's terminal evidence: absent on the read before it lands,
-        /// present after.
-        async fn run_terminal(
-            &self,
-            _session_id: &SessionId,
-            _run: &lash_core::TurnId,
-        ) -> Result<Option<lash::persistence::RunTerminal>, lash::persistence::StoreError> {
-            let call = self.run_terminal_calls.fetch_add(1, Ordering::SeqCst);
-            Ok((call >= 1).then(|| self.terminal.clone()))
-        }
-    }
-
-    /// The poller's marks land in admission, applied, settled order — each from
-    /// a point read on the probe — and the applications scan never runs.
-    #[tokio::test]
-    async fn the_store_poller_marks_keyed_reads_without_an_applications_scan() {
-        let session_id = SessionId::from("latency-probe");
-        let input_id = lash_core::InputId::from("latency-probe-input");
-        let run = lash_core::TurnId::from("latency-probe-run");
-        let stores = lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("open the SQLite in-memory store set");
-        let factory = stores.session_store_factory();
-        factory
-            .admit_session(&lash_core::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: session_id.clone(),
-                relation: lash_core::SessionRelation::Root,
-                config: lash_core::PersistedSessionConfig::new(
-                    lash_core::TurnBudget::Unbounded,
-                    lash_core::MaxToolCalls::new(1024),
-                    lash_core::NoProgressBudget::bounded(12),
-                    lash_core::SessionToolAccess::ambient(),
-                ),
-                head: lash_core::SessionCreationHead::Config,
-                retention: lash_core::Retention::UntilGc,
-            })
-            .await
-            .expect("create the probe's inner store");
-        let inner: Arc<dyn lash::persistence::RuntimeStore> = factory;
-        let probe = Arc::new(PollProbeStore::over(inner, &session_id, &input_id, &run));
-        let store: Arc<dyn lash::persistence::RuntimeStore> = probe.clone();
-
-        let marks = poll_marks(store, session_id, input_id, Instant::now()).await;
-
-        assert!(!marks.timed_out, "the probe answers every mark");
-        let admission = marks.admission_ms.expect("the held row's admission mark");
-        let applied = marks.applied_ms.expect("the binding's applied mark");
-        let settled = marks.settled_ms.expect("the terminal's settled mark");
-        assert!(
-            admission < applied && applied < settled,
-            "admission {admission}, applied {applied}, settled {settled}"
-        );
-        assert_eq!(probe.applications_calls.load(Ordering::SeqCst), 0);
-        assert_eq!(probe.pending_input_calls.load(Ordering::SeqCst), 2);
-        assert_eq!(probe.run_of_input_calls.load(Ordering::SeqCst), 3);
-        assert_eq!(probe.run_terminal_calls.load(Ordering::SeqCst), 2);
-    }
-
-    /// LATENCY-REMOTE: admission and settlement can commit between the pending
-    /// row read and the binding read, so missing the Admitted state must not
-    /// discard the admission-to-settled sample.
-    #[tokio::test]
-    async fn the_store_poller_retains_admission_when_settlement_races_the_pending_read() {
-        let session_id = SessionId::from("latency-race");
-        let input_id = lash_core::InputId::from("latency-race-input");
-        let run = lash_core::TurnId::from("latency-race-run");
-        let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
-        let probe =
-            PollProbeStore::over(stores.session_store_factory(), &session_id, &input_id, &run);
-        // The first pending read sees Open; admission and settlement become
-        // visible to the binding and terminal reads in that same tick.
-        probe.run_of_input_calls.store(2, Ordering::SeqCst);
-        probe.run_terminal_calls.store(1, Ordering::SeqCst);
-        let marks = poll_marks(Arc::new(probe), session_id, input_id, Instant::now()).await;
-
-        assert!(!marks.timed_out);
-        let admission = marks.admission_ms.expect("the binding proves admission");
-        let applied = marks.applied_ms.expect("the input's retained binding");
-        let settled = marks.settled_ms.expect("the run's terminal");
-        assert!(admission <= applied && applied <= settled);
     }
 }

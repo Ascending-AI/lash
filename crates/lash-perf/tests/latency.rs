@@ -1,9 +1,10 @@
-//! LATENCY-REMOTE: the remote latency instrument retains completed samples
-//! without running the provider in its submitting process.
+//! Latency receipts retain engine clocks and physical SQLite work.
 use std::process::Command;
 
+/// FIG-5933: both topologies publish causal phase clocks and physical work,
+/// including a fast run whose admission races the acceptance acknowledgement.
 #[test]
-fn cross_worker_retains_remote_completion_samples() {
+fn latency_receipts_use_engine_clocks_and_include_remote_work() {
     let dir = tempfile::tempdir().unwrap();
     let report = dir.path().join("report.json");
     let samples = dir.path().join("samples.json");
@@ -11,9 +12,11 @@ fn cross_worker_retains_remote_completion_samples() {
         .args([
             "latency",
             "--cases",
-            "cross-worker",
+            "fast,cross-worker,grace",
             "--lanes",
-            "1",
+            "3",
+            "--fast-samples",
+            "2",
             "--scale-down",
         ])
         .arg("--store-dir")
@@ -24,7 +27,6 @@ fn cross_worker_retains_remote_completion_samples() {
         .arg(&samples)
         .output()
         .unwrap();
-    // A standalone diagnostic cannot certify the omitted 10,000-sample fast gate.
     assert_eq!(
         output.status.code(),
         Some(2),
@@ -32,25 +34,64 @@ fn cross_worker_retains_remote_completion_samples() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let gate: serde_json::Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
-    assert_eq!(
-        gate["verdict"]["violations"],
-        serde_json::json!(["gated case `fast` did not run"])
-    );
+    let gate: serde_json::Value = serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
+    assert_eq!(gate["cases"][0]["actual_lanes"], 2);
+    for case in gate["cases"].as_array().unwrap() {
+        assert!(
+            case["sqlite_work"]["write_transactions_per_send"]
+                .as_f64()
+                .unwrap()
+                > 0.0
+        );
+        assert!(
+            case["sqlite_work"]["writer_busy_ms_per_send"]
+                .as_f64()
+                .unwrap()
+                > 0.0
+        );
+        assert!(
+            case["sqlite_work"]["reader_busy_ms_per_send"]
+                .as_f64()
+                .unwrap()
+                > 0.0
+        );
+        assert!(case["baseline"]["sha"].is_string());
+    }
     let rows: Vec<serde_json::Value> =
         serde_json::from_slice(&std::fs::read(samples).unwrap()).unwrap();
-    assert_eq!(rows.len(), 64);
+    assert_eq!(rows.len(), 82);
     for row in rows {
         assert_eq!(row["status"], "answered");
+        let clocks = &row["clocks"];
+        let ordered: Vec<u64> = ["request", "accepted", "admission", "terminal", "completion"]
+            .iter()
+            .map(|key| clocks[key]["monotonic_ns"].as_u64().unwrap())
+            .collect();
+        assert!(ordered.windows(2).all(|pair| pair[0] <= pair[1]), "{row}");
+        for key in ["request", "accepted", "admission", "terminal", "completion"] {
+            assert!(clocks[key]["unix_ns"].as_u64().unwrap() > 0);
+        }
+        for key in [
+            "accept_to_admission_ms",
+            "admission_to_first_visible_ms",
+            "admission_to_settled_ms",
+            "settled_to_complete_ms",
+            "provider_ms",
+            "overhead_ms",
+            "admission_to_first_delta_ms",
+        ] {
+            assert!(row[key].as_f64().unwrap() >= 0.0, "{key}: {row}");
+        }
+        assert!(clocks["first_delta"]["monotonic_ns"].as_u64().unwrap() >= ordered[2]);
         assert!(
-            row["provider_ms"].is_null(),
-            "the submitter must not execute the provider"
+            clocks["first_activity"]["monotonic_ns"].as_u64().unwrap()
+                <= clocks["first_delta"]["monotonic_ns"].as_u64().unwrap()
         );
-        assert_eq!(row["poller_timed_out"], false);
-        assert!(row["accept_to_applied_ms"].is_number());
-        assert!(row["admission_to_settled_ms"].is_number());
     }
-    assert!(report.exists());
+    let printed = String::from_utf8_lossy(&output.stdout);
+    assert!(printed.contains("writer busy ms/send"));
+    assert!(printed.contains("write transactions/send"));
+    assert!(printed.contains("absolute clocks"));
 }
 
 /// LATENCY-BINDING: slowing follow backoff must not delay discovery of the

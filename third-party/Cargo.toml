@@ -1776,7 +1776,7 @@ features = []
 package = "rustix"
 version = "=1.1.4"
 default-features = false
-features = ["alloc", "default", "fs", "std"]
+features = ["alloc", "default", "fs", "std", "time"]
 
 [dependencies.p0295]
 package = "rustls"

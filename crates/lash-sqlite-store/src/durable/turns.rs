@@ -108,6 +108,18 @@ pub(super) fn apply(
             admission,
             turn_deadline,
         } => {
+            #[cfg(feature = "perf-witness")]
+            lash_core_execution::perf_witness::latency::stage(|| {
+                lash_core_execution::perf_witness::latency::CommitMark::Admitted {
+                    session: session.as_str().to_owned(),
+                    run: run.as_str().to_owned(),
+                    inputs: admission
+                        .input_ids()
+                        .iter()
+                        .map(|id| id.as_str().to_owned())
+                        .collect(),
+                }
+            });
             let open = tx
                 .prepare_cached(SQL.open_run.sql())?
                 .query_row([session.as_str()], |_| Ok(()))
@@ -269,6 +281,12 @@ pub(super) fn apply(
             cause,
             head_revision,
         } => {
+            #[cfg(feature = "perf-witness")]
+            lash_core_execution::perf_witness::latency::stage(|| {
+                lash_core_execution::perf_witness::latency::CommitMark::Terminal {
+                    run: run.as_str().to_owned(),
+                }
+            });
             let mut cause = cause.as_ref().clone();
             if let RunTerminalCause::Cancelled {
                 evidence,

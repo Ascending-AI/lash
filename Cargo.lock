@@ -2188,6 +2188,7 @@ dependencies = [
  "chrono",
  "lash-internal-sansio",
  "lash-internal-trace",
+ "rustix",
  "schemars",
  "serde",
  "serde_json",
