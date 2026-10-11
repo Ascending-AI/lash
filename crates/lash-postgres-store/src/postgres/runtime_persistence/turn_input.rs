@@ -7,7 +7,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         session_id: &SessionId,
         source_key: &str,
     ) -> Result<Option<String>, StoreError> {
-        let row: Option<(String, String)> = sqlx::query_as(
+        let row: Option<(String, String)> = crate::observed_sql::query_as(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .select_id_by_source_key
@@ -54,7 +54,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         hash: &lash_core_execution::RunSpecHash,
     ) -> Result<Option<lash_core_execution::RunSpec>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let stored: Option<String> = sqlx::query_scalar(
+        let stored: Option<String> = crate::observed_sql::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
                 .run_specs
                 .select_spec
@@ -89,7 +89,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         // running run, read in one snapshot and listed in `enqueue_seq`
         // order (FIG-4044). The isolation level must precede every other
         // statement in the transaction.
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        crate::observed_sql::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
             .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
@@ -102,7 +102,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
             statements.list_undelivered.sql(),
             statements.list_accepted.sql(),
         ] {
-            let rows = sqlx::query(sql)
+            let rows = crate::observed_sql::query(sql)
                 .bind(session_id.as_str())
                 .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await
@@ -127,7 +127,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         // applied to the one row here: a row is listed until it is completed
         // or cancelled, open or admitted to its run alike.
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let row = sqlx::query(
+        let row = crate::observed_sql::query(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .select_by_id
@@ -149,7 +149,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::TurnInputApplication>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let rows = sqlx::query(
+        let rows = crate::observed_sql::query(
             crate::session_sql::session_sql()
                 .turn_commits
                 .select_all_for_session
@@ -245,7 +245,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
             CancelLockScope::Suffix(anchor_row.enqueue_seq),
         )
         .await?;
-        let rows = sqlx::query(
+        let rows = crate::observed_sql::query(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs_postgres
                 .select_suffix
@@ -330,7 +330,7 @@ impl lash_core_execution::QueuedWorkStore for PostgresStore {
     }
     async fn has_admissible_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
         lash_core_execution::store::validate_session_id(session_id)?;
-        sqlx::query_scalar(
+        crate::observed_sql::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
                 .family
                 .has_admissible_work
@@ -369,23 +369,25 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
     for draft in batch.drafts() {
         let submission_digest = support::turn_input_submission_digest(draft)?;
         let by_source_key: Option<(String, String)> = match draft.source_key.as_deref() {
-            Some(source_key) => sqlx::query_as(sql.pending_inputs.select_id_by_source_key.sql())
-                .bind(session_id.as_str())
-                .bind(source_key)
-                .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-                .await
-                .map_err(store_sqlx_error)?,
+            Some(source_key) => {
+                crate::observed_sql::query_as(sql.pending_inputs.select_id_by_source_key.sql())
+                    .bind(session_id.as_str())
+                    .bind(source_key)
+                    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+                    .await
+                    .map_err(store_sqlx_error)?
+            }
             None => None,
         };
         let by_input_id: Option<(String, String)> =
             match (&by_source_key, draft.input_id.as_deref()) {
-                (None, Some(input_id)) => {
-                    sqlx::query_as(sql.pending_inputs.select_session_by_input_id.sql())
-                        .bind(input_id)
-                        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-                        .await
-                        .map_err(store_sqlx_error)?
-                }
+                (None, Some(input_id)) => crate::observed_sql::query_as(
+                    sql.pending_inputs.select_session_by_input_id.sql(),
+                )
+                .bind(input_id)
+                .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+                .await
+                .map_err(store_sqlx_error)?,
                 _ => None,
             };
         let input_id = match support::decide_turn_input_draft_admission(
@@ -422,7 +424,7 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
                 };
                 let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
                 let run_spec = admit_run_spec_tx(tx, draft, &mut interned).await?;
-                sqlx::query(sql.pending_inputs.insert_new.sql())
+                crate::observed_sql::query(sql.pending_inputs.insert_new.sql())
                     .bind(enqueue_seq)
                     .bind(input_id.as_str())
                     .bind(session_id.as_str())
@@ -486,18 +488,19 @@ async fn admit_run_spec_tx(
     let spec = support::RunSpecAdmission::of(draft)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     if let Some(turn_id) = support::steering_run_spec_target(draft) {
-        let addressed = sqlx::query(sql.pending_inputs.select_run_spec_by_source_key.sql())
-            .bind(draft.session_id.as_str())
-            .bind(turn_id.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?
-            .map(|row| {
-                (
-                    row.get::<String, _>("state"),
-                    row.get::<Option<String>, _>("run_spec_hash"),
-                )
-            });
+        let addressed =
+            crate::observed_sql::query(sql.pending_inputs.select_run_spec_by_source_key.sql())
+                .bind(draft.session_id.as_str())
+                .bind(turn_id.as_str())
+                .fetch_optional(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(store_sqlx_error)?
+                .map(|row| {
+                    (
+                        row.get::<String, _>("state"),
+                        row.get::<Option<String>, _>("run_spec_hash"),
+                    )
+                });
         match addressed {
             Some((state, hash)) => support::check_steering_run_spec(
                 &draft.session_id,
@@ -513,14 +516,14 @@ async fn admit_run_spec_tx(
     if let Some((hash, canonical)) = spec.interned()
         && !interned.contains(hash)
     {
-        sqlx::query(sql.run_specs.intern.sql())
+        crate::observed_sql::query(sql.run_specs.intern.sql())
             .bind(draft.session_id.as_str())
             .bind(hash)
             .bind(canonical)
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
-        let stored: String = sqlx::query_scalar(sql.run_specs.select_spec.sql())
+        let stored: String = crate::observed_sql::query_scalar(sql.run_specs.select_spec.sql())
             .bind(draft.session_id.as_str())
             .bind(hash)
             .fetch_one(crate::observed_sql::executor(&mut **tx))
@@ -574,7 +577,7 @@ async fn turn_address_evidence_tx(
     turn_id: &lash_core_execution::TurnId,
 ) -> Result<lash_core_execution::store_backend_support::TurnAddressEvidence, StoreError> {
     let run = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
-    let ended: bool = sqlx::query_scalar(
+    let ended: bool = crate::observed_sql::query_scalar(
         crate::turn_ingress::turn_ingress_sql()
             .family
             .turn_address_ended

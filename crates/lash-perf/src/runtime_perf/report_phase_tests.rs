@@ -16,6 +16,47 @@ use lash_core::runtime::RuntimeTurnPhaseProbe;
 use lash_core::store::QueuedWorkStore as _;
 use lash_core::{SessionCatalogStore as _, SessionListFilter};
 
+/// GRAPH-WORK: the witness counts each envelope actually encoded and hashed,
+/// including repeated encodes whose identical result is deduplicated.
+#[test]
+fn checkpoint_graph_work_counts_real_envelopes() {
+    use lash_core_store::checkpoint_graph::*;
+    let witness = lash_core::perf_witness::Collector::install().expect("graph witness");
+    let mut graph = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(1 << 20)));
+    let mut body = TokenWriter::new();
+    body.text("graph work");
+    let body = body.into_bytes();
+    let root = graph
+        .encode(NodeKind::TEXT_LEAF, TypedBody::logical(&body))
+        .unwrap();
+    let bytes = graph.nodes()[&root].bytes.len() as u64;
+    graph
+        .encode(NodeKind::TEXT_LEAF, TypedBody::logical(&body))
+        .unwrap();
+    let encoded_work = witness.snapshot();
+    assert_eq!(
+        encoded_work.hash_passes, 2,
+        "both actual envelope hashes count"
+    );
+    eprintln!(
+        "GRAPH_WORK {}",
+        serde_json::json!({"encodes": encoded_work.graph_envelopes,
+        "encoded_bytes": encoded_work.graph_encoded_bytes, "hash_passes": encoded_work.hash_passes,
+        "hashed_bytes": encoded_work.hashed_bytes, "unique_staged_nodes": graph.nodes().len()})
+    );
+    graph.adopt(graph.nodes()[&root].clone()).unwrap();
+    let work = witness.snapshot();
+    assert_eq!(
+        work.hash_passes, 3,
+        "encoding and adoption both hash the envelope"
+    );
+    assert_eq!(work.hashed_bytes, 3 * bytes);
+    assert_eq!(work.graph_adopt_attempts, 1);
+    assert_eq!(work.graph_adopt_bytes, bytes);
+    assert_eq!(work.graph_envelopes, 2);
+    assert_eq!(work.graph_encoded_bytes, 2 * bytes);
+}
+
 fn high_traffic_config() -> HighTrafficConfig {
     HighTrafficConfig::parse(4, "plain=1,tool=1,queued=1,child=1", "2,4", 1.25)
         .expect("valid high-traffic test config")
@@ -329,6 +370,10 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
             "staged_node_count",
             "staged_node_bytes",
             "staged_leaf_bytes",
+            "graph_adopt_count",
+            "graph_adopt_bytes",
+            "graph_encode_count",
+            "graph_encode_bytes",
             "runtime_hash_count",
             "runtime_hash_bytes",
         ] {
@@ -354,6 +399,8 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
         for sample in 0..samples {
             let value =
                 |metric: &str| result.metric_samples[&format!("{prefix}.{metric}")][sample] as u64;
+            assert!(value("runtime_hash_count") > 0 && value("runtime_hash_bytes") > 0);
+            assert!(value("graph_encode_count") > 0 && value("graph_encode_bytes") > 0);
             assert!(
                 value("staged_node_count") > 0 && value("staged_node_bytes") > 0,
                 "{prefix} sample {sample} must stage the reassigned binding"

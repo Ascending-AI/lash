@@ -12,14 +12,16 @@ pub(crate) async fn released_through_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &ProcessId,
 ) -> Result<u64, PluginError> {
-    sqlx::query_scalar::<_, i64>(process_sql().event_horizon.select_released_through.sql())
-        .bind(process_id.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(plugin_sqlx_error)?
-        .map(|released| plugin_u64_from_sql("ProcessEventHorizon", "released_through", released))
-        .transpose()
-        .map(Option::unwrap_or_default)
+    crate::observed_sql::query_scalar::<_, i64>(
+        process_sql().event_horizon.select_released_through.sql(),
+    )
+    .bind(process_id.as_str())
+    .fetch_optional(crate::observed_sql::executor(&mut **tx))
+    .await
+    .map_err(plugin_sqlx_error)?
+    .map(|released| plugin_u64_from_sql("ProcessEventHorizon", "released_through", released))
+    .transpose()
+    .map(Option::unwrap_or_default)
 }
 
 pub(super) async fn release_process_events(
@@ -44,7 +46,7 @@ pub(super) async fn release_process_events(
     let mut after = previous;
     let mut released_events = 0_u64;
     loop {
-        let rows = sqlx::query(process_sql().event.page_release.sql())
+        let rows = crate::observed_sql::query(process_sql().event.page_release.sql())
             .bind(process_id.as_str())
             .bind(clamp_sequence_bound(after))
             .bind(target_bound)
@@ -71,7 +73,7 @@ pub(super) async fn release_process_events(
                     trace_cause: event.trace_cause,
                     occurred_at: event.occurred_at,
                 };
-                sqlx::query(process_sql().event.release.sql())
+                crate::observed_sql::query(process_sql().event.release.sql())
                     .bind(process_id.as_str())
                     .bind(sequence)
                     .bind(serde_json::to_string(&released).map_err(process_decode_error)?)
@@ -84,7 +86,7 @@ pub(super) async fn release_process_events(
             after = plugin_u64_from_sql("ProcessEvent", "sequence", sequence)?;
         }
     }
-    sqlx::query(process_sql().event_horizon.upsert.sql())
+    crate::observed_sql::query(process_sql().event_horizon.upsert.sql())
         .bind(process_id.as_str())
         .bind(target_bound)
         .execute(crate::observed_sql::executor(&mut **tx))

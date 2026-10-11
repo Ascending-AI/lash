@@ -58,7 +58,7 @@ async fn end_frames_left_tx(
     let sql = crate::artifact_store::artifact_sql();
     let gate = transition.map(|transition| transition.gate.clone());
     for ended in ended_frames {
-        sqlx::query(sql.fences.insert_fence.sql())
+        crate::observed_sql::query(sql.fences.insert_fence.sql())
             .bind(ended.kind().as_str())
             .bind(ended.canonical_id())
             .bind(crate::support::clamp_epoch_ms(now_ms))
@@ -85,12 +85,13 @@ async fn carry_into_successor_tx(
     let ended = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
     let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
     let sql = crate::artifact_store::artifact_sql();
-    let successor_fenced: bool = sqlx::query_scalar(sql.fences.select_is_fenced.sql())
-        .bind(successor.kind().as_str())
-        .bind(successor.canonical_id())
-        .fetch_one(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?;
+    let successor_fenced: bool =
+        crate::observed_sql::query_scalar(sql.fences.select_is_fenced.sql())
+            .bind(successor.kind().as_str())
+            .bind(successor.canonical_id())
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?;
     if successor_fenced {
         return Err(StoreError::ArtifactReferrerEnded {
             referrer: successor,
@@ -103,12 +104,13 @@ async fn carry_into_successor_tx(
         }
         let id = lash_core_execution::ProcessDefinitionId::parse(&carry.artifact_ref)
             .map_err(|e| StoreError::Backend(e.to_string()))?;
-        let bytes: Vec<u8> = sqlx::query_scalar(sql.lash_vm_artifacts.select_bytes.sql())
-            .bind("process_definition")
-            .bind(&carry.artifact_ref)
-            .fetch_one(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?;
+        let bytes: Vec<u8> =
+            crate::observed_sql::query_scalar(sql.lash_vm_artifacts.select_bytes.sql())
+                .bind("process_definition")
+                .bind(&carry.artifact_ref)
+                .fetch_one(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(store_sqlx_error)?;
         let draft = lash_core_execution::ProcessDefinitionDraft::from_store_bytes(&id, &bytes)
             .map_err(|e| StoreError::Backend(e.to_string()))?;
         closure.extend(draft.artifacts().iter().cloned());
@@ -133,7 +135,7 @@ async fn carry_into_successor_tx(
     carries.dedup();
     for (namespace, artifact_ref) in &carries {
         let key = format!("lash-artifact:{namespace}:{artifact_ref}");
-        sqlx::query(
+        crate::observed_sql::query(
             crate::connection_sql::connection_sql()
                 .lock_xact_by_text
                 .sql(),
@@ -144,21 +146,22 @@ async fn carry_into_successor_tx(
         .map_err(store_sqlx_error)?;
     }
     for (namespace, artifact_ref) in carries {
-        let source_edge: bool = sqlx::query_scalar(sql.edges.select_edge_exists.sql())
-            .bind(namespace)
-            .bind(artifact_ref)
-            .bind(ended.kind().as_str())
-            .bind(ended.canonical_id())
-            .fetch_one(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?;
+        let source_edge: bool =
+            crate::observed_sql::query_scalar(sql.edges.select_edge_exists.sql())
+                .bind(namespace)
+                .bind(artifact_ref)
+                .bind(ended.kind().as_str())
+                .bind(ended.canonical_id())
+                .fetch_one(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(store_sqlx_error)?;
         if !source_edge {
             return Err(StoreError::ArtifactCarryMissing {
                 artifact_ref: artifact_ref.to_owned(),
                 to: successor,
             });
         }
-        sqlx::query(sql.edges.insert_edge.sql())
+        crate::observed_sql::query(sql.edges.insert_edge.sql())
             .bind(namespace)
             .bind(artifact_ref)
             .bind(successor.kind().as_str())
@@ -181,12 +184,13 @@ impl SessionCommitStore for PostgresStore {
             session_id, turn_id,
         )?;
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let exists: bool = sqlx::query_scalar(session_sql().turn_commits.exists_for_turn.sql())
-            .bind(session_id.as_str())
-            .bind(&key)
-            .fetch_one(crate::observed_sql::executor(connection.as_mut()))
-            .await
-            .map_err(store_sqlx_error)?;
+        let exists: bool =
+            crate::observed_sql::query_scalar(session_sql().turn_commits.exists_for_turn.sql())
+                .bind(session_id.as_str())
+                .bind(&key)
+                .fetch_one(crate::observed_sql::executor(connection.as_mut()))
+                .await
+                .map_err(store_sqlx_error)?;
         Ok(exists)
     }
 
@@ -232,7 +236,7 @@ impl SessionCommitStore for PostgresStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        sqlx::query(session_sql().meta.retain_admission_base.sql())
+        crate::observed_sql::query(session_sql().meta.retain_admission_base.sql())
             .bind(session_id.as_str())
             .bind(base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str()))
             .execute(crate::observed_sql::executor(&mut **tx))
@@ -293,7 +297,7 @@ impl SessionCommitStore for PostgresStore {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-        let present: Option<i32> = sqlx::query_scalar(
+        let present: Option<i32> = crate::observed_sql::query_scalar(
             crate::session_sql::session_sql()
                 .meta_postgres
                 .select_state_version_for_update
@@ -396,12 +400,13 @@ pub(crate) async fn apply_runtime_commit_tx(
     ensure_session_not_deleted_tx(&mut *tx, &commit.session_id).await?;
     // The store is multi-session (ADR 0112): only a session the catalog
     // admitted commits, and admission is what writes its meta row.
-    let admitted =
-        sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
-            .bind(commit.session_id.as_str())
-            .fetch_one(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(store_sqlx_error)?;
+    let admitted = crate::observed_sql::query_scalar::<_, bool>(
+        session_sql().meta_postgres.exists_materialized.sql(),
+    )
+    .bind(commit.session_id.as_str())
+    .fetch_one(crate::observed_sql::executor(&mut ***tx))
+    .await
+    .map_err(store_sqlx_error)?;
     if !admitted {
         return Err(StoreError::SessionNotFound {
             session_id: commit.session_id.clone(),
@@ -413,7 +418,7 @@ pub(crate) async fn apply_runtime_commit_tx(
     let existing = load_session_head_meta_tx(&mut *tx, &commit.session_id, false, fleet).await?;
     planner.validate_node_derivation()?;
     {
-        let prior = sqlx::query(session_sql().turn_commits.select_receipt.sql())
+        let prior = crate::observed_sql::query(session_sql().turn_commits.select_receipt.sql())
             .bind(commit.session_id.as_str())
             .bind(planner.operation_key())
             .fetch_optional(crate::observed_sql::executor(&mut ***tx))
@@ -478,18 +483,19 @@ pub(crate) async fn apply_runtime_commit_tx(
     let (checkpoint_ref, manifest) =
         put_checkpoint_tx(&mut *tx, &commit.checkpoint, fleet, chunk_size).await?;
     let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
-    let locked_revision =
-        sqlx::query_scalar::<_, i64>(session_sql().head_postgres.select_revision_for_update.sql())
-            .bind(commit.session_id.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(store_sqlx_error)?
-            .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
-            .transpose()?
-            .unwrap_or(0);
+    let locked_revision = crate::observed_sql::query_scalar::<_, i64>(
+        session_sql().head_postgres.select_revision_for_update.sql(),
+    )
+    .bind(commit.session_id.as_str())
+    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+    .await
+    .map_err(store_sqlx_error)?
+    .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
+    .transpose()?
+    .unwrap_or(0);
     let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
     let parent_leaf = match old_leaf_node_id.as_deref() {
-        Some(leaf_node_id) => sqlx::query_as::<_, (i64, String, String)>(
+        Some(leaf_node_id) => crate::observed_sql::query_as::<_, (i64, String, String)>(
             session_sql()
                 .graph_postgres
                 .select_parent_facts_for_update
@@ -526,7 +532,7 @@ pub(crate) async fn apply_runtime_commit_tx(
     ) {
         (None, _) => true,
         (Some(_), None) => false,
-        (Some(required), Some(parent)) => match sqlx::query_as::<_, (String, i64)>(
+        (Some(required), Some(parent)) => match crate::observed_sql::query_as::<_, (String, i64)>(
             session_sql().graph_postgres.select_readable_ancestor.sql(),
         )
         .bind(required)
@@ -583,15 +589,16 @@ pub(crate) async fn apply_runtime_commit_tx(
         .iter()
         .map(|node| node.node_id.as_str())
         .collect::<Vec<_>>();
-    let occupied_node_ids =
-        sqlx::query_scalar::<_, String>(session_sql().graph_postgres.select_occupied.sql())
-            .bind(&node_ids)
-            .fetch_all(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(store_sqlx_error)?
-            .into_iter()
-            .map(lash_core_execution::NodeId::parse)
-            .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    let occupied_node_ids = crate::observed_sql::query_scalar::<_, String>(
+        session_sql().graph_postgres.select_occupied.sql(),
+    )
+    .bind(&node_ids)
+    .fetch_all(crate::observed_sql::executor(&mut ***tx))
+    .await
+    .map_err(store_sqlx_error)?
+    .into_iter()
+    .map(lash_core_execution::NodeId::parse)
+    .collect::<Result<std::collections::HashSet<_>, _>>()?;
     let published_leaf = match old_leaf_node_id {
         None => lash_core_execution::store::PublishedLeafFacts::Absent,
         Some(node_id) => match parent_node_facts {
@@ -617,7 +624,7 @@ pub(crate) async fn apply_runtime_commit_tx(
         let node_json = node.encode_storage_body(fleet).map_err(|err| {
             StoreError::Backend(format!("failed to encode graph node body: {err}"))
         })?;
-        sqlx::query(session_sql().graph.insert.sql())
+        crate::observed_sql::query(session_sql().graph.insert.sql())
             .bind(commit.session_id.as_str())
             .bind(&*node.node_id)
             .bind(node.parent_node_id.as_deref())
@@ -669,7 +676,7 @@ pub(crate) async fn apply_runtime_commit_tx(
         &head_json,
     )
     .await?;
-    let head_write = sqlx::query(session_sql().head_postgres.upsert_cas.sql())
+    let head_write = crate::observed_sql::query(session_sql().head_postgres.upsert_cas.sql())
         .bind(commit.session_id.as_str())
         .bind(sql_head_revision)
         .bind(plan.actual_head_revision() as i64)
@@ -699,14 +706,15 @@ pub(crate) async fn apply_runtime_commit_tx(
         commit.session_id.as_str(),
         head_write.rows_affected(),
     ) {
-        let actual_now = sqlx::query_scalar::<_, i64>(session_sql().head.select_revision.sql())
-            .bind(commit.session_id.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(store_sqlx_error)?
-            .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
-            .transpose()?
-            .unwrap_or(plan.actual_head_revision());
+        let actual_now =
+            crate::observed_sql::query_scalar::<_, i64>(session_sql().head.select_revision.sql())
+                .bind(commit.session_id.as_str())
+                .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+                .await
+                .map_err(store_sqlx_error)?
+                .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
+                .transpose()?
+                .unwrap_or(plan.actual_head_revision());
         return Err(StoreError::HeadRevisionConflict {
             expected: commit.expected_head_revision,
             actual: actual_now,
@@ -720,17 +728,16 @@ pub(crate) async fn apply_runtime_commit_tx(
         now,
     )
     .await?;
-    let retention =
-        sqlx::query_as::<_, (String, Option<i64>)>(session_sql().meta.touch_last_commit.sql())
-            .bind(commit.session_id.as_str())
-            .bind(i64::try_from(now).unwrap_or(i64::MAX))
-            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(store_sqlx_error)?
-            .map(|(kind, last_turns)| {
-                lash_core_execution::Retention::from_stored(&kind, last_turns)
-            })
-            .transpose()?;
+    let retention = crate::observed_sql::query_as::<_, (String, Option<i64>)>(
+        session_sql().meta.touch_last_commit.sql(),
+    )
+    .bind(commit.session_id.as_str())
+    .bind(i64::try_from(now).unwrap_or(i64::MAX))
+    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+    .await
+    .map_err(store_sqlx_error)?
+    .map(|(kind, last_turns)| lash_core_execution::Retention::from_stored(&kind, last_turns))
+    .transpose()?;
     if plan.head_changed()
         && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
     {
@@ -767,7 +774,7 @@ pub(crate) async fn apply_runtime_commit_tx(
     if retention.is_some_and(lash_core_execution::Retention::releases_at_commit) {
         crate::revisions::release_unretained_tx(&mut *tx, false, Some(&commit.session_id)).await?;
     }
-    let work_remaining = sqlx::query_scalar::<_, bool>(
+    let work_remaining = crate::observed_sql::query_scalar::<_, bool>(
         crate::turn_ingress::turn_ingress_sql()
             .family
             .has_admissible_work

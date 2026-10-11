@@ -355,6 +355,10 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 ("staged_node_count", shape.staged_node_count),
                 ("staged_node_bytes", shape.staged_node_bytes),
                 ("staged_leaf_bytes", shape.staged_leaf_bytes),
+                ("graph_adopt_count", work.graph_adopt_attempts),
+                ("graph_adopt_bytes", work.graph_adopt_bytes),
+                ("graph_encode_count", work.graph_envelopes),
+                ("graph_encode_bytes", work.graph_encoded_bytes),
                 ("runtime_hash_count", work.hash_passes),
                 ("runtime_hash_bytes", work.hashed_bytes),
             ];

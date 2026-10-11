@@ -18,6 +18,8 @@ name = "lash_kernel_vm"
 doctest = false
 
 [features]
+# Unsupported synchronous capture/import diagnostics; absent from ordinary builds.
+perf-witness = []
 # The machine also runs the synthetic successor of kernel version 1.
 synthetic-next = ["lash-kernel-doc/synthetic-next", "lash-kernel-state/synthetic-next"]
 

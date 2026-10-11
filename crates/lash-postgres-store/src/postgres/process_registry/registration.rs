@@ -94,11 +94,12 @@ pub(crate) async fn apply_registration_tx(
     // hold's lock orders this read against the abandonment's mark.
     if let Some(hold) = consumer_hold.as_ref() {
         parent_end::lock_consumer_hold_tx(tx, &hold.key).await?;
-        let abandoned: bool = sqlx::query_scalar(process_sql().abandoned_hold.exists.sql())
-            .bind(hold.key.as_str())
-            .fetch_one(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(plugin_sqlx_error)?;
+        let abandoned: bool =
+            crate::observed_sql::query_scalar(process_sql().abandoned_hold.exists.sql())
+                .bind(hold.key.as_str())
+                .fetch_one(crate::observed_sql::executor(&mut ***tx))
+                .await
+                .map_err(plugin_sqlx_error)?;
         if abandoned {
             return Err(lash_core_execution::runtime::abandoned_consumer_refusal(
                 registration.start_key.as_ref(),
@@ -108,40 +109,41 @@ pub(crate) async fn apply_registration_tx(
     }
     let mut record = ProcessRecord::from_prepared_registration(registration, process_id, now);
     let record_json = serde_json::to_string(&record).map_err(process_decode_error)?;
-    let result = sqlx::query(process_sql().process_postgres.insert_registration.sql())
-        .bind(record.id.as_str())
-        .bind(
-            record
-                .start_key
-                .as_ref()
-                .map(lash_core_execution::StartKey::as_str),
-        )
-        .bind(record.originator_id().as_str())
-        .bind(record.identity.kind.as_str())
-        .bind(&record.identity.label)
-        .bind(record.created_at_ms as i64)
-        .bind(record.updated_at_ms as i64)
-        .bind(
-            record
-                .lifetime
-                .scope()
-                .map(lash_core_execution::ScopeId::storage_kind),
-        )
-        .bind(
-            record
-                .lifetime
-                .scope()
-                .map(lash_core_execution::ScopeId::storage_id),
-        )
-        .bind(record.lifetime.storage_label())
-        .bind(record_json)
-        .bind(consumer_hold.as_ref().map(|hold| hold.key.clone()))
-        .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))
-        .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_id()))
-        .bind(consumer_hold.as_ref().map(|hold| hold.cancels))
-        .execute(crate::observed_sql::executor(&mut ***tx))
-        .await
-        .map_err(plugin_sqlx_error)?;
+    let result =
+        crate::observed_sql::query(process_sql().process_postgres.insert_registration.sql())
+            .bind(record.id.as_str())
+            .bind(
+                record
+                    .start_key
+                    .as_ref()
+                    .map(lash_core_execution::StartKey::as_str),
+            )
+            .bind(record.originator_id().as_str())
+            .bind(record.identity.kind.as_str())
+            .bind(&record.identity.label)
+            .bind(record.created_at_ms as i64)
+            .bind(record.updated_at_ms as i64)
+            .bind(
+                record
+                    .lifetime
+                    .scope()
+                    .map(lash_core_execution::ScopeId::storage_kind),
+            )
+            .bind(
+                record
+                    .lifetime
+                    .scope()
+                    .map(lash_core_execution::ScopeId::storage_id),
+            )
+            .bind(record.lifetime.storage_label())
+            .bind(record_json)
+            .bind(consumer_hold.as_ref().map(|hold| hold.key.clone()))
+            .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))
+            .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_id()))
+            .bind(consumer_hold.as_ref().map(|hold| hold.cancels))
+            .execute(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(plugin_sqlx_error)?;
     // On this tier alone the read that found no retained process for the
     // key and the insert that acts on it are two statements in one
     // `READ COMMITTED` transaction, so each takes its own snapshot: two
@@ -178,7 +180,7 @@ pub(crate) async fn apply_registration_tx(
     .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
     let process_id = record.id.clone();
     for session_id in observers {
-        sqlx::query(process_sql().observer.insert.sql())
+        crate::observed_sql::query(process_sql().observer.insert.sql())
             .bind(session_id.as_str())
             .bind(process_id.as_str())
             .execute(crate::observed_sql::executor(&mut ***tx))

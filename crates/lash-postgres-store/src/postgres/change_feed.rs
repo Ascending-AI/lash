@@ -73,7 +73,7 @@ pub(crate) async fn stage_turn_change(
     let sql = &session_sql().turn_commits_postgres;
     match change {
         TurnChange::Receipt(receipt) => {
-            sqlx::query(sql.insert_staged.sql())
+            crate::observed_sql::query(sql.insert_staged.sql())
                 .bind(receipt.session_id)
                 .bind(receipt.turn_id)
                 .bind(receipt.turn_commit_hash)
@@ -93,7 +93,7 @@ pub(crate) async fn stage_turn_change(
             fault_json,
             recorded_at_ms,
         } => {
-            sqlx::query(sql.insert_session_terminal_staged.sql())
+            crate::observed_sql::query(sql.insert_session_terminal_staged.sql())
                 .bind(session_id)
                 .bind(fault_json)
                 .bind(recorded_at_ms)
@@ -108,10 +108,10 @@ pub(crate) async fn stage_turn_change(
 /// the caller's transaction. Returns how many it sequenced.
 pub(crate) async fn sequence_turns(tx: &mut PgConnection) -> Result<i64, sqlx::Error> {
     let sql = &session_sql().turn_commits_postgres;
-    sqlx::query(sql.lock_clock.sql())
+    crate::observed_sql::query(sql.lock_clock.sql())
         .execute(crate::observed_sql::executor(&mut *tx))
         .await?;
-    sqlx::query_scalar(sql.sequence_committed.sql())
+    crate::observed_sql::query_scalar(sql.sequence_committed.sql())
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
 }
@@ -120,10 +120,10 @@ pub(crate) async fn sequence_turns(tx: &mut PgConnection) -> Result<i64, sqlx::E
 /// tombstone, in the caller's transaction. Returns how many it sequenced.
 pub(crate) async fn sequence_processes(tx: &mut PgConnection) -> Result<i64, sqlx::Error> {
     let sql = &process_sql().clock_postgres;
-    sqlx::query(sql.lock_clock.sql())
+    crate::observed_sql::query(sql.lock_clock.sql())
         .execute(crate::observed_sql::executor(&mut *tx))
         .await?;
-    sqlx::query_scalar(sql.sequence_committed.sql())
+    crate::observed_sql::query_scalar(sql.sequence_committed.sql())
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
 }
@@ -146,7 +146,7 @@ pub(crate) async fn sequence_before_read(
         Feed::Turns => session_sql().turn_commits_postgres.has_unsequenced.sql(),
         Feed::Processes => process_sql().clock_postgres.has_unsequenced.sql(),
     };
-    let pending: bool = sqlx::query_scalar(probe)
+    let pending: bool = crate::observed_sql::query_scalar(probe)
         .fetch_one(crate::observed_sql::executor(pool))
         .await
         .map_err(store_sqlx_error)?;

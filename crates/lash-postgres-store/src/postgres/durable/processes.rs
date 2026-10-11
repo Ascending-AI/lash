@@ -66,7 +66,7 @@ pub(crate) async fn create_actor_within(
     now: DurableInstant,
 ) -> Result<(), DurableError> {
     let actor = process_actor(process)?;
-    let created = sqlx::query(SQL.actor.create.sql())
+    let created = crate::observed_sql::query(SQL.actor.create.sql())
         .bind(actor.as_str())
         .bind(actor.kind().as_str())
         .bind(formats)
@@ -90,7 +90,7 @@ pub(crate) async fn lock_actor_within(
     process: &ProcessId,
 ) -> Result<(), DurableError> {
     let actor = process_actor(process)?;
-    sqlx::query(SQL.postgres.lock_actors.sql())
+    crate::observed_sql::query(SQL.postgres.lock_actors.sql())
         .bind(vec![actor.as_str()])
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
@@ -112,7 +112,7 @@ pub(crate) async fn cancel_mail_within(
     let (woken, seq) = wake_within(tx, &actor, true, now).await?;
     if newly_requested {
         let body = serde_json::json!({ "origin": origin, "requester": requester }).to_string();
-        sqlx::query(SQL.mail.append.sql())
+        crate::observed_sql::query(SQL.mail.append.sql())
             .bind(actor.as_str())
             .bind(seq.0)
             .bind(CANCEL_MAIL)
@@ -229,7 +229,7 @@ pub(super) async fn apply(
             expected_rev,
             driver_json,
         } => {
-            let moved: Option<i64> = sqlx::query_scalar(SQL.process.advance.sql())
+            let moved: Option<i64> = crate::observed_sql::query_scalar(SQL.process.advance.sql())
                 .bind(process.as_str())
                 .bind(integer::<i64>(*expected_rev)?)
                 .bind(driver_json)
@@ -251,7 +251,7 @@ pub(super) async fn apply(
             }))
         }
         ProcessWrite::Published { process, through } => {
-            sqlx::query(SQL.process.publish.sql())
+            crate::observed_sql::query(SQL.process.publish.sql())
                 .bind(process.as_str())
                 .bind(integer::<i64>(*through)?)
                 .execute(crate::observed_sql::executor(&mut ***tx))
@@ -353,7 +353,7 @@ async fn set_cursor(
     cursor: Option<&str>,
     epoch: Epoch,
 ) -> Result<(), DurableError> {
-    sqlx::query(SQL.process.set_cursor.sql())
+    crate::observed_sql::query(SQL.process.set_cursor.sql())
         .bind(process.as_str())
         .bind(cursor)
         .bind(epoch.0)
@@ -384,7 +384,7 @@ pub(super) async fn process(
     tx: &mut PgConnection,
     process: &ProcessId,
 ) -> Result<Option<ProcessActorRow>, DurableError> {
-    let Some(row) = sqlx::query(SQL.process.row.sql())
+    let Some(row) = crate::observed_sql::query(SQL.process.row.sql())
         .bind(process.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -414,7 +414,7 @@ pub(super) async fn until_children(
     let Some((kind, id)) = scope_index(scope) else {
         return Ok(Vec::new());
     };
-    let ids: Vec<String> = sqlx::query_scalar(SQL.process.pending_children.sql())
+    let ids: Vec<String> = crate::observed_sql::query_scalar(SQL.process.pending_children.sql())
         .bind(kind)
         .bind(id)
         .bind(after.map_or("", ProcessId::as_str))
@@ -437,7 +437,7 @@ pub(super) async fn live_until_descendants(
     let Some(roots) = subtree_roots(scope) else {
         return Ok(Vec::new());
     };
-    let ids: Vec<String> = sqlx::query_scalar(SQL.process.live_descendants.sql())
+    let ids: Vec<String> = crate::observed_sql::query_scalar(SQL.process.live_descendants.sql())
         .bind(roots.kind)
         .bind(roots.id)
         .bind(roots.turns)

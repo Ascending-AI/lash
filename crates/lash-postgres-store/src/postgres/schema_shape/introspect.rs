@@ -28,7 +28,7 @@ pub(crate) struct SearchPath(Vec<String>);
 pub(crate) async fn read_search_path(
     connection: &mut PgConnection,
 ) -> Result<SearchPath, StoreError> {
-    let schemas: Vec<String> = sqlx::query_scalar(
+    let schemas: Vec<String> = crate::observed_sql::query_scalar(
         "SELECT schema_name::text
          FROM unnest(pg_catalog.current_schemas(true)) WITH ORDINALITY
               AS resolved(schema_name, precedence)
@@ -82,7 +82,7 @@ pub(crate) async fn resolve_installation(
     connection: &mut PgConnection,
     search_path: &SearchPath,
 ) -> Result<Option<Installation>, StoreError> {
-    let row = sqlx::query(
+    let row = crate::observed_sql::query(
         "SELECT namespace.oid::bigint AS namespace_oid,
                 namespace.nspname::text AS namespace,
                 pg_catalog.quote_ident(namespace.nspname) AS quoted_namespace,
@@ -150,7 +150,7 @@ pub(crate) async fn read_component_version(
     {
         return Ok(ComponentVersion::Unreadable);
     }
-    let version = sqlx::query_scalar(&format!(
+    let version = crate::observed_sql::query_scalar(&format!(
         "SELECT version FROM {}.{ANCHOR_TABLE} WHERE component = $1",
         installation.quoted_namespace
     ))
@@ -184,7 +184,7 @@ async fn probe_columns_match_expected(
         names.push((*column).to_string());
         types.push(shape.sql_type.clone());
     }
-    let matched: i64 = sqlx::query_scalar(
+    let matched: i64 = crate::observed_sql::query_scalar(
         "SELECT count(*)
          FROM unnest($2::text[], $3::text[]) AS want(name, sql_type)
          JOIN pg_catalog.pg_attribute AS attribute
@@ -281,7 +281,7 @@ async fn read_shadow_findings(
     search_path: &SearchPath,
     table_names: &[String],
 ) -> Result<Vec<SchemaFinding>, StoreError> {
-    let rows = sqlx::query(
+    let rows = crate::observed_sql::query(
         "SELECT DISTINCT ON (expected.name)
                 expected.name AS name,
                 namespace.oid::bigint AS found_namespace_oid,
@@ -316,7 +316,7 @@ pub(crate) async fn resolve_tables(
     installation: &Installation,
     table_names: &[String],
 ) -> Result<BTreeMap<String, ResolvedTable>, StoreError> {
-    let rows = sqlx::query(
+    let rows = crate::observed_sql::query(
         "SELECT relation.relname::text AS name,
                 relation.oid::bigint AS oid
          FROM unnest($1::text[]) AS expected(name)
@@ -361,7 +361,7 @@ pub(crate) async fn read_live_shape(
     // materializes NOT NULL as `pg_constraint` rows with `contype = 'n'`;
     // nothing here enumerates `pg_constraint` unfiltered, so those rows cannot
     // enter the comparison.
-    let column_rows = sqlx::query(
+    let column_rows = crate::observed_sql::query(
         "SELECT attribute.attrelid::bigint AS table_oid,
                 attribute.attname::text AS column_name,
                 pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS sql_type,
@@ -409,7 +409,7 @@ pub(crate) async fn read_live_shape(
     // The `indnkeyatts` bound trims trailing INCLUDE columns, which carry no
     // uniqueness. `indkey` is an `int2vector` with a zero lower bound, so the
     // ordinality of `unnest` — always one-based — is what the bound applies to.
-    let index_rows = sqlx::query(
+    let index_rows = crate::observed_sql::query(
         "SELECT index_catalog.indrelid::bigint AS table_oid,
                 index_catalog.indisprimary AS is_primary,
                 ARRAY(
@@ -459,7 +459,7 @@ pub(crate) async fn read_live_shape(
 
     // `contype = 'f'` is filtered explicitly. `confdeltype` is a single stable
     // character, so the on-delete action carries no rendered expression text.
-    let foreign_key_rows = sqlx::query(
+    let foreign_key_rows = crate::observed_sql::query(
         "SELECT constraint_catalog.conrelid::bigint AS table_oid,
                 ARRAY(
                     SELECT attribute.attname::text
@@ -593,7 +593,7 @@ async fn read_seed_row_findings(
         {
             continue;
         }
-        let present: Option<i64> = sqlx::query_scalar(&format!(
+        let present: Option<i64> = crate::observed_sql::query_scalar(&format!(
             "SELECT 1::BIGINT FROM {}.{table} WHERE singleton = {key}",
             installation.quoted_namespace
         ))

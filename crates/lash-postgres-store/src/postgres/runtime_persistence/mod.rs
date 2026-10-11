@@ -8,7 +8,7 @@ pub(crate) async fn allocate_ingress_sequence_tx(
     session_id: &SessionId,
 ) -> Result<i64, StoreError> {
     lock_session_history_mutation_tx(tx, session_id).await?;
-    sqlx::query_scalar(
+    crate::observed_sql::query_scalar(
         crate::session_ingress::session_ingress_sql()
             .allocate_sequence
             .sql(),
@@ -38,7 +38,7 @@ pub(crate) async fn lock_session_history_mutations_tx(
         return Ok(());
     }
     // A fork takes no actor row after history, so history alone orders it.
-    sqlx::query(
+    crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .lock_xact_session_history_batch
             .sql(),
@@ -64,7 +64,7 @@ pub(crate) async fn ensure_session_not_closing_tx(
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
     let closing: Option<Option<i64>> =
-        sqlx::query_scalar(session_sql().meta.select_closing_intent.sql())
+        crate::observed_sql::query_scalar(session_sql().meta.select_closing_intent.sql())
             .bind(session_id.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await
@@ -85,11 +85,12 @@ pub(crate) async fn ensure_session_not_deleted_tx(
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
     lock_session_history_mutation_tx(tx, session_id).await?;
-    let deleted = sqlx::query_scalar::<_, bool>(session_sql().deleted_postgres.exists.sql())
-        .bind(session_id.as_str())
-        .fetch_one(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?;
+    let deleted =
+        crate::observed_sql::query_scalar::<_, bool>(session_sql().deleted_postgres.exists.sql())
+            .bind(session_id.as_str())
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?;
     if deleted {
         Err(StoreError::SessionDeleted {
             session_id: SessionId::parse(session_id.to_string())?,
@@ -113,7 +114,7 @@ async fn retirable_ancestry_node_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     node_id: &str,
 ) -> Result<Option<RetirableAncestryNode>, StoreError> {
-    let parent = sqlx::query_scalar::<_, Option<String>>(
+    let parent = crate::observed_sql::query_scalar::<_, Option<String>>(
         session_sql().graph_postgres.select_parent_for_update.sql(),
     )
     .bind(node_id)
@@ -123,12 +124,13 @@ async fn retirable_ancestry_node_tx(
     let Some(parent_node_id) = parent else {
         return Ok(None);
     };
-    let reachable =
-        sqlx::query_scalar::<_, bool>(session_sql().graph_postgres.exists_reachable.sql())
-            .bind(node_id)
-            .fetch_one(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?;
+    let reachable = crate::observed_sql::query_scalar::<_, bool>(
+        session_sql().graph_postgres.exists_reachable.sql(),
+    )
+    .bind(node_id)
+    .fetch_one(crate::observed_sql::executor(&mut **tx))
+    .await
+    .map_err(store_sqlx_error)?;
     if reachable {
         return Ok(None);
     }
@@ -142,7 +144,7 @@ async fn retire_ancestry_node_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     witness: RetirableAncestryNode,
 ) -> Result<Option<String>, StoreError> {
-    sqlx::query(session_sql().graph_postgres.retire.sql())
+    crate::observed_sql::query(session_sql().graph_postgres.retire.sql())
         .bind(&witness.node_id)
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
@@ -170,7 +172,7 @@ pub(crate) async fn nearest_frame_node_id_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     leaf_node_id: &str,
 ) -> Result<Option<String>, StoreError> {
-    sqlx::query_scalar(session_sql().graph_postgres.select_frame_node_id.sql())
+    crate::observed_sql::query_scalar(session_sql().graph_postgres.select_frame_node_id.sql())
         .bind(leaf_node_id)
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
@@ -212,7 +214,7 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
     // read until commit, so the absence it answers holds until the insert.
     if let Some(source_key) = batch.source_key.as_deref() {
         let by_source_key: Option<(String, String)> =
-            sqlx::query_as(sql.queued_batches.select_id_by_source_key.sql())
+            crate::observed_sql::query_as(sql.queued_batches.select_id_by_source_key.sql())
                 .bind(batch.session_id.as_str())
                 .bind(source_key)
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -237,7 +239,7 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
         now,
         Some(enqueue_seq_u64),
     );
-    sqlx::query(sql.queued_batches_postgres.insert_new.sql())
+    crate::observed_sql::query(sql.queued_batches_postgres.insert_new.sql())
         .bind(enqueue_seq)
         .bind(&batch_id)
         .bind(batch.session_id.as_str())
@@ -277,7 +279,7 @@ async fn read_session_state_version_tx(
     } else {
         session_sql().meta.select_state_version.sql()
     };
-    let marker: Option<Option<i32>> = sqlx::query_scalar(statement)
+    let marker: Option<Option<i32>> = crate::observed_sql::query_scalar(statement)
         .bind(session_id.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await

@@ -27,7 +27,7 @@ pub(crate) async fn read_tx(store: &PostgresStore) -> Result<PgTx<'_>, StoreErro
     let mut tx = crate::observed_sql::control("BEGIN", store.pool.begin())
         .await
         .map_err(store_sqlx_error)?;
-    sqlx::query(
+    crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .begin_repeatable_read_read_only
             .sql(),
@@ -40,7 +40,7 @@ pub(crate) async fn read_tx(store: &PostgresStore) -> Result<PgTx<'_>, StoreErro
 
 async fn check_live(tx: &mut sqlx::PgConnection, session_id: &SessionId) -> Result<(), StoreError> {
     lash_core_execution::store::validate_session_id(session_id)?;
-    let deleted: bool = sqlx::query_scalar(
+    let deleted: bool = crate::observed_sql::query_scalar(
         crate::session_sql::session_sql()
             .deleted_postgres
             .exists
@@ -119,7 +119,7 @@ pub(super) async fn head_leaf_path_node(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
 ) -> Result<Option<PathNode>, StoreError> {
-    sqlx::query_as::<_, (String, String, i64)>(HEAD_LEAF_PATH_NODE)
+    crate::observed_sql::query_as::<_, (String, String, i64)>(HEAD_LEAF_PATH_NODE)
         .bind(session_id.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -138,7 +138,7 @@ async fn owner_exit(
     tx: &mut sqlx::PgConnection,
     owner: &SessionId,
 ) -> Result<OwnerExit, StoreError> {
-    let Some(row) = sqlx::query(OWNER_EXIT)
+    let Some(row) = crate::observed_sql::query(OWNER_EXIT)
         .bind(owner.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -216,7 +216,7 @@ async fn readable_row(
     session_id: &SessionId,
     node_id: &str,
 ) -> Result<Option<PgRow>, StoreError> {
-    sqlx::query(READABLE_NODE)
+    crate::observed_sql::query(READABLE_NODE)
         .bind(node_id)
         .bind(session_id.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -228,7 +228,7 @@ async fn lineage_stamp(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
 ) -> Result<LineageStamp, StoreError> {
-    let rows = sqlx::query(
+    let rows = crate::observed_sql::query(
         crate::session_sql::session_sql()
             .lineage
             .select_for_stamp
@@ -259,12 +259,13 @@ async fn missing_anchor(
     session_id: &SessionId,
     node_id: &str,
 ) -> Result<StoreError, StoreError> {
-    let tombstoned: Option<bool> =
-        sqlx::query_scalar("SELECT tombstoned FROM lash_graph_nodes WHERE node_id = $1")
-            .bind(node_id)
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(store_sqlx_error)?;
+    let tombstoned: Option<bool> = crate::observed_sql::query_scalar(
+        "SELECT tombstoned FROM lash_graph_nodes WHERE node_id = $1",
+    )
+    .bind(node_id)
+    .fetch_optional(crate::observed_sql::executor(&mut *tx))
+    .await
+    .map_err(store_sqlx_error)?;
     Ok(StoreError::HistoryAnchorUnavailable {
         session_id: session_id.clone(),
         node_id: lash_core_execution::NodeId::parse(node_id)?,
@@ -380,7 +381,7 @@ pub(crate) async fn window_conn(
                 "frame generation exceeds leaf generation",
             ));
         }
-        let rows = sqlx::query(WINDOW_ROWS)
+        let rows = crate::observed_sql::query(WINDOW_ROWS)
             .bind(session_id.as_str())
             .bind(first_generation)
             .bind(leaf_generation)
@@ -570,7 +571,7 @@ impl SessionHistoryStore for PostgresStore {
         if expected_generation.is_some_and(|expected| expected != start_generation) {
             return Err(corrupt("SessionGraph", "history cursor generation changed"));
         }
-        let rows = sqlx::query(PAGE_HEADERS)
+        let rows = crate::observed_sql::query(PAGE_HEADERS)
             .bind(session_id.as_str())
             .bind(
                 i64::try_from(start_generation)
@@ -666,7 +667,7 @@ impl SessionHistoryStore for PostgresStore {
             .iter()
             .map(|row| row.id.as_str())
             .collect::<Vec<_>>();
-        let bodies = sqlx::query("SELECT node_id, node_json FROM lash_graph_nodes WHERE node_id = ANY($1) ORDER BY generation DESC")
+        let bodies = crate::observed_sql::query("SELECT node_id, node_json FROM lash_graph_nodes WHERE node_id = ANY($1) ORDER BY generation DESC")
             .bind(&ids).fetch_all(crate::observed_sql::executor(&mut *tx)).await.map_err(store_sqlx_error)?;
         if bodies.len() != headers.len() {
             return Err(corrupt("SessionGraph", "history body row is missing"));
@@ -724,7 +725,7 @@ impl SessionHistoryStore for PostgresStore {
     ) -> Result<bool, StoreError> {
         let mut tx = read_tx(self).await?;
         check_live(&mut tx, session_id).await?;
-        let candidate = sqlx::query_as::<_, (String, String, i64, String, i64)>(
+        let candidate = crate::observed_sql::query_as::<_, (String, String, i64, String, i64)>(
             "SELECT leaf.node_id, leaf.session_id, leaf.generation,
                     node.session_id, node.generation
              FROM lash_session_head AS head LEFT JOIN lash_session_revisions AS revision
@@ -783,7 +784,7 @@ impl SessionHistoryStore for PostgresStore {
         check_live(&mut tx, session_id).await?;
         let statement = crate::session_sql::session_sql();
         let mut rows = match after {
-            Some(cursor) => sqlx::query(
+            Some(cursor) => crate::observed_sql::query(
                 statement
                     .turn_commits
                     .select_failure_settlements_after
@@ -796,12 +797,14 @@ impl SessionHistoryStore for PostgresStore {
             .fetch_all(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?,
-            None => sqlx::query(statement.turn_commits.select_failure_settlements.sql())
-                .bind(session_id.as_str())
-                .bind(i64::from(limit.get()) + 1)
-                .fetch_all(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(store_sqlx_error)?,
+            None => {
+                crate::observed_sql::query(statement.turn_commits.select_failure_settlements.sql())
+                    .bind(session_id.as_str())
+                    .bind(i64::from(limit.get()) + 1)
+                    .fetch_all(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(store_sqlx_error)?
+            }
         };
         let more = rows.len() > limit.get() as usize;
         if more {
@@ -869,13 +872,14 @@ impl SessionHistoryStore for PostgresStore {
         let mut tx = read_tx(self).await?;
         check_live(&mut tx, session_id).await?;
         let statement = crate::session_sql::session_sql();
-        let rows = sqlx::query(statement.turn_commits.select_committed_turns_after.sql())
-            .bind(session_id.as_str())
-            .bind(i64::try_from(after).unwrap_or(i64::MAX))
-            .bind(i64::from(limit.get()))
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(store_sqlx_error)?;
+        let rows =
+            crate::observed_sql::query(statement.turn_commits.select_committed_turns_after.sql())
+                .bind(session_id.as_str())
+                .bind(i64::try_from(after).unwrap_or(i64::MAX))
+                .bind(i64::from(limit.get()))
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(store_sqlx_error)?;
         let receipts = rows
             .iter()
             .map(|row| {
@@ -895,12 +899,13 @@ impl SessionHistoryStore for PostgresStore {
             .flat_map(|receipt| receipt.appended().iter().map(|id| id.as_str()))
             .collect::<Vec<_>>();
         let mut bodies = std::collections::HashMap::new();
-        for row in sqlx::query(statement.graph_postgres.select_live_owned_bodies.sql())
-            .bind(session_id.as_str())
-            .bind(&wanted)
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(store_sqlx_error)?
+        for row in
+            crate::observed_sql::query(statement.graph_postgres.select_live_owned_bodies.sql())
+                .bind(session_id.as_str())
+                .bind(&wanted)
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(store_sqlx_error)?
         {
             let node_id: String = row.get("node_id");
             let parent: Option<String> = row.get("parent_node_id");

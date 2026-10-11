@@ -77,7 +77,7 @@ pub(crate) async fn load_recorded_lineage_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
 ) -> Result<Option<lash_core_execution::SessionLineage>, StoreError> {
-    let row = sqlx::query(session_sql().meta.select_lineage.sql())
+    let row = crate::observed_sql::query(session_sql().meta.select_lineage.sql())
         .bind(session_id.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
@@ -108,7 +108,7 @@ pub(crate) async fn write_session_meta_tx(
 ) -> Result<bool, StoreError> {
     let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;
     let sql = session_sql().meta_postgres.insert.sql();
-    let result = sqlx::query(sql)
+    let result = crate::observed_sql::query(sql)
         .bind(stored.session_id.as_str())
         .bind(&stored.relation_kind)
         .bind(stored.parent_session_id.as_deref())
@@ -147,13 +147,13 @@ pub(crate) async fn settle_observer_intents_tx(
     session_id: &SessionId,
     remaining: &[lash_core_execution::facade_support::SessionObserverIntent],
 ) -> Result<(), StoreError> {
-    sqlx::query(session_sql().observer_intents.delete_by_session.sql())
+    crate::observed_sql::query(session_sql().observer_intents.delete_by_session.sql())
         .bind(session_id.as_str())
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     for (process_index, intent) in remaining.iter().enumerate() {
-        sqlx::query(session_sql().observer_intents.insert.sql())
+        crate::observed_sql::query(session_sql().observer_intents.insert.sql())
             .bind(session_id.as_str())
             .bind(SessionMetaCodec::write_index(
                 SESSION_META_CODEC,
@@ -178,13 +178,13 @@ pub(crate) async fn load_session_meta(
         .await
         .map_err(store_sqlx_error)?;
     let row = if let Some(session_id) = selected_session_id {
-        sqlx::query(session_sql().meta_postgres.select_relation_for_share.sql())
+        crate::observed_sql::query(session_sql().meta_postgres.select_relation_for_share.sql())
             .bind(session_id.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?
     } else {
-        let mut rows = sqlx::query(
+        let mut rows = crate::observed_sql::query(
             session_sql()
                 .meta_postgres
                 .select_sole_relation_for_share
@@ -208,12 +208,13 @@ pub(crate) async fn load_session_meta(
         return Ok(None);
     };
     let mut stored = stored_relation_from_row(&row)?;
-    let observer_rows =
-        sqlx::query_as::<_, (i64, String)>(session_sql().observer_intents.select_for_session.sql())
-            .bind(stored.session_id.as_str())
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(store_sqlx_error)?;
+    let observer_rows = crate::observed_sql::query_as::<_, (i64, String)>(
+        session_sql().observer_intents.select_for_session.sql(),
+    )
+    .bind(stored.session_id.as_str())
+    .fetch_all(crate::observed_sql::executor(&mut *tx))
+    .await
+    .map_err(store_sqlx_error)?;
     for (process_index, process_id) in observer_rows {
         let process_index = SessionMetaCodec::read_index(
             SESSION_META_CODEC,
@@ -239,19 +240,20 @@ pub(crate) async fn load_session_meta(
     }
     let session_id = stored.session_id.clone();
     let mut meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
-    meta.owning_process_id =
-        sqlx::query_scalar::<_, Option<String>>(session_sql().meta.select_owning_process.sql())
-            .bind(session_id.as_str())
-            .fetch_one(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(store_sqlx_error)?
-            .map(|process_id| {
-                ProcessId::parse(&process_id).map_err(|error| StoreError::StoredDataCorrupt {
-                    record_kind: "SessionMeta owning process",
-                    message: error.to_string(),
-                })
-            })
-            .transpose()?;
+    meta.owning_process_id = crate::observed_sql::query_scalar::<_, Option<String>>(
+        session_sql().meta.select_owning_process.sql(),
+    )
+    .bind(session_id.as_str())
+    .fetch_one(crate::observed_sql::executor(&mut *tx))
+    .await
+    .map_err(store_sqlx_error)?
+    .map(|process_id| {
+        ProcessId::parse(&process_id).map_err(|error| StoreError::StoredDataCorrupt {
+            record_kind: "SessionMeta owning process",
+            message: error.to_string(),
+        })
+    })
+    .transpose()?;
     crate::observed_sql::control("COMMIT", tx.commit())
         .await
         .map_err(store_sqlx_error)?;

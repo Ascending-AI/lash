@@ -53,9 +53,10 @@ pub struct Transaction {
     pub graph_nodes: usize,
     /// Encoded bytes of every node it staged.
     pub graph_bytes: usize,
-    /// Encoded bytes of the nodes it staged that no earlier accepted commit
-    /// staged: what it newly installed. Zero when the store refused it.
+    /// Actual new canonical node bytes inserted by the store, zero on refusal.
     pub installed_bytes: usize,
+    /// Physical SQL in this owning commit, including its actor fence.
+    pub sql: Option<lash_core_execution::facade_support::sql::Receipt>,
     /// The nodes it staged by kind, keyed by the kind's number.
     pub by_kind: BTreeMap<u32, KindBytes>,
     /// How many execution roots it put: a cell's or process's park.
@@ -83,9 +84,9 @@ struct Encoded {
     by_kind: BTreeMap<u32, KindBytes>,
     exec_roots: usize,
     domain_writes: usize,
-    nodes: Vec<(lash_core_store::checkpoint_graph::NodeId, usize)>,
     /// The reason of the park it commits, if it parks its actor.
     parked: Option<String>,
+    sql: Option<lash_core_execution::facade_support::sql::Receipt>,
 }
 
 impl Encoded {
@@ -123,7 +124,6 @@ impl Encoded {
             share.bytes += bytes;
             encoded.graph_nodes += 1;
             encoded.graph_bytes += bytes;
-            encoded.nodes.push((node.id, bytes));
             if kind == NodeKind::PHASE_ROOT.0 || kind == NodeKind::TURN_CONTENT.0 {
                 encoded.checkpoint_bytes += bytes;
             } else {
@@ -140,7 +140,6 @@ type Waiters = HashMap<(String, &'static str), oneshot::Sender<Instant>>;
 pub struct Recorder {
     start: Instant,
     transactions: Mutex<Vec<Transaction>>,
-    installed: Mutex<std::collections::HashSet<lash_core_store::checkpoint_graph::NodeId>>,
     claims: Mutex<Vec<(Instant, String, String)>>,
     model_calls: Mutex<HashMap<String, Vec<Instant>>>,
     waiters: Mutex<Waiters>,
@@ -152,7 +151,6 @@ impl Default for Recorder {
         Self {
             start: Instant::now(),
             transactions: Mutex::default(),
-            installed: Mutex::default(),
             claims: Mutex::default(),
             model_calls: Mutex::default(),
             waiters: Mutex::default(),
@@ -240,13 +238,10 @@ impl Recorder {
     ) {
         let ended = Instant::now();
         let installed_bytes = if ok {
-            let mut installed = self.installed.lock_recover();
             encoded
-                .nodes
-                .iter()
-                .filter(|(id, _)| installed.insert(*id))
-                .map(|(_, bytes)| bytes)
-                .sum()
+                .sql
+                .as_ref()
+                .map_or(0, |sql| sql.newly_installed_graph_bytes as usize)
         } else {
             0
         };
@@ -262,26 +257,24 @@ impl Recorder {
             graph_nodes: encoded.graph_nodes,
             graph_bytes: encoded.graph_bytes,
             installed_bytes,
+            sql: encoded.sql,
             by_kind: encoded.by_kind,
             exec_roots: encoded.exec_roots,
             domain_writes: encoded.domain_writes,
         };
-        if ok {
-            let waiter = self
-                .waiters
-                .lock_recover()
-                .remove(&(transaction.actor.clone(), label));
-            if let Some(waiter) = waiter {
-                let _ = waiter.send(ended);
-            }
-            if let Some(reason) = encoded.parked {
-                let waiter = self.parks.lock_recover().remove(&transaction.actor);
-                if let Some(waiter) = waiter {
-                    let _ = waiter.send(reason);
-                }
-            }
-        }
+        let key = (transaction.actor.clone(), label);
+        let park_actor = transaction.actor.clone();
         self.transactions.lock_recover().push(transaction);
+        // Publishing the completion must make its receipt visible first.
+        if ok && let Some(waiter) = self.waiters.lock_recover().remove(&key) {
+            let _ = waiter.send(ended);
+        }
+        if ok
+            && let Some(reason) = encoded.parked
+            && let Some(waiter) = self.parks.lock_recover().remove(&park_actor)
+        {
+            let _ = waiter.send(reason);
+        }
     }
 }
 
@@ -290,6 +283,7 @@ pub struct RecordingStore {
     inner: Arc<dyn DurableStore>,
     node: String,
     recorder: Arc<Recorder>,
+    dialect: &'static str,
 }
 
 #[async_trait::async_trait]
@@ -367,9 +361,20 @@ impl DurableStore for RecordingStore {
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().to_string();
-        let encoded = Encoded::of(&tx);
+        let mut encoded = Encoded::of(&tx);
         let started = Instant::now();
-        let answer = self.inner.commit(tx, label).await;
+        let (answer, sql) = lash_core_execution::facade_support::sql::with_owner(
+            actor.clone(),
+            tx.epoch().0,
+            tx.revision().0,
+            lash_core_execution::facade_support::sql::collect(
+                format!("{actor}/{}", label.as_str()),
+                self.dialect,
+                self.inner.commit(tx, label),
+            ),
+        )
+        .await;
+        encoded.sql = Some(sql);
         self.recorder
             .record_with(started, actor, label.as_str(), answer.is_ok(), encoded);
         answer
@@ -380,12 +385,18 @@ impl DurableStore for RecordingStore {
         tx: MailTx,
         label: CommitLabel,
     ) -> Result<MailCommit, DurableError> {
-        let encoded = Encoded {
+        let mut encoded = Encoded {
             domain_writes: tx.writes().len(),
             ..Encoded::default()
         };
         let started = Instant::now();
-        let answer = self.inner.commit_mail(tx, label).await;
+        let (answer, sql) = lash_core_execution::facade_support::sql::collect(
+            format!("{}/{}", self.node, label.as_str()),
+            self.dialect,
+            self.inner.commit_mail(tx, label),
+        )
+        .await;
+        encoded.sql = Some(sql);
         self.recorder.record_with(
             started,
             self.node.clone(),
@@ -536,11 +547,17 @@ pub struct RecordingStores {
 
 impl RecordingStores {
     /// Record `inner`'s durable writes as `node`'s into `recorder`.
-    pub fn new(inner: Arc<dyn StoreSet>, node: &str, recorder: Arc<Recorder>) -> Self {
+    pub fn new(
+        inner: Arc<dyn StoreSet>,
+        node: &str,
+        recorder: Arc<Recorder>,
+        dialect: &'static str,
+    ) -> Self {
         let store = Arc::new(RecordingStore {
             inner: inner.durable_store(),
             node: node.to_owned(),
             recorder,
+            dialect,
         });
         Self { inner, store }
     }

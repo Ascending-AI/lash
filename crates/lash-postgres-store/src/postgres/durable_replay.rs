@@ -160,7 +160,7 @@ impl PostgresDurableStore {
             .await
             .map_err(|error| attempt(store_failure(error)))?;
         let (recorded, now, xact, fence): (Option<i32>, i64, String, Option<i64>) = match owner {
-            Some(owner) => sqlx::query_as(SQL.postgres.owner_envelope.sql())
+            Some(owner) => crate::observed_sql::query_as(SQL.postgres.owner_envelope.sql())
                 .bind(owner.actor().as_str())
                 .bind(owner.epoch().0)
                 .fetch_one(crate::observed_sql::executor(locked.connection()))
@@ -168,7 +168,7 @@ impl PostgresDurableStore {
                 .map_err(|error| attempt(sqlx_failure(error)))?,
             None => {
                 let (recorded, now, xact): (Option<i32>, i64, String) =
-                    sqlx::query_as(SQL.postgres.fence_clock_and_xact.sql())
+                    crate::observed_sql::query_as(SQL.postgres.fence_clock_and_xact.sql())
                         .fetch_one(crate::observed_sql::executor(locked.connection()))
                         .await
                         .map_err(|error| attempt(sqlx_failure(error)))?;

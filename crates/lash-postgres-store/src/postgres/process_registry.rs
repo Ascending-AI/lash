@@ -64,7 +64,7 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
         if let Some(record) = load_process(&self.pool, process_id).await? {
             return Ok(Some(record));
         }
-        let row = sqlx::query(process_sql().tombstone.select_terminal.sql())
+        let row = crate::observed_sql::query(process_sql().tombstone.select_terminal.sql())
             .bind(process_id.as_str())
             .fetch_optional(crate::observed_sql::executor(&self.pool))
             .await
@@ -124,12 +124,13 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
                 .map_err(plugin_sqlx_error)?;
             return Ok((Vec::new(), cursor));
         }
-        let rows = sqlx::query(process_sql().process_postgres.list_changes_after.sql())
-            .bind(cursor.store_sequence() as i64)
-            .bind(limit as i64)
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(plugin_sqlx_error)?;
+        let rows =
+            crate::observed_sql::query(process_sql().process_postgres.list_changes_after.sql())
+                .bind(cursor.store_sequence() as i64)
+                .bind(limit as i64)
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(plugin_sqlx_error)?;
         let mut records = Vec::new();
         let mut next_cursor = cursor;
         for row in rows {
@@ -307,13 +308,14 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
             .await
             .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let changed = sqlx::query(process_sql().observer_postgres.insert_if_absent.sql())
-            .bind(session_id.as_str())
-            .bind(process_id.as_str())
-            .execute(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(plugin_sqlx_error)?
-            .rows_affected();
+        let changed =
+            crate::observed_sql::query(process_sql().observer_postgres.insert_if_absent.sql())
+                .bind(session_id.as_str())
+                .bind(process_id.as_str())
+                .execute(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(plugin_sqlx_error)?
+                .rows_affected();
         if changed > 0 {
             append_process_event_tx(
                 &mut tx,
@@ -338,7 +340,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
             .await
             .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let changed = sqlx::query(process_sql().observer.delete.sql())
+        let changed = crate::observed_sql::query(process_sql().observer.delete.sql())
             .bind(session_id.as_str())
             .bind(process_id.as_str())
             .execute(crate::observed_sql::executor(&mut **tx))
@@ -371,7 +373,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
             .map_err(plugin_store_error)?;
         for process_id in process_ids {
             let mut record = require_process_tx(&mut tx, process_id).await?;
-            let removed = sqlx::query(process_sql().observer.delete.sql())
+            let removed = crate::observed_sql::query(process_sql().observer.delete.sql())
                 .bind(from_session_id.as_str())
                 .bind(process_id.as_str())
                 .execute(crate::observed_sql::executor(&mut **tx))
@@ -383,7 +385,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
                     "process `{process_id}` is not observed by `{from_session_id}`"
                 )));
             }
-            sqlx::query(process_sql().observer_postgres.insert_if_absent.sql())
+            crate::observed_sql::query(process_sql().observer_postgres.insert_if_absent.sql())
                 .bind(to_session_id.as_str())
                 .bind(process_id.as_str())
                 .execute(crate::observed_sql::executor(&mut **tx))
@@ -414,7 +416,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
         session_id: &SessionId,
         filter: &lash_core_execution::ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
-        let rows = sqlx::query(process_sql().registry_postgres.list_observed.sql())
+        let rows = crate::observed_sql::query(process_sql().registry_postgres.list_observed.sql())
             .bind(session_id.as_str())
             .bind(filter.status.labels())
             .bind(filter.retired_since_ms.map(clamp_epoch_ms))
@@ -439,7 +441,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
         session_id: &SessionId,
         process_id: &ProcessId,
     ) -> Result<bool, PluginError> {
-        let (retained, observer): (bool, bool) = sqlx::query_as(
+        let (retained, observer): (bool, bool) = crate::observed_sql::query_as(
             process_sql()
                 .registry_postgres
                 .observation_and_registration_exist
@@ -464,7 +466,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
         if self.get_process(process_id).await?.is_none() {
             return Err(registry_transitions::unknown_process(process_id));
         }
-        sqlx::query_scalar(process_sql().observer.list_sessions_for_process.sql())
+        crate::observed_sql::query_scalar(process_sql().observer.list_sessions_for_process.sql())
             .bind(process_id.as_str())
             .fetch_all(crate::observed_sql::executor(&self.pool))
             .await
@@ -483,12 +485,13 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(plugin_store_error)?;
-        let removed_observer_count = sqlx::query(process_sql().observer.delete_by_session.sql())
-            .bind(session_id.as_str())
-            .execute(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(plugin_sqlx_error)?
-            .rows_affected() as usize;
+        let removed_observer_count =
+            crate::observed_sql::query(process_sql().observer.delete_by_session.sql())
+                .bind(session_id.as_str())
+                .execute(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(plugin_sqlx_error)?
+                .rows_affected() as usize;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core_execution::ProcessSessionDeleteReport {
             session_id: session_id.clone(),
@@ -587,7 +590,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
             .ok_or_else(|| PluginError::Session("process event page limit is too large".into()))?;
         let page = match mode {
             lash_core_execution::ProcessEventQueryMode::Full => {
-                let rows = sqlx::query(process_sql().event.page_full.sql())
+                let rows = crate::observed_sql::query(process_sql().event.page_full.sql())
                     .bind(process_id.as_str())
                     .bind(after_sequence)
                     .bind(fetch_limit)
@@ -602,7 +605,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                 lash_core_execution::ProcessEventPage::from_full_rows(events, limit)
             }
             lash_core_execution::ProcessEventQueryMode::Lite => {
-                let rows = sqlx::query(process_sql().event.page_lite.sql())
+                let rows = crate::observed_sql::query(process_sql().event.page_lite.sql())
                     .bind(process_id.as_str())
                     .bind(after_sequence)
                     .bind(fetch_limit)
@@ -644,7 +647,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         if self.get_process(process_id).await?.is_none() {
             return Err(registry_transitions::unknown_process(process_id));
         }
-        let rows = sqlx::query(process_sql().event.list_recent.sql())
+        let rows = crate::observed_sql::query(process_sql().event.list_recent.sql())
             .bind(process_id.as_str())
             .bind(limit as i64)
             .fetch_all(crate::observed_sql::executor(&self.pool))
@@ -728,7 +731,7 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         crate::change_feed::sequence_processes(&mut tx)
             .await
             .map_err(plugin_sqlx_error)?;
-        let compacted_through: Option<i64> = sqlx::query_scalar(
+        let compacted_through: Option<i64> = crate::observed_sql::query_scalar(
             process_sql()
                 .tombstone_postgres
                 .select_max_compactable_change_seq
@@ -739,15 +742,16 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(plugin_sqlx_error)?;
-        let deleted = sqlx::query(process_sql().tombstone_postgres.delete_compactable.sql())
-            .bind(cutoff_epoch_ms)
-            .bind(max_change_seq)
-            .execute(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(plugin_sqlx_error)?
-            .rows_affected() as usize;
+        let deleted =
+            crate::observed_sql::query(process_sql().tombstone_postgres.delete_compactable.sql())
+                .bind(cutoff_epoch_ms)
+                .bind(max_change_seq)
+                .execute(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(plugin_sqlx_error)?
+                .rows_affected() as usize;
         if let Some(compacted_through) = compacted_through {
-            sqlx::query(process_sql().clock_postgres.raise_compaction_horizon.sql())
+            crate::observed_sql::query(process_sql().clock_postgres.raise_compaction_horizon.sql())
                 .bind(compacted_through)
                 .execute(crate::observed_sql::executor(&mut **tx))
                 .await
@@ -782,7 +786,7 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
     ) -> Result<(), PluginError> {
         crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
             Box::pin(async move {
-                sqlx::query(process_sql().process.release_consumer_hold.sql())
+                crate::observed_sql::query(process_sql().process.release_consumer_hold.sql())
                     .bind(process_id.as_str())
                     .bind(key)
                     .execute(crate::observed_sql::executor(tx.as_mut()))
@@ -804,7 +808,7 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
             .await
             .map_err(plugin_store_error)?;
         parent_end::lock_consumer_hold_tx(&mut tx, key).await?;
-        sqlx::query(process_sql().abandoned_hold.mark.sql())
+        crate::observed_sql::query(process_sql().abandoned_hold.mark.sql())
             .bind(key)
             .bind(owner.storage_kind())
             .bind(owner.storage_id())
@@ -812,11 +816,12 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(plugin_sqlx_error)?;
-        let ids: Vec<String> = sqlx::query_scalar(process_sql().process.select_owed_cancels.sql())
-            .bind(key)
-            .fetch_all(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(plugin_sqlx_error)?;
+        let ids: Vec<String> =
+            crate::observed_sql::query_scalar(process_sql().process.select_owed_cancels.sql())
+                .bind(key)
+                .fetch_all(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         ids.iter()
             .map(|id| {

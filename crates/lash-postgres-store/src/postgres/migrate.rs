@@ -492,7 +492,7 @@ async fn read_state(
     // Probed by OID against the anchored namespace, like every other object
     // read here: a `to_regclass` name lookup would resolve outside the
     // transaction's snapshot.
-    let ledger_present: bool = sqlx::query_scalar(
+    let ledger_present: bool = crate::observed_sql::query_scalar(
         "SELECT EXISTS (
              SELECT 1 FROM pg_catalog.pg_class
              WHERE relnamespace = $1 AND relname = 'lash_migrations'
@@ -503,7 +503,7 @@ async fn read_state(
     .await
     .map_err(store_sqlx_error)?;
     let applied = if ledger_present {
-        sqlx::query_as::<_, LedgerRow>(&format!(
+        crate::observed_sql::query_as::<_, LedgerRow>(&format!(
             "SELECT {LEDGER_COLUMNS}
                  FROM {}.lash_migrations ORDER BY started_at_ms, migration",
             installation.quoted_namespace()
@@ -546,7 +546,7 @@ async fn read_stamp_version(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     installation: &Installation,
 ) -> Result<Option<i32>, StoreError> {
-    let stamp_present: bool = sqlx::query_scalar(
+    let stamp_present: bool = crate::observed_sql::query_scalar(
         "SELECT EXISTS (
              SELECT 1 FROM pg_catalog.pg_class
              WHERE relnamespace = $1 AND relname = 'lash_schema_versions'
@@ -559,7 +559,7 @@ async fn read_stamp_version(
     if !stamp_present {
         return Ok(None);
     }
-    sqlx::query_scalar(&format!(
+    crate::observed_sql::query_scalar(&format!(
         "SELECT version FROM {}.lash_schema_versions WHERE component = $1",
         installation.quoted_namespace()
     ))
@@ -634,10 +634,12 @@ fn plan(state: &MigrationState) -> Result<Vec<PlannedStep<'static>>, StoreError>
 /// timestamps are the database's, not the migrating host's, the same rule the
 /// release stamp follows.
 async fn server_clock_ms(tx: &mut sqlx::Transaction<'_, Postgres>) -> Result<i64, StoreError> {
-    sqlx::query_scalar("SELECT CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT)")
-        .fetch_one(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)
+    crate::observed_sql::query_scalar(
+        "SELECT CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT)",
+    )
+    .fetch_one(crate::observed_sql::executor(&mut **tx))
+    .await
+    .map_err(store_sqlx_error)
 }
 
 /// Records one applied step in the ledger and returns its committed row's
@@ -653,26 +655,27 @@ async fn record_step(
     to_version: i32,
     started_at_ms: i64,
 ) -> Result<(String, String, i64, Option<i64>), StoreError> {
-    let recorded: Option<(String, String, i64, Option<i64>)> = sqlx::query_as(&format!(
-        "INSERT INTO {ledger} (phase, migration, release, state,
+    let recorded: Option<(String, String, i64, Option<i64>)> =
+        crate::observed_sql::query_as(&format!(
+            "INSERT INTO {ledger} (phase, migration, release, state,
                                from_version, to_version, started_at_ms, finished_at_ms)
          VALUES ($1, $2, $3, 'applied', $4, $5, $6,
                  CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT))
          ON CONFLICT (phase, migration) DO NOTHING
          RETURNING release, state, started_at_ms, finished_at_ms"
-    ))
-    .bind(phase)
-    .bind(migration)
-    .bind(crate::release_stamp::BUILD_RELEASE)
-    .bind(from_version)
-    .bind(to_version)
-    .bind(started_at_ms)
-    .fetch_optional(crate::observed_sql::executor(&mut **tx))
-    .await
-    .map_err(store_sqlx_error)?;
+        ))
+        .bind(phase)
+        .bind(migration)
+        .bind(crate::release_stamp::BUILD_RELEASE)
+        .bind(from_version)
+        .bind(to_version)
+        .bind(started_at_ms)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)?;
     match recorded {
         Some(row) => Ok(row),
-        None => sqlx::query_as(&format!(
+        None => crate::observed_sql::query_as(&format!(
             "SELECT release, state, started_at_ms, finished_at_ms FROM {ledger}
              WHERE phase = $1 AND migration = $2"
         ))
@@ -725,7 +728,7 @@ async fn apply_step(
             // Moving the stamp is part of the step: a later open sees either
             // the whole committed step or the version it started from. The
             // reader floor is a contract step's to raise, never an expand's.
-            let moved = sqlx::query(&format!(
+            let moved = crate::observed_sql::query(&format!(
                 "UPDATE {} SET version = $1 WHERE component = $2 AND version = $3",
                 relation("lash_schema_versions")
             ))
@@ -857,7 +860,7 @@ async fn lock_connection(
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
-        sqlx::query(if shared {
+        crate::observed_sql::query(if shared {
             "SELECT pg_advisory_lock_shared($1, $2)"
         } else {
             "SELECT pg_advisory_lock($1, $2)"
@@ -901,7 +904,7 @@ async fn read_state_under_lock(
     let mut tx = crate::observed_sql::control("BEGIN", begin)
         .await
         .map_err(store_sqlx_error)?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+    crate::observed_sql::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
@@ -1188,7 +1191,7 @@ pub(crate) async fn start_backfill(
     backfill: &BackfillMigration,
     limits: MigrationLimits,
 ) -> Result<(), MigrateError> {
-    let started: Option<String> = sqlx::query_scalar(
+    let started: Option<String> = crate::observed_sql::query_scalar(
         "SELECT state FROM lash_migrations WHERE phase = 'backfill' AND migration = $1",
     )
     .bind(backfill.id)
@@ -1211,7 +1214,7 @@ pub(crate) async fn start_backfill(
             .into());
         }
         // Another run may have started it while this one waited for the lock.
-        let started: Option<String> = sqlx::query_scalar(
+        let started: Option<String> = crate::observed_sql::query_scalar(
             "SELECT state FROM lash_migrations
              WHERE phase = 'backfill' AND migration = $1
              FOR UPDATE",
@@ -1230,7 +1233,7 @@ pub(crate) async fn start_backfill(
                 .await
                 .map_err(store_sqlx_error)?;
         }
-        sqlx::query(
+        crate::observed_sql::query(
             "INSERT INTO lash_migrations (phase, migration, release, state,
                  from_version, to_version, started_at_ms, finished_at_ms,
                  backfill_cursor, backfill_rows)
@@ -1282,7 +1285,7 @@ pub(crate) async fn backfill_batch_in(
         }
         .into());
     }
-    let row: Option<(String, Option<String>)> = sqlx::query_as(
+    let row: Option<(String, Option<String>)> = crate::observed_sql::query_as(
         "SELECT state, backfill_cursor FROM lash_migrations
          WHERE phase = 'backfill' AND migration = $1
          FOR UPDATE",
@@ -1302,14 +1305,15 @@ pub(crate) async fn backfill_batch_in(
         Some((state, _)) if state == "applied" => return Ok(BatchOutcome::Completed),
         Some((_, cursor)) => cursor,
     };
-    let (last_key, scanned, rewritten): (Option<String>, i64, i64) = sqlx::query_as(backfill.batch)
-        .bind(cursor.as_deref())
-        .bind(batch_rows)
-        .fetch_one(crate::observed_sql::executor(&mut ***tx))
-        .await
-        .map_err(store_sqlx_error)?;
+    let (last_key, scanned, rewritten): (Option<String>, i64, i64) =
+        crate::observed_sql::query_as(backfill.batch)
+            .bind(cursor.as_deref())
+            .bind(batch_rows)
+            .fetch_one(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(store_sqlx_error)?;
     let completed = scanned < batch_rows;
-    sqlx::query(
+    crate::observed_sql::query(
         "UPDATE lash_migrations
          SET backfill_cursor = COALESCE($2, backfill_cursor),
              backfill_rows = backfill_rows + $3,
@@ -1339,7 +1343,7 @@ async fn ledger_row(
     phase: MigrationPhase,
     migration: &str,
 ) -> Result<MigrationStep, StoreError> {
-    sqlx::query_as::<_, LedgerRow>(&format!(
+    crate::observed_sql::query_as::<_, LedgerRow>(&format!(
         "SELECT {LEDGER_COLUMNS} FROM lash_migrations WHERE phase = $1 AND migration = $2"
     ))
     .bind(phase.name())
@@ -1361,7 +1365,7 @@ pub(crate) async fn run_backfills(
 ) -> Result<Vec<MigrationStep>, MigrateError> {
     let mut executed = Vec::new();
     for backfill in BACKFILL_MIGRATIONS {
-        let recorded: Option<String> = sqlx::query_scalar(
+        let recorded: Option<String> = crate::observed_sql::query_scalar(
             "SELECT state FROM lash_migrations WHERE phase = 'backfill' AND migration = $1",
         )
         .bind(backfill.id)
@@ -1448,7 +1452,7 @@ async fn apply_contract(
     contract: &ContractMigration,
 ) -> Result<MigrationStep, MigrateError> {
     let mut tx = crate::guarded_tx::begin_migration(connection, fence).await?;
-    let applied: Vec<String> = sqlx::query_scalar(
+    let applied: Vec<String> = crate::observed_sql::query_scalar(
         "SELECT migration FROM lash_migrations
          WHERE phase = 'backfill' AND state = 'applied' AND migration = ANY($1)
          FOR SHARE",
@@ -1472,7 +1476,7 @@ async fn apply_contract(
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
-    sqlx::query(
+    crate::observed_sql::query(
         "UPDATE lash_schema_versions SET min_reader = GREATEST(min_reader, $1)
          WHERE component = $2",
     )

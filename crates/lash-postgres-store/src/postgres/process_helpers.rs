@@ -14,7 +14,7 @@ fn decode_process_record(json: &str) -> Result<ProcessRecord, PluginError> {
 pub(crate) async fn process_change_horizon_tx(
     tx: &mut sqlx::PgConnection,
 ) -> Result<u64, PluginError> {
-    let horizon: i64 = sqlx::query_scalar(
+    let horizon: i64 = crate::observed_sql::query_scalar(
         process_sql()
             .clock_postgres
             .select_compaction_horizon_for_share
@@ -34,7 +34,7 @@ pub(crate) async fn load_process_tx(
     tx: &mut sqlx::PgConnection,
     process_id: &ProcessId,
 ) -> Result<Option<ProcessRecord>, PluginError> {
-    let json: Option<String> = sqlx::query_scalar(
+    let json: Option<String> = crate::observed_sql::query_scalar(
         process_sql()
             .process_postgres
             .select_record_json_for_update
@@ -53,12 +53,13 @@ pub(crate) async fn load_process_by_start_key_tx(
     tx: &mut sqlx::PgConnection,
     start_key: &lash_core_execution::StartKey,
 ) -> Result<Option<ProcessRecord>, PluginError> {
-    let json: Option<String> =
-        sqlx::query_scalar(process_sql().process.select_record_json_by_start_key.sql())
-            .bind(start_key.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(plugin_sqlx_error)?;
+    let json: Option<String> = crate::observed_sql::query_scalar(
+        process_sql().process.select_record_json_by_start_key.sql(),
+    )
+    .bind(start_key.as_str())
+    .fetch_optional(crate::observed_sql::executor(&mut *tx))
+    .await
+    .map_err(plugin_sqlx_error)?;
     json.map(|json| decode_process_record(&json)).transpose()
 }
 
@@ -67,7 +68,7 @@ pub(crate) async fn load_process(
     process_id: &ProcessId,
 ) -> Result<Option<ProcessRecord>, PluginError> {
     let json: Option<String> =
-        sqlx::query_scalar(process_sql().process.select_record_json_by_id.sql())
+        crate::observed_sql::query_scalar(process_sql().process.select_record_json_by_id.sql())
             .bind(process_id.as_str())
             .fetch_optional(crate::observed_sql::executor(pool))
             .await
@@ -82,7 +83,7 @@ pub(crate) async fn require_process_tx(
     if let Some(record) = load_process_tx(tx, process_id).await? {
         return Ok(record);
     }
-    let row = sqlx::query(process_sql().tombstone.select_terminal.sql())
+    let row = crate::observed_sql::query(process_sql().tombstone.select_terminal.sql())
         .bind(process_id.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -107,7 +108,7 @@ pub(crate) async fn save_process_tx(
     tx: &mut GuardedTx<'_>,
     record: &ProcessRecord,
 ) -> Result<(), PluginError> {
-    sqlx::query(
+    crate::observed_sql::query(
         process_sql()
             .process_postgres
             .update_mutable_columns_staged
@@ -131,7 +132,7 @@ pub(crate) async fn load_event_by_key_tx(
     append: &lash_core_execution::facade_support::CanonicalProcessEventAppend,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<Option<ProcessEvent>, PluginError> {
-    let Some(row) = sqlx::query(process_sql().event.select_by_replay_key.sql())
+    let Some(row) = crate::observed_sql::query(process_sql().event.select_by_replay_key.sql())
         .bind(process_id.as_str())
         .bind(append.replay_key())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -158,7 +159,7 @@ pub(crate) async fn next_process_event_sequence_tx(
     process_id: &ProcessId,
 ) -> Result<(Option<u64>, u64), PluginError> {
     let last_sequence: Option<i64> =
-        sqlx::query_scalar(process_sql().event.select_max_sequence.sql())
+        crate::observed_sql::query_scalar(process_sql().event.select_max_sequence.sql())
             .bind(process_id.as_str())
             .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await
@@ -335,7 +336,7 @@ async fn stage_process_event_append_tx(
             event,
             projected_record,
         } => {
-            sqlx::query(process_sql().event.insert.sql())
+            crate::observed_sql::query(process_sql().event.insert.sql())
                 .bind(process_id.as_str())
                 .bind(sequence as i64)
                 .bind(event.fact.event_type())

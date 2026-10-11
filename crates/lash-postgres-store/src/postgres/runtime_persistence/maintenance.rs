@@ -34,7 +34,7 @@ impl PostgresStore {
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         // `lash_deleted_sessions` is deliberately exempt: it is permanent
         // identity evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
-        let removed_node_count = sqlx::query(
+        let removed_node_count = crate::observed_sql::query(
             session_sql()
                 .graph_postgres
                 .delete_tombstoned_for_session
@@ -45,7 +45,7 @@ impl PostgresStore {
         .await
         .map_err(store_sqlx_error)?
         .rows_affected() as usize;
-        let removed_pending_turn_input_tombstone_count = sqlx::query(
+        let removed_pending_turn_input_tombstone_count = crate::observed_sql::query(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .delete_withdrawn
@@ -57,7 +57,7 @@ impl PostgresStore {
         .map_err(store_sqlx_error)?
         .rows_affected();
         // A vacuumed command's replay meets its revision check.
-        let removed_queued_work_tombstone_count = sqlx::query(
+        let removed_queued_work_tombstone_count = crate::observed_sql::query(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
                 .delete_tombstones

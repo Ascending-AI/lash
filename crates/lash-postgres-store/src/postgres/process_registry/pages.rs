@@ -5,7 +5,7 @@ const CURSOR_BACKEND: &str = "postgres";
 pub(super) async fn count_non_terminal_processes(
     registry: &PostgresProcessRegistry,
 ) -> Result<usize, PluginError> {
-    let count = sqlx::query_scalar::<_, i64>(
+    let count = crate::observed_sql::query_scalar::<_, i64>(
         process_sql()
             .process_postgres
             .count_non_terminal_processes
@@ -24,7 +24,7 @@ pub(super) async fn count_non_terminal_processes(
 pub(super) async fn collect_non_terminal_records(
     registry: &PostgresProcessRegistry,
 ) -> Result<Vec<ProcessRecord>, PluginError> {
-    let rows = sqlx::query(process_sql().process.collect_non_terminal_records.sql())
+    let rows = crate::observed_sql::query(process_sql().process.collect_non_terminal_records.sql())
         .fetch_all(crate::observed_sql::executor(&registry.pool))
         .await
         .map_err(plugin_sqlx_error)?;
@@ -54,7 +54,7 @@ pub(super) async fn list_non_terminal_processes_page(
     }
     let through_process_id = match continuation.as_ref() {
         Some(cursor) => cursor.through_process_id().clone(),
-        None => match sqlx::query_scalar::<_, Option<String>>(
+        None => match crate::observed_sql::query_scalar::<_, Option<String>>(
             process_sql()
                 .process_postgres
                 .select_max_non_terminal_process_id
@@ -75,7 +75,7 @@ pub(super) async fn list_non_terminal_processes_page(
     };
     let row_limit = i64::try_from(page_size + 1).unwrap_or(i64::MAX);
     let rows = if let Some(cursor) = continuation.as_ref() {
-        sqlx::query(
+        crate::observed_sql::query(
             process_sql()
                 .process_postgres
                 .list_next_non_terminal_process_page
@@ -88,7 +88,7 @@ pub(super) async fn list_non_terminal_processes_page(
         .await
         .map_err(plugin_sqlx_error)?
     } else {
-        sqlx::query(
+        crate::observed_sql::query(
             process_sql()
                 .process_postgres
                 .list_first_non_terminal_process_page
@@ -134,7 +134,7 @@ mod tests {
         binds: &[&str],
     ) -> String {
         let statement = format!("EXPLAIN (COSTS OFF) {sql}");
-        let mut query = sqlx::query_scalar::<_, String>(&statement);
+        let mut query = crate::observed_sql::query_scalar::<_, String>(&statement);
         for bind in binds {
             query = query.bind(*bind);
         }
@@ -170,13 +170,13 @@ mod tests {
             .begin()
             .await
             .expect("begin explain transaction");
-        sqlx::query("SET LOCAL enable_seqscan = off")
+        crate::observed_sql::query("SET LOCAL enable_seqscan = off")
             .execute(&mut *tx)
             .await
             .expect("prefer the non-terminal index in the empty test database");
 
         let process_queries = &process_sql().process_postgres;
-        let max_plan = sqlx::query_scalar::<_, String>(&format!(
+        let max_plan = crate::observed_sql::query_scalar::<_, String>(&format!(
             "EXPLAIN (COSTS OFF) {}",
             process_queries.select_max_non_terminal_process_id.sql()
         ))
@@ -184,7 +184,7 @@ mod tests {
         .await
         .expect("explain PostgreSQL non-terminal maximum")
         .join(" | ");
-        let count_plan = sqlx::query_scalar::<_, String>(&format!(
+        let count_plan = crate::observed_sql::query_scalar::<_, String>(&format!(
             "EXPLAIN (COSTS OFF) {}",
             process_queries.count_non_terminal_processes.sql()
         ))

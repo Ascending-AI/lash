@@ -30,7 +30,7 @@ const COMPONENT: &str = "postgres";
 /// `Ok(None)` is an absent row, not an absent table: callers run this only
 /// where the schema gate has already admitted the table itself.
 async fn read_in_tx(tx: &mut Transaction<'_, Postgres>) -> Result<Option<i32>, sqlx::Error> {
-    sqlx::query_scalar(session_sql().fleet_format.select_fleet_format.sql())
+    crate::observed_sql::query_scalar(session_sql().fleet_format.select_fleet_format.sql())
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
 }
@@ -88,7 +88,7 @@ pub(crate) async fn seed(
         record_kind: "lash_fleet_format.format_version",
         message: format!("not a fleet-format version: {fleet}"),
     })?;
-    sqlx::query(session_sql().fleet_format.insert_if_absent.sql())
+    crate::observed_sql::query(session_sql().fleet_format.insert_if_absent.sql())
         .bind(version)
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
@@ -108,7 +108,7 @@ where
     E: sqlx::Executor<'e, Database = Postgres>,
 {
     let row: Result<Option<i32>, sqlx::Error> =
-        sqlx::query_scalar(session_sql().fleet_format.select_fleet_format.sql())
+        crate::observed_sql::query_scalar(session_sql().fleet_format.select_fleet_format.sql())
             .fetch_optional(crate::observed_sql::executor(executor))
             .await;
     match row {

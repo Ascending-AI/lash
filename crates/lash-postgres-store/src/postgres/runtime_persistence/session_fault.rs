@@ -9,7 +9,7 @@ async fn session_fault_conn(
     connection: &mut sqlx::PgConnection,
     session_id: &SessionId,
 ) -> Result<Option<SessionFault>, StoreError> {
-    sqlx::query(session_sql().meta.select_fault.sql())
+    crate::observed_sql::query(session_sql().meta.select_fault.sql())
         .bind(session_id.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *connection))
         .await
@@ -32,7 +32,7 @@ impl SessionFaultStore for PostgresStore {
     ) -> Result<Option<SessionFault>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
-        let changed = sqlx::query(session_sql().meta.record_fault.sql())
+        let changed = crate::observed_sql::query(session_sql().meta.record_fault.sql())
             .bind(session_id.as_str())
             .bind(record.to_stored()?)
             .bind(sql_counter_value("fault_at_ms", at_ms)?)
@@ -66,7 +66,7 @@ impl SessionFaultStore for PostgresStore {
         after: Option<&SessionId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<SessionFault>, StoreError> {
-        let rows = sqlx::query(session_sql().meta.list_faults.sql())
+        let rows = crate::observed_sql::query(session_sql().meta.list_faults.sql())
             .bind(after.map_or("", SessionId::as_str))
             .bind(i64::try_from(limit.get()).unwrap_or(i64::MAX))
             .fetch_all(crate::observed_sql::executor(&self.pool))
@@ -85,7 +85,7 @@ impl SessionFaultStore for PostgresStore {
     async fn clear_session_fault(&self, session_id: &SessionId) -> Result<bool, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
-        let changed = sqlx::query(session_sql().meta.clear_fault.sql())
+        let changed = crate::observed_sql::query(session_sql().meta.clear_fault.sql())
             .bind(session_id.as_str())
             .execute(crate::observed_sql::executor(&mut **tx))
             .await

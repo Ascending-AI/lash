@@ -194,6 +194,7 @@ impl Statement {
             .sum::<u64>();
         if let Some(window) = &self.window {
             window.row(&self.sql);
+            window.payload(&self.sql, 0, 0, bytes);
         }
         if let Some(state) = &self.state {
             state
@@ -248,8 +249,14 @@ impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
             return stream;
         };
         Box::pin(stream.map(move |result| {
-            if let Ok(Either::Right(row)) = &result {
-                statement.row(row);
+            match &result {
+                Ok(Either::Right(row)) => statement.row(row),
+                Ok(Either::Left(done)) => {
+                    if let Some(window) = &statement.window {
+                        window.payload(&statement.sql, done.rows_affected(), 0, 0);
+                    }
+                }
+                _ => {}
             }
             result
         }))
@@ -263,17 +270,32 @@ impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
         'c: 'e,
         Q: 'q + Execute<'q, Postgres>,
     {
-        let statement = Statement::new(query.sql());
-        let future = self.0.fetch_optional(query);
-        let Some(statement) = statement else {
-            return future;
-        };
+        if sql::Window::current().is_none() {
+            let statement = Statement::new(query.sql());
+            let future = self.0.fetch_optional(query);
+            return Box::pin(async move {
+                let result = future.await;
+                if let (Some(statement), Ok(Some(row))) = (&statement, &result) {
+                    statement.row(row);
+                }
+                result
+            });
+        }
+        // Consume command completion as well as rows. SQLx's optional API
+        // hides PgQueryResult, including affected rows of RETURNING writes.
+        // SQLx's PostgreSQL optional executor also drains all responses so
+        // deferred-constraint errors are visible before returning its first row.
+        let mut stream = self.fetch_many(query);
         Box::pin(async move {
-            let result = future.await;
-            if let Ok(Some(row)) = &result {
-                statement.row(row);
+            let mut first = None;
+            while let Some(result) = stream.next().await {
+                if let Either::Right(row) = result?
+                    && first.is_none()
+                {
+                    first = Some(row);
+                }
             }
-            result
+            Ok(first)
         })
     }
 
@@ -316,7 +338,7 @@ mod tests {
             let (answer, receipt) = sql::collect(
                 format!("known-select/{size}"),
                 "postgres",
-                sqlx::query("SELECT generate_series(1, $1)")
+                crate::observed_sql::query("SELECT generate_series(1, $1)")
                     .bind(size)
                     .fetch_all(executor(storage.pool())),
             )
@@ -325,6 +347,9 @@ mod tests {
             assert_eq!(receipt.statements, 1);
             assert_eq!(receipt.shapes.len(), 1);
             assert_eq!(receipt.rows_returned, size as u64);
+            assert_eq!(receipt.rows_affected, size as u64); // server SELECT command completion
+            assert_eq!(receipt.bound_bytes, 8);
+            assert_eq!(receipt.result_bytes, size as u64 * 8);
             assert_eq!(receipt.shapes["select generate_series(?, ?)"].statements, 1);
             assert_eq!(receipt.sqlite_work, None);
             eprintln!(
@@ -332,6 +357,31 @@ mod tests {
                 serde_json::to_string(&receipt).expect("receipt")
             );
         }
+        // SQL-PAYLOAD: a RETURNING write must retain command completion even
+        // when its caller wants only the first row. Count each parameter's
+        // actual encoding once, including UTF-8 text and binary bytea.
+        let mut connection = storage.pool().acquire().await.expect("connection");
+        sqlx::query("CREATE TEMP TABLE payload_sample (text TEXT, bytes BYTEA, number BIGINT)")
+            .execute(&mut *connection)
+            .await
+            .expect("fixture");
+        let (answer, receipt) = sql::collect("known-returning", "postgres",
+            query("INSERT INTO payload_sample SELECT $1, $2, $3 UNION ALL SELECT $1, $2, $3 RETURNING text, bytes, number")
+                .bind("é'a").bind(vec![0_u8, 1, 2]).bind(42_i64)
+                .fetch_optional(executor(&mut *connection))).await;
+        assert_eq!(
+            answer
+                .expect("insert")
+                .expect("first row")
+                .get::<String, _>(0),
+            "é'a"
+        );
+        assert_eq!(receipt.statements, 1);
+        assert_eq!(receipt.rows_affected, 2);
+        assert_eq!(receipt.rows_returned, 2);
+        assert_eq!(receipt.bound_bytes, 15);
+        assert_eq!(receipt.result_bytes, 30);
+        eprintln!("SQL_PAYLOAD {}", serde_json::to_string(&receipt).unwrap());
     }
     /// SQL-WORK: every requested operation is observed at each history size.
     #[tokio::test]
@@ -405,3 +455,7 @@ mod tests {
         );
     }
 }
+
+#[path = "observed_sql/bindings.rs"]
+mod bindings;
+pub(crate) use bindings::{Query, query, query_as, query_scalar};

@@ -16,7 +16,7 @@ impl PostgresStore {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
             .await?;
-        let deleted = sqlx::query_scalar::<_, bool>(
+        let deleted = crate::observed_sql::query_scalar::<_, bool>(
             "SELECT EXISTS(
                 SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
              )",
@@ -67,7 +67,7 @@ impl PostgresStore {
                 &head_json,
             )
             .await?;
-            sqlx::query(session_sql().head.insert_created.sql())
+            crate::observed_sql::query(session_sql().head.insert_created.sql())
                 .bind(request.session_id.as_str())
                 .execute(crate::observed_sql::executor(&mut **tx))
                 .await

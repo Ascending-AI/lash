@@ -284,6 +284,9 @@ pub(super) async fn run_once_frame_residency_curve(
         );
         points.push(measured);
     }
+    if let Some(root) = sqlite_root {
+        std::fs::remove_dir_all(root)?;
+    }
     check_frame_curve(&points)?;
     let mut counters = BTreeMap::new();
     counters.insert(
@@ -385,6 +388,8 @@ mod tests {
                 .expect("seed and reopen a fixed current frame"),
             );
         }
+        std::fs::remove_dir_all(&root).expect("remove closed SQLite fixture");
+        assert!(!root.exists());
         check_reopened_frame_residency(&points)
             .expect("resident heap and decoded rows stay fixed across earlier history");
     }

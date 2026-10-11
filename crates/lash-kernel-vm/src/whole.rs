@@ -72,8 +72,33 @@ impl KernelMachine {
         owner: ChildRef,
         freeze: impl FnMut(&FrozenDatum) -> Result<ChildRef, E>,
     ) -> Result<KernelWhole, WholeExportError<E>> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        let mut phase = crate::perf_witness::Phase::begin("machine.export");
         let parked = self.export()?;
-        KernelWhole::capture(&parked, release, owner, freeze).map_err(WholeExportError::Whole)
+        #[cfg(any(test, feature = "perf-witness"))]
+        {
+            if let Some(phase) = &mut phase {
+                phase.complete(
+                    parked.tasks.len(),
+                    parked.tasks.iter().map(|task| task.calls.len()).sum(),
+                    parked.objects.len(),
+                );
+            }
+            drop(phase);
+        }
+        #[cfg(any(test, feature = "perf-witness"))]
+        let mut phase = crate::perf_witness::Phase::begin("whole.capture");
+        let whole = KernelWhole::capture(&parked, release, owner, freeze)
+            .map_err(WholeExportError::Whole)?;
+        #[cfg(any(test, feature = "perf-witness"))]
+        if let Some(phase) = &mut phase {
+            phase.complete(
+                whole.tasks.len(),
+                whole.tasks.iter().map(|task| task.calls.len()).sum(),
+                whole.objects.len(),
+            );
+        }
+        Ok(whole)
     }
 
     /// Rebuilds a run from a whole state. Each wait's request is the one
@@ -98,10 +123,32 @@ impl KernelMachine {
             .keys()
             .copied()
             .collect();
+        #[cfg(any(test, feature = "perf-witness"))]
+        let mut phase = crate::perf_witness::Phase::begin("whole.restore");
         let parked: ParkedRun = whole
             .restore(functions, thaw, admitted)
             .map_err(WholeImportError::Whole)?;
-        Ok(Self::import(program, bounds, parked)?)
+        #[cfg(any(test, feature = "perf-witness"))]
+        let geometry = (
+            parked.tasks.len(),
+            parked.tasks.iter().map(|task| task.calls.len()).sum(),
+            parked.objects.len(),
+        );
+        #[cfg(any(test, feature = "perf-witness"))]
+        {
+            if let Some(phase) = &mut phase {
+                phase.complete(geometry.0, geometry.1, geometry.2);
+            }
+            drop(phase);
+        }
+        #[cfg(any(test, feature = "perf-witness"))]
+        let mut phase = crate::perf_witness::Phase::begin("machine.import");
+        let machine = Self::import(program, bounds, parked)?;
+        #[cfg(any(test, feature = "perf-witness"))]
+        if let Some(phase) = &mut phase {
+            phase.complete(geometry.0, geometry.1, geometry.2);
+        }
+        Ok(machine)
     }
 }
 

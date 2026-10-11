@@ -12,7 +12,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         &self,
         frame: &lash_core_execution::FrameEnvironmentId,
     ) -> Result<bool, StoreError> {
-        sqlx::query_scalar(
+        crate::observed_sql::query_scalar(
             session_sql()
                 .graph_postgres
                 .artifact_frame_is_retained
@@ -38,7 +38,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
     async fn count_unsettled_turns(
         &self,
     ) -> Result<lash_core_execution::store::UnsettledTurnCounts, StoreError> {
-        let row = sqlx::query(
+        let row = crate::observed_sql::query(
             crate::turn_ingress::turn_ingress_sql()
                 .family
                 .count_unsettled_turns
@@ -68,7 +68,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         .await?;
         let mut tx = crate::runtime_persistence::read_tx(self).await?;
         let sql = &session_sql().turn_commits;
-        let (current, horizon): (i64, i64) = sqlx::query_as(sql.change_clock.sql())
+        let (current, horizon): (i64, i64) = crate::observed_sql::query_as(sql.change_clock.sql())
             .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
@@ -76,7 +76,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         let horizon =
             crate::support::u64_from_sql("TurnChangeClock", "retention_horizon", horizon)?;
         after.check(current, horizon)?;
-        let rows = sqlx::query(sql.changes_after.sql())
+        let rows = crate::observed_sql::query(sql.changes_after.sql())
             .bind(after.store_sequence() as i64)
             .bind(i64::try_from(limit.get()).unwrap_or(i64::MAX))
             .fetch_all(crate::observed_sql::executor(&mut *tx))
@@ -116,7 +116,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
         let sql = &crate::session_runs::session_runs_sql().intents;
-        let rows = sqlx::query(sql.list_after.sql())
+        let rows = crate::observed_sql::query(sql.list_after.sql())
             .bind(after.map_or(0, |id| id.sequence()) as i64)
             .bind(limit.get() as i64)
             .fetch_all(crate::observed_sql::executor(&self.pool))
@@ -145,11 +145,12 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         let meta =
             crate::session_meta::load_session_meta(&self.pool, Some(session_id), &self.observer)
                 .await?;
-        let deleted: bool = sqlx::query_scalar(session_sql().deleted_postgres.exists.sql())
-            .bind(session_id.as_str())
-            .fetch_one(crate::observed_sql::executor(&self.pool))
-            .await
-            .map_err(store_sqlx_error)?;
+        let deleted: bool =
+            crate::observed_sql::query_scalar(session_sql().deleted_postgres.exists.sql())
+                .bind(session_id.as_str())
+                .fetch_one(crate::observed_sql::executor(&self.pool))
+                .await
+                .map_err(store_sqlx_error)?;
         Ok(if deleted {
             lash_core_execution::SessionLookup::Deleted
         } else if let Some(meta) = meta {
@@ -267,7 +268,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         // Target identity fences precede source-retention fences. This unlocked
         // fast path only decides already-materialized targets and permanent
         // tombstones; keep the post-lock checks below for concurrent changes.
-        let (exists, deleted) = sqlx::query_as::<_, (bool, bool)>(
+        let (exists, deleted) = crate::observed_sql::query_as::<_, (bool, bool)>(
             session_sql()
                 .meta_postgres
                 .exists_materialized_or_deleted
@@ -299,22 +300,25 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         // Keep the fork fences in the global order: every session advisory
         // fence first, then the retained revision, then its checkpoint root,
         // then graph and head.
-        let exists =
-            sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
-                .bind(request.session_id.as_str())
-                .fetch_one(crate::observed_sql::executor(&mut **tx))
-                .await
-                .map_err(store_sqlx_error)?;
+        let exists = crate::observed_sql::query_scalar::<_, bool>(
+            session_sql().meta_postgres.exists_materialized.sql(),
+        )
+        .bind(request.session_id.as_str())
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)?;
         if exists {
             return Err(StoreError::ForkSessionAlreadyExists {
                 session_id: request.session_id.clone(),
             });
         }
-        let deleted = sqlx::query_scalar::<_, bool>(session_sql().deleted_postgres.exists.sql())
-            .bind(request.session_id.as_str())
-            .fetch_one(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?;
+        let deleted = crate::observed_sql::query_scalar::<_, bool>(
+            session_sql().deleted_postgres.exists.sql(),
+        )
+        .bind(request.session_id.as_str())
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)?;
         if deleted {
             return Err(StoreError::SessionDeleted {
                 session_id: request.session_id.clone(),
@@ -323,16 +327,17 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         // The revision row is the retained point, share-locked until this
         // fork's own head roots what it names. No other revision is ever
         // forked in its place.
-        let retained = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
-            session_sql().revisions_postgres.select_for_share.sql(),
-        )
+        let retained = crate::observed_sql::query_as::<
+            _,
+            (Option<String>, Option<String>, Option<String>),
+        >(session_sql().revisions_postgres.select_for_share.sql())
         .bind(source_session_id.as_str())
         .bind(sql_revision)
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
         let Some((leaf_node_id, mut checkpoint_ref, _head_json)) = retained else {
-            let (source_exists, source_deleted) = sqlx::query_as::<_, (bool, bool)>(
+            let (source_exists, source_deleted) = crate::observed_sql::query_as::<_, (bool, bool)>(
                 session_sql()
                     .meta_postgres
                     .exists_materialized_or_deleted
@@ -365,7 +370,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             let leaf = lash_core_execution::NodeId::parse(leaf_node_id)?;
             // Retirement never tombstones a retained revision's leaf, so a
             // dead one is damage, not a collected point.
-            let node_facts = sqlx::query_as::<_, (String, i64)>(
+            let node_facts = crate::observed_sql::query_as::<_, (String, i64)>(
                 session_sql()
                     .graph_postgres
                     .select_owner_generation_for_update
@@ -416,7 +421,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                     .await
                     .map_err(store_sqlx_error)?;
             }
-            source_frame_ended = sqlx::query_scalar(
+            source_frame_ended = crate::observed_sql::query_scalar(
                 crate::artifact_store::artifact_sql()
                     .fences
                     .select_is_fenced
@@ -439,19 +444,20 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             let mut current_node_id = leaf;
             let mut expected_generation = fork_generation;
             loop {
-                let facts = sqlx::query_as::<_, (String, Option<String>, String, i64)>(
-                    session_sql().graph_postgres.select_edge_for_share.sql(),
-                )
-                .bind(&*current_node_id)
-                .fetch_optional(crate::observed_sql::executor(&mut **tx))
-                .await
-                .map_err(store_sqlx_error)?
-                .ok_or_else(|| StoreError::StoredDataCorrupt {
-                    record_kind: "SessionGraph",
-                    message: format!(
-                        "retained fork path is missing or tombstoned at `{current_node_id}`"
-                    ),
-                })?;
+                let facts =
+                    crate::observed_sql::query_as::<_, (String, Option<String>, String, i64)>(
+                        session_sql().graph_postgres.select_edge_for_share.sql(),
+                    )
+                    .bind(&*current_node_id)
+                    .fetch_optional(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(store_sqlx_error)?
+                    .ok_or_else(|| StoreError::StoredDataCorrupt {
+                        record_kind: "SessionGraph",
+                        message: format!(
+                            "retained fork path is missing or tombstoned at `{current_node_id}`"
+                        ),
+                    })?;
                 let generation = u64_from_sql("SessionGraph node", "generation", facts.3)?;
                 if generation != expected_generation {
                     return Err(StoreError::StoredDataCorrupt {
@@ -558,14 +564,14 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             &head_json,
         )
         .await?;
-        sqlx::query(session_sql().head_postgres.insert_fork.sql())
+        crate::observed_sql::query(session_sql().head_postgres.insert_fork.sql())
             .bind(request.session_id.as_str())
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         if let Some(fork_plan) = &fork_plan {
             for ancestor in fork_plan.ancestors() {
-                sqlx::query(session_sql().lineage.insert.sql())
+                crate::observed_sql::query(session_sql().lineage.insert.sql())
                     .bind(fork_plan.session_id().as_str())
                     .bind(ancestor.ancestor_session_id.as_str())
                     .bind(&*ancestor.fork_node_id)
@@ -595,7 +601,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         )
         .await?;
         if let Some((source_frame, fork_frame)) = copy_frame_edges {
-            sqlx::query(
+            crate::observed_sql::query(
                 crate::artifact_store::artifact_sql()
                     .edges
                     .copy_referrer_edges
@@ -642,7 +648,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         let limit = AttachmentRootPage::QUERY_LIMIT as i64;
         let ids: Vec<String> = match source {
             AttachmentRootSource::Referrer(kind) => {
-                sqlx::query_scalar(sql.edges.select_root_page.sql())
+                crate::observed_sql::query_scalar(sql.edges.select_root_page.sql())
                     .bind(kind.as_str())
                     .bind(after)
                     .bind(limit)
@@ -650,14 +656,14 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
                     .await
             }
             AttachmentRootSource::OtherReferrers => {
-                sqlx::query_scalar(sql.edges.select_other_root_page.sql())
+                crate::observed_sql::query_scalar(sql.edges.select_other_root_page.sql())
                     .bind(after)
                     .bind(limit)
                     .fetch_all(crate::observed_sql::executor(&self.pool))
                     .await
             }
             AttachmentRootSource::PendingWrites => {
-                sqlx::query_scalar(sql.pending.select_root_page.sql())
+                crate::observed_sql::query_scalar(sql.pending.select_root_page.sql())
                     .bind(after)
                     .bind(limit)
                     .fetch_all(crate::observed_sql::executor(&self.pool))
@@ -684,7 +690,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         &self,
         id: &lash_core_execution::AttachmentId,
     ) -> Result<bool, StoreError> {
-        Ok(sqlx::query(
+        Ok(crate::observed_sql::query(
             crate::attachments::attachment_sql()
                 .edges
                 .select_live_root
@@ -734,7 +740,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         // the root predicate below and that writer's manifest insert cannot
         // interleave.
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
-        let rooted = sqlx::query(
+        let rooted = crate::observed_sql::query(
             crate::attachments::attachment_sql()
                 .edges
                 .select_live_root
@@ -749,7 +755,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(lash_core_execution::AttachmentCondemnation::RootPresent);
         }
-        let inserted = sqlx::query(
+        let inserted = crate::observed_sql::query(
             crate::attachments::attachment_sql()
                 .postgres
                 .insert_condemned
@@ -766,7 +772,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
             // it is stale evidence of an upload whose bytes this sweep is about
             // to delete. Clearing them here is what makes a negative byte-absence
             // tombstone unnecessary.
-            sqlx::query(
+            crate::observed_sql::query(
                 crate::attachments::attachment_sql()
                     .uploads
                     .delete_by_id
@@ -799,7 +805,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         // put bytes into an in-flight delete.
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
-        let armed = sqlx::query(
+        let armed = crate::observed_sql::query(
             crate::attachments::attachment_sql()
                 .condemnation
                 .arm_delete
@@ -888,7 +894,7 @@ async fn fence_deleted_session_frames_tx(
                 lash_core_execution::ReferrerGuard::SessionGraphRetired(session),
             )
         } else {
-            sqlx::query(
+            crate::observed_sql::query(
                 crate::artifact_store::artifact_sql()
                     .fences
                     .insert_fence
@@ -913,7 +919,7 @@ async fn session_texts(
     statement: &str,
     session_id: &SessionId,
 ) -> Result<Vec<String>, StoreError> {
-    sqlx::query_scalar(statement)
+    crate::observed_sql::query_scalar(statement)
         .bind(session_id.as_str())
         .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
@@ -931,22 +937,23 @@ pub(crate) async fn delete_session_tx(
     now: u64,
 ) -> Result<Option<crate::change_feed::TurnChange>, StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
-    let materialized =
-        sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
-            .bind(session_id.as_str())
-            .fetch_one(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?;
+    let materialized = crate::observed_sql::query_scalar::<_, bool>(
+        session_sql().meta_postgres.exists_materialized.sql(),
+    )
+    .bind(session_id.as_str())
+    .fetch_one(crate::observed_sql::executor(&mut **tx))
+    .await
+    .map_err(store_sqlx_error)?;
     if materialized {
         fence_deleted_session_frames_tx(tx, std::slice::from_ref(session_id), fleet_format, now)
             .await?;
         // Permanent identity evidence for host-facing session ids.
-        sqlx::query(session_sql().deleted_postgres.insert_from_meta.sql())
+        crate::observed_sql::query(session_sql().deleted_postgres.insert_from_meta.sql())
             .bind(session_id.as_str())
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
-        sqlx::query(session_sql().deleted_postgres.insert_root.sql())
+        crate::observed_sql::query(session_sql().deleted_postgres.insert_root.sql())
             .bind(session_id.as_str())
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
@@ -956,7 +963,7 @@ pub(crate) async fn delete_session_tx(
     // a failed transaction cannot leave live-looking state without its owner.
     // The session advisory fence stabilizes this head read. Do not take its
     // row lock before the complete hash-sorted blob candidate set below.
-    let head = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+    let head = crate::observed_sql::query_as::<_, (Option<String>, Option<String>)>(
         session_sql().head.select_reclaim.sql(),
     )
     .bind(session_id.as_str())
@@ -1003,7 +1010,7 @@ pub(crate) async fn delete_session_tx(
         session_sql().revisions.delete_by_session.sql(),
         session_sql().pins.delete_by_session.sql(),
     ] {
-        sqlx::query(statement)
+        crate::observed_sql::query(statement)
             .bind(session_id.as_str())
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
@@ -1016,7 +1023,7 @@ pub(crate) async fn delete_session_tx(
     for leaf_node_id in &retained_leaves {
         crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, leaf_node_id).await?;
     }
-    let unreachable_candidates = sqlx::query_scalar::<_, String>(
+    let unreachable_candidates = crate::observed_sql::query_scalar::<_, String>(
         session_sql().graph_postgres.select_unreachable_leaves.sql(),
     )
     .bind(session_id.as_str())
@@ -1031,7 +1038,7 @@ pub(crate) async fn delete_session_tx(
     // owner is gone (ancestry retired at a fork child's delete or collection),
     // and no session-scoped vacuum could ever reach it. Live sessions' rows
     // stay resident for their own vacuum, so this is not a catalog-wide sweep.
-    sqlx::query(
+    crate::observed_sql::query(
         session_sql()
             .graph_postgres
             .delete_tombstoned_reclaimable
@@ -1051,7 +1058,7 @@ pub(crate) async fn delete_session_tx(
             .sql(),
         turn_ingress.cancel_requests.delete_by_session.sql(),
     ] {
-        sqlx::query(statement)
+        crate::observed_sql::query(statement)
             .bind(session_id.as_str())
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
@@ -1063,7 +1070,7 @@ pub(crate) async fn delete_session_tx(
         session_sql().observer_intents.delete_by_session.sql(),
         session_sql().meta.delete_by_session.sql(),
     ] {
-        sqlx::query(statement)
+        crate::observed_sql::query(statement)
             .bind(session_id.as_str())
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
@@ -1095,7 +1102,7 @@ pub(crate) async fn delete_session_tx(
 pub(crate) async fn next_turn_change_sequence(
     conn: &mut sqlx::PgConnection,
 ) -> Result<i64, StoreError> {
-    sqlx::query_scalar(session_sql().turn_commits.next_change_seq.sql())
+    crate::observed_sql::query_scalar(session_sql().turn_commits.next_change_seq.sql())
         .fetch_optional(crate::observed_sql::executor(conn))
         .await
         .map_err(store_sqlx_error)?

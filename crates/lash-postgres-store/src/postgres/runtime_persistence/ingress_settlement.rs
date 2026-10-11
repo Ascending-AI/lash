@@ -143,7 +143,7 @@ async fn admitted_input_tx(
     run: &TurnId,
     input_id: &lash_core_execution::InputId,
 ) -> Result<lash_core_execution::PendingTurnInput, StoreError> {
-    let row = sqlx::query(
+    let row = crate::observed_sql::query(
         crate::turn_ingress::turn_ingress_sql()
             .pending_inputs_postgres
             .select_by_id_for_update
@@ -177,7 +177,7 @@ async fn admitted_batch_tx(
 ) -> Result<QueuedWorkBatch, StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
     let observed: Option<Option<String>> =
-        sqlx::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
+        crate::observed_sql::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
             .bind(session_id.as_str())
             .bind(batch_id.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut **tx))
@@ -204,7 +204,7 @@ async fn settle_admitted_input_tx(
     state: lash_core_execution::runtime::TurnInputStateKind,
     now: u64,
 ) -> Result<(), StoreError> {
-    let settled = sqlx::query(
+    let settled = crate::observed_sql::query(
         crate::turn_ingress::turn_ingress_sql()
             .pending_inputs
             .settle_admitted
@@ -229,7 +229,7 @@ async fn release_admitted_input_tx(
     run: &TurnId,
     input_id: &lash_core_execution::InputId,
 ) -> Result<(), StoreError> {
-    let released = sqlx::query(
+    let released = crate::observed_sql::query(
         crate::turn_ingress::turn_ingress_sql()
             .pending_inputs
             .release_admitted
@@ -252,7 +252,7 @@ async fn release_admitted_batch_tx(
     run: &TurnId,
     batch_id: &lash_core_execution::BatchId,
 ) -> Result<(), StoreError> {
-    let released = sqlx::query(
+    let released = crate::observed_sql::query(
         crate::turn_ingress::turn_ingress_sql()
             .queued_batches
             .release_admitted

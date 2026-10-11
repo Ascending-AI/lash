@@ -58,14 +58,14 @@ pub(crate) async fn run_terminal_conn(
     session_id: &SessionId,
     run: &TurnId,
 ) -> Result<Option<RunTerminal>, StoreError> {
-    let row = sqlx::query(session_runs_sql().runs.select_terminal.sql())
+    let row = crate::observed_sql::query(session_runs_sql().runs.select_terminal.sql())
         .bind(session_id.as_str())
         .bind(run.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?;
     let Some(row) = row else {
-        let deleted: bool = sqlx::query_scalar(
+        let deleted: bool = crate::observed_sql::query_scalar(
             crate::session_sql::session_sql()
                 .deleted_postgres
                 .exists
@@ -153,7 +153,7 @@ pub(crate) async fn terminal_window_ref(
 ) -> Result<Option<TerminalWindowRef>, StoreError> {
     let sql = &session_runs_sql().runs;
     let head: Option<(i64, Option<String>, Option<String>, String)> =
-        sqlx::query_as(sql.select_window_head.sql())
+        crate::observed_sql::query_as(sql.select_window_head.sql())
             .bind(session.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut *conn))
             .await
@@ -162,7 +162,7 @@ pub(crate) async fn terminal_window_ref(
         return Ok(None);
     };
     let head_digest = lash_core_execution::store::BlobRef::for_content(head_json.as_bytes()).0;
-    sqlx::query(sql.insert_window_head.sql())
+    crate::observed_sql::query(sql.insert_window_head.sql())
         .bind(session.as_str())
         .bind(&head_digest)
         .bind(head_json)
@@ -201,7 +201,7 @@ pub(crate) async fn write_run_terminal_conn(
             .await;
     }
     let sql = session_runs_sql();
-    sqlx::query(sql.runs.insert_open.sql())
+    crate::observed_sql::query(sql.runs.insert_open.sql())
         .bind(terminal.session_id.as_str())
         .bind(terminal.run.as_str())
         .execute(crate::observed_sql::executor(&mut *conn))
@@ -215,7 +215,7 @@ pub(crate) async fn write_run_terminal_conn(
     let (window_revision, window_leaf, window_checkpoint, window_head) =
         TerminalWindowRef::columns(window.as_ref());
     let columns = terminal.to_stored()?;
-    let written = sqlx::query(sql.runs.write_terminal.sql())
+    let written = crate::observed_sql::query(sql.runs.write_terminal.sql())
         .bind(terminal.session_id.as_str())
         .bind(terminal.run.as_str())
         .bind(columns.kind)
@@ -269,14 +269,14 @@ async fn release_run_rows_conn(
     at_ms: u64,
 ) -> Result<(), StoreError> {
     let verbs = &session_runs_sql().inputs;
-    let own: Vec<String> = sqlx::query_scalar(verbs.bound_inputs.sql())
+    let own: Vec<String> = crate::observed_sql::query_scalar(verbs.bound_inputs.sql())
         .bind(session_id.as_str())
         .bind(run.as_str())
         .fetch_all(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?;
     for input in own {
-        sqlx::query(verbs.unbind.sql())
+        crate::observed_sql::query(verbs.unbind.sql())
             .bind(session_id.as_str())
             .bind(&input)
             .execute(crate::observed_sql::executor(&mut *conn))
@@ -284,13 +284,13 @@ async fn release_run_rows_conn(
             .map_err(store_sqlx_error)?;
     }
     let sql = crate::turn_ingress::turn_ingress_sql();
-    sqlx::query(sql.pending_inputs.release_run.sql())
+    crate::observed_sql::query(sql.pending_inputs.release_run.sql())
         .bind(session_id.as_str())
         .bind(run.as_str())
         .execute(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?;
-    sqlx::query(sql.queued_batches.release_run.sql())
+    crate::observed_sql::query(sql.queued_batches.release_run.sql())
         .bind(session_id.as_str())
         .bind(run.as_str())
         .execute(crate::observed_sql::executor(&mut *conn))
@@ -299,11 +299,12 @@ async fn release_run_rows_conn(
     // What the run let go of is the session's to admit again.
     crate::durable::wake_session_tx(conn, session_id, false, at_ms).await?;
     let ended = run_turns_conn(conn, session_id, run).await?;
-    let open_rows = sqlx::query(sql.pending_inputs_postgres.select_pending_active.sql())
-        .bind(session_id.as_str())
-        .fetch_all(crate::observed_sql::executor(&mut *conn))
-        .await
-        .map_err(store_sqlx_error)?;
+    let open_rows =
+        crate::observed_sql::query(sql.pending_inputs_postgres.select_pending_active.sql())
+            .bind(session_id.as_str())
+            .fetch_all(crate::observed_sql::executor(&mut *conn))
+            .await
+            .map_err(store_sqlx_error)?;
     let mut addressed = Vec::new();
     for row in open_rows {
         let input = crate::pending_turn_input_from_row(crate::pending_turn_input_row(row)?)?;
@@ -321,7 +322,7 @@ async fn release_run_rows_conn(
     // `select_request` yields request_id, origin, reason, disposition, mode.
     let request: Option<
         lash_core_execution::store_backend_support::turn_cancel::TurnCancelRequestRow,
-    > = sqlx::query_as(sql.cancel_requests.select_request.sql())
+    > = crate::observed_sql::query_as(sql.cancel_requests.select_request.sql())
         .bind(session_id.as_str())
         .bind(run.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *conn))
@@ -336,7 +337,7 @@ async fn release_run_rows_conn(
         .unwrap_or(lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer);
     for input in addressed {
         if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop {
-            sqlx::query(sql.pending_inputs.cancel.sql())
+            crate::observed_sql::query(sql.pending_inputs.cancel.sql())
                 .bind(session_id.as_str())
                 .bind(input.input_id.as_str())
                 .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
@@ -423,7 +424,7 @@ async fn unanswered_run_tx(
         return Ok(UnansweredRun::Ended(Box::new(terminal)));
     }
     Ok(
-        if sqlx::query(session_runs_sql().runs.select_terminal.sql())
+        if crate::observed_sql::query(session_runs_sql().runs.select_terminal.sql())
             .bind(session.as_str())
             .bind(run.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut **tx))
@@ -456,17 +457,18 @@ async fn write_unanswered_run_end_tx(
     };
     // The run's own input is dropped and its batches cancelled first; the
     // terminal write then releases whatever else the run still held.
-    let mut inputs: Vec<String> = sqlx::query_scalar(session_runs_sql().inputs.bound_inputs.sql())
-        .bind(session.as_str())
-        .bind(run.as_str())
-        .fetch_all(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?;
+    let mut inputs: Vec<String> =
+        crate::observed_sql::query_scalar(session_runs_sql().inputs.bound_inputs.sql())
+            .bind(session.as_str())
+            .bind(run.as_str())
+            .fetch_all(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?;
     let batches = admitted_batches_conn(tx, session, run).await?;
     inputs.sort();
     inputs.dedup();
     for input in inputs {
-        sqlx::query(
+        crate::observed_sql::query(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .cancel_input
@@ -498,7 +500,7 @@ pub(crate) async fn cancel_run_batch_tx(
     batch_id: &str,
     at_ms: u64,
 ) -> Result<(), StoreError> {
-    sqlx::query(
+    crate::observed_sql::query(
         crate::turn_ingress::turn_ingress_sql()
             .queued_batches
             .cancel_batch
@@ -520,7 +522,7 @@ pub(crate) async fn unfinished_run_conn(
     session_id: &SessionId,
 ) -> Result<Option<UnfinishedRun>, StoreError> {
     let row: Option<(String, String)> =
-        sqlx::query_as(session_runs_sql().runs.select_unfinished.sql())
+        crate::observed_sql::query_as(session_runs_sql().runs.select_unfinished.sql())
             .bind(session_id.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut *conn))
             .await
@@ -544,7 +546,7 @@ pub(crate) async fn head_ownership_facts_conn(
     let unfinished_run = unfinished_run_conn(conn, session_id)
         .await?
         .map(|unfinished| unfinished.run);
-    let row: (Option<i64>, Option<i64>, Option<i64>, Option<i64>) = sqlx::query_as(
+    let row: (Option<i64>, Option<i64>, Option<i64>, Option<i64>) = crate::observed_sql::query_as(
         crate::turn_ingress::turn_ingress_sql()
             .family
             .pending_session_work_ordering
@@ -585,7 +587,7 @@ pub(crate) async fn run_admission_conn(
     run: &TurnId,
 ) -> Result<Option<RunAdmissionRecord>, StoreError> {
     let json: Option<Option<String>> =
-        sqlx::query_scalar(session_runs_sql().runs.select_admission.sql())
+        crate::observed_sql::query_scalar(session_runs_sql().runs.select_admission.sql())
             .bind(session_id.as_str())
             .bind(run.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut *conn))
@@ -624,7 +626,7 @@ pub(crate) async fn run_turns_conn(
         }));
     let mut members = Vec::new();
     for (statement, id) in rows {
-        let key: Option<Option<String>> = sqlx::query_scalar(statement)
+        let key: Option<Option<String>> = crate::observed_sql::query_scalar(statement)
             .bind(session_id.as_str())
             .bind(id)
             .fetch_optional(crate::observed_sql::executor(&mut *conn))
@@ -657,7 +659,7 @@ pub(crate) async fn run_binding_conn(
     session_id: &SessionId,
     input: &InputId,
 ) -> Result<Option<TurnId>, StoreError> {
-    sqlx::query_scalar::<_, String>(session_runs_sql().inputs.select_run.sql())
+    crate::observed_sql::query_scalar::<_, String>(session_runs_sql().inputs.select_run.sql())
         .bind(session_id.as_str())
         .bind(input.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *conn))
@@ -678,7 +680,7 @@ pub(crate) async fn bind_applied_input_tx(
     input: &InputId,
     run: &TurnId,
 ) -> Result<(), StoreError> {
-    sqlx::query(session_runs_sql().inputs.insert.sql())
+    crate::observed_sql::query(session_runs_sql().inputs.insert.sql())
         .bind(session_id.as_str())
         .bind(input.as_str())
         .bind(run.as_str())
@@ -705,14 +707,14 @@ pub(crate) async fn bind_run_inputs_conn(
         }
     }
     let sql = session_runs_sql();
-    sqlx::query(sql.runs.insert_open.sql())
+    crate::observed_sql::query(sql.runs.insert_open.sql())
         .bind(session_id.as_str())
         .bind(run.as_str())
         .execute(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?;
     for input in inputs {
-        sqlx::query(sql.inputs.insert.sql())
+        crate::observed_sql::query(sql.inputs.insert.sql())
             .bind(session_id.as_str())
             .bind(input.as_str())
             .bind(run.as_str())
@@ -750,7 +752,7 @@ pub(crate) async fn close_session_intent_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
 ) -> Result<Option<ControlIntent>, StoreError> {
-    sqlx::query(session_runs_sql().intents.select_close_session.sql())
+    crate::observed_sql::query(session_runs_sql().intents.select_close_session.sql())
         .bind(session_id.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *conn))
         .await
@@ -765,7 +767,7 @@ pub(crate) async fn load_intent_conn(
     conn: &mut PgConnection,
     id: ControlIntentId,
 ) -> Result<Option<ControlIntent>, StoreError> {
-    sqlx::query(session_runs_sql().intents.select_by_id.sql())
+    crate::observed_sql::query(session_runs_sql().intents.select_by_id.sql())
         .bind(sql_i64("control intent id", id.sequence())?)
         .fetch_optional(crate::observed_sql::executor(&mut *conn))
         .await
@@ -785,7 +787,7 @@ pub(crate) async fn insert_intent_conn(
 ) -> Result<ControlIntent, StoreError> {
     let state = ControlIntentState::Pending;
     let (state_code, state_json) = stored_intent_state(&state)?;
-    let id: i64 = sqlx::query_scalar(session_runs_sql().intents.insert.sql())
+    let id: i64 = crate::observed_sql::query_scalar(session_runs_sql().intents.insert.sql())
         .bind(session_id.as_str())
         .bind(i64::from(CONTROL_INTENT_FORMAT))
         .bind(kind.code())
@@ -826,7 +828,7 @@ pub(crate) async fn begin_session_close_tx(
     if let Some(intent) = close_session_intent_conn(tx, session_id).await? {
         return Ok(Some(intent));
     }
-    let meta: Option<Option<i64>> = sqlx::query_scalar(
+    let meta: Option<Option<i64>> = crate::observed_sql::query_scalar(
         crate::session_sql::session_sql()
             .meta
             .select_closing_intent
@@ -841,7 +843,7 @@ pub(crate) async fn begin_session_close_tx(
     }
     let sql = session_runs_sql();
     let mut runs = std::collections::BTreeSet::new();
-    let open: Vec<String> = sqlx::query_scalar(sql.runs.select_open_runs.sql())
+    let open: Vec<String> = crate::observed_sql::query_scalar(sql.runs.select_open_runs.sql())
         .bind(session_id.as_str())
         .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
@@ -872,13 +874,14 @@ pub(crate) async fn begin_session_close_tx(
             .await?;
         }
     }
-    let closed = sqlx::query(crate::session_sql::session_sql().meta.begin_close.sql())
-        .bind(session_id.as_str())
-        .bind(sql_i64("control intent id", intent.id.sequence())?)
-        .execute(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?
-        .rows_affected();
+    let closed =
+        crate::observed_sql::query(crate::session_sql::session_sql().meta.begin_close.sql())
+            .bind(session_id.as_str())
+            .bind(sql_i64("control intent id", intent.id.sequence())?)
+            .execute(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected();
     if closed != 1 {
         return Err(StoreError::Contended);
     }
@@ -900,7 +903,7 @@ pub(crate) async fn delete_session_runs_conn(
         sql.runs.delete_window_heads_by_session.sql(),
         sql.inputs.delete_by_session.sql(),
     ] {
-        sqlx::query(statement)
+        crate::observed_sql::query(statement)
             .bind(session_id.as_str())
             .execute(crate::observed_sql::executor(&mut *conn))
             .await
@@ -990,7 +993,7 @@ impl RunStore for PostgresStore {
         run: &TurnId,
     ) -> Result<Vec<TurnId>, StoreError> {
         let scopes: Vec<String> =
-            sqlx::query_scalar(session_runs_sql().inputs.bound_turn_scopes.sql())
+            crate::observed_sql::query_scalar(session_runs_sql().inputs.bound_turn_scopes.sql())
                 .bind(session_id.as_str())
                 .bind(run.as_str())
                 .fetch_all(crate::observed_sql::executor(&self.pool))

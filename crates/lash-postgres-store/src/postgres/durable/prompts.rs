@@ -95,7 +95,7 @@ pub(super) async fn apply(
             snapshot,
             texts,
         } => {
-            let recorded = sqlx::query(SQL.insert_snapshot.sql())
+            let recorded = crate::observed_sql::query(SQL.insert_snapshot.sql())
                 .bind(call.session.as_str())
                 .bind(call.call.owner_column())
                 .bind(call.call.call_column())
@@ -121,19 +121,21 @@ pub(super) async fn apply(
             }
             let hashes: Vec<&str> = distinct.keys().copied().collect();
             let bodies: Vec<&str> = distinct.values().copied().collect();
-            sqlx::query(connection_sql().lock_xact_shared_by_text_batch_seeded.sql())
-                .bind(&hashes)
-                .bind(TEXT_LOCK_SEED)
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            sqlx::query(POSTGRES_SQL.insert_texts.sql())
+            crate::observed_sql::query(
+                connection_sql().lock_xact_shared_by_text_batch_seeded.sql(),
+            )
+            .bind(&hashes)
+            .bind(TEXT_LOCK_SEED)
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+            crate::observed_sql::query(POSTGRES_SQL.insert_texts.sql())
                 .bind(&hashes)
                 .bind(&bodies)
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
-            sqlx::query(POSTGRES_SQL.insert_edges.sql())
+            crate::observed_sql::query(POSTGRES_SQL.insert_edges.sql())
                 .bind(call.session.as_str())
                 .bind(call.call.owner_column())
                 .bind(call.call.call_column())
@@ -162,23 +164,23 @@ pub(crate) async fn release(
 ) -> Result<(), sqlx::Error> {
     let released: Vec<String> = match run {
         None => {
-            let hashes = sqlx::query_scalar(SQL.release_session_edges.sql())
+            let hashes = crate::observed_sql::query_scalar(SQL.release_session_edges.sql())
                 .bind(session.as_str())
                 .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await?;
-            sqlx::query(SQL.release_session_snapshots.sql())
+            crate::observed_sql::query(SQL.release_session_snapshots.sql())
                 .bind(session.as_str())
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await?;
             hashes
         }
         Some(run) => {
-            let hashes = sqlx::query_scalar(SQL.release_run_edges.sql())
+            let hashes = crate::observed_sql::query_scalar(SQL.release_run_edges.sql())
                 .bind(session.as_str())
                 .bind(ModelCallId::turn_owner(run))
                 .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await?;
-            sqlx::query(SQL.release_run_snapshots.sql())
+            crate::observed_sql::query(SQL.release_run_snapshots.sql())
                 .bind(session.as_str())
                 .bind(ModelCallId::turn_owner(run))
                 .execute(crate::observed_sql::executor(&mut *tx))
@@ -196,12 +198,12 @@ pub(crate) async fn release(
     }
     // The lock waits out every open record of these texts; the reclaim, a
     // later statement, then sees each edge those records committed.
-    sqlx::query(connection_sql().lock_xact_by_text_batch_seeded.sql())
+    crate::observed_sql::query(connection_sql().lock_xact_by_text_batch_seeded.sql())
         .bind(&released)
         .bind(TEXT_LOCK_SEED)
         .execute(crate::observed_sql::executor(&mut *tx))
         .await?;
-    sqlx::query(POSTGRES_SQL.reclaim_texts.sql())
+    crate::observed_sql::query(POSTGRES_SQL.reclaim_texts.sql())
         .bind(&released)
         .execute(crate::observed_sql::executor(&mut *tx))
         .await?;
@@ -212,7 +214,7 @@ pub(super) async fn snapshot(
     tx: &mut PgConnection,
     call: &PromptCallKey,
 ) -> Result<Option<PromptSnapshotRow>, DurableError> {
-    let Some(row) = sqlx::query(SQL.read_snapshot.sql())
+    let Some(row) = crate::observed_sql::query(SQL.read_snapshot.sql())
         .bind(call.session.as_str())
         .bind(call.call.owner_column())
         .bind(call.call.call_column())
@@ -222,7 +224,7 @@ pub(super) async fn snapshot(
     else {
         return Ok(None);
     };
-    let texts: Vec<String> = sqlx::query_scalar(SQL.read_edges.sql())
+    let texts: Vec<String> = crate::observed_sql::query_scalar(SQL.read_edges.sql())
         .bind(call.session.as_str())
         .bind(call.call.owner_column())
         .bind(call.call.call_column())
@@ -243,7 +245,7 @@ pub(super) async fn texts(
 ) -> Result<Vec<PromptText>, DurableError> {
     let mut found = Vec::with_capacity(hashes.len());
     for hash in hashes {
-        let text: Option<String> = sqlx::query_scalar(SQL.read_text.sql())
+        let text: Option<String> = crate::observed_sql::query_scalar(SQL.read_text.sql())
             .bind(hash)
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await

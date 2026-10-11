@@ -9,7 +9,7 @@ pub(super) async fn filter_unregistered_process_ids(
     if process_ids.is_empty() {
         return Ok(Vec::new());
     }
-    sqlx::query_scalar(
+    crate::observed_sql::query_scalar(
         process_sql()
             .process_postgres
             .classify_unregistered_candidates
@@ -38,7 +38,7 @@ pub(super) async fn filter_tombstoned_process_ids(
     if process_ids.is_empty() {
         return Ok(Vec::new());
     }
-    sqlx::query_scalar(
+    crate::observed_sql::query_scalar(
         process_sql()
             .process_postgres
             .classify_tombstoned_candidates

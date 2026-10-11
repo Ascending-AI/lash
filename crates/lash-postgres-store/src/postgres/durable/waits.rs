@@ -51,7 +51,7 @@ pub(super) async fn apply(
     match write {
         WaitWrite::Pin { id, scope, purpose } => {
             let columns = purpose.columns();
-            sqlx::query(SQL.waits.pin.sql())
+            crate::observed_sql::query(SQL.waits.pin.sql())
                 .bind(id.to_hex())
                 .bind(commit.actor.as_str())
                 .bind(scope.stored())
@@ -69,7 +69,7 @@ pub(super) async fn apply(
             Ok(())
         }
         WaitWrite::Due { id } => {
-            sqlx::query(SQL.waits.due.sql())
+            crate::observed_sql::query(SQL.waits.due.sql())
                 .bind(id.to_hex())
                 .bind(commit.actor.as_str())
                 .bind(TIMER_DIGEST)
@@ -80,12 +80,13 @@ pub(super) async fn apply(
             Ok(())
         }
         WaitWrite::RevokeScope(scope) => {
-            let owners: Vec<String> = sqlx::query_scalar(SQL.waits.revoke_scope.sql())
-                .bind(scope.stored())
-                .bind(commit.now.0)
-                .fetch_all(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
+            let owners: Vec<String> =
+                crate::observed_sql::query_scalar(SQL.waits.revoke_scope.sql())
+                    .bind(scope.stored())
+                    .bind(commit.now.0)
+                    .fetch_all(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
             wake_owners(tx, commit.actor, owners, commit.now).await
         }
         WaitWrite::ResolveProcessTerminal {
@@ -93,14 +94,15 @@ pub(super) async fn apply(
             digest,
             resolution_ref,
         } => {
-            let owners: Vec<String> = sqlx::query_scalar(SQL.waits.resolve_process_terminal.sql())
-                .bind(process.as_str())
-                .bind(digest)
-                .bind(resolution_ref)
-                .bind(commit.now.0)
-                .fetch_all(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
+            let owners: Vec<String> =
+                crate::observed_sql::query_scalar(SQL.waits.resolve_process_terminal.sql())
+                    .bind(process.as_str())
+                    .bind(digest)
+                    .bind(resolution_ref)
+                    .bind(commit.now.0)
+                    .fetch_all(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
             wake_owners(tx, commit.actor, owners, commit.now).await
         }
         WaitWrite::ResolveChildSession {
@@ -108,14 +110,15 @@ pub(super) async fn apply(
             digest,
             resolution_ref,
         } => {
-            let owners: Vec<String> = sqlx::query_scalar(SQL.waits.resolve_child_session.sql())
-                .bind(process.as_str())
-                .bind(digest)
-                .bind(resolution_ref)
-                .bind(commit.now.0)
-                .fetch_all(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
+            let owners: Vec<String> =
+                crate::observed_sql::query_scalar(SQL.waits.resolve_child_session.sql())
+                    .bind(process.as_str())
+                    .bind(digest)
+                    .bind(resolution_ref)
+                    .bind(commit.now.0)
+                    .fetch_all(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
             wake_owners(tx, commit.actor, owners, commit.now).await
         }
     }
@@ -152,7 +155,7 @@ pub(super) async fn resolve(
     resolution: &WaitResolution,
     now: DurableInstant,
 ) -> Result<(ResolveAnswer, Option<Woken>), DurableError> {
-    let row = sqlx::query(SQL.postgres.lock.sql())
+    let row = crate::observed_sql::query(SQL.postgres.lock.sql())
         .bind(resolution.id.to_hex())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -163,7 +166,7 @@ pub(super) async fn resolve(
     if let Some(answer) = settled_answer(&row, resolution) {
         return Ok((answer, None));
     }
-    let owner: Option<String> = sqlx::query_scalar(SQL.waits.resolve.sql())
+    let owner: Option<String> = crate::observed_sql::query_scalar(SQL.waits.resolve.sql())
         .bind(resolution.id.to_hex())
         .bind(&resolution.digest)
         .bind(&resolution.resolution_ref)
@@ -210,7 +213,7 @@ pub(super) async fn pending(
     tx: &mut PgConnection,
     owner: &ActorKey,
 ) -> Result<Vec<WaitRow>, DurableError> {
-    let rows = sqlx::query(SQL.waits.pending.sql())
+    let rows = crate::observed_sql::query(SQL.waits.pending.sql())
         .bind(owner.as_str())
         .fetch_all(crate::observed_sql::executor(tx))
         .await
@@ -222,7 +225,7 @@ pub(super) async fn wait(
     tx: &mut PgConnection,
     id: &WaitId,
 ) -> Result<Option<WaitRow>, DurableError> {
-    let row = sqlx::query(SQL.waits.one.sql())
+    let row = crate::observed_sql::query(SQL.waits.one.sql())
         .bind(id.to_hex())
         .fetch_optional(crate::observed_sql::executor(tx))
         .await

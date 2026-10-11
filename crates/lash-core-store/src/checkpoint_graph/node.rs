@@ -46,6 +46,8 @@ impl NodeId {
     /// The identity of an envelope's bytes.
     #[must_use]
     pub fn of_envelope(bytes: &[u8]) -> Self {
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_hash_pass(bytes.len());
         Self(BlobRef::digest_for_content(bytes))
     }
 
@@ -234,6 +236,8 @@ pub(crate) fn write_envelope(kind: NodeKind, children: &[[u8; 32]], body: &[u8])
     }
     put_varint(&mut out, body.len() as u64);
     out.extend_from_slice(body);
+    #[cfg(feature = "perf-witness")]
+    crate::perf_witness::record_graph_encode(out.len());
     out
 }
 

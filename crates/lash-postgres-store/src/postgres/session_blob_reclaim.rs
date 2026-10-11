@@ -24,7 +24,7 @@ pub(crate) async fn lock_session_blob_candidates_tx(
     // Same global lock order as checkpoint publication in support.rs: every
     // blob row in the complete union is locked by ascending content hash before
     // any owner edge is severed.
-    let locked = sqlx::query_scalar::<_, String>(
+    let locked = crate::observed_sql::query_scalar::<_, String>(
         crate::blobs::blob_sql()
             .postgres
             .lock_reclaim_candidates
@@ -57,7 +57,7 @@ pub(crate) async fn reclaim_session_checkpoint_blobs_tx(
         let mut kept = std::collections::BTreeSet::new();
         let mut deleted_now = 0_usize;
         for blob_ref in remaining {
-            let deleted = sqlx::query(
+            let deleted = crate::observed_sql::query(
                 crate::blobs::blob_sql()
                     .postgres
                     .reclaim_session_candidate

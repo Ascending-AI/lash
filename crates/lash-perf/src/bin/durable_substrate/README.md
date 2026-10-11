@@ -29,6 +29,7 @@ tool registry, projections and event feed; facade wiring exists in
 
 | Case | What it measures |
 |---|---|
+| `operations` | Six owning SQL windows on fresh fixed-prior-turn sessions; independent `--prior-turns`, `--cell-parks`, `--value-bytes` |
 | `rounds-{1,5,20}` | L12a's N-round turn: one session per batch, one `benchmark_echo` per round |
 | `concurrent-{1,10,100}` | L12a's concurrency: S sessions per batch, five rounds of three parallel calls |
 | `resume-{1,5,20}` | A turn held at its model call after N rounds; its node stops; a fresh node resumes it |
@@ -75,3 +76,45 @@ kiln gate lash <fork> -- python3 crates/lash-perf/src/bin/durable_substrate/benc
 python3 crates/lash-perf/src/bin/durable_substrate/report.py \
   --inputs docs/perf/durable-substrate-2026-10.jsonl
 ```
+
+## Six-operation sweep
+
+See [physical SQL windows](../../../../../docs/perf/instruments/sql-operation-windows.md)
+for counter units, owner scope and graph-work definitions. The sweep records
+actual CellEnd separately from quiet snapshots, store-installed bytes, raw samples,
+load1 and CPU PSI. The PostgreSQL aggregate counters are separate and refuse
+incomplete statistics. Use a fresh evidence directory on each invocation.
+
+```sh
+. ./env.sh
+kiln build //crates/lash-perf:durable-substrate__bin \
+  //crates/lash-vm-worker:lash-vm-worker__bin --materializations final \
+  --build-report .kiln/FIG-5927/operation-build.json
+B="$(python3 tools/buck2/outputs.py --report .kiln/FIG-5927/operation-build.json \
+  --label //crates/lash-perf:durable-substrate__bin --single)"
+export LASH_VM_WORKER="$(python3 tools/buck2/outputs.py --report .kiln/FIG-5927/operation-build.json \
+  --label //crates/lash-vm-worker:lash-vm-worker__bin --single)"
+
+for prior in 10 100 1000; do
+  for parks in 1 10; do
+    for bytes in 0 16384; do
+      name="h${prior}-p${parks}-v${bytes}"
+      (ulimit -v 8388608; /usr/bin/time -v "$B" --store sqlite \
+        --sqlite-dir "$PWD/.kiln/FIG-5927/$name/sqlite" --case operations \
+        --prior-turns "$prior" --cell-parks "$parks" --value-bytes "$bytes" \
+        --samples 10 --out "$PWD/.kiln/FIG-5927/$name/sqlite.jsonl")
+      (ulimit -v 8388608; /usr/bin/time -v kiln gate lash <fork> -- \
+        python3 crates/lash-perf/src/bin/durable_substrate/bench.py \
+        --binary "$B" --evidence-dir ".kiln/FIG-5927/$name/postgres" \
+        --nodes 1 --case operations -- --prior-turns "$prior" \
+        --cell-parks "$parks" --value-bytes "$bytes" --samples 10)
+    done
+  done
+ done
+```
+
+The commands export the pinned worker runfile for direct binary invocations.
+These functional instruments include observer overhead. Keep the time command's
+peak RSS evidence and reject latency comparisons at load1 >= 8. Do not use a live
+PostgreSQL database. This sweep is a measurement recipe, not an additional landing
+gate; the small SQLite law pins the six owning boundaries deterministically.

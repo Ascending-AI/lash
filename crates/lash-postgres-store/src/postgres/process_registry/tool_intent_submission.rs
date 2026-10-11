@@ -22,7 +22,7 @@ pub(super) async fn admit(
     let mut tx = crate::begin_guarded(pool, fence)
         .await
         .map_err(crate::plugin_store_error)?;
-    sqlx::query(
+    crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .lock_xact_evidence_retention_shared
             .sql(),
@@ -32,14 +32,15 @@ pub(super) async fn admit(
     .map_err(plugin_sqlx_error)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let owner = submission.identity.owner.to_string();
-    let retired: bool = sqlx::query_scalar(sql.tool_intents.select_owner_retired.sql())
-        .bind(&owner)
-        .fetch_one(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(plugin_sqlx_error)?;
+    let retired: bool =
+        crate::observed_sql::query_scalar(sql.tool_intents.select_owner_retired.sql())
+            .bind(&owner)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(plugin_sqlx_error)?;
     if !retired {
         let encoded = serde_json::to_string(&submission).map_err(process_decode_error)?;
-        let inserted = sqlx::query(sql.tool_intents_postgres.insert_new.sql())
+        let inserted = crate::observed_sql::query(sql.tool_intents_postgres.insert_new.sql())
             .bind(&submission.identity.replay_key)
             .bind(&owner)
             .bind(&submission.identity.execution_scope_id)
@@ -56,7 +57,7 @@ pub(super) async fn admit(
             return Ok(ToolIntentSubmissionAdmission::Admitted);
         }
     }
-    let row = sqlx::query(sql.tool_intents.select_by_replay_key.sql())
+    let row = crate::observed_sql::query(sql.tool_intents.select_by_replay_key.sql())
         .bind(&submission.identity.replay_key)
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
@@ -80,7 +81,7 @@ pub(super) async fn complete(
     let mut tx = crate::begin_guarded(pool, fence)
         .await
         .map_err(crate::plugin_store_error)?;
-    let row = sqlx::query(
+    let row = crate::observed_sql::query(
         crate::turn_ingress::turn_ingress_sql()
             .tool_intents_postgres
             .select_by_replay_key_for_update
@@ -94,7 +95,7 @@ pub(super) async fn complete(
     let changed = submission.complete(at_ms, outcome)?;
     if changed {
         let encoded = serde_json::to_string(&submission).map_err(process_decode_error)?;
-        sqlx::query(
+        crate::observed_sql::query(
             crate::turn_ingress::turn_ingress_sql()
                 .tool_intents
                 .update_submission

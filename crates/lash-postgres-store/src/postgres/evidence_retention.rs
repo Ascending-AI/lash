@@ -18,7 +18,7 @@ pub(crate) async fn reclaim(
     async {
         let mut tx = begin_guarded(&factory.pool, &factory.fence).await?;
         // One cross-worker fence for this host-invoked, atomic multi-phase sweep.
-        sqlx::query(
+        crate::observed_sql::query(
             crate::connection_sql::connection_sql()
                 .lock_xact_evidence_retention
                 .sql(),
@@ -32,36 +32,37 @@ pub(crate) async fn reclaim(
         crate::change_feed::sequence_turns(&mut tx)
             .await
             .map_err(store_sqlx_error)?;
-        let (current, _): (i64, i64) = sqlx::query_as(sql.change_clock.sql())
+        let (current, _): (i64, i64) = crate::observed_sql::query_as(sql.change_clock.sql())
             .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         let current = crate::support::u64_from_sql("TurnChangeClock", "current_seq", current)?;
         let watermark = bound.turn_watermark.acknowledged_sequence(current)?;
         let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);
-        let horizon: Option<i64> = sqlx::query_scalar(sql.removed_horizon.sql())
+        let horizon: Option<i64> = crate::observed_sql::query_scalar(sql.removed_horizon.sql())
             .bind(cutoff)
             .bind(watermark)
             .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         if let Some(horizon) = horizon {
-            sqlx::query(sql.advance_horizon.sql())
+            crate::observed_sql::query(sql.advance_horizon.sql())
                 .bind(horizon)
                 .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
         }
-        let removed_session_terminal_count = sqlx::query(sql.delete_session_terminals.sql())
-            .bind(cutoff)
-            .bind(watermark)
-            .execute(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?
-            .rows_affected() as usize;
+        let removed_session_terminal_count =
+            crate::observed_sql::query(sql.delete_session_terminals.sql())
+                .bind(cutoff)
+                .bind(watermark)
+                .execute(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(store_sqlx_error)?
+                .rows_affected() as usize;
         // deleted_sessions permanently protects identity reuse (FIG-754 / FIG-748).
         let removed_receipt_count =
-            sqlx::query(session_sql().turn_commits_postgres.delete_retained.sql())
+            crate::observed_sql::query(session_sql().turn_commits_postgres.delete_retained.sql())
                 .bind(cutoff)
                 .bind(watermark)
                 .execute(crate::observed_sql::executor(&mut **tx))
@@ -75,7 +76,7 @@ pub(crate) async fn reclaim(
         // owner's rows past it. Submissions hold this sweep's lock shared, so
         // none claims an identity between the fence and the delete.
         let tool_intents = crate::turn_ingress::turn_ingress_sql();
-        sqlx::query(
+        crate::observed_sql::query(
             tool_intents
                 .tool_intents_postgres
                 .fence_retired_owners
@@ -86,7 +87,7 @@ pub(crate) async fn reclaim(
         .await
         .map_err(store_sqlx_error)?;
         let removed_tool_intent_submission_count =
-            sqlx::query(tool_intents.tool_intents.reclaim_retired.sql())
+            crate::observed_sql::query(tool_intents.tool_intents.reclaim_retired.sql())
                 .bind(cutoff)
                 .execute(crate::observed_sql::executor(&mut **tx))
                 .await

@@ -125,6 +125,7 @@ pub(super) async fn run_once_resident_graph_append_curve(
         })
         .await?;
 
+    let mut metric_samples_ms: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     for turn_index in 0..chat_turns {
         let fixtures = &fixtures;
         run.turn(
@@ -277,6 +278,9 @@ pub(super) async fn run_once_resident_graph_append_curve(
                     )?;
                     phase_profile.insert(phase.0, phase.1);
                 }
+                for (name, phase) in &phase_profile {
+                    metric_samples_ms.entry(format!("{name}_ms")).or_default().push(phase.duration_ms);
+                }
                 Ok(TurnRun {
                     value: (),
                     tail: TurnTail {
@@ -300,6 +304,7 @@ pub(super) async fn run_once_resident_graph_append_curve(
         .await?;
 
     let result = run.finish(RunTail {
+        metric_samples_ms,
         session_nodes: fixtures
             .iter()
             .chain(growth_fixtures.iter())
@@ -365,7 +370,17 @@ mod append_allocation_tests {
     #[tokio::test]
     async fn the_resident_graph_curve_meets_its_counted_allocation_contract() -> anyhow::Result<()>
     {
-        run_once_resident_graph_append_curve(1).await?;
+        let result = run_once_resident_graph_append_curve(1).await?;
+        assert_eq!(
+            result.metric_samples_ms.len(),
+            RESIDENT_GRAPH_SIZES.len() * MAX_SLOPE_BYTES_PER_RESIDENT_NODE.len()
+        );
+        assert!(
+            result
+                .metric_samples_ms
+                .values()
+                .all(|samples| samples.len() == 1)
+        );
         Ok(())
     }
 

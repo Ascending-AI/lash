@@ -17,7 +17,7 @@ async fn select_prunable<'c>(
     max_change_seq: Option<i64>,
     filter: Option<&lash_core_execution::ProcessListFilter>,
 ) -> Result<Vec<ProcessRecord>, PluginError> {
-    let rows = sqlx::query(sql)
+    let rows = crate::observed_sql::query(sql)
         .bind(cutoff)
         .bind(max_change_seq)
         .fetch_all(crate::observed_sql::executor(executor))
@@ -76,7 +76,7 @@ async fn reclaim_settled_parent_end_plans_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     cutoff: i64,
 ) -> Result<u64, PluginError> {
-    sqlx::query(process_sql().plan_postgres.delete_reclaimable.sql())
+    crate::observed_sql::query(process_sql().plan_postgres.delete_reclaimable.sql())
         .bind(cutoff)
         .execute(crate::observed_sql::executor(&mut **tx))
         .await

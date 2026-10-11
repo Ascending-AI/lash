@@ -76,7 +76,7 @@ pub(crate) async fn arm_cleanup_tx(
         .map_err(store_sqlx_error)?;
     let kind = cleanup.referrer().kind().as_str();
     let referrer_id = cleanup.referrer().canonical_id();
-    let existing = sqlx::query(CLEANUP.select_by_referrer.sql())
+    let existing = crate::observed_sql::query(CLEANUP.select_by_referrer.sql())
         .bind(kind)
         .bind(&referrer_id)
         .fetch_optional(crate::observed_sql::executor(&mut *conn))
@@ -93,7 +93,7 @@ pub(crate) async fn arm_cleanup_tx(
         .map_err(|error| StoreError::Backend(error.to_string()))?;
     match decision {
         CleanupUpsert::Insert => {
-            sqlx::query(CLEANUP.insert_if_absent.sql())
+            crate::observed_sql::query(CLEANUP.insert_if_absent.sql())
                 .bind(kind)
                 .bind(&referrer_id)
                 .bind(json)
@@ -104,7 +104,7 @@ pub(crate) async fn arm_cleanup_tx(
                 .map_err(store_sqlx_error)?;
         }
         CleanupUpsert::ReplaceGuard => {
-            sqlx::query(CLEANUP.replace_guard_with_ended.sql())
+            crate::observed_sql::query(CLEANUP.replace_guard_with_ended.sql())
                 .bind(kind)
                 .bind(&referrer_id)
                 .bind(json)
@@ -116,7 +116,7 @@ pub(crate) async fn arm_cleanup_tx(
         CleanupUpsert::Keep => {}
     }
     if cleanup.is_ended() {
-        sqlx::query(
+        crate::observed_sql::query(
             crate::artifact_store::artifact_sql()
                 .fences
                 .insert_fence
@@ -225,7 +225,7 @@ impl ObligationLedger for PostgresObligationLedger {
         let limit = i64::try_from(limit.get()).unwrap_or(i64::MAX);
         let token = ClaimToken::mint();
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
-        let ids: Vec<String> = sqlx::query_scalar(locking)
+        let ids: Vec<String> = crate::observed_sql::query_scalar(locking)
             .bind(now)
             .bind(limit)
             .fetch_all(crate::observed_sql::executor(&mut **tx))
@@ -233,7 +233,7 @@ impl ObligationLedger for PostgresObligationLedger {
             .map_err(store_sqlx_error)?;
         let mut claimed = Vec::with_capacity(ids.len());
         for id in ids {
-            let row = sqlx::query(sql.claim_due_row.sql())
+            let row = crate::observed_sql::query(sql.claim_due_row.sql())
                 .bind(&id)
                 .bind(token.as_str())
                 .bind(until)
@@ -262,7 +262,7 @@ impl ObligationLedger for PostgresObligationLedger {
             now_ms.saturating_add(claim_ttl_ms),
         )?;
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
-        let row = sqlx::query(sql.claim.sql())
+        let row = crate::observed_sql::query(sql.claim.sql())
             .bind(id.as_str())
             .bind(token.as_str())
             .bind(until)
@@ -284,30 +284,36 @@ impl ObligationLedger for PostgresObligationLedger {
         let sql = self.sql;
         let now = sql_i64("obligation settle instant", now_ms)?;
         let query = match settlement {
-            ObligationSettlement::Delivered => sqlx::query(sql.settle_delivered.sql())
-                .bind(id.as_str())
-                .bind(token.as_str())
-                .bind(now),
-            ObligationSettlement::Retry { due_at_ms, error } => sqlx::query(sql.settle_retry.sql())
-                .bind(id.as_str())
-                .bind(token.as_str())
-                .bind(sql_i64("obligation due instant", due_at_ms)?)
-                .bind(error.message)
-                .bind(error.code.as_str().to_owned()),
-            ObligationSettlement::Stall { reason, error } => sqlx::query(sql.settle_stall.sql())
-                .bind(id.as_str())
-                .bind(token.as_str())
-                .bind(reason.as_str())
-                .bind(error.message)
-                .bind(now)
-                .bind(error.code.as_str().to_owned()),
+            ObligationSettlement::Delivered => {
+                crate::observed_sql::query(sql.settle_delivered.sql())
+                    .bind(id.as_str())
+                    .bind(token.as_str())
+                    .bind(now)
+            }
+            ObligationSettlement::Retry { due_at_ms, error } => {
+                crate::observed_sql::query(sql.settle_retry.sql())
+                    .bind(id.as_str())
+                    .bind(token.as_str())
+                    .bind(sql_i64("obligation due instant", due_at_ms)?)
+                    .bind(error.message)
+                    .bind(error.code.as_str().to_owned())
+            }
+            ObligationSettlement::Stall { reason, error } => {
+                crate::observed_sql::query(sql.settle_stall.sql())
+                    .bind(id.as_str())
+                    .bind(token.as_str())
+                    .bind(reason.as_str())
+                    .bind(error.message)
+                    .bind(now)
+                    .bind(error.code.as_str().to_owned())
+            }
             ObligationSettlement::Defer { due_at_ms } => {
                 if self.kind != ObligationKind::ArtifactCleanup {
                     return Err(StoreError::Backend(
                         "defer requires an artifact cleanup obligation".into(),
                     ));
                 }
-                sqlx::query(CLEANUP_LEDGER.obligation_settle_defer.sql())
+                crate::observed_sql::query(CLEANUP_LEDGER.obligation_settle_defer.sql())
                     .bind(id.as_str())
                     .bind(token.as_str())
                     .bind(sql_i64("obligation due instant", due_at_ms)?)
@@ -331,7 +337,7 @@ impl ObligationLedger for PostgresObligationLedger {
         let sql = self.sql;
         let due_at = sql_i64("obligation due instant", now_ms)?;
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
-        let changed = sqlx::query(sql.rearm.sql())
+        let changed = crate::observed_sql::query(sql.rearm.sql())
             .bind(id.as_str())
             .bind(due_at)
             .execute(crate::observed_sql::executor(&mut **tx))
@@ -348,7 +354,7 @@ impl ObligationLedger for PostgresObligationLedger {
         limit: NonZeroUsize,
     ) -> Result<Vec<StalledObligation>, StoreError> {
         let sql = self.sql;
-        let rows = sqlx::query(sql.select_stalled.sql())
+        let rows = crate::observed_sql::query(sql.select_stalled.sql())
             .bind(after.map_or("", ObligationId::as_str))
             .bind(i64::try_from(limit.get()).unwrap_or(i64::MAX))
             .fetch_all(crate::observed_sql::executor(&self.pool))
@@ -385,7 +391,7 @@ impl ObligationLedger for PostgresObligationLedger {
 
     async fn count_stalled(&self) -> Result<u64, StoreError> {
         let sql = self.sql;
-        let count: i64 = sqlx::query_scalar(sql.count_stalled.sql())
+        let count: i64 = crate::observed_sql::query_scalar(sql.count_stalled.sql())
             .fetch_one(crate::observed_sql::executor(&self.pool))
             .await
             .map_err(store_sqlx_error)?;
@@ -394,11 +400,12 @@ impl ObligationLedger for PostgresObligationLedger {
 
     async fn standing(&self, id: &ObligationId) -> Result<Option<ObligationStanding>, StoreError> {
         let sql = self.sql;
-        let row: Option<(Option<String>, i32)> = sqlx::query_as(sql.select_standing.sql())
-            .bind(id.as_str())
-            .fetch_optional(crate::observed_sql::executor(&self.pool))
-            .await
-            .map_err(store_sqlx_error)?;
+        let row: Option<(Option<String>, i32)> =
+            crate::observed_sql::query_as(sql.select_standing.sql())
+                .bind(id.as_str())
+                .fetch_optional(crate::observed_sql::executor(&self.pool))
+                .await
+                .map_err(store_sqlx_error)?;
         let Some((Some(label), attempts)) = row else {
             return Ok(None);
         };
@@ -426,7 +433,7 @@ impl ArtifactCleanupLedger for PostgresObligationLedger {
     async fn nudge(&self, referrer: &ArtifactReferrer, now_ms: u64) -> Result<bool, StoreError> {
         let due_at = sql_i64("cleanup due instant", now_ms)?;
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
-        let changed = sqlx::query(CLEANUP.nudge.sql())
+        let changed = crate::observed_sql::query(CLEANUP.nudge.sql())
             .bind(referrer.kind().as_str())
             .bind(referrer.canonical_id())
             .bind(due_at)
@@ -439,7 +446,7 @@ impl ArtifactCleanupLedger for PostgresObligationLedger {
     }
 
     async fn load_cleanup(&self, id: &ObligationId) -> Result<Option<ArtifactCleanup>, StoreError> {
-        sqlx::query(CLEANUP.select_by_id.sql())
+        crate::observed_sql::query(CLEANUP.select_by_id.sql())
             .bind(id.as_str())
             .fetch_optional(crate::observed_sql::executor(&self.pool))
             .await

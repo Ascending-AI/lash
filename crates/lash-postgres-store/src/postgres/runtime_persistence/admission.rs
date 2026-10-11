@@ -119,7 +119,7 @@ async fn checkpoint_work_pending_postgres(
             family.checkpoint_work_pending_before_completion.sql()
         }
     };
-    sqlx::query_scalar(sql)
+    crate::observed_sql::query_scalar(sql)
         .bind(request.session_id.as_str())
         .bind(request.turn_id.as_str())
         .bind(i64::try_from(request.max_inputs).unwrap_or(i64::MAX))
@@ -140,7 +140,7 @@ async fn read_step_admission_tx(
     mode: lash_core_execution::TurnInputAdmissionMode,
 ) -> Result<CheckpointAdmission, StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
-    let input_rows = sqlx::query(sql.pending_inputs.select_admitted_by_step.sql())
+    let input_rows = crate::observed_sql::query(sql.pending_inputs.select_admitted_by_step.sql())
         .bind(session_id.as_str())
         .bind(run.as_str())
         .bind(step)
@@ -179,7 +179,7 @@ async fn compose_active_turn_inputs_tx(
             .admission_candidates_active_turn_before_completion
             .sql(),
     };
-    let rows = sqlx::query(statement)
+    let rows = crate::observed_sql::query(statement)
         .bind(session_id.as_str())
         .bind(i64::try_from(max_inputs).unwrap_or(i64::MAX))
         .bind(turn_id.as_str())
@@ -209,7 +209,7 @@ async fn bind_turn_inputs_tx(
         .admit
         .sql();
     for input in &admitted.inputs {
-        let bound = sqlx::query(statement)
+        let bound = crate::observed_sql::query(statement)
             .bind(admitted.session_id.as_str())
             .bind(input.input_id.as_str())
             .bind(state)
@@ -241,7 +241,7 @@ async fn scan_queued_work_candidates_tx(
     statement: &str,
     max_rows: usize,
 ) -> Result<(Vec<QueuedWorkBatch>, Vec<TurnLaneCandidate>), StoreError> {
-    let rows = sqlx::query(statement)
+    let rows = crate::observed_sql::query(statement)
         .bind(session_id.as_str())
         .bind(admission_scan_limit(max_rows))
         .fetch_all(crate::observed_sql::executor(&mut **tx))

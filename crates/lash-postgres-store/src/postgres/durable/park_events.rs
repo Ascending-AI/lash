@@ -20,7 +20,7 @@ async fn append(
     reason_json: &str,
     at: DurableInstant,
 ) -> Result<(), DurableError> {
-    sqlx::query(SQL.park_events.append.sql())
+    crate::observed_sql::query(SQL.park_events.append.sql())
         .bind(actor)
         .bind(kind.as_str())
         .bind(reason_json)
@@ -39,7 +39,7 @@ pub(super) async fn apply(
     let actor = commit.actor.as_str();
     match write {
         ParkEventWrite::Park { reason_json } => {
-            sqlx::query(SQL.park.set_park.sql())
+            crate::observed_sql::query(SQL.park.set_park.sql())
                 .bind(actor)
                 .bind(reason_json)
                 .execute(crate::observed_sql::executor(&mut *tx))
@@ -48,7 +48,7 @@ pub(super) async fn apply(
             append(tx, actor, ParkEventKind::Parked, reason_json, commit.now).await
         }
         ParkEventWrite::Ended { reason_json } => {
-            let cleared = sqlx::query(SQL.park.clear_park.sql())
+            let cleared = crate::observed_sql::query(SQL.park.clear_park.sql())
                 .bind(actor)
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
@@ -70,7 +70,7 @@ pub(super) async fn redrive(
     now: DurableInstant,
 ) -> Result<(RedriveAnswer, Option<Woken>), DurableError> {
     let actor = request.actor.as_str();
-    let park: Option<(Option<String>, i64)> = sqlx::query_as(SQL.park.park_of.sql())
+    let park: Option<(Option<String>, i64)> = crate::observed_sql::query_as(SQL.park.park_of.sql())
         .bind(actor)
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -79,7 +79,7 @@ pub(super) async fn redrive(
         return Ok((RedriveAnswer::NotParked, None));
     }
     let (woken, _) = wake_within(tx, &request.actor, true, now).await?;
-    sqlx::query(SQL.park.clear_park.sql())
+    crate::observed_sql::query(SQL.park.clear_park.sql())
         .bind(actor)
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
@@ -94,7 +94,7 @@ pub(super) async fn read(
     after: Option<ParkEventSeq>,
     limit: usize,
 ) -> Result<Vec<ParkEventRow>, DurableError> {
-    let rows = sqlx::query(SQL.park_events.page.sql())
+    let rows = crate::observed_sql::query(SQL.park_events.page.sql())
         .bind(after.map_or(0, |seq| seq.0))
         .bind(integer::<i64>(limit)?)
         .fetch_all(crate::observed_sql::executor(&mut *tx))

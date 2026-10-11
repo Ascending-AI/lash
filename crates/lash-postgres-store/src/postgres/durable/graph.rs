@@ -236,7 +236,7 @@ fn ttl(lease: &ReadLease) -> i64 {
 
 /// One stored blob: its bytes and encoding.
 async fn stored_blob(tx: &mut PgConnection, hash: &str) -> Answer<Option<(Vec<u8>, BlobEncoding)>> {
-    let row: Option<(Vec<u8>, i16)> = sqlx::query_as(SQL.graph.blob.sql())
+    let row: Option<(Vec<u8>, i16)> = crate::observed_sql::query_as(SQL.graph.blob.sql())
         .bind(hash)
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -246,7 +246,7 @@ async fn stored_blob(tx: &mut PgConnection, hash: &str) -> Answer<Option<(Vec<u8
 }
 
 async fn stored_edges(tx: &mut PgConnection, hash: &str) -> Answer<Vec<String>> {
-    sqlx::query_scalar(SQL.graph.edges_of.sql())
+    crate::observed_sql::query_scalar(SQL.graph.edges_of.sql())
         .bind(hash)
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
@@ -256,7 +256,7 @@ async fn stored_edges(tx: &mut PgConnection, hash: &str) -> Answer<Vec<String>> 
 /// One nullable text column of the row `sql` selects, or none.
 async fn one_text(
     tx: &mut PgConnection,
-    query: sqlx::query::Query<'_, sqlx::Postgres, sqlx::postgres::PgArguments>,
+    query: crate::observed_sql::Query<'_>,
 ) -> Answer<Option<String>> {
     let row = query
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -272,7 +272,7 @@ async fn one_text(
 async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<NodeId>> {
     let stored = match owner {
         RootOwner::Exec(exec) => {
-            let row = sqlx::query(SQL.snapshots.root.sql())
+            let row = crate::observed_sql::query(SQL.snapshots.root.sql())
                 .bind(exec.stored())
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
@@ -289,7 +289,7 @@ async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<Node
         } => {
             one_text(
                 tx,
-                sqlx::query(SQL.facts.root.sql())
+                crate::observed_sql::query(SQL.facts.root.sql())
                     .bind(owner.stored())
                     .bind(number::<i64>(run.0)?)
                     .bind(number::<i64>(ordinal.0)?),
@@ -299,7 +299,7 @@ async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<Node
         RootOwner::EffectAdmission { exec, effect } => {
             one_text(
                 tx,
-                sqlx::query(SQL.graph.admission_root.sql())
+                crate::observed_sql::query(SQL.graph.admission_root.sql())
                     .bind(exec.stored())
                     .bind(effect.0.to_vec()),
             )
@@ -308,7 +308,7 @@ async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<Node
         RootOwner::TurnPhase { session, run } => {
             one_text(
                 tx,
-                sqlx::query(SQL.turns.phase_root.sql())
+                crate::observed_sql::query(SQL.turns.phase_root.sql())
                     .bind(session.as_str())
                     .bind(run.as_str()),
             )
@@ -317,7 +317,7 @@ async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<Node
         RootOwner::WorkingExecution { session, run } => {
             one_text(
                 tx,
-                sqlx::query(SQL.turns.working_root.sql())
+                crate::observed_sql::query(SQL.turns.working_root.sql())
                     .bind(session.as_str())
                     .bind(run.as_str()),
             )
@@ -330,7 +330,7 @@ async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<Node
         } => {
             one_text(
                 tx,
-                sqlx::query(SQL.turns.namespace_root.sql())
+                crate::observed_sql::query(SQL.turns.namespace_root.sql())
                     .bind(session.as_str())
                     .bind(run.as_str())
                     .bind(plugin.as_str()),
@@ -340,7 +340,7 @@ async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<Node
         RootOwner::SessionRevision { session, revision } => {
             one_text(
                 tx,
-                sqlx::query(SQL.graph.revision_root.sql())
+                crate::observed_sql::query(SQL.graph.revision_root.sql())
                     .bind(session.as_str())
                     .bind(number::<i64>(*revision)?),
             )
@@ -349,14 +349,15 @@ async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<Node
         RootOwner::SessionAdmissionBase { session } => {
             one_text(
                 tx,
-                sqlx::query(SQL.graph.admission_base_root.sql()).bind(session.as_str()),
+                crate::observed_sql::query(SQL.graph.admission_base_root.sql())
+                    .bind(session.as_str()),
             )
             .await?
         }
         RootOwner::ReadPin(pin) => {
             one_text(
                 tx,
-                sqlx::query(SQL.graph.pin_root.sql()).bind(pin.0.as_str()),
+                crate::observed_sql::query(SQL.graph.pin_root.sql()).bind(pin.0.as_str()),
             )
             .await?
         }
@@ -366,7 +367,7 @@ async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<Node
         } => {
             one_text(
                 tx,
-                sqlx::query(SQL.postgres.artifact_root.sql())
+                crate::observed_sql::query(SQL.postgres.artifact_root.sql())
                     .bind(namespace.as_str())
                     .bind(artifact.as_str()),
             )
@@ -375,7 +376,7 @@ async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<Node
         RootOwner::ReleasePin { release } => {
             one_text(
                 tx,
-                sqlx::query(SQL.graph.release_root.sql()).bind(release.as_str()),
+                crate::observed_sql::query(SQL.graph.release_root.sql()).bind(release.as_str()),
             )
             .await?
         }
@@ -445,7 +446,7 @@ async fn walk_within(
     } else {
         SQL.postgres.walk_reach.sql()
     };
-    let rows: Vec<(String, i16, Option<Vec<u8>>)> = sqlx::query_as(reach)
+    let rows: Vec<(String, i16, Option<Vec<u8>>)> = crate::observed_sql::query_as(reach)
         .bind(&root_hex)
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
@@ -465,7 +466,7 @@ async fn walk_within(
             .collect();
         if !unread.is_empty() {
             let rows: Vec<(String, i16, Option<Vec<u8>>)> =
-                sqlx::query_as(SQL.postgres.walk_level.sql())
+                crate::observed_sql::query_as(SQL.postgres.walk_level.sql())
                     .bind(&unread)
                     .bind(&root_hex)
                     .fetch_all(crate::observed_sql::executor(&mut *tx))
@@ -571,10 +572,7 @@ async fn reachable(tx: &mut PgConnection, root: &NodeId, wanted: &[NodeId]) -> A
 }
 
 /// Whether `query`, a conditional write that returns its row, matched one.
-async fn matched(
-    tx: &mut PgConnection,
-    query: sqlx::query::Query<'_, sqlx::Postgres, sqlx::postgres::PgArguments>,
-) -> Answer<bool> {
+async fn matched(tx: &mut PgConnection, query: crate::observed_sql::Query<'_>) -> Answer<bool> {
     Ok(query
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -602,7 +600,7 @@ pub(super) async fn apply_admission(
         } => {
             matched(
                 tx,
-                sqlx::query(SQL.graph.admission_put.sql())
+                crate::observed_sql::query(SQL.graph.admission_put.sql())
                     .bind(exec.stored())
                     .bind(effect.0.to_vec())
                     .bind(member.as_ref().map(|member| member.owner.stored()))
@@ -630,7 +628,7 @@ pub(super) async fn apply_admission(
         } => {
             matched(
                 tx,
-                sqlx::query(SQL.graph.admission_remove.sql())
+                crate::observed_sql::query(SQL.graph.admission_remove.sql())
                     .bind(exec.stored())
                     .bind(effect.0.to_vec())
                     .bind(expected.to_hex()),
@@ -670,7 +668,7 @@ pub(super) async fn apply_release_pin(
 ) -> Result<(), DurableError> {
     match write {
         ReleasePinWrite::Install { release, root } => {
-            let installed = sqlx::query(SQL.graph.release_install.sql())
+            let installed = crate::observed_sql::query(SQL.graph.release_install.sql())
                 .bind(release.as_str())
                 .bind(root.to_hex())
                 .execute(crate::observed_sql::executor(&mut *tx))
@@ -678,11 +676,12 @@ pub(super) async fn apply_release_pin(
                 .map_err(sqlx_failure)?
                 .rows_affected();
             if installed == 0 {
-                let pinned: String = sqlx::query_scalar(SQL.graph.release_root.sql())
-                    .bind(release.as_str())
-                    .fetch_one(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
+                let pinned: String =
+                    crate::observed_sql::query_scalar(SQL.graph.release_root.sql())
+                        .bind(release.as_str())
+                        .fetch_one(crate::observed_sql::executor(&mut *tx))
+                        .await
+                        .map_err(sqlx_failure)?;
                 if pinned != root.to_hex() {
                     return Err(graph_refused(GraphRefusal::RevisionConflict));
                 }
@@ -692,7 +691,7 @@ pub(super) async fn apply_release_pin(
         ReleasePinWrite::Retire { release, expected } => {
             let retired = matched(
                 tx,
-                sqlx::query(SQL.graph.release_retire.sql())
+                crate::observed_sql::query(SQL.graph.release_retire.sql())
                     .bind(release.as_str())
                     .bind(expected.to_hex()),
             )
@@ -722,7 +721,7 @@ pub(crate) async fn install(
         .chain(graph.external_roots.iter())
         .collect();
     if !named.is_empty() {
-        let rows: Vec<(String, i16)> = sqlx::query_as(SQL.postgres.lock_nodes.sql())
+        let rows: Vec<(String, i16)> = crate::observed_sql::query_as(SQL.postgres.lock_nodes.sql())
             .bind(named.iter().map(|node| node.to_hex()).collect::<Vec<_>>())
             .fetch_all(crate::observed_sql::executor(&mut *tx))
             .await
@@ -752,25 +751,27 @@ pub(crate) async fn install(
     // stored and one writes the fresh nodes' edges, whatever their number.
     let hashes: Vec<String> = graph.nodes.iter().map(|node| node.id.to_hex()).collect();
     let contents: Vec<&[u8]> = graph.nodes.iter().map(|node| &node.bytes[..]).collect();
-    let inserted: BTreeSet<String> = sqlx::query_scalar(SQL.postgres.insert_nodes.sql())
-        .bind(&hashes)
-        .bind(&contents)
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)?
-        .into_iter()
-        .collect();
+    let inserted: BTreeSet<String> =
+        crate::observed_sql::query_scalar(SQL.postgres.insert_nodes.sql())
+            .bind(&hashes)
+            .bind(&contents)
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(db)?
+            .into_iter()
+            .collect();
     let held: Vec<String> = hashes
         .iter()
         .filter(|hash| !inserted.contains(*hash))
         .cloned()
         .collect();
     if !held.is_empty() {
-        let rows: Vec<(String, Vec<u8>, i16)> = sqlx::query_as(SQL.postgres.stored_nodes.sql())
-            .bind(&held)
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(db)?;
+        let rows: Vec<(String, Vec<u8>, i16)> =
+            crate::observed_sql::query_as(SQL.postgres.stored_nodes.sql())
+                .bind(&held)
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(db)?;
         let stored: BTreeMap<String, (Vec<u8>, i16)> = rows
             .into_iter()
             .map(|(hash, bytes, encoding)| (hash, (bytes, encoding)))
@@ -809,12 +810,15 @@ pub(crate) async fn install(
         }
     }
     if !parents.is_empty() {
-        sqlx::query(SQL.postgres.insert_edges.sql())
+        crate::observed_sql::query(SQL.postgres.insert_edges.sql())
             .bind(&parents)
             .bind(&children)
             .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(db)?;
+    }
+    if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
+        window.installed_graph(installed.newly_installed_canonical_bytes);
     }
     Ok(installed)
 }
@@ -847,7 +851,7 @@ pub(crate) async fn reachable_from(
 }
 
 async fn insert_pin(tx: &mut PgConnection, pin: &ReadPin) -> Answer<()> {
-    sqlx::query(SQL.graph.pin_insert.sql())
+    crate::observed_sql::query(SQL.graph.pin_insert.sql())
         .bind(pin.pin_id.0.as_str())
         .bind(pin.lease_owner.as_str())
         .bind(number::<i64>(pin.generation)?)
@@ -862,7 +866,7 @@ async fn insert_pin(tx: &mut PgConnection, pin: &ReadPin) -> Answer<()> {
 async fn retire_pin(tx: &mut PgConnection, pin: &ReadPin) -> Answer<bool> {
     matched(
         tx,
-        sqlx::query(SQL.graph.pin_retire.sql())
+        crate::observed_sql::query(SQL.graph.pin_retire.sql())
             .bind(pin.pin_id.0.as_str())
             .bind(pin.lease_owner.as_str())
             .bind(number::<i64>(pin.generation)?)
@@ -883,7 +887,7 @@ async fn commit_in(
     // The owner's epoch fence: the first row lock, under the gate and the
     // writer fence the `BEGIN` took.
     let actor = fence.actor.as_str();
-    let fenced = sqlx::query(super::SQL.actor.fence.sql())
+    let fenced = crate::observed_sql::query(super::SQL.actor.fence.sql())
         .bind(actor)
         .bind(fence.epoch.0)
         .fetch_optional(crate::observed_sql::executor(&mut ***tx))
@@ -901,7 +905,7 @@ async fn commit_in(
             .map_err(|error| from_durable(super::store_failure(error)))?;
     }
     if !fence.read_pins.is_empty() {
-        sqlx::query(SQL.postgres.lock_pins.sql())
+        crate::observed_sql::query(SQL.postgres.lock_pins.sql())
             .bind(
                 fence
                     .read_pins
@@ -915,12 +919,13 @@ async fn commit_in(
     }
     // A retry of an acknowledged commit is answered from its receipt; the
     // fence bump above rolls back with it.
-    let receipt: Option<(Vec<u8>, Vec<u8>)> = sqlx::query_as(SQL.graph.receipt.sql())
-        .bind(actor)
-        .bind(batch.commit_id.0.to_vec())
-        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-        .await
-        .map_err(db)?;
+    let receipt: Option<(Vec<u8>, Vec<u8>)> =
+        crate::observed_sql::query_as(SQL.graph.receipt.sql())
+            .bind(actor)
+            .bind(batch.commit_id.0.to_vec())
+            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(db)?;
     if let Some((digest, result)) = receipt {
         if digest != checked.encoded.digest.0 {
             return Err(GraphRefusal::CommitIdentityConflict);
@@ -933,7 +938,7 @@ async fn commit_in(
     for (owner, expected) in batch.expected.iter() {
         let found = match owner {
             RootOwner::Exec(exec) => {
-                let rev: Option<i64> = sqlx::query_scalar(SQL.snapshots.root.sql())
+                let rev: Option<i64> = crate::observed_sql::query_scalar(SQL.snapshots.root.sql())
                     .bind(exec.stored())
                     .fetch_optional(crate::observed_sql::executor(&mut ***tx))
                     .await
@@ -979,7 +984,7 @@ async fn commit_in(
     };
     // The receipt records the result, so its own row is not in the result's
     // SQL bytes.
-    sqlx::query(SQL.graph.receipt_insert.sql())
+    crate::observed_sql::query(SQL.graph.receipt_insert.sql())
         .bind(actor)
         .bind(batch.commit_id.0.to_vec())
         .bind(checked.encoded.digest.0.to_vec())
@@ -994,11 +999,12 @@ async fn commit_in(
 /// Reads read pin `pin`'s row, locked, and checks it is exactly `pin` and
 /// unexpired at `now`.
 async fn check_pin(tx: &mut PgConnection, pin: &ReadPin, now: DurableInstant) -> Answer<()> {
-    let row: Option<(String, i64, String, i64)> = sqlx::query_as(SQL.postgres.pin_row.sql())
-        .bind(pin.pin_id.0.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)?;
+    let row: Option<(String, i64, String, i64)> =
+        crate::observed_sql::query_as(SQL.postgres.pin_row.sql())
+            .bind(pin.pin_id.0.as_str())
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(db)?;
     let Some((lease_owner, generation, root, expires_at)) = row else {
         return Err(GraphRefusal::ReadPinMismatch);
     };
@@ -1049,7 +1055,7 @@ async fn fetch_pinned_in(
                 return Err(GraphRefusal::ReadPinMismatch);
             }
             let expires_at = now.after_millis(ttl(&lease));
-            let generation: i64 = sqlx::query_scalar(SQL.graph.pin_renew.sql())
+            let generation: i64 = crate::observed_sql::query_scalar(SQL.graph.pin_renew.sql())
                 .bind(pin.pin_id.0.as_str())
                 .bind(expires_at.0)
                 .fetch_one(crate::observed_sql::executor(&mut *tx))
@@ -1078,7 +1084,7 @@ pub(crate) async fn collect_in(
     let mut report = GraphCollection::default();
     let mut stack: Vec<String> = Vec::new();
     for source in RootSource::ALL {
-        let rows: Vec<String> = sqlx::query_scalar(SQL.graph.catalog_source.sql())
+        let rows: Vec<String> = crate::observed_sql::query_scalar(SQL.graph.catalog_source.sql())
             .bind(source.catalog_name())
             .fetch_all(crate::observed_sql::executor(&mut *tx))
             .await
@@ -1131,7 +1137,7 @@ pub(crate) async fn collect_in(
     }
     report.marked = marked.len() as u64;
     let marks: Vec<String> = marked.into_iter().collect();
-    let dangling: i64 = sqlx::query_scalar(SQL.postgres.dangling_edges.sql())
+    let dangling: i64 = crate::observed_sql::query_scalar(SQL.postgres.dangling_edges.sql())
         .bind(&marks)
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
@@ -1146,7 +1152,7 @@ pub(crate) async fn collect_in(
 
 /// Runs sweep `sql` over the mark set `marks`: how many rows it deleted.
 async fn sweep(tx: &mut PgConnection, sql: &str, marks: &[String]) -> Answer<u64> {
-    Ok(sqlx::query(sql)
+    Ok(crate::observed_sql::query(sql)
         .bind(marks)
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
@@ -1160,11 +1166,13 @@ pub(crate) async fn retire_expired_read_pins_in(
     tx: &mut PgConnection,
     now: i64,
 ) -> Result<u64, sqlx::Error> {
-    Ok(sqlx::query(SQL.graph.pins_retire_expired.sql())
-        .bind(now)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await?
-        .rows_affected())
+    Ok(
+        crate::observed_sql::query(SQL.graph.pins_retire_expired.sql())
+            .bind(now)
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await?
+            .rows_affected(),
+    )
 }
 
 impl PostgresDurableStore {

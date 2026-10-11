@@ -22,6 +22,7 @@ lash_rust_library(
     crate_features = [],
     crate_name = "lash_kernel_vm",
     declared_features = [
+        "perf-witness",
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-kernel-vm", "lash_kernel_vm"),
@@ -45,6 +46,7 @@ lash_rust_unit_test(
     crate_name = "lash_kernel_vm",
     crate_root = "src/lib.rs",
     declared_features = [
+        "perf-witness",
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-kernel-vm", "lash_kernel_vm", "//crates/lash-kernel-vm:lash-kernel-vm__unit_test"),
@@ -96,6 +98,7 @@ lash_rust_feature_library(
     ],
     crate_name = "lash_kernel_vm",
     declared_features = [
+        "perf-witness",
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-kernel-vm", "lash_kernel_vm"),

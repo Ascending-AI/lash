@@ -35,7 +35,7 @@ where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
     use lash_core_execution::compat::{CompatStamp, StampRead};
-    match sqlx::query_as::<_, (i32, i32)>(
+    match crate::observed_sql::query_as::<_, (i32, i32)>(
         "SELECT version, min_reader FROM lash_schema_versions WHERE component = $1",
     )
     .bind(SCHEMA_COMPONENT)
@@ -93,7 +93,7 @@ pub(crate) async fn ensure_schema_with_release(
     // half-applied migration batch. The lock needs no privileges, so a runtime
     // role that can neither create nor alter anything can still hold it.
     let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
-    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+    crate::observed_sql::query("SELECT pg_advisory_xact_lock($1, $2)")
         .bind(lock_namespace)
         .bind(lock_key)
         .execute(crate::observed_sql::executor(&mut *tx))
@@ -251,9 +251,11 @@ pub(crate) async fn read_catalog_id<'e, E>(executor: E) -> Result<Option<String>
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    sqlx::query_scalar("SELECT catalog_id FROM lash_catalog_identity WHERE singleton = TRUE")
-        .fetch_optional(crate::observed_sql::executor(executor))
-        .await
+    crate::observed_sql::query_scalar(
+        "SELECT catalog_id FROM lash_catalog_identity WHERE singleton = TRUE",
+    )
+    .fetch_optional(crate::observed_sql::executor(executor))
+    .await
 }
 
 /// The refusal for a catalog whose identity row is missing: a data
@@ -302,7 +304,7 @@ async fn schema_observation_connection(pool: &PgPool) -> Result<sqlx::PgConnecti
     // closed when it drops — on the error and cancellation paths as much as the
     // happy one — and the backend releases the session lock with it.
     let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
-    sqlx::query("SELECT pg_advisory_lock_shared($1, $2)")
+    crate::observed_sql::query("SELECT pg_advisory_lock_shared($1, $2)")
         .bind(lock_namespace)
         .bind(lock_key)
         .execute(crate::observed_sql::executor(&mut connection))
@@ -340,7 +342,7 @@ async fn observe_within_repeatable_read(
     let mut tx = crate::observed_sql::control("BEGIN", sqlx::Connection::begin(connection))
         .await
         .map_err(store_sqlx_error)?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+    crate::observed_sql::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
@@ -398,7 +400,7 @@ async fn verify_within_repeatable_read(
         .map_err(store_sqlx_error)?;
     // Must precede every other statement in the transaction: PostgreSQL rejects the
     // change once a snapshot has been established.
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+    crate::observed_sql::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;

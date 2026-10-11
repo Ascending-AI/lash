@@ -56,27 +56,62 @@ pub enum Counters {
 }
 
 /// Counter snapshot of either dialect.
-#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct Snapshot {
     /// PostgreSQL's counters.
     pub postgres: Option<PgCounters>,
     /// SQLite file plus WAL bytes.
     pub sqlite_bytes: Option<u64>,
+    /// Reset, eviction and per-role visibility evidence for the aggregate.
+    pub postgres_validity: Option<PgValidity>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct PgValidity {
+    stats_reset: String,
+    dealloc: i64,
+    /// Every statement entry for every role in this database, before filtering.
+    #[serde(skip)]
+    entries: BTreeMap<(i64, i64, bool), (i64, i64, String)>,
+    role_entries: BTreeMap<i64, usize>,
+}
+impl PgValidity {
+    fn check(&self, before: &Self) -> Result<()> {
+        ensure!(
+            self.stats_reset == before.stats_reset && self.dealloc == before.dealloc,
+            "pg_stat_statements reset or evicted entries during the window"
+        );
+        for (key, prior) in &before.entries {
+            let after = self
+                .entries
+                .get(key)
+                .context("a baseline role/query entry disappeared")?;
+            ensure!(
+                after.0 >= prior.0 && after.1 >= prior.1 && after.2 == prior.2,
+                "a role/query counter decreased or reset during the window"
+            );
+        }
+        Ok(())
+    }
 }
 
 impl Snapshot {
     /// `self - before`.
-    pub fn since(&self, before: &Self) -> Self {
-        Self {
+    pub fn since(&self, before: &Self) -> Result<Self> {
+        if let (Some(after), Some(prior)) = (&self.postgres_validity, &before.postgres_validity) {
+            after.check(prior)?;
+        }
+        Ok(Self {
             postgres: match (self.postgres, before.postgres) {
                 (Some(after), Some(before)) => Some(after.since(&before)),
                 _ => None,
             },
+            postgres_validity: self.postgres_validity.clone(),
             sqlite_bytes: match (self.sqlite_bytes, before.sqlite_bytes) {
                 (Some(after), Some(before)) => Some(after.saturating_sub(before)),
                 _ => None,
             },
-        }
+        })
     }
 }
 
@@ -95,6 +130,8 @@ const LEVELS: &str = "SELECT \
        JOIN pg_namespace n ON n.oid = c.relnamespace \
        WHERE c.relkind IN ('r', 'm') AND n.nspname NOT IN ('pg_catalog', 'information_schema')), \
     (SELECT count(*)::bigint FROM pg_stat_activity WHERE datname = current_database())";
+
+type PgEntryRow = (i64, i64, bool, i64, i64, String, Option<String>);
 
 impl Counters {
     /// Counters for `database`.
@@ -122,10 +159,48 @@ impl Counters {
     pub async fn read(&self) -> Result<Snapshot> {
         match self {
             Self::Postgres(pool) => {
+                let (dealloc, stats_reset): (i64, String) = sqlx::query_as(
+                    "SELECT dealloc, stats_reset::text FROM pg_stat_statements_info",
+                )
+                .fetch_one(pool)
+                .await?;
+                let entries: Vec<PgEntryRow> = sqlx::query_as(
+                    "SELECT userid::bigint, queryid, toplevel, calls, rows, stats_since::text, query FROM pg_stat_statements WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())"
+                ).fetch_all(pool).await?;
+                // Missing text means the observer cannot see another workload
+                // role. Never publish that role's invisible work as zero.
+                ensure!(
+                    entries.iter().all(|entry| entry.6.is_some()),
+                    "pg_stat_statements lacks query visibility for a database role"
+                );
+                let mut role_entries = BTreeMap::new();
+                for entry in &entries {
+                    *role_entries.entry(entry.0).or_default() += 1;
+                }
+                let validity = PgValidity {
+                    stats_reset,
+                    dealloc,
+                    role_entries,
+                    entries: entries
+                        .into_iter()
+                        .map(|(user, query, top, calls, rows, since, _)| {
+                            ((user, query, top), (calls, rows, since))
+                        })
+                        .collect(),
+                };
                 let (write_statements, write_rows, all_statements): (i64, i64, i64) =
                     sqlx::query_as(STATEMENTS).fetch_one(pool).await?;
                 let (wal_bytes, relation_bytes, connections): (i64, i64, i64) =
                     sqlx::query_as(LEVELS).fetch_one(pool).await?;
+                let info_after: (i64, String) = sqlx::query_as(
+                    "SELECT dealloc, stats_reset::text FROM pg_stat_statements_info",
+                )
+                .fetch_one(pool)
+                .await?;
+                ensure!(
+                    info_after == (validity.dealloc, validity.stats_reset.clone()),
+                    "pg_stat_statements reset or evicted entries while reading a snapshot"
+                );
                 Ok(Snapshot {
                     postgres: Some(PgCounters {
                         write_statements,
@@ -136,10 +211,12 @@ impl Counters {
                         connections,
                     }),
                     sqlite_bytes: None,
+                    postgres_validity: Some(validity),
                 })
             }
             Self::Sqlite(path) => Ok(Snapshot {
                 postgres: None,
+                postgres_validity: None,
                 sqlite_bytes: Some(file_bytes(path) + file_bytes(&wal_path(path))),
             }),
         }
@@ -179,6 +256,8 @@ pub struct Distribution {
     pub count: usize,
     /// Median.
     pub p50_ms: f64,
+    /// 95th percentile.
+    pub p95_ms: f64,
     /// 99th percentile (the maximum below 100 samples).
     pub p99_ms: f64,
     /// Maximum.
@@ -196,6 +275,7 @@ impl Distribution {
         Ok(Self {
             count: sorted.len(),
             p50_ms: ms(rank(50)),
+            p95_ms: ms(rank(95)),
             p99_ms: ms(rank(99)),
             max_ms: ms(sorted[sorted.len() - 1]),
         })
@@ -238,5 +318,38 @@ impl Report {
         writeln!(file, "{line}")?;
         file.flush()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// PG-COUNTER-WINDOW: aggregate deltas require stable reset/eviction
+    /// identity and every baseline role/query entry, even if totals increased.
+    #[test]
+    fn aggregate_windows_refuse_reset_eviction_and_missing_role_entries() {
+        let before = PgValidity {
+            stats_reset: "baseline".into(),
+            dealloc: 0,
+            entries: BTreeMap::from([((7, 11, true), (3, 4, "epoch".into()))]),
+            role_entries: BTreeMap::from([(7, 1)]),
+        };
+        let mut after = before.clone();
+        after.entries.get_mut(&(7, 11, true)).unwrap().0 += 1;
+        after.check(&before).unwrap();
+        after.stats_reset = "reset".into();
+        assert!(after.check(&before).is_err());
+        after = before.clone();
+        after.dealloc = 1;
+        assert!(after.check(&before).is_err());
+        after = before.clone();
+        after.entries.clear();
+        assert!(after.check(&before).is_err());
+        after = before.clone();
+        after.entries.get_mut(&(7, 11, true)).unwrap().2 = "new epoch".into();
+        assert!(after.check(&before).is_err());
+        after = before.clone();
+        after.entries.get_mut(&(7, 11, true)).unwrap().1 -= 1;
+        assert!(after.check(&before).is_err());
     }
 }

@@ -50,7 +50,7 @@ pub(super) async fn apply(
             commit_id,
         } => {
             let key = exec.stored();
-            let found = sqlx::query(SQL.root.sql())
+            let found = crate::observed_sql::query(SQL.root.sql())
                 .bind(&key)
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
@@ -68,7 +68,7 @@ pub(super) async fn apply(
             }
             match expected {
                 None => {
-                    sqlx::query(SQL.insert.sql())
+                    crate::observed_sql::query(SQL.insert.sql())
                         .bind(&key)
                         .bind(root.to_hex())
                         .bind(commit_id.0.to_vec())
@@ -78,7 +78,7 @@ pub(super) async fn apply(
                         .map_err(sqlx_failure)?;
                 }
                 Some(rev) => {
-                    let replaced = sqlx::query(SQL.replace.sql())
+                    let replaced = crate::observed_sql::query(SQL.replace.sql())
                         .bind(&key)
                         .bind(integer::<i64>(rev.0)?)
                         .bind(root.to_hex())
@@ -95,7 +95,7 @@ pub(super) async fn apply(
             Ok(())
         }
         ExecRootWrite::Retire { exec, expected } => {
-            let retired = sqlx::query(SQL.retire.sql())
+            let retired = crate::observed_sql::query(SQL.retire.sql())
                 .bind(exec.stored())
                 .bind(expected.to_hex())
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -107,7 +107,7 @@ pub(super) async fn apply(
             Ok(())
         }
         ExecRootWrite::Clear { exec } => {
-            sqlx::query(SQL.clear.sql())
+            crate::observed_sql::query(SQL.clear.sql())
                 .bind(exec.stored())
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
@@ -140,7 +140,7 @@ pub(super) async fn read(
     tx: &mut PgConnection,
     exec: &ExecKey,
 ) -> Result<Option<ExecRootRow>, DurableError> {
-    let Some(row) = sqlx::query(SQL.read.sql())
+    let Some(row) = crate::observed_sql::query(SQL.read.sql())
         .bind(exec.stored())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -165,7 +165,7 @@ pub(super) async fn under(
     tx: &mut PgConnection,
     prefix: &str,
 ) -> Result<Vec<ExecRootRow>, DurableError> {
-    let rows = sqlx::query(SQL.under.sql())
+    let rows = crate::observed_sql::query(SQL.under.sql())
         .bind(prefix)
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await

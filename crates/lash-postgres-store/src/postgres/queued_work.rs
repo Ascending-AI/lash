@@ -72,7 +72,7 @@ pub(crate) async fn load_queued_batch(
     tx: &mut sqlx::PgConnection,
     batch_id: &str,
 ) -> Result<Option<QueuedWorkBatch>, StoreError> {
-    let row = sqlx::query(
+    let row = crate::observed_sql::query(
         crate::turn_ingress::turn_ingress_sql()
             .queued_batches
             .select_by_id
@@ -127,7 +127,7 @@ pub(crate) async fn complete_admitted_batch_tx(
     let sql = crate::turn_ingress::turn_ingress_sql();
     let row = lash_core_execution::store::IngressRowId::Batch(batch_id.clone());
     let observed: Option<Option<String>> =
-        sqlx::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
+        crate::observed_sql::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
             .bind(session_id.as_str())
             .bind(batch_id.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut **tx))
@@ -139,7 +139,7 @@ pub(crate) async fn complete_admitted_batch_tx(
         &row,
         observed.as_ref().map(Option::as_deref),
     )?;
-    let settled = sqlx::query(sql.queued_batches.settle_admitted.sql())
+    let settled = crate::observed_sql::query(sql.queued_batches.settle_admitted.sql())
         .bind(session_id.as_str())
         .bind(batch_id.as_str())
         .bind(run.as_str())
@@ -185,7 +185,7 @@ pub(crate) async fn settle_open_command_tx(
     };
     let sql = crate::turn_ingress::turn_ingress_sql();
     let observed: Option<Option<String>> =
-        sqlx::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
+        crate::observed_sql::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
             .bind(session_id.as_str())
             .bind(batch_id.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut **tx))
@@ -196,7 +196,7 @@ pub(crate) async fn settle_open_command_tx(
         batch_id,
         observed.as_ref().map(Option::as_deref),
     )?;
-    let settled = sqlx::query(sql.queued_batches.settle_command.sql())
+    let settled = crate::observed_sql::query(sql.queued_batches.settle_command.sql())
         .bind(session_id.as_str())
         .bind(batch_id.as_str())
         .bind(crate::support::clamp_epoch_ms(at_ms))

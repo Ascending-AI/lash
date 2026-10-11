@@ -36,7 +36,7 @@ pub(super) async fn apply(
             record,
         } => {
             let owner_key = owner.stored();
-            let taken: Option<i32> = sqlx::query_scalar(SQL.ordinal_taken.sql())
+            let taken: Option<i32> = crate::observed_sql::query_scalar(SQL.ordinal_taken.sql())
                 .bind(&owner_key)
                 .bind(integer::<i64>(run.0)?)
                 .bind(integer::<i64>(ordinal.0)?)
@@ -51,13 +51,14 @@ pub(super) async fn apply(
                 }));
             }
             if let Some(previous) = ordinal.0.checked_sub(1) {
-                let follows: Option<i32> = sqlx::query_scalar(SQL.ordinal_taken.sql())
-                    .bind(&owner_key)
-                    .bind(integer::<i64>(run.0)?)
-                    .bind(integer::<i64>(previous)?)
-                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
+                let follows: Option<i32> =
+                    crate::observed_sql::query_scalar(SQL.ordinal_taken.sql())
+                        .bind(&owner_key)
+                        .bind(integer::<i64>(run.0)?)
+                        .bind(integer::<i64>(previous)?)
+                        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                        .await
+                        .map_err(sqlx_failure)?;
                 if follows.is_none() {
                     return Err(DurableError::Domain(DomainRefusal::RunOrdinalGap {
                         owner: owner.clone(),
@@ -69,13 +70,14 @@ pub(super) async fn apply(
             if *kind == RunFactKind::XOutcome
                 && let Some(call) = call
             {
-                let exists: Option<i32> = sqlx::query_scalar(SQL.outcome_exists.sql())
-                    .bind(&owner_key)
-                    .bind(integer::<i64>(run.0)?)
-                    .bind(call.as_str())
-                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
+                let exists: Option<i32> =
+                    crate::observed_sql::query_scalar(SQL.outcome_exists.sql())
+                        .bind(&owner_key)
+                        .bind(integer::<i64>(run.0)?)
+                        .bind(call.as_str())
+                        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                        .await
+                        .map_err(sqlx_failure)?;
                 if exists.is_some() {
                     return Err(DurableError::Domain(DomainRefusal::OutcomeExists {
                         owner: owner.clone(),
@@ -84,7 +86,7 @@ pub(super) async fn apply(
                     }));
                 }
             }
-            sqlx::query(SQL.append.sql())
+            crate::observed_sql::query(SQL.append.sql())
                 .bind(&owner_key)
                 .bind(integer::<i64>(run.0)?)
                 .bind(integer::<i64>(ordinal.0)?)
@@ -98,7 +100,7 @@ pub(super) async fn apply(
             Ok(())
         }
         RunFactWrite::Prune { owner, before } => {
-            sqlx::query(SQL.prune.sql())
+            crate::observed_sql::query(SQL.prune.sql())
                 .bind(owner.stored())
                 .bind(integer::<i64>(before.0)?)
                 .execute(crate::observed_sql::executor(&mut *tx))
@@ -113,7 +115,7 @@ pub(super) async fn read(
     tx: &mut PgConnection,
     owner: &OwnerKey,
 ) -> Result<Vec<RunFactRow>, DurableError> {
-    let rows = sqlx::query(SQL.read.sql())
+    let rows = crate::observed_sql::query(SQL.read.sql())
         .bind(owner.stored())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await

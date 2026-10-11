@@ -120,7 +120,7 @@ impl XactId {
     /// The id of the transaction open on `connection`, assigned now if it
     /// has none yet.
     pub(crate) async fn of(connection: &mut PgConnection) -> Result<Self, sqlx::Error> {
-        sqlx::query_scalar(connection_sql().select_xact_id.sql())
+        crate::observed_sql::query_scalar(connection_sql().select_xact_id.sql())
             .fetch_one(crate::observed_sql::executor(connection))
             .await
             .map(Self)
@@ -223,8 +223,10 @@ async fn recorded_status(
     xact: &XactId,
     settle: &Settle<'_>,
 ) -> Result<Option<String>, sqlx::Error> {
-    let status = sqlx::query_scalar::<_, Option<String>>(connection_sql().select_xact_status.sql())
-        .bind(&xact.0);
+    let status = crate::observed_sql::query_scalar::<_, Option<String>>(
+        connection_sql().select_xact_status.sql(),
+    )
+    .bind(&xact.0);
     #[cfg(any(test, feature = "testing"))]
     if let Some(fault) = settle.fault
         && let Some(lost) = fault.outcome_connection(settle.pool).await

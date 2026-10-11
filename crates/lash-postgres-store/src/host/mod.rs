@@ -757,7 +757,7 @@ pub(crate) async fn connection_capacity<'e, E>(
 where
     E: sqlx::Executor<'e, Database = Postgres>,
 {
-    let (max_connections, reserved_connections): (i64, i64) = sqlx::query_as(
+    let (max_connections, reserved_connections): (i64, i64) = crate::observed_sql::query_as(
         "SELECT MAX(setting::bigint) FILTER (WHERE name = 'max_connections'),
                 COALESCE(SUM(setting::bigint) FILTER (WHERE name IN ('superuser_reserved_connections', 'reserved_connections')), 0)::bigint
          FROM pg_settings WHERE name IN ('max_connections', 'superuser_reserved_connections', 'reserved_connections')",

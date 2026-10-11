@@ -3,10 +3,11 @@ use super::*;
 use lash_core_execution::{ProcessChangeBounds, ProcessRosterCursor, ProcessRosterRecords};
 
 async fn bounds_tx(tx: &mut sqlx::PgConnection) -> Result<ProcessChangeBounds, PluginError> {
-    let row = sqlx::query(process_sql().clock_postgres.select_bounds_for_share.sql())
-        .fetch_one(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(plugin_sqlx_error)?;
+    let row =
+        crate::observed_sql::query(process_sql().clock_postgres.select_bounds_for_share.sql())
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(plugin_sqlx_error)?;
     Ok(ProcessChangeBounds {
         current: ProcessChangeCursor::from_store_sequence(plugin_u64_from_sql(
             "ProcessChangeClock",
@@ -67,7 +68,7 @@ pub(super) async fn page(
     }
     let through = match &cursor {
         Some(cursor) => Some(cursor.through().clone()),
-        None => sqlx::query_scalar::<_, Option<String>>(
+        None => crate::observed_sql::query_scalar::<_, Option<String>>(
             process_sql().process.select_max_process_id.sql(),
         )
         .fetch_one(crate::observed_sql::executor(&mut *tx))
@@ -88,15 +89,16 @@ pub(super) async fn page(
             .map(serde_json::to_value)
             .transpose()
             .map_err(process_decode_error)?;
-        let mut query = sqlx::query_scalar::<_, String>(crate::process_sql::roster_sql(filter))
-            .bind(filter.status.labels())
-            .bind(filter.originator.as_ref().map(|o| o.originator_id()))
-            .bind(filter.identity_kind.as_deref())
-            .bind(filter.identity_label.as_deref())
-            .bind(definition)
-            .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
-            .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
-            .bind(filter.retired_since_ms.map(clamp_epoch_ms));
+        let mut query =
+            crate::observed_sql::query_scalar::<_, String>(crate::process_sql::roster_sql(filter))
+                .bind(filter.status.labels())
+                .bind(filter.originator.as_ref().map(|o| o.originator_id()))
+                .bind(filter.identity_kind.as_deref())
+                .bind(filter.identity_label.as_deref())
+                .bind(definition)
+                .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
+                .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
+                .bind(filter.retired_since_ms.map(clamp_epoch_ms));
         if let Some(scope) = &filter.until {
             query = query.bind(scope.storage_kind()).bind(scope.storage_id());
         }
@@ -179,11 +181,11 @@ async fn filtered_roster_page_decodes_only_matches_in_ten_thousand_rows() {
     }
     expected.sort();
 
-    sqlx::query("DELETE FROM lash_processes")
+    crate::observed_sql::query("DELETE FROM lash_processes")
         .execute(backend.pool())
         .await
         .expect("remove template");
-    sqlx::query("INSERT INTO lash_processes (process_id, originator_id, identity_kind, identity_label, created_at_ms, updated_at_ms, lifetime, record_json) SELECT r->>'id', 'host', r#>>'{identity,kind}', r#>>'{identity,label}', (r->>'created_at_ms')::bigint, (r->>'updated_at_ms')::bigint, 'detached', r::text FROM jsonb_array_elements($1) r")
+    crate::observed_sql::query("INSERT INTO lash_processes (process_id, originator_id, identity_kind, identity_label, created_at_ms, updated_at_ms, lifetime, record_json) SELECT r->>'id', 'host', r#>>'{identity,kind}', r#>>'{identity,label}', (r->>'created_at_ms')::bigint, (r->>'updated_at_ms')::bigint, 'detached', r::text FROM jsonb_array_elements($1) r")
         .bind(serde_json::to_value(rows).expect("encode records")).execute(backend.pool()).await.expect("seed ten thousand rows");
 
     let page = registry

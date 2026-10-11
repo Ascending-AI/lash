@@ -18,7 +18,7 @@ pub(super) async fn prune_process_rows_tx(
         crate::artifact_store::lock_referrer_tx(tx, &referrer)
             .await
             .map_err(plugin_sqlx_error)?;
-        sqlx::query(
+        crate::observed_sql::query(
             crate::artifact_store::artifact_sql()
                 .fences
                 .insert_fence
@@ -45,7 +45,7 @@ pub(super) async fn prune_process_rows_tx(
     // Events are deleted explicitly for the report count; the final set-based
     // process delete cascades observers, leases, handovers, and terminal wake
     // deliveries through their existing foreign keys.
-    let (pruned_events, pruned_processes) = sqlx::query_as::<_, (i64, i64)>(
+    let (pruned_events, pruned_processes) = crate::observed_sql::query_as::<_, (i64, i64)>(
         crate::process_sql::process_sql()
             .registry_postgres
             .prune_rows
@@ -123,7 +123,7 @@ mod tests {
                 .expect("read events before divergent prune"),
         )
         .expect("encode events before divergent prune");
-        let clock_before: i64 = sqlx::query_scalar(
+        let clock_before: i64 = crate::observed_sql::query_scalar(
             "SELECT current_seq FROM lash_process_change_clock WHERE singleton = TRUE",
         )
         .fetch_one(storage.pool())
@@ -159,7 +159,7 @@ mod tests {
             events_before,
             "divergent prune must retain the event journal"
         );
-        let tombstone_count: i64 = sqlx::query_scalar(
+        let tombstone_count: i64 = crate::observed_sql::query_scalar(
             "SELECT count(*) FROM lash_process_tombstones WHERE process_id = $1",
         )
         .bind(process_id.as_str())
@@ -170,7 +170,7 @@ mod tests {
             tombstone_count, 0,
             "divergent prune must not leave a tombstone"
         );
-        let clock_after: i64 = sqlx::query_scalar(
+        let clock_after: i64 = crate::observed_sql::query_scalar(
             "SELECT current_seq FROM lash_process_change_clock WHERE singleton = TRUE",
         )
         .fetch_one(storage.pool())
@@ -181,7 +181,7 @@ mod tests {
             "divergent prune must roll back the clock"
         );
 
-        sqlx::query("DELETE FROM lash_processes WHERE process_id = $1")
+        crate::observed_sql::query("DELETE FROM lash_processes WHERE process_id = $1")
             .bind(process_id.as_str())
             .execute(storage.pool())
             .await

@@ -5,7 +5,7 @@ pub(crate) async fn list_sessions(
     pool: &PgPool,
     filter: &SessionListFilter,
 ) -> Result<Vec<SessionView>, StoreError> {
-    let rows = sqlx::query(
+    let rows = crate::observed_sql::query(
         crate::session_sql::session_sql()
             .meta_postgres
             .select_catalog

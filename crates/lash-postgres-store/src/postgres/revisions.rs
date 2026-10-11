@@ -24,7 +24,7 @@ pub(crate) async fn record_revision_tx(
     checkpoint_ref: Option<&str>,
     head_json: &str,
 ) -> Result<(), StoreError> {
-    sqlx::query(session_sql().revisions.insert.sql())
+    crate::observed_sql::query(session_sql().revisions.insert.sql())
         .bind(session_id.as_str())
         .bind(head_revision)
         .bind(leaf_node_id)
@@ -49,7 +49,7 @@ pub(crate) async fn release_unretained_tx(
     collecting: bool,
     session_id: Option<&SessionId>,
 ) -> Result<usize, StoreError> {
-    let released = sqlx::query(session_sql().revisions.prune_unretained.sql())
+    let released = crate::observed_sql::query(session_sql().revisions.prune_unretained.sql())
         .bind(i64::from(collecting))
         .bind(session_id.map(SessionId::as_str))
         .fetch_all(crate::observed_sql::executor(&mut **tx))
@@ -76,20 +76,22 @@ pub(crate) async fn retention_tx(
     tx: &mut Tx<'_>,
     session_id: &SessionId,
 ) -> Result<Option<Retention>, StoreError> {
-    sqlx::query_as::<_, (String, Option<i64>)>(session_sql().meta.select_retention.sql())
-        .bind(session_id.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?
-        .map(|(kind, last_turns)| Retention::from_stored(&kind, last_turns))
-        .transpose()
+    crate::observed_sql::query_as::<_, (String, Option<i64>)>(
+        session_sql().meta.select_retention.sql(),
+    )
+    .bind(session_id.as_str())
+    .fetch_optional(crate::observed_sql::executor(&mut **tx))
+    .await
+    .map_err(store_sqlx_error)?
+    .map(|(kind, last_turns)| Retention::from_stored(&kind, last_turns))
+    .transpose()
 }
 
 /// Refuse a session the catalog does not hold: a deletion tombstone answers
 /// [`StoreError::SessionDeleted`], an id it never held
 /// [`StoreError::SessionNotFound`].
 async fn require_session_tx(tx: &mut Tx<'_>, session_id: &SessionId) -> Result<(), StoreError> {
-    let (exists, deleted) = sqlx::query_as::<_, (bool, bool)>(
+    let (exists, deleted) = crate::observed_sql::query_as::<_, (bool, bool)>(
         session_sql()
             .meta_postgres
             .exists_materialized_or_deleted
@@ -114,11 +116,12 @@ async fn require_session_tx(tx: &mut Tx<'_>, session_id: &SessionId) -> Result<(
 
 /// The published pointer of `session_id`: its head.
 async fn head_revision_tx(tx: &mut Tx<'_>, session_id: &SessionId) -> Result<u64, StoreError> {
-    let head: Option<i64> = sqlx::query_scalar(session_sql().revisions.select_head_revision.sql())
-        .bind(session_id.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?;
+    let head: Option<i64> =
+        crate::observed_sql::query_scalar(session_sql().revisions.select_head_revision.sql())
+            .bind(session_id.as_str())
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?;
     u64_from_sql("SessionRevision", "head_revision", head.unwrap_or(0))
 }
 
@@ -140,7 +143,7 @@ async fn resolve_tx(
             match crate::session_runs::run_binding_conn(tx, session_id, input).await? {
                 Some(run) => run,
                 None => {
-                    let state: Option<String> = sqlx::query_scalar(
+                    let state: Option<String> = crate::observed_sql::query_scalar(
                         crate::turn_ingress::turn_ingress_sql()
                             .pending_inputs
                             .select_state_by_id
@@ -196,11 +199,13 @@ async fn resolved_pins_tx(
     tx: &mut Tx<'_>,
     session_id: &SessionId,
 ) -> Result<Vec<(Target, Option<u64>)>, StoreError> {
-    let pins = sqlx::query_as::<_, (String, String)>(session_sql().pins.select_by_session.sql())
-        .bind(session_id.as_str())
-        .fetch_all(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?;
+    let pins = crate::observed_sql::query_as::<_, (String, String)>(
+        session_sql().pins.select_by_session.sql(),
+    )
+    .bind(session_id.as_str())
+    .fetch_all(crate::observed_sql::executor(&mut **tx))
+    .await
+    .map_err(store_sqlx_error)?;
     let mut resolved = Vec::with_capacity(pins.len());
     for (kind, id) in pins {
         let target = Target::from_stored(&kind, &id)?;
@@ -240,7 +245,7 @@ async fn begin_snapshot(pool: &PgPool) -> Result<Tx<'_>, StoreError> {
     let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
         .await
         .map_err(store_sqlx_error)?;
-    sqlx::query(
+    crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .begin_repeatable_read
             .sql(),
@@ -264,9 +269,10 @@ impl PostgresStore {
             .await?
             .revision(session_id, target)?;
         let row = match i64::try_from(revision) {
-            Ok(sql_revision) => sqlx::query_as::<_, (Option<String>, Option<String>, String)>(
-                session_sql().revisions.select.sql(),
-            )
+            Ok(sql_revision) => crate::observed_sql::query_as::<
+                _,
+                (Option<String>, Option<String>, String),
+            >(session_sql().revisions.select.sql())
             .bind(session_id.as_str())
             .bind(sql_revision)
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -306,13 +312,14 @@ impl PostgresStore {
         let fleet = self.fence.fleet();
         let mut tx = begin_snapshot(&self.pool).await?;
         require_session_tx(&mut tx, session_id).await?;
-        let rows = sqlx::query_as::<_, (i64, Option<String>, Option<String>, String)>(
-            session_sql().revisions.select_by_session.sql(),
-        )
-        .bind(session_id.as_str())
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(store_sqlx_error)?;
+        let rows =
+            crate::observed_sql::query_as::<_, (i64, Option<String>, Option<String>, String)>(
+                session_sql().revisions.select_by_session.sql(),
+            )
+            .bind(session_id.as_str())
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(store_sqlx_error)?;
         let mut stored = Vec::with_capacity(rows.len());
         for (head_revision, leaf_node_id, checkpoint_ref, head_json) in rows {
             stored.push(RevisionRow {
@@ -361,7 +368,7 @@ impl PostgresStore {
     ) -> Result<(), StoreError> {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, session_id).await?;
-        sqlx::query(session_sql().pins.delete.sql())
+        crate::observed_sql::query(session_sql().pins.delete.sql())
             .bind(session_id.as_str())
             .bind(target.kind())
             .bind(target.id())
@@ -403,7 +410,7 @@ impl PostgresStore {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, session_id).await?;
         require_session_tx(&mut tx, session_id).await?;
-        sqlx::query(session_sql().meta.set_retention.sql())
+        crate::observed_sql::query(session_sql().meta.set_retention.sql())
             .bind(session_id.as_str())
             .bind(retention.kind())
             .bind(retention.last_turns().map(i64::from))
@@ -420,7 +427,7 @@ pub(crate) async fn pin_tx(
     session_id: &SessionId,
     target: &Target,
 ) -> Result<(), StoreError> {
-    sqlx::query(session_sql().pins.insert.sql())
+    crate::observed_sql::query(session_sql().pins.insert.sql())
         .bind(session_id.as_str())
         .bind(target.kind())
         .bind(target.id())

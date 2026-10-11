@@ -611,7 +611,7 @@ impl PostgresStorage {
     ///
     /// let (namespace, key) = PostgresStorage::schema_advisory_lock_key();
     /// let mut connection = pool.acquire().await?;
-    /// sqlx::query("SELECT pg_advisory_lock($1, $2)")
+    /// crate::observed_sql::query("SELECT pg_advisory_lock($1, $2)")
     ///     .bind(namespace)
     ///     .bind(key)
     ///     .execute(&mut *connection)
@@ -619,7 +619,7 @@ impl PostgresStorage {
     /// // ... run the migrations here, still holding the key ...
     /// let report = PostgresStorage::verify_schema_on(&mut connection).await?;
     /// assert!(report.is_conformant(), "{report}");
-    /// sqlx::query("SELECT pg_advisory_unlock($1, $2)")
+    /// crate::observed_sql::query("SELECT pg_advisory_unlock($1, $2)")
     ///     .bind(namespace)
     ///     .bind(key)
     ///     .execute(&mut *connection)

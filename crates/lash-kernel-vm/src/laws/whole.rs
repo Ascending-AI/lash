@@ -341,3 +341,38 @@ main {
         Ok(None)
     );
 }
+
+/// WHOLE-PHASE-WORK: capture and cold import have separate raw receipts;
+/// a relay reports the complete objects/tasks/calls that actually cross it.
+#[test]
+fn whole_capture_and_import_report_each_real_phase_and_structure() {
+    let mut embedder = Embedder::with(ALIASES_CYCLES_AND_NUMBERS, Setup::default());
+    assert!(matches!(embedder.run(), Step::Parked(_)));
+    let collector = crate::perf_witness::Collector::install().unwrap();
+    assert!(crate::perf_witness::Collector::install().is_none());
+    embedder.relay_whole(false, &mut FrozenStore::default());
+    let receipts = collector.snapshot();
+    assert_eq!(
+        receipts.iter().map(|r| r.phase).collect::<Vec<_>>(),
+        [
+            "machine.export",
+            "whole.capture",
+            "whole.restore",
+            "machine.import",
+            "machine.export",
+            "whole.capture"
+        ]
+    );
+    let expected = receipts[0].geometry.unwrap();
+    assert!(expected.objects > 0 && expected.tasks > 0 && expected.active_calls > 0);
+    for receipt in &receipts {
+        assert_eq!(receipt.geometry, Some(expected));
+        eprintln!(
+            "KERNEL_WHOLE {}",
+            serde_json::json!({"phase": receipt.phase,
+            "elapsed_nanos": receipt.elapsed_nanos, "tasks": expected.tasks,
+            "active_calls": expected.active_calls, "objects": expected.objects,
+            "scope": "actual synchronous phase call; structure cardinalities, not bytes or charge"})
+        );
+    }
+}

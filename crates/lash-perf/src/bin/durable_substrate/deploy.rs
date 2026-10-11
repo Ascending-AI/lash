@@ -166,7 +166,15 @@ impl Deployment {
             stores.process_env_store().as_ref(),
         )
         .await;
-        let recorded = RecordingStores::new(stores, node, Arc::clone(&self.recorder));
+        let recorded = RecordingStores::new(
+            stores,
+            node,
+            Arc::clone(&self.recorder),
+            match self.database {
+                Database::Sqlite(_) => "sqlite",
+                Database::Postgres(_) => "postgres",
+            },
+        );
         let backend = Backend::assemble(BackendParts {
             stores: Arc::new(recorded),
             settings: self.settings,

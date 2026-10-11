@@ -86,7 +86,7 @@ async fn scan_started_processes(
     pool: &PgPool,
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
-    let rows = sqlx::query_as::<_, (String, String, String)>(
+    let rows = crate::observed_sql::query_as::<_, (String, String, String)>(
         crate::process_sql::process_sql()
             .process_postgres
             .list_live_for_preflight
@@ -122,7 +122,7 @@ async fn scan_module_artifacts(
     pool: &PgPool,
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
-    let rows = sqlx::query_as::<_, (String, Vec<u8>)>(
+    let rows = crate::observed_sql::query_as::<_, (String, Vec<u8>)>(
         crate::artifact_store::artifact_sql()
             .lash_vm_artifacts
             .list_namespace_page
@@ -343,15 +343,15 @@ async fn fetch_sessions(
     // the whole table.
     let sql = crate::session_sql::session_sql();
     let query = match scan.after.as_deref() {
-        None => sqlx::query_as::<_, (String, String)>(
+        None => crate::observed_sql::query_as::<_, (String, String)>(
             sql.head_postgres.scan_checkpoints_first_page.sql(),
         )
         .bind(row_limit(scan)),
-        Some(after) => {
-            sqlx::query_as::<_, (String, String)>(sql.head_postgres.scan_checkpoints_after.sql())
-                .bind(after.to_string())
-                .bind(row_limit(scan))
-        }
+        Some(after) => crate::observed_sql::query_as::<_, (String, String)>(
+            sql.head_postgres.scan_checkpoints_after.sql(),
+        )
+        .bind(after.to_string())
+        .bind(row_limit(scan)),
     };
     let rows = query
         .fetch_all(crate::observed_sql::executor(&mut **snapshot))
@@ -381,7 +381,7 @@ async fn fetch_blobs(
     // One statement per session would turn a hundred-session page into a
     // hundred round trips against a server the host has not decided to depend
     // on yet.
-    let rows = sqlx::query_as::<_, (String, Vec<u8>)>(
+    let rows = crate::observed_sql::query_as::<_, (String, Vec<u8>)>(
         crate::blobs::blob_sql()
             .postgres
             .select_bodies_by_hash
@@ -407,7 +407,7 @@ async fn read_only_snapshot(pool: &PgPool) -> Result<Transaction<'_, Postgres>, 
             backend: "postgres",
             message: error.to_string(),
         })?;
-    sqlx::query(
+    crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .begin_repeatable_read_read_only
             .sql(),

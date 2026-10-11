@@ -249,7 +249,7 @@ pub async fn idle(run: &Run<'_>, case: &Case, actors: usize, window: Duration) -
     let after = counters.read().await?;
     let transactions = deployment.recorder.transactions_since(from);
     let seconds = window.as_secs_f64();
-    let delta = after.since(&before);
+    let delta = after.since(&before)?;
     run.report.write(
         "idle",
         &serde_json::json!({
@@ -263,10 +263,10 @@ pub async fn idle(run: &Run<'_>, case: &Case, actors: usize, window: Duration) -
             "durable_transactions_per_s": transactions.iter().filter(|t| t.ok).count() as f64 / seconds,
             "counters": delta,
             "statements_per_s": delta.postgres.map(|pg| pg.all_statements as f64 / seconds),
-            "relation_bytes_per_waiting_actor": before.since(&empty).postgres
+            "relation_bytes_per_waiting_actor": before.since(&empty)?.postgres
                 .filter(|_| actors > 0)
                 .map(|pg| pg.relation_bytes as f64 / actors as f64),
-            "sqlite_bytes_per_waiting_actor": before.since(&empty).sqlite_bytes
+            "sqlite_bytes_per_waiting_actor": before.since(&empty)?.sqlite_bytes
                 .filter(|_| actors > 0)
                 .map(|bytes| bytes as f64 / actors as f64),
             "connections": after.postgres.map(|pg| pg.connections),

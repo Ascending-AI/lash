@@ -73,7 +73,7 @@ async fn check_fence_tx(
     tx: &mut sqlx::PgConnection,
     referrer: &ArtifactReferrer,
 ) -> Result<(), StoreError> {
-    let fenced: bool = sqlx::query_scalar(
+    let fenced: bool = crate::observed_sql::query_scalar(
         crate::artifact_store::artifact_sql()
             .fences
             .select_is_fenced
@@ -105,12 +105,13 @@ pub(crate) async fn acquire_attachment_refs_tx(
         lock_attachment_fence_tx(tx, id.as_str()).await?;
     }
     for id in &ids {
-        let deleting: bool = sqlx::query_scalar(attachment_sql().postgres.select_deleting.sql())
-            .bind(id.as_str())
-            .fetch_one(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(store_sqlx_error)?;
-        let evidenced = sqlx::query(attachment_sql().uploads.select_evidence.sql())
+        let deleting: bool =
+            crate::observed_sql::query_scalar(attachment_sql().postgres.select_deleting.sql())
+                .bind(id.as_str())
+                .fetch_one(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(store_sqlx_error)?;
+        let evidenced = crate::observed_sql::query(attachment_sql().uploads.select_evidence.sql())
             .bind(id.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
@@ -123,7 +124,7 @@ pub(crate) async fn acquire_attachment_refs_tx(
         }
     }
     for id in &ids {
-        sqlx::query(
+        crate::observed_sql::query(
             attachment_sql()
                 .condemnation
                 .delete_unclaimed_condemned
@@ -145,7 +146,7 @@ async fn insert_edge_tx(
     referrer: &ArtifactReferrer,
     id: &AttachmentId,
 ) -> Result<(), StoreError> {
-    sqlx::query(attachment_sql().edges.insert.sql())
+    crate::observed_sql::query(attachment_sql().edges.insert.sql())
         .bind(id.as_str())
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
@@ -159,15 +160,17 @@ async fn has_permit_tx(
     write: &AttachmentWrite,
     token: &str,
 ) -> Result<bool, StoreError> {
-    Ok(sqlx::query(attachment_sql().pending.select_permit.sql())
-        .bind(token)
-        .bind(write.attachment_id.as_str())
-        .bind(write.claim.referrer().kind().as_str())
-        .bind(write.claim.referrer().canonical_id())
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?
-        .is_some())
+    Ok(
+        crate::observed_sql::query(attachment_sql().pending.select_permit.sql())
+            .bind(token)
+            .bind(write.attachment_id.as_str())
+            .bind(write.claim.referrer().kind().as_str())
+            .bind(write.claim.referrer().canonical_id())
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?
+            .is_some(),
+    )
 }
 async fn abort_write_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -175,7 +178,7 @@ async fn abort_write_tx(
     referrer: &ArtifactReferrer,
     token: &str,
 ) -> Result<(), StoreError> {
-    sqlx::query(attachment_sql().condemnation.delete_superseded_claim.sql())
+    crate::observed_sql::query(attachment_sql().condemnation.delete_superseded_claim.sql())
         .bind(id.as_str())
         .bind(token)
         .bind(referrer.kind().as_str())
@@ -183,7 +186,7 @@ async fn abort_write_tx(
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
-    sqlx::query(attachment_sql().pending.delete_permit.sql())
+    crate::observed_sql::query(attachment_sql().pending.delete_permit.sql())
         .bind(token)
         .bind(id.as_str())
         .bind(referrer.kind().as_str())
@@ -191,7 +194,7 @@ async fn abort_write_tx(
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
-    sqlx::query(attachment_sql().edges.delete_unproven_ref.sql())
+    crate::observed_sql::query(attachment_sql().edges.delete_unproven_ref.sql())
         .bind(id.as_str())
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
@@ -226,7 +229,7 @@ pub(crate) async fn lock_attachment_fence_tx(
     tx: &mut sqlx::PgConnection,
     attachment_id: &str,
 ) -> Result<(), StoreError> {
-    sqlx::query(
+    crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .lock_xact_by_class_and_text
             .sql(),
@@ -286,13 +289,13 @@ pub(crate) async fn begin_attachment_sweep(
     for _ in 0..attempts {
         let mut tx = crate::begin_guarded(&mut connection, fence).await?;
         let generation: i64 =
-            sqlx::query_scalar(attachment_sql().sweep_clock.mint_generation.sql())
+            crate::observed_sql::query_scalar(attachment_sql().sweep_clock.mint_generation.sql())
                 .bind(true)
                 .fetch_one(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        let held: bool = sqlx::query_scalar(
+        let held: bool = crate::observed_sql::query_scalar(
             crate::connection_sql::connection_sql()
                 .try_lock_session_by_class_and_text
                 .sql(),
@@ -340,7 +343,7 @@ async fn sweep_pass_is_dead(
     let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
         .await
         .map_err(store_sqlx_error)?;
-    sqlx::query(
+    crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .set_local_lock_timeout
             .sql(),
@@ -349,7 +352,7 @@ async fn sweep_pass_is_dead(
     .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
-    let probe = sqlx::query(
+    let probe = crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .lock_xact_by_class_and_text
             .sql(),
@@ -387,7 +390,7 @@ pub(crate) async fn adopt_attachment_condemnations(
 ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, StoreError> {
     let mine = sweep_generation_sql(generation)?;
     let now = i64::try_from(now).unwrap_or(i64::MAX);
-    let rows = sqlx::query_as::<_, (String, i64, String, i32, Option<String>, i64)>(
+    let rows = crate::observed_sql::query_as::<_, (String, i64, String, i32, Option<String>, i64)>(
         attachment_sql().condemnation.select_adoptable.sql(),
     )
     .bind(mine)
@@ -433,7 +436,7 @@ pub(crate) async fn adopt_attachment_condemnations(
         }
         let mut tx = crate::begin_guarded(pool, fence).await?;
         lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
-        let adopted = sqlx::query(attachment_sql().condemnation.adopt.sql())
+        let adopted = crate::observed_sql::query(attachment_sql().condemnation.adopt.sql())
             .bind(id.as_str())
             .bind(mine)
             .bind(owner)
@@ -490,21 +493,21 @@ pub(crate) async fn settle_attachment_condemnation(
     let statements = &attachment_sql().condemnation;
     let settled = match settlement {
         lash_core_execution::AttachmentCondemnationSettlement::Deleted => {
-            sqlx::query(statements.delete_armed.sql())
+            crate::observed_sql::query(statements.delete_armed.sql())
                 .bind(attachment_id)
                 .bind(generation)
                 .execute(crate::observed_sql::executor(&mut **tx))
                 .await
         }
         lash_core_execution::AttachmentCondemnationSettlement::Spared => {
-            sqlx::query(statements.delete_spared.sql())
+            crate::observed_sql::query(statements.delete_spared.sql())
                 .bind(attachment_id)
                 .bind(generation)
                 .execute(crate::observed_sql::executor(&mut **tx))
                 .await
         }
         lash_core_execution::AttachmentCondemnationSettlement::Failed { stall, error } => {
-            sqlx::query(statements.record_failed_delete.sql())
+            crate::observed_sql::query(statements.record_failed_delete.sql())
                 .bind(attachment_id)
                 .bind(generation)
                 .bind(error)
@@ -542,7 +545,7 @@ pub(crate) fn sweep_generation_sql(
 pub(crate) async fn list_attachment_condemnations(
     pool: &PgPool,
 ) -> Result<Vec<lash_core_execution::AttachmentCondemnationRecord>, StoreError> {
-    let rows = sqlx::query(attachment_sql().condemnation.select_all.sql())
+    let rows = crate::observed_sql::query(attachment_sql().condemnation.select_all.sql())
         .fetch_all(crate::observed_sql::executor(pool))
         .await
         .map_err(store_sqlx_error)?;
@@ -589,7 +592,7 @@ pub(crate) async fn recover_abandoned_attachment_write(
 ) -> Result<(), StoreError> {
     // Discover the referrer without a lock, then re-read the claim after taking
     // its referrer and digest locks in global order. End may have released it.
-    let claim = sqlx::query_as::<_, (String, String, String)>(
+    let claim = crate::observed_sql::query_as::<_, (String, String, String)>(
         attachment_sql().condemnation.select_claim.sql(),
     )
     .bind(id)
@@ -608,7 +611,7 @@ pub(crate) async fn recover_abandoned_attachment_write(
     let mut tx = crate::begin_guarded(pool, fence).await?;
     lock_attachment_referrer_tx(&mut tx, &referrer).await?;
     lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
-    let current = sqlx::query_as::<_, (String, String, String)>(
+    let current = crate::observed_sql::query_as::<_, (String, String, String)>(
         attachment_sql().condemnation.select_claim.sql(),
     )
     .bind(id.as_str())
@@ -636,7 +639,7 @@ impl AttachmentReferrers for PostgresStore {
         lock_attachment_referrer_tx(&mut tx, referrer).await?;
         check_fence_tx(&mut tx, referrer).await?;
         lock_attachment_fence_tx(&mut tx, write.attachment_id.as_str()).await?;
-        let condemnation = sqlx::query_as::<_, (String, Option<String>)>(
+        let condemnation = crate::observed_sql::query_as::<_, (String, Option<String>)>(
             attachment_sql().condemnation.select_phase_and_claim.sql(),
         )
         .bind(write.attachment_id.as_str())
@@ -666,7 +669,7 @@ impl AttachmentReferrers for PostgresStore {
                 });
             }
         }
-        sqlx::query(attachment_sql().pending.insert.sql())
+        crate::observed_sql::query(attachment_sql().pending.insert.sql())
             .bind(token.as_hex())
             .bind(write.attachment_id.as_str())
             .bind(referrer.kind().as_str())
@@ -676,7 +679,7 @@ impl AttachmentReferrers for PostgresStore {
             .await
             .map_err(store_sqlx_error)?;
         if condemnation.is_some() {
-            sqlx::query(attachment_sql().condemnation.claim_write.sql())
+            crate::observed_sql::query(attachment_sql().condemnation.claim_write.sql())
                 .bind(write.attachment_id.as_str())
                 .bind(token.as_hex())
                 .execute(crate::observed_sql::executor(&mut **tx))
@@ -707,19 +710,19 @@ impl AttachmentReferrers for PostgresStore {
                 digest: write.attachment_id.clone(),
             });
         }
-        sqlx::query(attachment_sql().uploads.insert.sql())
+        crate::observed_sql::query(attachment_sql().uploads.insert.sql())
             .bind(write.attachment_id.as_str())
             .bind(clamp_epoch_ms(self.clock.timestamp_ms()))
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
-        sqlx::query(attachment_sql().condemnation.delete_by_write_token.sql())
+        crate::observed_sql::query(attachment_sql().condemnation.delete_by_write_token.sql())
             .bind(write.attachment_id.as_str())
             .bind(&token)
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
-        sqlx::query(attachment_sql().pending.delete_permit.sql())
+        crate::observed_sql::query(attachment_sql().pending.delete_permit.sql())
             .bind(token)
             .bind(write.attachment_id.as_str())
             .bind(referrer.kind().as_str())
@@ -770,7 +773,7 @@ impl AttachmentReferrers for PostgresStore {
         }
         lock_attachment_referrer_tx(&mut tx, referrer).await?;
         lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
-        let fenced: bool = sqlx::query_scalar(
+        let fenced: bool = crate::observed_sql::query_scalar(
             crate::artifact_store::artifact_sql()
                 .fences
                 .select_is_fenced
@@ -784,7 +787,7 @@ impl AttachmentReferrers for PostgresStore {
         if !fenced {
             let retained = if let ArtifactReferrer::Session(session) = referrer {
                 let row: (bool, bool, bool) =
-                    sqlx::query_as(attachment_sql().postgres.session_state.sql())
+                    crate::observed_sql::query_as(attachment_sql().postgres.session_state.sql())
                         .bind(session.as_str())
                         .fetch_one(crate::observed_sql::executor(&mut **tx))
                         .await
@@ -794,7 +797,7 @@ impl AttachmentReferrers for PostgresStore {
                 false
             };
             if !retained {
-                sqlx::query(attachment_sql().edges.delete_ref.sql())
+                crate::observed_sql::query(attachment_sql().edges.delete_ref.sql())
                     .bind(id.as_str())
                     .bind(referrer.kind().as_str())
                     .bind(referrer.canonical_id())
@@ -808,17 +811,18 @@ impl AttachmentReferrers for PostgresStore {
     async fn end_attachment_referrer(&self, referrer: &ArtifactReferrer) -> Result<(), StoreError> {
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
         lock_attachment_referrer_tx(&mut tx, referrer).await?;
-        let ids: Vec<String> =
-            sqlx::query_scalar(attachment_sql().pending.select_referrer_digests.sql())
-                .bind(referrer.kind().as_str())
-                .bind(referrer.canonical_id())
-                .fetch_all(crate::observed_sql::executor(&mut **tx))
-                .await
-                .map_err(store_sqlx_error)?;
+        let ids: Vec<String> = crate::observed_sql::query_scalar(
+            attachment_sql().pending.select_referrer_digests.sql(),
+        )
+        .bind(referrer.kind().as_str())
+        .bind(referrer.canonical_id())
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)?;
         for id in ids {
             lock_attachment_fence_tx(&mut tx, &id).await?;
         }
-        sqlx::query(
+        crate::observed_sql::query(
             crate::artifact_store::artifact_sql()
                 .fences
                 .insert_fence
@@ -830,13 +834,13 @@ impl AttachmentReferrers for PostgresStore {
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
-        sqlx::query(attachment_sql().pending.delete_referrer.sql())
+        crate::observed_sql::query(attachment_sql().pending.delete_referrer.sql())
             .bind(referrer.kind().as_str())
             .bind(referrer.canonical_id())
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
-        sqlx::query(attachment_sql().edges.delete_referrer.sql())
+        crate::observed_sql::query(attachment_sql().edges.delete_referrer.sql())
             .bind(referrer.kind().as_str())
             .bind(referrer.canonical_id())
             .execute(crate::observed_sql::executor(&mut **tx))
@@ -849,7 +853,7 @@ impl AttachmentReferrers for PostgresStore {
         session: &SessionId,
     ) -> Result<SessionReferrerState, StoreError> {
         let (metadata, deleted, retained): (bool, bool, bool) =
-            sqlx::query_as(attachment_sql().postgres.session_state.sql())
+            crate::observed_sql::query_as(attachment_sql().postgres.session_state.sql())
                 .bind(session.as_str())
                 .fetch_one(crate::observed_sql::executor(&self.pool))
                 .await
@@ -869,7 +873,7 @@ impl AttachmentReferrers for PostgresStore {
         id: &AttachmentId,
     ) -> Result<Vec<ArtifactReferrer>, StoreError> {
         let rows: Vec<(String, String)> =
-            sqlx::query_as(attachment_sql().edges.select_referrers.sql())
+            crate::observed_sql::query_as(attachment_sql().edges.select_referrers.sql())
                 .bind(id.as_str())
                 .fetch_all(crate::observed_sql::executor(&self.pool))
                 .await

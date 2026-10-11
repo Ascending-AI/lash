@@ -474,7 +474,7 @@ impl PostgresDurableStore {
         if let Some(now) = self.injected_instant().transpose()? {
             return Ok(now);
         }
-        let now: i64 = sqlx::query_scalar(
+        let now: i64 = crate::observed_sql::query_scalar(
             crate::connection_sql::connection_sql()
                 .select_statement_epoch_ms
                 .sql(),
@@ -497,7 +497,7 @@ impl PostgresDurableStore {
             .await
             .map_err(store_failure)?;
         let (recorded, now): (Option<i32>, i64) =
-            sqlx::query_as(SQL.postgres.fence_and_clock.sql())
+            crate::observed_sql::query_as(SQL.postgres.fence_and_clock.sql())
                 .fetch_one(crate::observed_sql::executor(locked.connection()))
                 .await
                 .map_err(sqlx_failure)?;
@@ -520,10 +520,11 @@ impl PostgresDurableStore {
     /// Every registered boot's liveness lock, read on the scheduler pool.
     async fn liveness(&self) -> Result<Vec<lash_durable::BootLiveness>, DurableError> {
         self.within(CommitCapacity::Scheduler, async {
-            let rows: Vec<(String, String, bool)> = sqlx::query_as(SQL.postgres.liveness.sql())
-                .fetch_all(crate::observed_sql::executor(&self.pools.scheduler))
-                .await
-                .map_err(sqlx_failure)?;
+            let rows: Vec<(String, String, bool)> =
+                crate::observed_sql::query_as(SQL.postgres.liveness.sql())
+                    .fetch_all(crate::observed_sql::executor(&self.pools.scheduler))
+                    .await
+                    .map_err(sqlx_failure)?;
             Ok(rows
                 .into_iter()
                 .map(|(node, boot, held)| lash_durable::BootLiveness {
@@ -557,16 +558,17 @@ impl PostgresDurableStore {
                         });
                     }
                     for (owner, free) in [(&reaper.owner, false), (boot, true)] {
-                        let taken: bool = sqlx::query_scalar(SQL.postgres.take_liveness.sql())
-                            .bind(owner.boot.as_str())
-                            .fetch_one(crate::observed_sql::executor(&mut **tx))
-                            .await
-                            .map_err(sqlx_failure)?;
+                        let taken: bool =
+                            crate::observed_sql::query_scalar(SQL.postgres.take_liveness.sql())
+                                .bind(owner.boot.as_str())
+                                .fetch_one(crate::observed_sql::executor(&mut **tx))
+                                .await
+                                .map_err(sqlx_failure)?;
                         if taken != free {
                             return Ok(Vec::new());
                         }
                     }
-                    let deleted = sqlx::query(SQL.node.delete_boot.sql())
+                    let deleted = crate::observed_sql::query(SQL.node.delete_boot.sql())
                         .bind(boot.node.as_str())
                         .bind(boot.boot.as_str())
                         .fetch_optional(crate::observed_sql::executor(&mut **tx))
@@ -600,7 +602,7 @@ async fn node_live(tx: &mut PgConnection, node: &Owner) -> Result<bool, DurableE
 
 /// Whether `node` is draining, or `None` when it holds no lease.
 async fn node_draining(tx: &mut PgConnection, node: &Owner) -> Result<Option<bool>, DurableError> {
-    sqlx::query_scalar(SQL.postgres.node_live.sql())
+    crate::observed_sql::query_scalar(SQL.postgres.node_live.sql())
         .bind(node.node.as_str())
         .bind(node.boot.as_str())
         .fetch_optional(crate::observed_sql::executor(tx))
@@ -620,7 +622,7 @@ async fn release_owned_by(
     owner: &Owner,
     now: DurableInstant,
 ) -> Result<Vec<(ActorKey, Epoch)>, DurableError> {
-    let rows = sqlx::query(SQL.actor.release_owned_by.sql())
+    let rows = crate::observed_sql::query(SQL.actor.release_owned_by.sql())
         .bind(owner.node.as_str())
         .bind(owner.boot.as_str())
         .bind(now.0)
@@ -637,7 +639,7 @@ async fn fenced(
     actor: &ActorKey,
     held: Epoch,
 ) -> Result<DurableError, DurableError> {
-    let current: Option<i64> = sqlx::query_scalar(SQL.actor.epoch_of.sql())
+    let current: Option<i64> = crate::observed_sql::query_scalar(SQL.actor.epoch_of.sql())
         .bind(actor.as_str())
         .fetch_optional(crate::observed_sql::executor(tx))
         .await
@@ -708,7 +710,7 @@ async fn apply_owner(
         apply_domain(tx, &committing, domain).await?;
     }
     if let Some(formats) = write.formats() {
-        sqlx::query(SQL.actor.stamp_formats.sql())
+        crate::observed_sql::query(SQL.actor.stamp_formats.sql())
             .bind(actor)
             .bind(formats.as_str())
             .execute(crate::observed_sql::executor(&mut ***tx))
@@ -716,7 +718,7 @@ async fn apply_owner(
             .map_err(sqlx_failure)?;
     }
     if let Some(through) = write.ack() {
-        sqlx::query(SQL.postgres.ack_through.sql())
+        crate::observed_sql::query(SQL.postgres.ack_through.sql())
             .bind(actor)
             .bind(through.0)
             .execute(crate::observed_sql::executor(&mut ***tx))
@@ -729,22 +731,23 @@ async fn apply_owner(
             // A cancel that arrived since the owner's read is not lost to the
             // park: the actor goes ready instead, its park kept, and its
             // claimer ends it engine-free.
-            let stored: String = sqlx::query_scalar(SQL.postgres.park_unless_pending.sql())
-                .bind(actor)
-                .bind(now.0)
-                .bind(lash_durable::domain::CANCEL_MAIL)
-                .fetch_one(crate::observed_sql::executor(&mut ***tx))
-                .await
-                .map_err(sqlx_failure)?;
+            let stored: String =
+                crate::observed_sql::query_scalar(SQL.postgres.park_unless_pending.sql())
+                    .bind(actor)
+                    .bind(now.0)
+                    .bind(lash_durable::domain::CANCEL_MAIL)
+                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
+                    .await
+                    .map_err(sqlx_failure)?;
             actor_state(&stored)?
         }
         Some(Release::Terminal) => {
-            sqlx::query(SQL.mail.delete_all.sql())
+            crate::observed_sql::query(SQL.mail.delete_all.sql())
                 .bind(actor)
                 .execute(crate::observed_sql::executor(&mut ***tx))
                 .await
                 .map_err(sqlx_failure)?;
-            let stored: String = sqlx::query_scalar(SQL.actor.end.sql())
+            let stored: String = crate::observed_sql::query_scalar(SQL.actor.end.sql())
                 .bind(actor)
                 .fetch_one(crate::observed_sql::executor(&mut ***tx))
                 .await
@@ -757,7 +760,7 @@ async fn apply_owner(
                 Release::Ready => ("ready", None),
                 _ => ("idle", None),
             };
-            let stored: String = sqlx::query_scalar(SQL.actor.release.sql())
+            let stored: String = crate::observed_sql::query_scalar(SQL.actor.release.sql())
                 .bind(actor)
                 .bind(state)
                 .bind(due)
@@ -794,14 +797,14 @@ pub(crate) async fn wake_within(
     } else {
         SQL.actor.wake.sql()
     };
-    let woke = sqlx::query(statement)
+    let woke = crate::observed_sql::query(statement)
         .bind(actor.as_str())
         .bind(now.0)
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
     let Some(row) = woke else {
-        let state: Option<(i64, String)> = sqlx::query_as(SQL.actor.epoch_of.sql())
+        let state: Option<(i64, String)> = crate::observed_sql::query_as(SQL.actor.epoch_of.sql())
             .bind(actor.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
@@ -832,7 +835,7 @@ pub(crate) async fn wake_session_within(
 ) -> Result<Woken, DurableError> {
     let actor = ActorKey::session(session.as_str())
         .map_err(|error| corrupt("session actor key", &error.to_string()))?;
-    sqlx::query(SQL.actor.create.sql())
+    crate::observed_sql::query(SQL.actor.create.sql())
         .bind(actor.as_str())
         .bind(actor.kind().as_str())
         .bind(lash_durable::domain::SESSION_ACTOR_FORMATS)
@@ -958,7 +961,7 @@ async fn lock_mail_targets(tx: &mut PgConnection, writes: &MailTx) -> Result<(),
     targets.sort_unstable();
     targets.dedup();
     if targets.len() > 1 {
-        sqlx::query(SQL.postgres.lock_actors.sql())
+        crate::observed_sql::query(SQL.postgres.lock_actors.sql())
             .bind(&targets)
             .execute(crate::observed_sql::executor(&mut *tx))
             .await
@@ -978,7 +981,7 @@ async fn apply_mail(
     for write in writes.writes() {
         match write {
             MailWrite::CreateActor { actor, formats } => {
-                let created = sqlx::query(SQL.actor.create.sql())
+                let created = crate::observed_sql::query(SQL.actor.create.sql())
                     .bind(actor.as_str())
                     .bind(actor.kind().as_str())
                     .bind(formats.as_str())
@@ -1003,7 +1006,7 @@ async fn apply_mail(
             MailWrite::Append { actor, .. } | MailWrite::Wake { actor } => {
                 let (woken, seq) = wake_within(tx, actor, false, now).await?;
                 if let MailWrite::Append { kind, body, .. } = write {
-                    sqlx::query(SQL.mail.append.sql())
+                    crate::observed_sql::query(SQL.mail.append.sql())
                         .bind(actor.as_str())
                         .bind(seq.0)
                         .bind(kind.as_str())
@@ -1049,11 +1052,12 @@ impl DurableStore for PostgresDurableStore {
                 let formats = serde_json::Value::from(formats).to_string();
                 let (mut tx, now) = self.open(CommitLabel::NODE_REGISTER).await?;
                 let outcome = async {
-                    let boots: Vec<String> = sqlx::query_scalar(SQL.node.delete_boots.sql())
-                        .bind(spec.node.as_str())
-                        .fetch_all(crate::observed_sql::executor(&mut **tx))
-                        .await
-                        .map_err(sqlx_failure)?;
+                    let boots: Vec<String> =
+                        crate::observed_sql::query_scalar(SQL.node.delete_boots.sql())
+                            .bind(spec.node.as_str())
+                            .fetch_all(crate::observed_sql::executor(&mut **tx))
+                            .await
+                            .map_err(sqlx_failure)?;
                     for boot in boots {
                         let earlier = Owner {
                             node: spec.node.clone(),
@@ -1062,7 +1066,7 @@ impl DurableStore for PostgresDurableStore {
                         release_owned_by(&mut tx, &earlier, now).await?;
                     }
                     let expires_at = now.after_millis(spec.ttl_millis);
-                    sqlx::query(SQL.node.insert.sql())
+                    crate::observed_sql::query(SQL.node.insert.sql())
                         .bind(lease_owner.node.as_str())
                         .bind(lease_owner.boot.as_str())
                         .bind(&formats)
@@ -1090,7 +1094,7 @@ impl DurableStore for PostgresDurableStore {
         self.within(CommitCapacity::Renewal, async {
             crate::observed_sql::measure(&self.observer, CommitLabel::HEARTBEAT, 0, async {
                 let (mut tx, now) = self.open(CommitLabel::HEARTBEAT).await?;
-                let outcome = sqlx::query_scalar::<_, i64>(SQL.node.renew.sql())
+                let outcome = crate::observed_sql::query_scalar::<_, i64>(SQL.node.renew.sql())
                     .bind(node.owner.node.as_str())
                     .bind(node.owner.boot.as_str())
                     .bind(now.after_millis(node.ttl_millis).0)
@@ -1120,11 +1124,12 @@ impl DurableStore for PostgresDurableStore {
                             node: reaper.owner.node.clone(),
                         });
                     }
-                    let dead: Vec<(String, String)> = sqlx::query_as(SQL.node.delete_expired.sql())
-                        .bind(now.0)
-                        .fetch_all(crate::observed_sql::executor(&mut **tx))
-                        .await
-                        .map_err(sqlx_failure)?;
+                    let dead: Vec<(String, String)> =
+                        crate::observed_sql::query_as(SQL.node.delete_expired.sql())
+                            .bind(now.0)
+                            .fetch_all(crate::observed_sql::executor(&mut **tx))
+                            .await
+                            .map_err(sqlx_failure)?;
                     let mut reaped = Vec::new();
                     for (node, boot) in dead {
                         let from = Owner {
@@ -1154,7 +1159,7 @@ impl DurableStore for PostgresDurableStore {
             crate::observed_sql::measure(&self.observer, CommitLabel::NODE_RELEASE, 0, async {
                 let (mut tx, now) = self.open(CommitLabel::NODE_RELEASE).await?;
                 let outcome = async {
-                    let deleted = sqlx::query(SQL.node.delete_boot.sql())
+                    let deleted = crate::observed_sql::query(SQL.node.delete_boot.sql())
                         .bind(node.owner.node.as_str())
                         .bind(node.owner.boot.as_str())
                         .fetch_optional(crate::observed_sql::executor(&mut **tx))
@@ -1199,7 +1204,7 @@ impl DurableStore for PostgresDurableStore {
                         Some(true) => return Ok(Vec::new()),
                         Some(false) => {}
                     }
-                    let rows = sqlx::query(SQL.postgres.claim.sql())
+                    let rows = crate::observed_sql::query(SQL.postgres.claim.sql())
                         .bind(now.0)
                         .bind(node.owner.node.as_str())
                         .bind(node.owner.boot.as_str())
@@ -1237,12 +1242,13 @@ impl DurableStore for PostgresDurableStore {
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.within(CommitCapacity::Scheduler, async {
-            let rows: Vec<(String, i64, String)> = sqlx::query_as(SQL.actor.owned_by.sql())
-                .bind(node.owner.node.as_str())
-                .bind(node.owner.boot.as_str())
-                .fetch_all(crate::observed_sql::executor(&self.pools.scheduler))
-                .await
-                .map_err(sqlx_failure)?;
+            let rows: Vec<(String, i64, String)> =
+                crate::observed_sql::query_as(SQL.actor.owned_by.sql())
+                    .bind(node.owner.node.as_str())
+                    .bind(node.owner.boot.as_str())
+                    .fetch_all(crate::observed_sql::executor(&self.pools.scheduler))
+                    .await
+                    .map_err(sqlx_failure)?;
             rows.into_iter()
                 .map(|(key, epoch, formats)| {
                     Ok(Claimed {
@@ -1262,7 +1268,7 @@ impl DurableStore for PostgresDurableStore {
             crate::observed_sql::measure(&self.observer, CommitLabel::NODE_DRAIN, 0, async {
                 let (mut tx, _now) = self.open(CommitLabel::NODE_DRAIN).await?;
                 let outcome = async {
-                    sqlx::query(SQL.node.mark_draining.sql())
+                    crate::observed_sql::query(SQL.node.mark_draining.sql())
                         .bind(node.owner.node.as_str())
                         .bind(node.owner.boot.as_str())
                         .fetch_optional(crate::observed_sql::executor(&mut **tx))
@@ -1285,7 +1291,7 @@ impl DurableStore for PostgresDurableStore {
         self.within(CommitCapacity::Work, async {
             let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
             let now = self.instant_on(&mut connection).await?;
-            let rows: Vec<String> = sqlx::query_scalar(SQL.node.live_decodes.sql())
+            let rows: Vec<String> = crate::observed_sql::query_scalar(SQL.node.live_decodes.sql())
                 .bind(now.0)
                 .fetch_all(crate::observed_sql::executor(&mut *connection))
                 .await
@@ -1301,7 +1307,7 @@ impl DurableStore for PostgresDurableStore {
                 lash_durable::ActorKind::Session => Some(actor.id()),
                 lash_durable::ActorKind::Process => None,
             };
-            let rows = sqlx::query(SQL.postgres.open.sql())
+            let rows = crate::observed_sql::query(SQL.postgres.open.sql())
                 .bind(actor.as_str())
                 .bind(session)
                 .fetch_all(crate::observed_sql::executor(&mut *self.reader().await?))
@@ -1379,7 +1385,7 @@ impl DurableStore for PostgresDurableStore {
 
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
         self.within(CommitCapacity::Work, async {
-            let Some(row) = sqlx::query(SQL.actor.snapshot.sql())
+            let Some(row) = crate::observed_sql::query(SQL.actor.snapshot.sql())
                 .bind(actor.as_str())
                 .fetch_optional(crate::observed_sql::executor(&self.pools.work))
                 .await
@@ -1414,7 +1420,7 @@ impl DurableStore for PostgresDurableStore {
         limit: usize,
     ) -> Result<Vec<ActorKey>, DurableError> {
         self.within(CommitCapacity::Work, async {
-            let rows = sqlx::query(SQL.actor.in_formats.sql())
+            let rows = crate::observed_sql::query(SQL.actor.in_formats.sql())
                 .bind(formats.as_str())
                 .bind(after.map_or("", ActorKey::as_str))
                 .bind(i64::try_from(limit).unwrap_or(i64::MAX))
@@ -1512,7 +1518,7 @@ mod constraint_tests {
             .execute(crate::observed_sql::executor(&mut conn))
             .await
             .expect("create constraint fixture");
-        sqlx::query("INSERT INTO lash_waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch, key_name) VALUES ('wait', 's/session', 's/session', 'engine_key', true, 'pending', 1, 'key')").execute(crate::observed_sql::executor(&mut conn)).await.expect("pending engine key wait");
+        crate::observed_sql::query("INSERT INTO lash_waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch, key_name) VALUES ('wait', 's/session', 's/session', 'engine_key', true, 'pending', 1, 'key')").execute(crate::observed_sql::executor(&mut conn)).await.expect("pending engine key wait");
         for (assignment, constraint) in [
             (
                 "kind = 'timer', host_resolvable = false, key_name = NULL",
@@ -1528,7 +1534,7 @@ mod constraint_tests {
             ),
             ("resolution_ref = 'payload'", "ck_waits_resolution_ref"),
         ] {
-            let error = sqlx::query(&format!("UPDATE lash_waits SET {assignment}"))
+            let error = crate::observed_sql::query(&format!("UPDATE lash_waits SET {assignment}"))
                 .execute(crate::observed_sql::executor(&mut conn))
                 .await
                 .expect_err("impossible wait must be refused");
@@ -1539,8 +1545,8 @@ mod constraint_tests {
                 Some(constraint)
             );
         }
-        sqlx::query("UPDATE lash_waits SET kind = 'timer', host_resolvable = false, key_name = NULL, deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").execute(crate::observed_sql::executor(&mut conn)).await.expect("resolved timer without value");
-        let error = sqlx::query("UPDATE lash_waits SET resolution_ref = 'payload'")
+        crate::observed_sql::query("UPDATE lash_waits SET kind = 'timer', host_resolvable = false, key_name = NULL, deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").execute(crate::observed_sql::executor(&mut conn)).await.expect("resolved timer without value");
+        let error = crate::observed_sql::query("UPDATE lash_waits SET resolution_ref = 'payload'")
             .execute(crate::observed_sql::executor(&mut conn))
             .await
             .expect_err("timer has no payload");
@@ -1555,7 +1561,7 @@ mod constraint_tests {
             ("p/process", "session"),
             ("x/unknown", "session"),
         ] {
-            let error = sqlx::query(&format!("INSERT INTO lash_actors (actor_key, kind, state, epoch, formats, state_revision, mail_seq, acked_seq, created_at_ms) VALUES ('{key}', '{kind}', 'idle', 0, '[]', 0, 0, 0, 0)")).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("key must agree with kind");
+            let error = crate::observed_sql::query(&format!("INSERT INTO lash_actors (actor_key, kind, state, epoch, formats, state_revision, mail_seq, acked_seq, created_at_ms) VALUES ('{key}', '{kind}', 'idle', 0, '[]', 0, 0, 0, 0)")).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("key must agree with kind");
             assert_eq!(
                 error
                     .as_database_error()
@@ -1567,7 +1573,7 @@ mod constraint_tests {
             (0_i64, vec![0_u8; 32], "ck_exec_snapshots_rev"),
             (1, vec![0; 31], "ck_exec_snapshots_commit_id"),
         ] {
-            let error = sqlx::query("INSERT INTO lash_exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch) VALUES ('p/process', $1, 'root', $2, 1)").bind(rev).bind(commit_id).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("rev and commit id are checked");
+            let error = crate::observed_sql::query("INSERT INTO lash_exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch) VALUES ('p/process', $1, 'root', $2, 1)").bind(rev).bind(commit_id).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("rev and commit id are checked");
             assert_eq!(
                 error
                     .as_database_error()

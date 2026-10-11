@@ -44,6 +44,13 @@ impl SqliteWork {
 pub struct Shape {
     pub statements: u64,
     pub rows_returned: u64,
+    pub rows_affected: u64,
+    /// PostgreSQL encoded parameter payload; SQLite expanded bound SQL spelling.
+    pub bound_bytes: u64,
+    /// Bind payload could not be measured; these are unknown, not zero-byte binds.
+    pub unmeasured_bound_statements: u64,
+    /// Returned scalar payload (text/blob bytes; numeric storage width).
+    pub result_bytes: u64,
     pub sqlite_work: Option<SqliteWork>,
 }
 
@@ -60,9 +67,21 @@ pub struct Receipt {
     pub population: &'static str,
     pub parent_operation: Option<String>,
     pub backend: &'static str,
+    pub rows_affected_unit: &'static str,
+    pub bound_bytes_unit: &'static str,
+    pub result_bytes_unit: &'static str,
     pub statements: u64,
     pub rows_returned: u64,
+    pub rows_affected: u64,
+    /// PostgreSQL encoded parameter payload; SQLite expanded bound SQL spelling.
+    pub bound_bytes: u64,
+    /// Bind payload could not be measured; these are unknown, not zero-byte binds.
+    pub unmeasured_bound_statements: u64,
+    /// Returned scalar payload (text/blob bytes; numeric storage width).
+    pub result_bytes: u64,
     pub sqlite_work: Option<SqliteWork>,
+    /// New canonical node bytes inserted in this attempt; only committed on success.
+    pub newly_installed_graph_bytes: u64,
     pub shapes: BTreeMap<String, Shape>,
     pub unretained_shape_statements: u64,
     pub configured_shape_limit: usize,
@@ -118,8 +137,28 @@ impl Window {
                 population: "caller task and delegated connection work",
                 parent_operation,
                 backend,
+                rows_affected_unit: if backend == "sqlite" {
+                    "sqlite3_total_changes64 delta; includes trigger and foreign-key writes; attempted changes, committed only on success"
+                } else {
+                    "SQLx server command-completion rows; includes SELECT rows, excludes hidden CTE/trigger mutations"
+                },
+                bound_bytes_unit: if backend == "sqlite" {
+                    "UTF-8 bytes of expanded bound SQL literals, repeated occurrences included"
+                } else {
+                    "binary parameter payload bytes, protocol framing excluded"
+                },
+                result_bytes_unit: if backend == "sqlite" {
+                    "text/blob payload bytes and 8 bytes per integer/float, NULL zero"
+                } else {
+                    "returned column format payload bytes, protocol framing excluded"
+                },
                 statements: 0,
                 rows_returned: 0,
+                rows_affected: 0,
+                bound_bytes: 0,
+                unmeasured_bound_statements: 0,
+                result_bytes: 0,
+                newly_installed_graph_bytes: 0,
                 sqlite_work: (backend == "sqlite").then(SqliteWork::default),
                 shapes: BTreeMap::new(),
                 unretained_shape_statements: 0,
@@ -168,6 +207,42 @@ impl Window {
     }
     pub fn work(&self, sql: &str, work: SqliteWork) {
         self.record(sql, false, false, Some(work));
+    }
+    /// Physical payload counters, propagated through nested operation windows.
+    pub fn payload(&self, sql: &str, rows_affected: u64, bound_bytes: u64, result_bytes: u64) {
+        if let Some(parent) = &self.parent {
+            parent.payload(sql, rows_affected, bound_bytes, result_bytes);
+        }
+        let key = normalize(sql);
+        let mut receipt = self.receipt.lock().unwrap_or_else(PoisonError::into_inner);
+        receipt.rows_affected += rows_affected;
+        receipt.bound_bytes += bound_bytes;
+        receipt.result_bytes += result_bytes;
+        if let Some(shape) = receipt.shapes.get_mut(&key) {
+            shape.rows_affected += rows_affected;
+            shape.bound_bytes += bound_bytes;
+            shape.result_bytes += result_bytes;
+        }
+    }
+    pub fn unmeasured_bound(&self, sql: &str) {
+        if let Some(parent) = &self.parent {
+            parent.unmeasured_bound(sql);
+        }
+        let key = normalize(sql);
+        let mut receipt = self.receipt.lock().unwrap_or_else(PoisonError::into_inner);
+        receipt.unmeasured_bound_statements += 1;
+        if let Some(shape) = receipt.shapes.get_mut(&key) {
+            shape.unmeasured_bound_statements += 1;
+        }
+    }
+    pub fn installed_graph(&self, bytes: u64) {
+        if let Some(parent) = &self.parent {
+            parent.installed_graph(bytes);
+        }
+        self.receipt
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .newly_installed_graph_bytes += bytes;
     }
     fn record(&self, sql: &str, statement: bool, row: bool, work: Option<SqliteWork>) {
         if let Some(parent) = &self.parent {
@@ -296,7 +371,14 @@ mod tests {
         for index in 0..SHAPE_LIMIT {
             window.statement(&format!("select col_{index} from table_{index}"));
         }
+        window.unmeasured_bound("select 'unknown', 123, ?3");
+        window.unmeasured_bound("select col_63 from table_63");
         let receipt = window.snapshot();
+        assert_eq!(receipt.unmeasured_bound_statements, 2);
+        assert_eq!(
+            receipt.shapes["select ?, ?, ?"].unmeasured_bound_statements,
+            1
+        );
         assert_eq!(receipt.shapes.len(), SHAPE_LIMIT);
         assert_eq!(receipt.statements, SHAPE_LIMIT as u64 + 2);
         assert_eq!(receipt.unretained_shape_statements, 1);

@@ -36,37 +36,38 @@ impl super::PostgresDurableStore {
         let connection = crate::connection_sql::connection_sql();
         let actor = session_actor(session)?;
         loop {
-            let held: Option<i64> = sqlx::query_scalar(SQL.postgres.lock_session_writes.sql())
-                .bind(actor.as_str())
-                .bind(session.as_str())
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(store_sqlx_error)?;
+            let held: Option<i64> =
+                crate::observed_sql::query_scalar(SQL.postgres.lock_session_writes.sql())
+                    .bind(actor.as_str())
+                    .bind(session.as_str())
+                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(store_sqlx_error)?;
             if held.is_some() {
                 return Ok(());
             }
-            sqlx::query(connection.savepoint_session_history.sql())
+            crate::observed_sql::query(connection.savepoint_session_history.sql())
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(store_sqlx_error)?;
-            sqlx::query(connection.lock_xact_session_history.sql())
+            crate::observed_sql::query(connection.lock_xact_session_history.sql())
                 .bind(session.as_str())
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(store_sqlx_error)?;
-            let created = sqlx::query(SQL.actor.epoch_of.sql())
+            let created = crate::observed_sql::query(SQL.actor.epoch_of.sql())
                 .bind(actor.as_str())
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(store_sqlx_error)?
                 .is_some();
             if created {
-                sqlx::query(connection.rollback_to_session_history.sql())
+                crate::observed_sql::query(connection.rollback_to_session_history.sql())
                     .execute(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(store_sqlx_error)?;
             }
-            sqlx::query(connection.release_session_history.sql())
+            crate::observed_sql::query(connection.release_session_history.sql())
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(store_sqlx_error)?;
@@ -84,7 +85,7 @@ impl super::PostgresDurableStore {
         session: &SessionId,
     ) -> Result<(), crate::StoreError> {
         let actor = session_actor(session)?;
-        sqlx::query(SQL.postgres.lock_actors.sql())
+        crate::observed_sql::query(SQL.postgres.lock_actors.sql())
             .bind([actor.as_str()].as_slice())
             .execute(crate::observed_sql::executor(tx))
             .await
@@ -114,7 +115,7 @@ pub(super) async fn cancel_inputs(
     run: &TurnId,
     disposition: lash_core_execution::TurnCancelUndeliveredInputPolicy,
 ) -> Result<lash_core_execution::TurnCancelInputOutcome, DurableError> {
-    let rows = sqlx::query(SQL.session_mail.cancel_inputs.sql())
+    let rows = crate::observed_sql::query(SQL.session_mail.cancel_inputs.sql())
         .bind(session.as_str())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
@@ -153,7 +154,7 @@ pub(super) async fn standing(
     tx: &mut PgConnection,
     session: &SessionId,
 ) -> Result<(bool, bool), DurableError> {
-    let row = sqlx::query(SQL.session_mail.standing.sql())
+    let row = crate::observed_sql::query(SQL.session_mail.standing.sql())
         .bind(session.as_str())
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
@@ -178,7 +179,7 @@ pub(super) async fn read(
     if !mailbox.live {
         return Ok(mailbox);
     }
-    let bound: Option<String> = sqlx::query_scalar(SQL.session_mail.bound_run.sql())
+    let bound: Option<String> = crate::observed_sql::query_scalar(SQL.session_mail.bound_run.sql())
         .bind(session.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -187,7 +188,7 @@ pub(super) async fn read(
         .map(TurnId::parse)
         .transpose()
         .map_err(|error| undecodable("bound run", error))?;
-    let inputs = sqlx::query(SQL.session_mail.open_inputs.sql())
+    let inputs = crate::observed_sql::query(SQL.session_mail.open_inputs.sql())
         .bind(session.as_str())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
@@ -202,7 +203,7 @@ pub(super) async fn read(
             &get::<String>(row, 5)?,
         )?);
     }
-    let batches = sqlx::query(SQL.session_mail.open_batches.sql())
+    let batches = crate::observed_sql::query(SQL.session_mail.open_batches.sql())
         .bind(session.as_str())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
@@ -290,7 +291,7 @@ pub(super) async fn request_operation_cancel(
     let batch = request.batch.as_str();
     let actor = ActorKey::session(session).map_err(|_| undecodable("session id", session))?;
     let open: Option<(String, Option<String>)> =
-        sqlx::query_as(SQL.session_mail.open_operation.sql())
+        crate::observed_sql::query_as(SQL.session_mail.open_operation.sql())
             .bind(session)
             .bind(batch)
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -302,19 +303,20 @@ pub(super) async fn request_operation_cancel(
     if batch_kind(&payload_json)? != MailBatchKind::Operation {
         return Ok((OperationCancelAnswer::NotOpen, None));
     }
-    let withdrawn: Option<String> = sqlx::query_scalar(SQL.session_mail.withdraw_unentered.sql())
-        .bind(session)
-        .bind(batch)
-        .bind(now.0)
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
+    let withdrawn: Option<String> =
+        crate::observed_sql::query_scalar(SQL.session_mail.withdraw_unentered.sql())
+            .bind(session)
+            .bind(batch)
+            .bind(now.0)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
     if withdrawn.is_some() {
         let (woken, _) = super::wake_within(tx, &actor, false, now).await?;
         return Ok((OperationCancelAnswer::Withdrawn, Some(woken)));
     }
     let requested: Option<String> =
-        sqlx::query_scalar(SQL.session_mail.request_operation_cancel.sql())
+        crate::observed_sql::query_scalar(SQL.session_mail.request_operation_cancel.sql())
             .bind(session)
             .bind(batch)
             .bind(&request.request_json)
@@ -328,7 +330,7 @@ pub(super) async fn request_operation_cancel(
     // The row moved under the writes: it settled, or a racing request
     // was accepted first.
     let open: Option<(String, Option<String>)> =
-        sqlx::query_as(SQL.session_mail.open_operation.sql())
+        crate::observed_sql::query_as(SQL.session_mail.open_operation.sql())
             .bind(session)
             .bind(batch)
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -353,7 +355,7 @@ pub(super) async fn settle_held(
     run: &TurnId,
     now_ms: i64,
 ) -> Result<(), DurableError> {
-    sqlx::query(SQL.session_mail.settle_held_inputs.sql())
+    crate::observed_sql::query(SQL.session_mail.settle_held_inputs.sql())
         .bind(session.as_str())
         .bind(run.as_str())
         .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
@@ -361,7 +363,7 @@ pub(super) async fn settle_held(
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    sqlx::query(SQL.session_mail.settle_held_batches.sql())
+    crate::observed_sql::query(SQL.session_mail.settle_held_batches.sql())
         .bind(session.as_str())
         .bind(run.as_str())
         .bind(now_ms)
@@ -383,7 +385,7 @@ pub(super) async fn withdraw_queued(
     now_ms: i64,
 ) -> Result<Option<InputId>, DurableError> {
     let candidates: Vec<(String, Option<String>)> =
-        sqlx::query_as(SQL.session_mail.open_inputs_named.sql())
+        crate::observed_sql::query_as(SQL.session_mail.open_inputs_named.sql())
             .bind(session.as_str())
             .bind(run.as_str())
             .fetch_all(crate::observed_sql::executor(&mut *tx))
@@ -394,14 +396,15 @@ pub(super) async fn withdraw_queued(
         if queued_input_run(&input, source_key.as_deref()).as_ref() != Some(run) {
             continue;
         }
-        let withdrawn: Option<String> = sqlx::query_scalar(SQL.session_mail.withdraw_input.sql())
-            .bind(session.as_str())
-            .bind(input.as_str())
-            .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
-            .bind(now_ms)
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(sqlx_failure)?;
+        let withdrawn: Option<String> =
+            crate::observed_sql::query_scalar(SQL.session_mail.withdraw_input.sql())
+                .bind(session.as_str())
+                .bind(input.as_str())
+                .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+                .bind(now_ms)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
         return Ok(withdrawn.map(|_| input));
     }
     Ok(None)
@@ -438,13 +441,14 @@ async fn enter_operation(
     session: &SessionId,
     batch: &BatchId,
 ) -> Result<(), DurableError> {
-    let entered: Option<String> = sqlx::query_scalar(SQL.session_mail.enter_operation.sql())
-        .bind(session.as_str())
-        .bind(batch.as_str())
-        .bind(commit.now.0)
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
+    let entered: Option<String> =
+        crate::observed_sql::query_scalar(SQL.session_mail.enter_operation.sql())
+            .bind(session.as_str())
+            .bind(batch.as_str())
+            .bind(commit.now.0)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
     match entered {
         Some(_) => Ok(()),
         None => Err(DurableError::Domain(
@@ -502,17 +506,18 @@ async fn admit(
         })
     };
     for input in inputs {
-        let bound: Option<String> = sqlx::query_scalar(SQL.session_mail.bind_input.sql())
-            .bind(session.as_str())
-            .bind(input.as_str())
-            .bind(run.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(sqlx_failure)?;
+        let bound: Option<String> =
+            crate::observed_sql::query_scalar(SQL.session_mail.bind_input.sql())
+                .bind(session.as_str())
+                .bind(input.as_str())
+                .bind(run.as_str())
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
         if bound.is_none() {
             return Err(moved(input.as_str()));
         }
-        sqlx::query(SQL.session_mail.record_run_input.sql())
+        crate::observed_sql::query(SQL.session_mail.record_run_input.sql())
             .bind(session.as_str())
             .bind(input.as_str())
             .bind(run.as_str())
@@ -521,13 +526,14 @@ async fn admit(
             .map_err(sqlx_failure)?;
     }
     for batch in batches {
-        let bound: Option<String> = sqlx::query_scalar(SQL.session_mail.bind_batch.sql())
-            .bind(session.as_str())
-            .bind(batch.as_str())
-            .bind(run.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(sqlx_failure)?;
+        let bound: Option<String> =
+            crate::observed_sql::query_scalar(SQL.session_mail.bind_batch.sql())
+                .bind(session.as_str())
+                .bind(batch.as_str())
+                .bind(run.as_str())
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
         if bound.is_none() {
             return Err(moved(batch.as_str()));
         }

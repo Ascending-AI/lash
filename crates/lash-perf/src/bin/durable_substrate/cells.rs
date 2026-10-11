@@ -147,9 +147,20 @@ fn model(scripts: Arc<Scripts>, recorder: Arc<Recorder>) -> ProviderHandle {
                 if let Some(session) = &session {
                     recorder.model_call(session);
                 }
+                // Earlier turns' assistants are history, not this turn's
+                // cell answer. Stop at the benchmark admission, rather than
+                // the user-role feedback messages the cell itself produces.
                 let answered = request
                     .messages
                     .iter()
+                    .rev()
+                    .take_while(|message| {
+                        message.role != LlmRole::User
+                            || session_of_admission(
+                                &serde_json::to_string(message).unwrap_or_default(),
+                            )
+                            .is_none()
+                    })
                     .any(|message| message.role == LlmRole::Assistant);
                 let text = match session {
                     Some(session) if !answered => cell_source(&scripts, &session),

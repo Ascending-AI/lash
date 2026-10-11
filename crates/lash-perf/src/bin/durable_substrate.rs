@@ -18,6 +18,8 @@ use std::alloc::System;
 mod cells;
 #[path = "durable_substrate/deploy.rs"]
 mod deploy;
+#[path = "durable_substrate/operations.rs"]
+mod operations;
 #[path = "durable_substrate/process.rs"]
 mod process;
 #[path = "durable_substrate/processes.rs"]
@@ -55,6 +57,15 @@ struct Args {
     /// The `lash-vm-worker` executable every node's cells run on.
     #[arg(long, env = "LASH_VM_WORKER")]
     vm_worker: PathBuf,
+    /// Complete operation matrix: actual committed prior turns per fresh sample.
+    #[arg(long, default_value_t = 10)]
+    prior_turns: usize,
+    /// Complete operation matrix: awaits (parks) in the measured cell.
+    #[arg(long, default_value_t = 10)]
+    cell_parks: usize,
+    /// Complete operation matrix: bytes retained per awaited value.
+    #[arg(long, default_value_t = 0)]
+    value_bytes: usize,
     /// Serving nodes (PostgreSQL only above one).
     #[arg(long, default_value_t = 1)]
     nodes: usize,
@@ -102,6 +113,7 @@ enum Kind {
     HotWaits { waits: usize },
     Idle { actors: usize },
     Store,
+    Operations,
 }
 
 fn rounds(rounds: usize, tools_per_round: usize) -> Script {
@@ -114,6 +126,7 @@ fn rounds(rounds: usize, tools_per_round: usize) -> Script {
 
 fn case(name: &str) -> Result<Case> {
     let (kind, script) = match name {
+        "operations" => (Kind::Operations, Script::default()),
         "rounds-1" => (Kind::Rounds { sessions: 1 }, rounds(1, 1)),
         "rounds-5" => (Kind::Rounds { sessions: 1 }, rounds(5, 1)),
         "rounds-20" => (Kind::Rounds { sessions: 1 }, rounds(20, 1)),
@@ -165,6 +178,9 @@ pub struct Run<'a> {
     samples: usize,
     pool: PoolSize,
     worker: &'a Path,
+    prior_turns: usize,
+    cell_parks: usize,
+    value_bytes: usize,
 }
 
 impl Run<'_> {
@@ -223,6 +239,9 @@ async fn main() -> Result<()> {
             database,
             nodes: args.nodes,
             samples: args.samples,
+            prior_turns: args.prior_turns,
+            cell_parks: args.cell_parks,
+            value_bytes: args.value_bytes,
             pool: PoolSize {
                 max: args.pool_max,
                 min: args.pool_min,
@@ -231,6 +250,7 @@ async fn main() -> Result<()> {
         };
         eprintln!("case {name} on {} x{}", args.store, args.nodes);
         match case.kind {
+            Kind::Operations => operations::run(&run).await?,
             Kind::Rounds { sessions } => turns::rounds(&run, &case, sessions).await?,
             Kind::Resume { prior_turns } => turns::resume(&run, &case, prior_turns).await?,
             Kind::Cell => turns::cell(&run, &case).await?,

@@ -28,6 +28,8 @@ mod heap;
 mod interface;
 mod machine;
 pub mod observe;
+#[cfg(any(test, feature = "perf-witness"))]
+pub mod perf_witness;
 mod whole;
 
 #[cfg(test)]

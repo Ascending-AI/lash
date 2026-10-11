@@ -220,10 +220,12 @@ impl WriterFence {
     /// The fence's read, its transaction holding the fence lock: the
     /// recorded epoch, `None` when the row is absent.
     async fn read(&self, connection: &mut PgConnection) -> Result<Option<i32>, StoreError> {
-        sqlx::query_scalar::<_, i32>(session_sql().fleet_format.select_fleet_format.sql())
-            .fetch_optional(crate::observed_sql::executor(connection))
-            .await
-            .map_err(|error| self.refused(store_sqlx_error(error)))
+        crate::observed_sql::query_scalar::<_, i32>(
+            session_sql().fleet_format.select_fleet_format.sql(),
+        )
+        .fetch_optional(crate::observed_sql::executor(connection))
+        .await
+        .map_err(|error| self.refused(store_sqlx_error(error)))
     }
 
     /// `error`, refusing a fence: contention is counted for a test's seam.
@@ -331,7 +333,7 @@ pub(crate) async fn read_plugin_writers(
     connection: &mut PgConnection,
 ) -> Result<PluginWriterRanges, StoreError> {
     let rows: Vec<(String, i32, i32)> =
-        sqlx::query_as(session_sql().fleet_plugin_writers.select_all.sql())
+        crate::observed_sql::query_as(session_sql().fleet_plugin_writers.select_all.sql())
             .fetch_all(crate::observed_sql::executor(connection))
             .await
             .map_err(store_sqlx_error)?;
@@ -406,12 +408,13 @@ impl GuardedTx<'_> {
             .map(str::to_owned)
             .collect();
         loop {
-            let rows: Vec<(String, i32, i32)> =
-                sqlx::query_as(session_sql().fleet_plugin_writers.select_named.sql())
-                    .bind(&plugins)
-                    .fetch_all(crate::observed_sql::executor(&mut *self.tx))
-                    .await
-                    .map_err(store_sqlx_error)?;
+            let rows: Vec<(String, i32, i32)> = crate::observed_sql::query_as(
+                session_sql().fleet_plugin_writers.select_named.sql(),
+            )
+            .bind(&plugins)
+            .fetch_all(crate::observed_sql::executor(&mut *self.tx))
+            .await
+            .map_err(store_sqlx_error)?;
             let seeded = plugin_writer_ranges(rows)?
                 .admit(publication)
                 .map_err(plugin_writer_refusal)?;
@@ -421,15 +424,16 @@ impl GuardedTx<'_> {
             let mut provisioned = 0;
             for (plugin, range) in &seeded {
                 let (min, max) = plugin_writer_bounds(plugin, *range)?;
-                provisioned +=
-                    sqlx::query(session_sql().fleet_plugin_writers.insert_if_absent.sql())
-                        .bind(plugin)
-                        .bind(min)
-                        .bind(max)
-                        .execute(crate::observed_sql::executor(&mut *self.tx))
-                        .await
-                        .map_err(store_sqlx_error)?
-                        .rows_affected();
+                provisioned += crate::observed_sql::query(
+                    session_sql().fleet_plugin_writers.insert_if_absent.sql(),
+                )
+                .bind(plugin)
+                .bind(min)
+                .bind(max)
+                .execute(crate::observed_sql::executor(&mut *self.tx))
+                .await
+                .map_err(store_sqlx_error)?
+                .rows_affected();
             }
             // Every row this transaction inserted is the one it was admitted
             // against. A row another transaction committed first is read and
@@ -449,7 +453,7 @@ impl GuardedTx<'_> {
         let recorded = read_plugin_writers(&mut self.tx).await?;
         for (plugin, range) in recorded.provisioned(registrations, self.finalized) {
             let (min, max) = plugin_writer_bounds(&plugin, range)?;
-            sqlx::query(session_sql().fleet_plugin_writers.insert_if_absent.sql())
+            crate::observed_sql::query(session_sql().fleet_plugin_writers.insert_if_absent.sql())
                 .bind(&plugin)
                 .bind(min)
                 .bind(max)
@@ -667,12 +671,13 @@ pub(crate) async fn begin_migration<'c>(
     let mut tx = crate::observed_sql::control("BEGIN", Acquire::begin(connection))
         .await
         .map_err(store_sqlx_error)?;
-    let recordable: bool = sqlx::query_scalar(session_sql().fleet_format.select_is_present.sql())
-        .fetch_one(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(store_sqlx_error)?;
+    let recordable: bool =
+        crate::observed_sql::query_scalar(session_sql().fleet_format.select_is_present.sql())
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(store_sqlx_error)?;
     let recorded = if recordable {
-        sqlx::query(
+        crate::observed_sql::query(
             crate::connection_sql::connection_sql()
                 .lock_xact_fleet_fence_shared
                 .sql(),
@@ -731,7 +736,7 @@ pub(crate) async fn begin_fleet_row(
     let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
         .await
         .map_err(store_sqlx_error)?;
-    sqlx::query(
+    crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .lock_xact_fleet_fence
             .sql(),
@@ -739,10 +744,11 @@ pub(crate) async fn begin_fleet_row(
     .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
-    let row: Option<i32> = sqlx::query_scalar(session_sql().fleet_format.select_fleet_format.sql())
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(store_sqlx_error)?;
+    let row: Option<i32> =
+        crate::observed_sql::query_scalar(session_sql().fleet_format.select_fleet_format.sql())
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(store_sqlx_error)?;
     let Some(recorded) = row else {
         return Err(missing_fence_row("the fleet-format row is absent"));
     };

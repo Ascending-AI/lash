@@ -1,19 +1,25 @@
 //! SQLite's single trace callback: physical rows and per-execution work,
 //! including cached statements, on the connection's own worker.
 use lash_core_execution::facade_support::sql::{SqliteWork, Window};
-use rusqlite::{
-    StatementStatus,
-    trace::{StmtRef, TraceEvent},
-};
+use rusqlite::{StatementStatus, ffi};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ffi::{CStr, c_int, c_uint, c_void};
 
 thread_local! {
-    static BEFORE: RefCell<HashMap<String, SqliteWork>> = RefCell::new(HashMap::new());
+    static BEFORE: RefCell<HashMap<usize, (SqliteWork, i64)>> = RefCell::new(HashMap::new());
 }
 
-fn counters(statement: &StmtRef<'_>) -> SqliteWork {
-    let count = |status| u64::try_from(statement.get_status(status)).unwrap_or_default();
+// SQLite owns each callback's statement and connection for its entire duration.
+// The public StmtRef omits the row/connection handles needed for these counters.
+#[expect(
+    unsafe_code,
+    reason = "SQLite trace supplies live borrowed statement handles"
+)]
+unsafe fn counters(statement: *mut ffi::sqlite3_stmt) -> SqliteWork {
+    let count = |status: StatementStatus| unsafe {
+        u64::try_from(ffi::sqlite3_stmt_status(statement, status as c_int, 0)).unwrap_or_default()
+    };
     SqliteWork {
         vm_steps: count(StatementStatus::VmStep),
         fullscan_steps: count(StatementStatus::FullscanStep),
@@ -23,58 +29,267 @@ fn counters(statement: &StmtRef<'_>) -> SqliteWork {
     }
 }
 
+#[expect(
+    unsafe_code,
+    reason = "installs the synchronous SQLite trace callback on a live connection"
+)]
 pub(crate) fn enable(connection: &rusqlite::Connection) {
-    connection.trace_v2(
-        rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT
-            | rusqlite::trace::TraceEventCodes::SQLITE_TRACE_ROW
-            | rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
-        Some(trace),
-    );
+    unsafe {
+        ffi::sqlite3_trace_v2(
+            connection.handle(),
+            (ffi::SQLITE_TRACE_STMT | ffi::SQLITE_TRACE_ROW | ffi::SQLITE_TRACE_PROFILE) as c_uint,
+            Some(trace),
+            std::ptr::null_mut(),
+        );
+    }
 }
 
-pub(crate) fn trace(event: TraceEvent<'_>) {
-    let window = Window::current();
-    match event {
-        TraceEvent::Stmt(statement, text) if !text.starts_with("--") => {
-            if let Some(window) = &window {
-                let sql = statement.sql();
-                window.statement(&sql);
-                BEFORE.with(|before| {
-                    before
-                        .borrow_mut()
-                        .insert(sql.into_owned(), counters(&statement));
-                });
-            }
+#[expect(
+    unsafe_code,
+    reason = "all callback pointers are borrowed from SQLite until this callback returns"
+)]
+unsafe extern "C" fn trace(
+    code: c_uint,
+    _: *mut c_void,
+    ptr: *mut c_void,
+    detail: *mut c_void,
+) -> c_int {
+    // Never unwind across SQLite's C boundary.
+    let _ = std::panic::catch_unwind(|| unsafe {
+        let statement = ptr.cast::<ffi::sqlite3_stmt>();
+        let sql_ptr = ffi::sqlite3_sql(statement);
+        if sql_ptr.is_null() {
+            return;
         }
-        TraceEvent::Row(statement) => {
-            if let Some(window) = &window {
-                window.row(&statement.sql());
-            }
-        }
-        TraceEvent::Profile(statement, _) => {
-            if let Some(window) = &window {
-                let sql = statement.sql();
-                if let Some(before) = BEFORE.with(|before| before.borrow_mut().remove(sql.as_ref()))
-                {
-                    window.work(&sql, counters(&statement).difference(before));
+        let sql = CStr::from_ptr(sql_ptr).to_string_lossy();
+        let window = Window::current();
+        match code {
+            ffi::SQLITE_TRACE_STMT => {
+                if !detail.is_null() {
+                    let expanded_trace = CStr::from_ptr(detail.cast()).to_bytes();
+                    // Trigger trace entries are synthetic comments on the
+                    // outer statement. A real SQL statement may start with a
+                    // comment too, and must still have one start receipt.
+                    if expanded_trace.starts_with(b"--")
+                        && expanded_trace != CStr::from_ptr(sql_ptr).to_bytes()
+                    {
+                        return;
+                    }
+                }
+                if let Some(window) = &window {
+                    window.statement(&sql);
+                    let expanded = ffi::sqlite3_expanded_sql(statement);
+                    if !expanded.is_null() {
+                        let bytes = CStr::from_ptr(expanded).to_bytes().len();
+                        window.payload(
+                            &sql,
+                            0,
+                            (bytes + placeholder_bytes(&sql)).saturating_sub(sql.len()) as u64,
+                            0,
+                        );
+                        ffi::sqlite3_free(expanded.cast());
+                    } else {
+                        window.unmeasured_bound(&sql);
+                    }
+                    BEFORE.with(|before| {
+                        before.borrow_mut().insert(
+                            ptr.addr(),
+                            (
+                                counters(statement),
+                                ffi::sqlite3_total_changes64(ffi::sqlite3_db_handle(statement)),
+                            ),
+                        )
+                    });
                 }
             }
-            #[cfg(feature = "perf-witness")]
-            if lash_core_execution::perf_witness::sql_receipts_enabled() {
-                lash_core_execution::perf_witness::record_sql_statement_bytes(
-                    &statement.sql(),
-                    statement.expanded_sql().map_or(0, |sql| sql.len()),
-                );
-            } else {
-                lash_core_execution::perf_witness::record_sql_statement(&statement.sql());
+            ffi::SQLITE_TRACE_ROW => {
+                if let Some(window) = &window {
+                    window.row(&sql);
+                    let bytes = (0..ffi::sqlite3_column_count(statement))
+                        .map(|column| match ffi::sqlite3_column_type(statement, column) {
+                            ffi::SQLITE_INTEGER | ffi::SQLITE_FLOAT => 8,
+                            ffi::SQLITE_TEXT | ffi::SQLITE_BLOB => {
+                                ffi::sqlite3_column_bytes(statement, column) as u64
+                            }
+                            _ => 0,
+                        })
+                        .sum();
+                    window.payload(&sql, 0, 0, bytes);
+                }
             }
+            ffi::SQLITE_TRACE_PROFILE => {
+                if let Some((before, changes)) =
+                    BEFORE.with(|before| before.borrow_mut().remove(&ptr.addr()))
+                    && let Some(window) = &window
+                {
+                    window.work(&sql, counters(statement).difference(before));
+                    let affected =
+                        ffi::sqlite3_total_changes64(ffi::sqlite3_db_handle(statement)) - changes;
+                    window.payload(&sql, affected.max(0) as u64, 0, 0);
+                }
+                #[cfg(feature = "perf-witness")]
+                if lash_core_execution::perf_witness::sql_receipts_enabled() {
+                    let expanded = ffi::sqlite3_expanded_sql(statement);
+                    let bytes = if expanded.is_null() {
+                        0
+                    } else {
+                        CStr::from_ptr(expanded).to_bytes().len()
+                    };
+                    if !expanded.is_null() {
+                        ffi::sqlite3_free(expanded.cast());
+                    }
+                    lash_core_execution::perf_witness::record_sql_statement_bytes(&sql, bytes);
+                } else {
+                    lash_core_execution::perf_witness::record_sql_statement(&sql);
+                }
+            }
+            _ => {}
         }
-        _ => {}
+    });
+    0
+}
+
+/// Count placeholder spelling in the original SQL, excluding quoted text and
+/// comments. Expanded SQL changes only these spans; its delta gives actual
+/// bound SQL literal bytes, including quoting/hex expansion and repeated uses.
+fn placeholder_bytes(sql: &str) -> usize {
+    let bytes = sql.as_bytes();
+    let mut index = 0;
+    let mut total = 0;
+    while index < bytes.len() {
+        let start = index;
+        match bytes[index] {
+            b'\'' | b'"' | b'`' | b'[' => {
+                let quote = if bytes[index] == b'[' {
+                    b']'
+                } else {
+                    bytes[index]
+                };
+                index += 1;
+                while index < bytes.len() {
+                    if bytes[index] == quote {
+                        index += 1;
+                        if bytes.get(index) != Some(&quote) {
+                            break;
+                        }
+                    }
+                    index += 1;
+                }
+            }
+            b'-' if bytes.get(index + 1) == Some(&b'-') => {
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                index += 2;
+                while index + 1 < bytes.len() && &bytes[index..index + 2] != b"*/" {
+                    index += 1;
+                }
+                index = (index + 2).min(bytes.len());
+            }
+            b'?' | b':' | b'@' | b'$' => {
+                index += 1;
+                while bytes
+                    .get(index)
+                    .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                {
+                    index += 1;
+                }
+                total += index - start;
+            }
+            _ => index += 1,
+        }
     }
+    total
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// SQL-PAYLOAD: counts writes separately from returned rows, keeps result
+    /// payload distinct from SQLite's expanded bind spelling, and cached
+    /// re-execution cannot inherit a previous statement's changes.
+    #[test]
+    fn sql_payload_counts_actual_rows_and_cached_execution_bytes() {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute(
+                "CREATE TABLE sample (text TEXT, bytes BLOB, number INTEGER)",
+                [],
+            )
+            .unwrap();
+        enable(&connection);
+        for iteration in 0..2 {
+            let window = Window::new(format!("payload-{iteration}"), "sqlite");
+            Window::on_worker(Some(window.clone()), || {
+                connection
+                    .prepare_cached("INSERT INTO sample VALUES (?1, ?2, ?3)")
+                    .unwrap()
+                    .execute(rusqlite::params!["é'a", &[0_u8, 1, 2][..], 42_i64])
+                    .unwrap();
+                connection
+                    .prepare_cached("-- a real statement, not a trigger\nSELECT text, bytes, number FROM sample LIMIT 1")
+                    .unwrap()
+                    .query_row([], |_| Ok(()))
+                    .unwrap();
+            });
+            let receipt = window.snapshot();
+            assert_eq!(receipt.statements, 2);
+            assert_eq!(receipt.rows_affected, 1);
+            assert_eq!(receipt.rows_returned, 1);
+            assert_eq!(receipt.unmeasured_bound_statements, 0);
+            assert_eq!(receipt.bound_bytes, 18); // 'é''a', x'000102', 42
+            assert_eq!(receipt.result_bytes, 15); // 4 UTF-8 + 3 blob + 8 integer
+            assert_eq!(
+                receipt
+                    .shapes
+                    .values()
+                    .map(|s| s.rows_affected)
+                    .sum::<u64>(),
+                1
+            );
+            eprintln!("SQL_PAYLOAD {}", serde_json::to_string(&receipt).unwrap());
+        }
+    }
+
+    /// GRAPH-INSTALL-WORK: count successful store insertions, including
+    /// reinstalls after collection, rather than recorder-global first-seen ids.
+    #[tokio::test]
+    async fn graph_install_bytes_follow_deduplication_and_collection() {
+        use lash_core_store::checkpoint_graph::*;
+        use lash_durable::{ActorKey, CommitLabel, DurableStore, Epoch};
+        let stores = crate::SqliteStoreSet::memory().await.unwrap();
+        let identity = lash_core_execution::testing::sql_work::owner_commit(&stores).await;
+        let store = stores.durable_store();
+        let actor = ActorKey::session("sql-work-owner").unwrap();
+        let mut graph = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(1 << 20)));
+        let root = graph
+            .encode_value(NodeKind::TEXT_LEAF, &"install witness".to_owned())
+            .unwrap();
+        let bytes = graph.nodes()[&root].bytes.len() as u64;
+        for (sample, expected) in [bytes, 0, bytes].into_iter().enumerate() {
+            if sample == 2 {
+                store
+                    .collect_graph(lash_durable::domain::graph_commit::CollectionLimits::UNBOUNDED)
+                    .await
+                    .unwrap();
+            }
+            let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+            tx.stage(graph.nodes().values().cloned());
+            let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+                format!("install-{sample}"),
+                "sqlite",
+                store.commit(tx, CommitLabel::new("sql-work.install")),
+            )
+            .await;
+            answer.unwrap();
+            assert_eq!(receipt.newly_installed_graph_bytes, expected);
+            eprintln!("SQL_INSTALL {}", serde_json::to_string(&receipt).unwrap());
+        }
+    }
+
     /// SQL-WORK: all five windows export statements, normalized shapes,
     /// returned rows and SQL VM work, separately from logical graph writes.
     #[tokio::test]

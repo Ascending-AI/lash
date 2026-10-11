@@ -28,7 +28,7 @@ async fn stored(
     tx: &mut PgConnection,
     session: &SessionId,
 ) -> Result<Option<Stored>, DurableError> {
-    let Some(row) = sqlx::query(SQL.row.sql())
+    let Some(row) = crate::observed_sql::query(SQL.row.sql())
         .bind(session.as_str())
         .fetch_optional(crate::observed_sql::executor(tx))
         .await
@@ -51,7 +51,7 @@ pub(super) async fn apply(
 ) -> Result<(), DurableError> {
     match write {
         SessionCloseWrite::Begin { session } => {
-            sqlx::query(SQL.begin.sql())
+            crate::observed_sql::query(SQL.begin.sql())
                 .bind(session.as_str())
                 .bind(commit.now.0)
                 .bind(commit.epoch.0)
@@ -76,7 +76,7 @@ pub(super) async fn apply(
                     },
                 ));
             }
-            sqlx::query(SQL.record_step.sql())
+            crate::observed_sql::query(SQL.record_step.sql())
                 .bind(session.as_str())
                 .bind(step.as_str())
                 .bind(commit.epoch.0)
@@ -86,7 +86,7 @@ pub(super) async fn apply(
             Ok(())
         }
         SessionCloseWrite::ScopeEnded { session, scope } => {
-            sqlx::query(SQL.scope_ended.sql())
+            crate::observed_sql::query(SQL.scope_ended.sql())
                 .bind(session.as_str())
                 .bind(scope.stored())
                 .execute(crate::observed_sql::executor(tx))
@@ -105,7 +105,7 @@ pub(super) async fn record_ending(
     session: &SessionId,
     scope: &ScopeKey,
 ) -> Result<(), DurableError> {
-    sqlx::query(SQL.scope_ending.sql())
+    crate::observed_sql::query(SQL.scope_ending.sql())
         .bind(session.as_str())
         .bind(scope.stored())
         .bind(commit.now.0)
@@ -120,7 +120,7 @@ pub(super) async fn ending_scopes(
     tx: &mut PgConnection,
     session: &SessionId,
 ) -> Result<Vec<ScopeKey>, DurableError> {
-    let stored: Vec<String> = sqlx::query_scalar(SQL.ending_scopes.sql())
+    let stored: Vec<String> = crate::observed_sql::query_scalar(SQL.ending_scopes.sql())
         .bind(session.as_str())
         .fetch_all(crate::observed_sql::executor(tx))
         .await

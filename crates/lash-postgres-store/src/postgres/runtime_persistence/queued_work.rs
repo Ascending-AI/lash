@@ -47,7 +47,7 @@ impl PostgresStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         let sql = crate::turn_ingress::turn_ingress_sql();
-        let row = sqlx::query(sql.queued_batches_postgres.select_cancelable.sql())
+        let row = crate::observed_sql::query(sql.queued_batches_postgres.select_cancelable.sql())
             .bind(session_id.as_str())
             .bind(batch_id)
             .fetch_optional(crate::observed_sql::executor(&mut **tx))
@@ -60,7 +60,7 @@ impl PostgresStore {
         let row = queued_batch_row(row)?;
         let batch = queued_work_batch_from_row(row)?;
         // The row lock `select_cancelable` took holds the openness decision.
-        sqlx::query(sql.queued_batches.withdraw_open.sql())
+        crate::observed_sql::query(sql.queued_batches.withdraw_open.sql())
             .bind(session_id.as_str())
             .bind(batch_id)
             .bind(crate::support::clamp_epoch_ms(self.clock.timestamp_ms()))
@@ -77,7 +77,7 @@ impl PostgresStore {
         batch_id: &str,
     ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let row = sqlx::query(
+        let row = crate::observed_sql::query(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
                 .select_command_completion
@@ -109,7 +109,7 @@ impl PostgresStore {
         let mut tx = crate::observed_sql::control("BEGIN", connection.begin())
             .await
             .map_err(store_sqlx_error)?;
-        sqlx::query(
+        crate::observed_sql::query(
             crate::connection_sql::connection_sql()
                 .begin_repeatable_read_read_only
                 .sql(),
@@ -120,7 +120,7 @@ impl PostgresStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        let rows = sqlx::query(
+        let rows = crate::observed_sql::query(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
                 .list_by_session
@@ -156,7 +156,7 @@ impl PostgresStore {
             Option<i64>,
             Option<i64>,
             Option<i64>,
-        ) = sqlx::query_as(
+        ) = crate::observed_sql::query_as(
             crate::turn_ingress::turn_ingress_sql()
                 .family
                 .pending_session_work_ordering
@@ -195,7 +195,7 @@ impl PostgresStore {
             .map_err(store_sqlx_error)?;
         // One snapshot for the batch rows and their item rows; see
         // `list_queued_work`.
-        sqlx::query(
+        crate::observed_sql::query(
             crate::connection_sql::connection_sql()
                 .begin_repeatable_read_read_only
                 .sql(),
@@ -206,7 +206,7 @@ impl PostgresStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        let rows = sqlx::query(
+        let rows = crate::observed_sql::query(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
                 .list_open

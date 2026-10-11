@@ -47,7 +47,7 @@ pub(crate) fn build_schema_versions() -> Vec<StoreComponentVersion> {
 /// absence, which is the honest answer — it did not write these bytes. Why the
 /// privilege is asked for rather than discovered is on the statement.
 async fn stamp_is_writable(tx: &mut Transaction<'_, Postgres>) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(session_sql().release_stamp.select_is_writable.sql())
+    crate::observed_sql::query_scalar(session_sql().release_stamp.select_is_writable.sql())
         .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
 }
@@ -64,7 +64,7 @@ pub(crate) async fn write(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx
         return Ok(());
     }
     let existing: Option<String> =
-        sqlx::query_scalar(session_sql().release_stamp.select_release.sql())
+        crate::observed_sql::query_scalar(session_sql().release_stamp.select_release.sql())
             .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await?;
     if let Some(existing) = existing
@@ -72,7 +72,7 @@ pub(crate) async fn write(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx
     {
         return Ok(());
     }
-    sqlx::query(session_sql().release_stamp.upsert.sql())
+    crate::observed_sql::query(session_sql().release_stamp.upsert.sql())
         .bind(BUILD_RELEASE)
         .bind(StoreReleaseStamp::encode_schema_versions(
             &build_schema_versions(),
@@ -91,7 +91,7 @@ where
     E: sqlx::Executor<'e, Database = Postgres>,
 {
     let row: Result<Option<(String, String, i64)>, sqlx::Error> =
-        sqlx::query_as(session_sql().release_stamp.select_stamp.sql())
+        crate::observed_sql::query_as(session_sql().release_stamp.select_stamp.sql())
             .fetch_optional(crate::observed_sql::executor(executor))
             .await;
     match row {
@@ -137,20 +137,21 @@ pub(crate) async fn read_state_in_tx(
 pub(crate) async fn read_release_in_tx(tx: &mut Transaction<'_, Postgres>) -> Option<String> {
     // A missing or unreadable release table must not poison the open
     // transaction that is about to report a different compatibility refusal.
-    sqlx::query("SAVEPOINT lash_release_read")
+    crate::observed_sql::query("SAVEPOINT lash_release_read")
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .ok()?;
-    let release = sqlx::query_scalar(session_sql().release_stamp.select_release.sql())
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
-        .await;
+    let release =
+        crate::observed_sql::query_scalar(session_sql().release_stamp.select_release.sql())
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
+            .await;
     if release.is_err() {
-        sqlx::query("ROLLBACK TO SAVEPOINT lash_release_read")
+        crate::observed_sql::query("ROLLBACK TO SAVEPOINT lash_release_read")
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .ok()?;
     }
-    sqlx::query("RELEASE SAVEPOINT lash_release_read")
+    crate::observed_sql::query("RELEASE SAVEPOINT lash_release_read")
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .ok()?;

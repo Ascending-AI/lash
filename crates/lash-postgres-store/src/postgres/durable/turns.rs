@@ -53,7 +53,7 @@ pub(super) async fn apply(
             admission,
             turn_deadline,
         } => {
-            let open: Option<String> = sqlx::query_scalar(SQL.open_run.sql())
+            let open: Option<String> = crate::observed_sql::query_scalar(SQL.open_run.sql())
                 .bind(session.as_str())
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
@@ -63,7 +63,7 @@ pub(super) async fn apply(
                     session: session.clone(),
                 });
             }
-            sqlx::query(SQL.insert_run.sql())
+            crate::observed_sql::query(SQL.insert_run.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .bind(admission.to_stored().map_err(|error| encoding(&error))?)
@@ -71,7 +71,7 @@ pub(super) async fn apply(
                 .await
                 .map_err(sqlx_failure)?;
             let (phase, argument) = UnfinishedPhase::Admitted.stored();
-            sqlx::query(SQL.insert_phase.sql())
+            crate::observed_sql::query(SQL.insert_phase.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .bind(phase)
@@ -95,21 +95,22 @@ pub(super) async fn apply(
         } => {
             let (stored, argument) = phase.stored();
             let pin = phase.model();
-            let advanced: Option<String> = sqlx::query_scalar(SQL.advance_phase.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .bind(stored)
-                .bind(argument.map(integer::<i64>).transpose()?)
-                .bind(i64::from(*iteration))
-                .bind(phase.checkpoint().map(|checkpoint| checkpoint.to_hex()))
-                .bind(pin.map(|pin| pin.request_ref.as_str()))
-                .bind(pin.map(|pin| pin.deadline.0))
-                .bind(commit.epoch.0)
-                .bind(pin.map(|pin| i64::from(pin.call)))
-                .bind(pin.map(|pin| pin.stream_from.as_str()))
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
+            let advanced: Option<String> =
+                crate::observed_sql::query_scalar(SQL.advance_phase.sql())
+                    .bind(session.as_str())
+                    .bind(run.as_str())
+                    .bind(stored)
+                    .bind(argument.map(integer::<i64>).transpose()?)
+                    .bind(i64::from(*iteration))
+                    .bind(phase.checkpoint().map(|checkpoint| checkpoint.to_hex()))
+                    .bind(pin.map(|pin| pin.request_ref.as_str()))
+                    .bind(pin.map(|pin| pin.deadline.0))
+                    .bind(commit.epoch.0)
+                    .bind(pin.map(|pin| i64::from(pin.call)))
+                    .bind(pin.map(|pin| pin.stream_from.as_str()))
+                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
             if advanced.is_none() {
                 return refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
@@ -119,13 +120,14 @@ pub(super) async fn apply(
             Ok(())
         }
         TurnWrite::TraceExported { session, run } => {
-            let recorded: Option<String> = sqlx::query_scalar(SQL.trace_exported.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .bind(commit.epoch.0)
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
+            let recorded: Option<String> =
+                crate::observed_sql::query_scalar(SQL.trace_exported.sql())
+                    .bind(session.as_str())
+                    .bind(run.as_str())
+                    .bind(commit.epoch.0)
+                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
             if recorded.is_none() {
                 return refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
@@ -139,7 +141,7 @@ pub(super) async fn apply(
             run,
             namespaces,
         } => {
-            let open: Option<String> = sqlx::query_scalar(SQL.open_named_run.sql())
+            let open: Option<String> = crate::observed_sql::query_scalar(SQL.open_named_run.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -154,7 +156,7 @@ pub(super) async fn apply(
             for namespace in namespaces {
                 let entry = serde_json::to_string(&namespace.entry)
                     .map_err(|error| corrupt("turn namespace entry", &error.to_string()))?;
-                sqlx::query(SQL.upsert_namespace.sql())
+                crate::observed_sql::query(SQL.upsert_namespace.sql())
                     .bind(session.as_str())
                     .bind(run.as_str())
                     .bind(namespace.plugin.as_str())
@@ -176,7 +178,7 @@ pub(super) async fn apply(
             expected,
             working,
         } => {
-            let set: Option<String> = sqlx::query_scalar(SQL.working_set.sql())
+            let set: Option<String> = crate::observed_sql::query_scalar(SQL.working_set.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .bind(working.map(|working| working.to_hex()))
@@ -218,7 +220,7 @@ pub(super) async fn apply(
                 .map_err(|error| encoding(&error))?;
             let (window_revision, window_leaf, window_checkpoint, window_head) =
                 super::super::session_runs::TerminalWindowRef::columns(window.as_ref());
-            let ended: Option<String> = sqlx::query_scalar(SQL.end_run.sql())
+            let ended: Option<String> = crate::observed_sql::query_scalar(SQL.end_run.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .bind(cause.kind().as_str())
@@ -238,13 +240,13 @@ pub(super) async fn apply(
                     run: run.clone(),
                 });
             }
-            sqlx::query(SQL.delete_phase.sql())
+            crate::observed_sql::query(SQL.delete_phase.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
-            sqlx::query(SQL.delete_namespaces.sql())
+            crate::observed_sql::query(SQL.delete_namespaces.sql())
                 .bind(session.as_str())
                 .bind(run.as_str())
                 .execute(crate::observed_sql::executor(&mut *tx))
@@ -326,7 +328,7 @@ pub(super) async fn request_cancel(
         let (woken, _) = super::wake_within(tx, &actor, false, now).await?;
         return Ok((TurnCancelAnswer::Withdrawn { input }, Some(woken)));
     }
-    let open: Option<String> = sqlx::query_scalar(SQL.open_named_run.sql())
+    let open: Option<String> = crate::observed_sql::query_scalar(SQL.open_named_run.sql())
         .bind(session)
         .bind(run)
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -337,7 +339,7 @@ pub(super) async fn request_cancel(
     }
     let answer = match cancel_of(tx, &request.session, &request.run).await? {
         None => {
-            sqlx::query(SQL.insert_cancel.sql())
+            crate::observed_sql::query(SQL.insert_cancel.sql())
                 .bind(session)
                 .bind(run)
                 .bind(&request.request_id)
@@ -351,7 +353,7 @@ pub(super) async fn request_cancel(
             TurnCancelAnswer::Requested
         }
         Some(mut accepted) if request.escalates(&accepted) => {
-            sqlx::query(SQL.escalate_cancel.sql())
+            crate::observed_sql::query(SQL.escalate_cancel.sql())
                 .bind(session)
                 .bind(run)
                 .bind(&request.request_id)
@@ -382,7 +384,7 @@ async fn cancel_of(
     session: &SessionId,
     run: &TurnId,
 ) -> Result<Option<TurnCancelRequest>, DurableError> {
-    let stored: Option<StoredCancel> = sqlx::query_as(SQL.cancel_of.sql())
+    let stored: Option<StoredCancel> = crate::observed_sql::query_as(SQL.cancel_of.sql())
         .bind(session.as_str())
         .bind(run.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -425,7 +427,7 @@ pub(super) async fn turn_end(
     session: &SessionId,
     run: &TurnId,
 ) -> Result<Option<TurnEnd>, DurableError> {
-    let Some(row) = sqlx::query(SQL.ended.sql())
+    let Some(row) = crate::observed_sql::query(SQL.ended.sql())
         .bind(session.as_str())
         .bind(run.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -449,7 +451,7 @@ pub(super) async fn turn_namespaces(
     session: &SessionId,
     run: &TurnId,
 ) -> Result<Vec<TurnNamespace>, DurableError> {
-    let rows = sqlx::query(SQL.namespaces.sql())
+    let rows = crate::observed_sql::query(SQL.namespaces.sql())
         .bind(session.as_str())
         .bind(run.as_str())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
@@ -483,7 +485,7 @@ pub(super) async fn turn(
     tx: &mut PgConnection,
     session: &SessionId,
 ) -> Result<Option<TurnRow>, DurableError> {
-    let Some(row) = sqlx::query(SQL.unfinished.sql())
+    let Some(row) = crate::observed_sql::query(SQL.unfinished.sql())
         .bind(session.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -557,10 +559,12 @@ mod ddl_tests {
         let mut connection = sqlx::PgConnection::connect(database.url())
             .await
             .expect("connect to the isolated store");
-        sqlx::query("INSERT INTO lash_blobs (hash, content, encoding) VALUES ('{}', '\\x00', 1)")
-            .execute(&mut connection)
-            .await
-            .expect("a checkpoint blob");
+        crate::observed_sql::query(
+            "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('{}', '\\x00', 1)",
+        )
+        .execute(&mut connection)
+        .await
+        .expect("a checkpoint blob");
         Some((database, connection))
     }
 
@@ -583,7 +587,7 @@ mod ddl_tests {
         checkpoint: Option<&str>,
         pin: Option<(&str, i64)>,
     ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
-        sqlx::query(
+        crate::observed_sql::query(
             "INSERT INTO lash_turn_phases (session_id, run, phase, phase_arg, iteration,
                  checkpoint_ref, model_request_ref, model_deadline_ms, model_stream_from,
                  written_epoch)
@@ -667,7 +671,7 @@ mod ddl_tests {
             return;
         };
         let mut end = async |run: &str, kind: &str, cause: &str| {
-            sqlx::query(
+            crate::observed_sql::query(
                 "INSERT INTO lash_session_runs (session_id, run, admission_json, terminal_kind,
                      terminal_cause_json, terminal_head_revision, terminal_at_ms)
                  VALUES ('s', $1, NULL, $2, $3, NULL, 1)",

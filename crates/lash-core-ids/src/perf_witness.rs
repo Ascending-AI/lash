@@ -18,6 +18,10 @@ const INSTALLING: u8 = 1;
 const ACTIVE: u8 = 2;
 
 static COLLECTOR_STATE: AtomicU8 = AtomicU8::new(INACTIVE);
+static GRAPH_ENVELOPES: AtomicU64 = AtomicU64::new(0);
+static GRAPH_ENCODED_BYTES: AtomicU64 = AtomicU64::new(0);
+static GRAPH_ADOPT_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+static GRAPH_ADOPT_BYTES: AtomicU64 = AtomicU64::new(0);
 static HASH_PASSES: AtomicU64 = AtomicU64::new(0);
 static HASHED_BYTES: AtomicU64 = AtomicU64::new(0);
 // Pool-wait sample serialization is acceptable here because this recorder is
@@ -127,6 +131,10 @@ impl SqlVerb {
 /// One point-in-time view of the runtime work observed by the active witness.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Snapshot {
+    pub graph_adopt_attempts: u64,
+    pub graph_adopt_bytes: u64,
+    pub graph_envelopes: u64,
+    pub graph_encoded_bytes: u64,
     pub hash_passes: u64,
     pub hashed_bytes: u64,
     pub pool_checkout_wait_nanos: Vec<u64>,
@@ -171,6 +179,10 @@ impl Collector {
         COLLECTOR_STATE
             .compare_exchange(INACTIVE, INSTALLING, Ordering::AcqRel, Ordering::Relaxed)
             .map_err(|_| AlreadyInstalled)?;
+        GRAPH_ENVELOPES.store(0, Ordering::Relaxed);
+        GRAPH_ENCODED_BYTES.store(0, Ordering::Relaxed);
+        GRAPH_ADOPT_ATTEMPTS.store(0, Ordering::Relaxed);
+        GRAPH_ADOPT_BYTES.store(0, Ordering::Relaxed);
         HASH_PASSES.store(0, Ordering::Relaxed);
         HASHED_BYTES.store(0, Ordering::Relaxed);
         SQL_STATEMENTS.store(0, Ordering::Relaxed);
@@ -190,6 +202,10 @@ impl Collector {
     /// Snapshot all work observed since this collector was installed.
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
+            graph_adopt_attempts: GRAPH_ADOPT_ATTEMPTS.load(Ordering::Relaxed),
+            graph_adopt_bytes: GRAPH_ADOPT_BYTES.load(Ordering::Relaxed),
+            graph_envelopes: GRAPH_ENVELOPES.load(Ordering::Relaxed),
+            graph_encoded_bytes: GRAPH_ENCODED_BYTES.load(Ordering::Relaxed),
             hash_passes: HASH_PASSES.load(Ordering::Relaxed),
             hashed_bytes: HASHED_BYTES.load(Ordering::Relaxed),
             pool_checkout_wait_nanos: lock_pool_checkout_waits().clone(),
@@ -217,7 +233,26 @@ impl Drop for Collector {
     }
 }
 
-/// Record one SHA-256 pass over a checkpoint body.
+/// Record one complete graph envelope produced, before staging deduplication.
+#[inline]
+pub fn record_graph_encode(bytes: usize) {
+    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
+        GRAPH_ENVELOPES.fetch_add(1, Ordering::Relaxed);
+        GRAPH_ENCODED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+}
+
+/// Record one received envelope submitted to adoption, including refused and duplicate nodes.
+#[inline]
+pub fn record_graph_adopt(bytes: usize) {
+    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
+        GRAPH_ADOPT_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+        GRAPH_ADOPT_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+}
+
+/// Record one digest pass over a checkpoint body or graph envelope.
+/// Legacy bodies use SHA-256; graph envelopes use the domain-separated BLAKE3 hash.
 #[inline]
 pub fn record_hash_pass(bytes: usize) {
     if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {

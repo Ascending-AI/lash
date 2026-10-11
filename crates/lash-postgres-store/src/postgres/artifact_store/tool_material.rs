@@ -17,7 +17,7 @@ async fn lock_bundle_tx(
     tx: &mut Transaction<'_, Postgres>,
     artifact_ref: &str,
 ) -> Result<(), StoreError> {
-    sqlx::query(
+    crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .lock_xact_by_text
             .sql(),
@@ -35,7 +35,7 @@ async fn holder_ended_tx(
     tx: &mut Transaction<'_, Postgres>,
     referrer: &ArtifactReferrer,
 ) -> Result<bool, StoreError> {
-    sqlx::query_scalar(artifact_sql().fences.select_is_fenced.sql())
+    crate::observed_sql::query_scalar(artifact_sql().fences.select_is_fenced.sql())
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
         .fetch_one(crate::observed_sql::executor(&mut **tx))
@@ -48,7 +48,7 @@ async fn insert_lease_tx(
     artifact_ref: &str,
     referrer: &ArtifactReferrer,
 ) -> Result<(), StoreError> {
-    sqlx::query(artifact_sql().edges.insert_edge.sql())
+    crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
         .bind(TOOL_MATERIAL_NAMESPACE)
         .bind(artifact_ref)
         .bind(referrer.kind().as_str())
@@ -99,7 +99,7 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
             });
         }
         lock_bundle_tx(&mut tx, artifact_ref).await?;
-        sqlx::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
+        crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
             .bind(TOOL_MATERIAL_NAMESPACE)
             .bind(artifact_ref)
             .bind(bundle.bytes())
@@ -107,7 +107,7 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
             .await
             .map_err(store_sqlx_error)?;
         let stored: Vec<u8> =
-            sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
+            crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
                 .bind(TOOL_MATERIAL_NAMESPACE)
                 .bind(artifact_ref)
                 .fetch_one(crate::observed_sql::executor(&mut **tx))
@@ -156,12 +156,13 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
             });
         }
         lock_bundle_tx(&mut tx, artifact_ref).await?;
-        let exists: bool = sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
-            .bind(TOOL_MATERIAL_NAMESPACE)
-            .bind(artifact_ref)
-            .fetch_one(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?;
+        let exists: bool =
+            crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
+                .bind(TOOL_MATERIAL_NAMESPACE)
+                .bind(artifact_ref)
+                .fetch_one(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(store_sqlx_error)?;
         if !exists {
             return Err(missing(first));
         }
@@ -206,19 +207,20 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
             }
             .into());
         }
-        let leased: bool = sqlx::query_scalar(artifact_sql().edges.select_edge_exists.sql())
-            .bind(TOOL_MATERIAL_NAMESPACE)
-            .bind(&artifact.artifact_ref)
-            .bind(referrer.kind().as_str())
-            .bind(referrer.canonical_id())
-            .fetch_one(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(store_sqlx_error)?;
+        let leased: bool =
+            crate::observed_sql::query_scalar(artifact_sql().edges.select_edge_exists.sql())
+                .bind(TOOL_MATERIAL_NAMESPACE)
+                .bind(&artifact.artifact_ref)
+                .bind(referrer.kind().as_str())
+                .bind(referrer.canonical_id())
+                .fetch_one(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(store_sqlx_error)?;
         if !leased {
             return Err(missing(reference));
         }
         let bytes: Vec<u8> =
-            sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
+            crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
                 .bind(TOOL_MATERIAL_NAMESPACE)
                 .bind(&artifact.artifact_ref)
                 .fetch_one(crate::observed_sql::executor(&mut *tx))

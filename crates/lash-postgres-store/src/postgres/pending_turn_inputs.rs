@@ -91,7 +91,7 @@ pub(crate) async fn load_pending_turn_input(
     session_id: &SessionId,
     input_id: &str,
 ) -> Result<Option<lash_core_execution::PendingTurnInput>, StoreError> {
-    let row = sqlx::query(
+    let row = crate::observed_sql::query(
         crate::turn_ingress::turn_ingress_sql()
             .pending_inputs
             .select_by_id
@@ -138,7 +138,7 @@ pub(crate) async fn load_pending_turn_input_row_by_target_tx(
             source_key.as_str()
         }
     };
-    let row = sqlx::query(statement)
+    let row = crate::observed_sql::query(statement)
         .bind(session_id.as_str())
         .bind(key)
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
@@ -170,12 +170,12 @@ pub(crate) async fn lock_cancel_rows_in_queue_order(
                 .iter()
                 .map(|input_id| input_id.as_str().to_string())
                 .collect::<Vec<_>>();
-            sqlx::query(statements.lock_cancel_targets_in_queue_order.sql())
+            crate::observed_sql::query(statements.lock_cancel_targets_in_queue_order.sql())
                 .bind(session_id.as_str())
                 .bind(input_ids)
         }
         CancelLockScope::Suffix(anchor_seq) => {
-            sqlx::query(statements.lock_cancel_suffix_in_queue_order.sql())
+            crate::observed_sql::query(statements.lock_cancel_suffix_in_queue_order.sql())
                 .bind(session_id.as_str())
                 .bind(i64::try_from(anchor_seq).unwrap_or(i64::MAX))
         }
@@ -216,7 +216,7 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
                     },
                 );
             }
-            let cancelled = sqlx::query(
+            let cancelled = crate::observed_sql::query(
                 crate::turn_ingress::turn_ingress_sql()
                     .pending_inputs
                     .cancel

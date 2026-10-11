@@ -30,7 +30,7 @@ test = false
 [[bin]]
 name = "durable-substrate"
 path = "src/bin/durable_substrate.rs"
-test = false
+test = true
 
 [lints]
 workspace = true

@@ -33,7 +33,7 @@ fn lease_row(row: &PgRow) -> Result<LeaseRow, StoreError> {
 }
 
 async fn db_now(tx: &mut Transaction<'_, Postgres>) -> Result<i64, StoreError> {
-    sqlx::query_scalar(
+    crate::observed_sql::query_scalar(
         crate::connection_sql::connection_sql()
             .select_statement_epoch_ms
             .sql(),
@@ -47,7 +47,7 @@ async fn current(
     tx: &mut Transaction<'_, Postgres>,
     name: &str,
 ) -> Result<Option<LeaseRow>, StoreError> {
-    sqlx::query(SQL.select.sql())
+    crate::observed_sql::query(SQL.select.sql())
         .bind(name)
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
@@ -80,7 +80,7 @@ impl RecoveryLeaderStore for PostgresRecoveryLeader {
     async fn acquire(&self, claim: &LeaseClaim) -> Result<LeaseAnswer, StoreError> {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let now = db_now(&mut tx).await?;
-        let taken = sqlx::query(SQL.acquire.sql())
+        let taken = crate::observed_sql::query(SQL.acquire.sql())
             .bind(claim.name.as_str())
             .bind(claim.holder.as_str())
             .bind(claim.generation_rank)
@@ -105,7 +105,7 @@ impl RecoveryLeaderStore for PostgresRecoveryLeader {
     async fn renew(&self, claim: &LeaseClaim, term: i64) -> Result<LeaseAnswer, StoreError> {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let now = db_now(&mut tx).await?;
-        let renewed = sqlx::query(SQL.renew.sql())
+        let renewed = crate::observed_sql::query(SQL.renew.sql())
             .bind(claim.name.as_str())
             .bind(claim.holder.as_str())
             .bind(term)
@@ -135,7 +135,7 @@ impl RecoveryLeaderStore for PostgresRecoveryLeader {
     ) -> Result<bool, StoreError> {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         let now = db_now(&mut tx).await?;
-        let changed = sqlx::query(SQL.resign.sql())
+        let changed = crate::observed_sql::query(SQL.resign.sql())
             .bind(name.as_str())
             .bind(holder.as_str())
             .bind(term)

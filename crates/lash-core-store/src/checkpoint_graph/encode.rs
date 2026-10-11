@@ -158,6 +158,8 @@ impl GraphStaging {
     /// [`GraphRefusal::HashMismatch`], any refusal of the envelope, or
     /// [`GraphRefusal::EncodeMemoryLimit`].
     pub fn adopt(&mut self, node: EncodedNode) -> Result<(), GraphRefusal> {
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_graph_adopt(node.bytes.len());
         if NodeId::of_envelope(&node.bytes) != node.id {
             return Err(GraphRefusal::HashMismatch(node.id));
         }

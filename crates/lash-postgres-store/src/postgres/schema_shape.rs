@@ -104,7 +104,7 @@ pub(crate) async fn expanded_findings(
     };
     let names: Vec<String> = SchemaShape::expected().tables.keys().cloned().collect();
     let ddl_tokens: Vec<&str> = crate::schema::SCHEMA_DDL.split_whitespace().collect();
-    let constraints = sqlx::query(
+    let constraints = crate::observed_sql::query(
         "SELECT relation.relname::text AS table_name, constraint_row.conname::text AS name,
                 constraint_row.contype::text AS kind
          FROM pg_catalog.pg_constraint AS constraint_row
@@ -132,7 +132,7 @@ pub(crate) async fn expanded_findings(
             ));
         }
     }
-    let triggers = sqlx::query(
+    let triggers = crate::observed_sql::query(
         "SELECT relation.relname::text AS table_name, trigger.tgname::text AS name
          FROM pg_catalog.pg_trigger AS trigger
          JOIN pg_catalog.pg_class AS relation ON relation.oid = trigger.tgrelid
@@ -193,7 +193,7 @@ pub(crate) async fn synthetic_next_findings(
     let Some(schema) = report.schema.as_deref() else {
         return Ok(findings);
     };
-    let (table_found, index_found): (bool, bool) = sqlx::query_as(
+    let (table_found, index_found): (bool, bool) = crate::observed_sql::query_as(
         "SELECT EXISTS (
              SELECT 1 FROM pg_catalog.pg_class AS relation
              JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace

@@ -13,7 +13,7 @@ pub(crate) async fn postgres_transaction_epoch_ms(
 ) -> Result<u64, StoreError> {
     #[cfg(any(test, feature = "testing"))]
     {
-        let injected: Option<String> = sqlx::query_scalar(
+        let injected: Option<String> = crate::observed_sql::query_scalar(
             crate::connection_sql::connection_sql()
                 .select_injected_lease_epoch_ms
                 .sql(),
@@ -27,7 +27,7 @@ pub(crate) async fn postgres_transaction_epoch_ms(
                 .map_err(|error| StoreError::Backend(format!("invalid test lease time: {error}")));
         }
     }
-    let now: i64 = sqlx::query_scalar(
+    let now: i64 = crate::observed_sql::query_scalar(
         crate::connection_sql::connection_sql()
             .select_transaction_epoch_ms
             .sql(),
@@ -252,7 +252,7 @@ async fn put_checkpoint_blobs_tx(
             .iter()
             .map(|(_, content)| &content[..])
             .collect::<Vec<_>>();
-        sqlx::query(crate::blobs::blob_sql().postgres.insert_chunk.sql())
+        crate::observed_sql::query(crate::blobs::blob_sql().postgres.insert_chunk.sql())
             .bind(hashes)
             .bind(contents)
             .execute(crate::observed_sql::executor(&mut **tx))
@@ -267,11 +267,13 @@ pub(crate) async fn lock_checkpoint_blob_tx(
     blob_ref: &str,
     component_key: Option<&str>,
 ) -> Result<(), StoreError> {
-    let exists = sqlx::query_scalar::<_, bool>(crate::blobs::blob_sql().postgres.lock_one.sql())
-        .bind(blob_ref)
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?;
+    let exists = crate::observed_sql::query_scalar::<_, bool>(
+        crate::blobs::blob_sql().postgres.lock_one.sql(),
+    )
+    .bind(blob_ref)
+    .fetch_optional(crate::observed_sql::executor(&mut **tx))
+    .await
+    .map_err(store_sqlx_error)?;
     if exists.is_some() {
         return Ok(());
     }
@@ -299,7 +301,7 @@ async fn lock_checkpoint_blobs_tx(
     let mut locked = std::collections::HashSet::with_capacity(blob_refs.len());
     for chunk in blob_refs.chunks(chunk_size) {
         locked.extend(
-            sqlx::query_scalar::<_, String>(
+            crate::observed_sql::query_scalar::<_, String>(
                 crate::blobs::blob_sql().postgres.lock_existing_hashes.sql(),
             )
             .bind(chunk)
@@ -337,7 +339,7 @@ async fn checkpoint_component_bodies_tx(
     let mut bodies = std::collections::HashMap::with_capacity(blob_refs.len());
     let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
     for chunk in blob_refs.chunks(chunk_size) {
-        let rows = sqlx::query(
+        let rows = crate::observed_sql::query(
             crate::blobs::blob_sql()
                 .postgres
                 .select_bodies_by_hash
@@ -542,7 +544,7 @@ pub(crate) async fn load_session_head_meta_tx(
     } else {
         session_sql().head.select_meta.sql()
     };
-    let row = sqlx::query(sql)
+    let row = crate::observed_sql::query(sql)
         .bind(session_id.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
@@ -561,7 +563,7 @@ pub(crate) async fn load_terminal_head_meta_tx(
     run: &lash_core_execution::TurnId,
     fleet: lash_core_execution::FleetFormat,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
-    let row = sqlx::query(
+    let row = crate::observed_sql::query(
         crate::session_runs::session_runs_sql()
             .runs
             .select_terminal_window

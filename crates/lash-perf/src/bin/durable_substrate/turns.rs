@@ -20,7 +20,7 @@ use crate::{Case, Run};
 /// How long a turn may take before the bench gives up on it.
 const TURN_LIMIT: Duration = Duration::from_secs(600);
 
-fn turn_id(name: &str) -> Result<TurnId> {
+pub(crate) fn turn_id(name: &str) -> Result<TurnId> {
     TurnId::try_from(name.to_owned()).map_err(|error| anyhow::anyhow!("{error}"))
 }
 
@@ -68,7 +68,7 @@ struct BatchRecord<'a> {
 /// for its `turn.commit`; returns (admission start, commit). A session that
 /// parks first runs nothing more until an operator redrives it, so its turn
 /// is refused at the park, with the park's reason.
-async fn one_turn(
+pub(crate) async fn one_turn(
     deployment: &Deployment,
     index: usize,
     session: &SessionId,
@@ -157,7 +157,7 @@ fn batch_record<'a>(
 
 /// Close `sessions` and wait for each actor's end: L12a's teardown,
 /// outside every measured window. A closed session frees its node's slot.
-async fn close(deployment: &Deployment, sessions: &[SessionId]) -> Result<()> {
+pub(crate) async fn close(deployment: &Deployment, sessions: &[SessionId]) -> Result<()> {
     try_join_all(
         sessions
             .iter()
@@ -238,7 +238,7 @@ pub async fn rounds(run: &Run<'_>, case: &Case, sessions: usize) -> Result<()> {
                 sessions,
                 window_us,
                 &transactions,
-                after.since(&before),
+                after.since(&before)?,
             ),
         )?;
         close(&deployment, &names).await?;
@@ -390,6 +390,8 @@ struct BlockSample {
     batch: usize,
     block: usize,
     label: &'static str,
+    operation: &'static str,
+    sql: Option<lash_core_execution::facade_support::sql::Receipt>,
     snapshot_bytes: usize,
     /// What the block's commit newly installed.
     installed_bytes: usize,
@@ -440,7 +442,13 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
         );
         let blocks: Vec<&Transaction> = transactions
             .iter()
-            .filter(|t| t.actor == actor && t.ok && t.exec_roots > 0)
+            .filter(|t| {
+                t.actor == actor
+                    && t.ok
+                    && (t.exec_roots > 0
+                        || t.by_kind
+                            .contains_key(&lash_core_store::checkpoint_graph::NodeKind::CELL_END.0))
+            })
             .collect();
         for (index, block) in blocks.iter().enumerate() {
             let cycle_us = blocks.get(index + 1).map(|next| next.at_us - block.at_us);
@@ -455,6 +463,17 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
                     batch,
                     block: index,
                     label: block.label,
+                    operation: if block
+                        .by_kind
+                        .contains_key(&lash_core_store::checkpoint_graph::NodeKind::CELL_END.0)
+                    {
+                        "cell.end"
+                    } else if block.label == "cell.snapshot+admit" {
+                        "cell.park"
+                    } else {
+                        "cell.quiet_snapshot"
+                    },
+                    sql: block.sql.clone(),
                     snapshot_bytes: block.snapshot_bytes,
                     installed_bytes: block.installed_bytes,
                     graph_nodes: block.graph_nodes,
@@ -474,7 +493,7 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
                 1,
                 micros(timing.0, timing.1),
                 &transactions,
-                after.since(&before),
+                after.since(&before)?,
             ),
         )?;
         close(&deployment, std::slice::from_ref(&session)).await?;

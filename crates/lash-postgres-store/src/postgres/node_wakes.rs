@@ -124,7 +124,7 @@ impl Session {
             listener
                 .listen_all([self.channel.as_str(), APPENDED_CHANNEL])
                 .await?;
-            sqlx::query(SQL.postgres.hold_liveness.sql())
+            crate::observed_sql::query(SQL.postgres.hold_liveness.sql())
                 .bind(&self.boot)
                 .execute(crate::observed_sql::executor(&mut listener))
                 .await?;
@@ -241,7 +241,7 @@ impl NodeWakes for PostgresNodeWakes {
         }
         self.store
             .within(CommitCapacity::Work, async {
-                sqlx::query(SQL.postgres.notify.sql())
+                crate::observed_sql::query(SQL.postgres.notify.sql())
                     .bind(&channels)
                     .bind(&payloads)
                     .execute(crate::observed_sql::executor(&self.store.pools.work))
