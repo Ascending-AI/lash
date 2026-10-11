@@ -285,7 +285,9 @@ impl SqliteStoreSet {
                     process_env_store.options.blob_profile,
                     options.observer.clone(),
                 );
-                Some(Arc::new(crate::durable::SqliteNodeWakes::new(store, path)))
+                Some(Arc::new(
+                    crate::durable::SqliteNodeWakes::new(store, path).await?,
+                ))
             }
             SqliteLocation::Memory { .. } => None,
         };

@@ -2,8 +2,11 @@
 //! database file, which several processes on one machine serve as separate
 //! nodes (FIG-5422).
 //!
-//! - **Wakes.** A batch is one write transaction on the store's connection,
-//!   after the commits that woke its actors and never inside one: a row for
+//! - **Wakes.** Each producer writes its hints in the transaction that wakes
+//!   its actors. A temporary capture table follows the member's savepoint:
+//!   refused work leaves no hint, and a group answers only after its shared
+//!   durable commit. A post-commit flush signals listeners without writing.
+//!   Standalone transport publications write their own batch: a row for
 //!   each node picked to claim a readied unowned actor, with no actors, and a
 //!   row for each owner node with the keys of its actors that took mail, and
 //!   a row for every node, naming none, with the keys of the actors whose
@@ -165,14 +168,21 @@ impl std::fmt::Debug for SqliteNodeWakes {
 impl SqliteNodeWakes {
     /// The node wakes of the database file at `path`, whose durable store is
     /// `store`.
-    pub(crate) fn new(store: SqliteDurableStore, path: &std::path::Path) -> Self {
+    pub(crate) async fn new(
+        store: SqliteDurableStore,
+        path: &std::path::Path,
+    ) -> rusqlite::Result<Self> {
+        store
+            .conn
+            .install_node_wakes(NodeWakeWriter::new(&store))
+            .await?;
         let target = DatabaseTarget::File(path.to_path_buf());
-        Self {
+        Ok(Self {
             locks: LivenessLocks::beside(path, store.conn.operational.liveness_lock_attempts),
             ring: ring(&target),
             store,
             target,
-        }
+        })
     }
 }
 
@@ -468,6 +478,11 @@ impl NodeWakes for SqliteNodeWakes {
         Ok(())
     }
 
+    async fn committed(&self, _batch: &WakeBatch) -> Result<(), DurableError> {
+        self.ring.ring();
+        Ok(())
+    }
+
     async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
         let opener = Opener {
             target: self.target.clone(),
@@ -530,3 +545,7 @@ impl SqliteNodeWakes {
 #[cfg(test)]
 #[path = "node_wakes_tests.rs"]
 mod tests;
+
+#[path = "node_wakes_commit.rs"]
+mod commit;
+pub(crate) use commit::NodeWakeWriter;

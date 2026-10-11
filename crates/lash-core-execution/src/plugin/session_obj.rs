@@ -10,6 +10,7 @@ use lash_core_store::tool_run::{AttributedVerdict, CheckRecord};
 use super::*;
 
 mod directives;
+mod outcome_boundary;
 mod prompt_inputs;
 mod tools;
 pub use tools::ResolvedToolSurface;
@@ -683,30 +684,6 @@ impl PluginSession {
         )
     }
 
-    pub fn has_assistant_stream_hooks(&self) -> bool {
-        !self
-            .capabilities()
-            .contributions
-            .assistant_stream_hooks
-            .is_empty()
-    }
-
-    pub fn has_assistant_stream_finished_hooks(&self) -> bool {
-        !self
-            .capabilities()
-            .contributions
-            .assistant_stream_finished_hooks
-            .is_empty()
-    }
-
-    pub fn has_context_pressure_hooks(&self) -> bool {
-        !self
-            .capabilities()
-            .contributions
-            .context_pressure_hooks
-            .is_empty()
-    }
-
     /// Ask each registered context-pressure hook, in priority order, what the
     /// turn being prepared needs. The first hook that opens a frame is the
     /// last one asked: a turn opens at most one frame. `Continue` decisions
@@ -760,19 +737,6 @@ impl PluginSession {
             }
         }
         Ok(None)
-    }
-
-    pub(crate) fn has_tool_result_hooks(&self) -> bool {
-        !self
-            .capabilities()
-            .contributions
-            .tool_result_transforms
-            .is_empty()
-            || !self
-                .capabilities()
-                .contributions
-                .tool_result_checks
-                .is_empty()
     }
 
     /// Chain every argument transform once, in recorded registration order.
@@ -1076,14 +1040,6 @@ impl PluginSession {
             }
         }
         Ok(states)
-    }
-
-    pub fn has_runtime_event_hooks(&self) -> bool {
-        !self
-            .capabilities()
-            .contributions
-            .runtime_event_hooks
-            .is_empty()
     }
 
     /// Host handles capture every namespace. Plugin-facing handles export none.

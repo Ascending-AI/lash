@@ -409,6 +409,10 @@ fn cell_abort(error: RuntimeError) -> TurnError {
 
 #[async_trait::async_trait]
 impl TurnDrive for RuntimeDrive {
+    fn can_defer_tool_outcomes(&self) -> bool {
+        self.driver.session.plugins().can_defer_tool_outcomes()
+    }
+
     fn machine(&mut self) -> &mut TurnMachine {
         &mut self.machine
     }

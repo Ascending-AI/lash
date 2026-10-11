@@ -312,6 +312,8 @@ pub struct Lifecycle {
     checked: HashSet<WaitRef>,
     /// The members whose committed plugin state this lifecycle published.
     published: BTreeSet<AdmittedId>,
+    prepare_final: bool,
+    prepared: Option<lash_durable::ActorTx>,
 }
 
 impl Lifecycle {
@@ -342,6 +344,8 @@ impl Lifecycle {
             batch_opened: None,
             checked: HashSet::new(),
             published: BTreeSet::new(),
+            prepare_final: false,
+            prepared: None,
         }
     }
 
@@ -351,6 +355,14 @@ impl Lifecycle {
     pub fn with_settlement_label(mut self, label: CommitLabel) -> Self {
         self.settlement_label = label;
         self
+    }
+
+    pub(super) fn prepare_final(&mut self, enabled: bool) {
+        self.prepare_final = enabled;
+    }
+
+    pub(super) fn take_prepared(&mut self) -> Option<lash_durable::ActorTx> {
+        self.prepared.take()
     }
 
     /// This lifecycle reading `fence` in every transaction that commits
@@ -575,7 +587,8 @@ impl Lifecycle {
                     .is_some_and(|opened| self.cx.clock().now() >= opened + group.window));
         if batch_due {
             let mut tx = self.cx.begin().await?;
-            if self.fence.as_ref().is_some_and(|fence| fence(&tx)) {
+            let fenced = self.fence.as_ref().is_some_and(|fence| fence(&tx));
+            if fenced {
                 self.cancel_runs_before(RunSeq(u64::MAX));
                 for result in self.finished.values_mut() {
                     discard_answer(result);
@@ -604,6 +617,34 @@ impl Lifecycle {
             } else {
                 self.outcome_label
             };
+            // Only a final batch of plain answers can ride the next output.
+            // Parks, retries, state publication and callbacks on unanswered
+            // members still consume a recorded boundary here.
+            let final_plain = self.prepare_final
+                && !fenced
+                && !retried
+                && unanswered.is_empty()
+                && self.running.is_empty()
+                && self.finished.values().all(|result| {
+                    matches!(result,
+                    Ok(MemberOutcome { store_local, terminal: None, output })
+                        if store_local.is_empty() && !matches!(output, SettledOutput::Waiting(_)))
+                })
+                && folded.rounds().all(|view| {
+                    view.members().iter().all(|member| {
+                        member.outcome().is_some() || outcomes.contains(&view.id_of(member))
+                    })
+                });
+            if final_plain {
+                self.prepared = Some(tx);
+                self.finished.clear();
+                self.batch_opened = None;
+                return Ok(Some(Act::Idle(Idle {
+                    parked: Vec::new(),
+                    retry_due: None,
+                    busy: false,
+                })));
+            }
             let act = self.commit(tx, label).await?;
             if matches!(act, Act::Committed(_)) {
                 // The outcomes are durable: their plugin state publishes now,

@@ -556,6 +556,7 @@ impl<'a> AdmittedToolCall<'a> {
                 let (decided, proposals) = crate::plugin::collect_proposals(plugins, decide).await;
                 let decided = decided.map_err(fault)?;
                 if matches!(decided.0, CallDecision::Final { .. })
+                    && !proposals.is_empty()
                     && matches!(
                         capture,
                         SingletonCapture::Done { .. } | SingletonCapture::Isolated { .. }

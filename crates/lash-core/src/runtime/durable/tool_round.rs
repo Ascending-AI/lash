@@ -41,15 +41,19 @@
 //!   session releases as `waiting` until the earliest due, holding no claim
 //!   slot. The wait's resolution, or the due time, re-claims it, and the
 //!   restored turn resumes the round from its fold.
-//! - **Presentation.** The machine is answered with each member's committed
-//!   outcome, in declared order. The round's `present` record rides the
-//!   turn's next commit: `round.present+model.start` when the machine calls
-//!   the model next, `turn.commit` when it finishes.
+//! - **Presentation.** Recorded outcomes answer the machine in declared order.
+//!   Final plain answers may prepare the next provider call provisionally,
+//!   when no callback or VM consumes them first: outcomes, presentation and
+//!   model admission commit together as `round.outcome+present+model.start`.
+//!   Their observations and emissions stay held until that commit succeeds.
+//!   Otherwise `present` rides the next `round.present+model.start` or
+//!   `turn.commit`, after the required recorded-outcome boundary.
 
 use std::sync::Arc;
 
 use lash_core_execution::runtime::actor::round::{
-    self, AdmittedRound, RoundCalls, RoundDraft, RoundEnd, RoundError, RoundRunner, RoundTools,
+    self, AdmittedRound, DeferredOutcome, PreparedRoundEnd, RoundCalls, RoundDraft, RoundEnd,
+    RoundError, RoundRunner, RoundTools,
 };
 use lash_core_store::effect_opener::EffectOpener;
 use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, TurnWrite};
@@ -66,7 +70,10 @@ use crate::{ActorContext, EffectId, Response};
 pub(super) enum RoundExit {
     /// The machine is answered. The round's presentation commits with the
     /// turn's next commit.
-    Answered(Option<lash_core_execution::runtime::actor::round::PresentRecord>),
+    Answered {
+        present: Option<lash_core_execution::runtime::actor::round::PresentRecord>,
+        outcome: Option<Box<DeferredOutcome>>,
+    },
     /// The turn accepted a cancel: its stop settles the round's unfinished
     /// members `Cancelled` as it ends the turn.
     CancelRequested,
@@ -162,7 +169,10 @@ pub(super) async fn run(
             id,
             results: Vec::new(),
         });
-        return Ok(RoundExit::Answered(None));
+        return Ok(RoundExit::Answered {
+            present: None,
+            outcome: None,
+        });
     }
     let reads = cx.durable_reads()?;
     let rows = reads.run_facts_of(&owner, run).await?;
@@ -298,10 +308,11 @@ pub(super) async fn run(
     // accepted stop itself: an answer that lands after the request was
     // accepted, before this owner saw it, publishes nothing (FIG-5381).
     let cancel = CancellationToken::new();
+    let prepare = drive.can_defer_tool_outcomes();
     let running = runner
         .cancelled_by(cancel.clone())
         .fenced_by(Arc::new(turn_cancel::immediate_in))
-        .run();
+        .run_or_prepare(prepare);
     tokio::pin!(running);
     let end = loop {
         tokio::select! {
@@ -317,9 +328,12 @@ pub(super) async fn run(
     if cancel.is_cancelled() {
         return Ok(RoundExit::CancelRequested);
     }
-    let end = match end {
-        RoundEnd::Settled(end) => end,
-        RoundEnd::Suspended { due } => return Ok(RoundExit::Suspended { due }),
+    let (end, outcome) = match end {
+        PreparedRoundEnd::Recorded(RoundEnd::Settled(end)) => (end, None),
+        PreparedRoundEnd::Recorded(RoundEnd::Suspended { due }) => {
+            return Ok(RoundExit::Suspended { due });
+        }
+        PreparedRoundEnd::Prepared { round, outcome } => (round, Some(outcome)),
     };
 
     let view = end.round();
@@ -341,7 +355,10 @@ pub(super) async fn run(
     drive
         .machine()
         .handle_response(Response::ToolResults { id, results });
-    Ok(RoundExit::Answered(carry))
+    Ok(RoundExit::Answered {
+        present: carry,
+        outcome,
+    })
 }
 
 /// Record calls the protocol already refused, in the transaction that

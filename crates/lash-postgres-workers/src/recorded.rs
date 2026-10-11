@@ -379,6 +379,10 @@ impl NodeWakes for RecordedNodeWakes {
         self.inner.publish(batch).await
     }
 
+    async fn committed(&self, batch: &WakeBatch) -> Result<(), DurableError> {
+        self.inner.committed(batch).await
+    }
+
     async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
         self.inner.listen(lease).await
     }

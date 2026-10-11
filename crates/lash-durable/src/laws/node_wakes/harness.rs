@@ -137,7 +137,10 @@ pub struct LawNode {
 impl LawNode {
     /// Wait until an activation has read its mailbox and is waiting for
     /// a hint or its mail poll. A later append cannot race its initial read.
-    pub(super) async fn waiting(&mut self) -> LawOutcome {
+    ///
+    /// # Errors
+    /// The node stopped before waiting for mail.
+    pub async fn waiting(&mut self) -> LawOutcome {
         self.waiting
             .recv()
             .await
@@ -145,7 +148,10 @@ impl LawNode {
     }
 
     /// Wait for the next mail to reach one of the node's actors.
-    pub(super) async fn arrived(&mut self) -> LawOutcome {
+    ///
+    /// # Errors
+    /// The node stopped before delivering the mail.
+    pub async fn arrived(&mut self) -> LawOutcome {
         self.arrived
             .recv()
             .await
@@ -241,14 +247,14 @@ pub(super) fn quiet() -> LeaseSettings {
 
 /// Every claim call the counted nodes made, as (node, actors taken).
 #[derive(Clone, Default)]
-pub(super) struct Claims {
+pub struct Claims {
     attempts: Arc<std::sync::Mutex<Vec<(String, usize)>>>,
     changed: Arc<Notify>,
 }
 
 impl Claims {
     /// Await completed claim calls, rather than racing a wall-clock bound.
-    pub(super) async fn wait_for(&self, count: usize) {
+    pub async fn wait_for(&self, count: usize) {
         loop {
             let changed = self.changed.notified();
             if self.len() >= count {
@@ -265,7 +271,8 @@ impl Claims {
             .len()
     }
 
-    pub(super) fn take(&self) -> Vec<(String, usize)> {
+    /// Take the completed claim attempts, leaving the next interval empty.
+    pub fn take(&self) -> Vec<(String, usize)> {
         std::mem::take(
             &mut *self
                 .attempts
@@ -277,10 +284,13 @@ impl Claims {
 
 /// The seam the wake laws count claim attempts through: a durable store
 /// that records each claim call and forwards every call unchanged.
-pub(super) struct CountingStore {
-    pub(super) inner: Arc<dyn DurableStore>,
-    pub(super) node: String,
-    pub(super) claims: Claims,
+pub struct CountingStore {
+    /// The production store whose calls are forwarded unchanged.
+    pub inner: Arc<dyn DurableStore>,
+    /// The claimant's node name.
+    pub node: String,
+    /// The recorder shared by the law's claimants.
+    pub claims: Claims,
 }
 
 #[async_trait::async_trait]
@@ -532,6 +542,12 @@ pub(super) fn observing(inner: Arc<dyn NodeWakes>) -> (Arc<dyn NodeWakes>, Evide
 impl NodeWakes for ObservedWakes {
     async fn publish(&self, batch: &WakeBatch) -> Result<(), DurableError> {
         self.inner.publish(batch).await?;
+        let _ = self.evidence.send(WakeEvidence::Published(batch.clone()));
+        Ok(())
+    }
+
+    async fn committed(&self, batch: &WakeBatch) -> Result<(), DurableError> {
+        self.inner.committed(batch).await?;
         let _ = self.evidence.send(WakeEvidence::Published(batch.clone()));
         Ok(())
     }

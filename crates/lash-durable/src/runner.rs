@@ -515,6 +515,44 @@ impl WakeSink {
         }
     }
 
+    /// Plan transaction-local remote hints without notifying a listener or
+    /// reserving a claim slot. With no attached runner, route readiness among
+    /// the live nodes the transaction read; an owned actor names its owner.
+    #[must_use]
+    pub fn plan(&self, woken: &Woken, peers: &[NodeId]) -> WakeBatch {
+        let nodes = self.nodes();
+        let hints = woken
+            .owner
+            .as_ref()
+            .and_then(|owner| nodes.iter().find(|(_, hints)| hints.is_mine(owner)))
+            .or_else(|| nodes.first())
+            .map(|(_, hints)| hints);
+        let mut batch = WakeBatch::default();
+        match &woken.owner {
+            Some(owner) if hints.is_some_and(|hints| hints.is_mine(owner)) => {}
+            Some(owner) => {
+                batch
+                    .owned
+                    .entry(owner.node.clone())
+                    .or_default()
+                    .insert(woken.actor.clone());
+            }
+            None if woken.state == ActorState::Ready => {
+                let peer = match hints {
+                    Some(hints) if hints.inner.room.load(Ordering::Acquire) > 0 => None,
+                    Some(hints) => hints.peer_for(&woken.actor),
+                    None => peers
+                        .iter()
+                        .max_by_key(|peer| rendezvous(&woken.actor, peer))
+                        .cloned(),
+                };
+                batch.ready.extend(peer);
+            }
+            None => {}
+        }
+        batch
+    }
+
     fn nodes(&self) -> std::sync::MutexGuard<'_, Vec<(u64, Hints)>> {
         self.inner
             .nodes
@@ -801,7 +839,7 @@ async fn publish(hints: Hints, node_wakes: Arc<dyn NodeWakes>) {
         if !batch.is_empty() {
             // A hint that fails to send costs latency only: the polls find
             // the work.
-            let _ = node_wakes.publish(&batch).await;
+            let _ = node_wakes.committed(&batch).await;
         }
     }
 }

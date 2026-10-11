@@ -90,6 +90,13 @@ pub trait NodeWakes: Send + Sync + 'static {
     /// that woke its actors, never inside a writing transaction.
     async fn publish(&self, batch: &WakeBatch) -> Result<(), DurableError>;
 
+    /// Deliver hints for work that already committed. SQLite carries the rows
+    /// in that commit and only signals its listeners here; a transport without
+    /// transaction-local hints publishes the batch here.
+    async fn committed(&self, batch: &WakeBatch) -> Result<(), DurableError> {
+        self.publish(batch).await
+    }
+
     /// Open `lease`'s listener: subscribe to the node's own channel, and
     /// take the boot's liveness lock on the listener's session. Returns
     /// once both are in place, so a scan that follows misses no hint sent

@@ -110,7 +110,9 @@ pub use rounds::{
     PinnedRound, PresentRecord, admit_round, pin_round, present, presentation,
     record_trace_exported, settle_retry, start_retry,
 };
-pub use runner::{RoundEnd, RoundError, RoundRunner, SettledRound};
+pub use runner::{
+    DeferredOutcome, PreparedRoundEnd, RoundEnd, RoundError, RoundRunner, SettledRound,
+};
 pub use tools::{
     AcceptedStop, CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools,
     TraceProposal, call_draft, completed_material, decode_completed, request_material,

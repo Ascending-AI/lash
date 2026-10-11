@@ -14,6 +14,7 @@
 //! nothing. The wake re-claims it, and a runner resumed from the fold
 //! carries on.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_durable::domain::{OwnerKey, RunFacts, RunSeq};
@@ -38,6 +39,59 @@ pub enum RoundEnd {
     Suspended {
         /// The earliest retry due time or parked wait deadline.
         due: Option<DurableInstant>,
+    },
+}
+
+/// A round's final plain answers, staged for its next output boundary.
+/// Nothing in this value has published or committed yet.
+pub struct DeferredOutcome {
+    tx: lash_durable::ActorTx,
+    folded: RunFold,
+    bodies: Arc<dyn MemberBodies>,
+}
+
+impl std::fmt::Debug for DeferredOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeferredOutcome")
+            .field("actor", self.tx.actor())
+            .finish_non_exhaustive()
+    }
+}
+
+impl DeferredOutcome {
+    /// Append the outcomes to a freshly fenced transaction of the same owner.
+    /// Its fresh cancellation read decides whether these answers may commit.
+    pub fn append_to(&self, tx: &mut lash_durable::ActorTx) {
+        tx.stage(self.tx.graph().values().cloned());
+        for node in self.tx.reads() {
+            tx.require(*node);
+        }
+        for write in self.tx.domain() {
+            tx.write(write.clone());
+        }
+    }
+
+    /// Publish the final observations only after the combined commit was
+    /// acknowledged. No store-local state or unanswered callback is deferred.
+    pub fn committed(self) {
+        for view in self.folded.rounds() {
+            self.bodies.observe(view, &BTreeSet::new());
+        }
+    }
+}
+
+/// The final plain answers can be consumed by pure turn preparation. They
+/// remain staged until the owner's next output boundary commits them.
+#[derive(Debug)]
+pub enum PreparedRoundEnd {
+    /// The ordinary committed end, including suspension.
+    Recorded(RoundEnd),
+    /// All members answered; their fold is provisional until `outcome` commits.
+    Prepared {
+        /// The provisional final fold.
+        round: SettledRound,
+        /// The writes and observations held for the next output boundary.
+        outcome: Box<DeferredOutcome>,
     },
 }
 
@@ -103,6 +157,7 @@ pub struct RoundRunner {
     policies: PolicyView,
     lifecycle: Lifecycle,
     cancel: CancellationToken,
+    bodies: Arc<dyn MemberBodies>,
 }
 
 impl RoundRunner {
@@ -135,7 +190,13 @@ impl RoundRunner {
             cx: cx.clone(),
             owner,
             run,
-            lifecycle: Lifecycle::new(cx, policies.clone(), bodies, CommitLabel::ROUND_OUTCOME),
+            lifecycle: Lifecycle::new(
+                cx,
+                policies.clone(),
+                Arc::clone(&bodies),
+                CommitLabel::ROUND_OUTCOME,
+            ),
+            bodies,
             policies,
             cancel: CancellationToken::new(),
         }
@@ -168,7 +229,21 @@ impl RoundRunner {
     ///
     /// [`RoundError`]: ownership lost or another store failure on a read,
     /// inconsistent records, or the activation stopping.
-    pub async fn run(mut self) -> Result<RoundEnd, RoundError> {
+    pub async fn run(self) -> Result<RoundEnd, RoundError> {
+        match self.run_or_prepare(false).await? {
+            PreparedRoundEnd::Recorded(end) => Ok(end),
+            PreparedRoundEnd::Prepared { .. } => Err(RoundError::Stopped),
+        }
+    }
+
+    /// Run the round, allowing final plain answers to ride the next output
+    /// when the caller consumes them only through pure preparation. The caller
+    /// must commit the returned outcome before publishing anything derived from it.
+    ///
+    /// # Errors
+    /// As [`run`](Self::run).
+    pub async fn run_or_prepare(mut self, prepare: bool) -> Result<PreparedRoundEnd, RoundError> {
+        self.lifecycle.prepare_final(prepare);
         let (mut rows, mut waits) = load(&self.cx, &self.owner, self.run).await?;
         let clock = Arc::clone(self.cx.clock());
         let idle_evict = self.cx.backend().config().settings().idle_evict;
@@ -196,12 +271,32 @@ impl RoundRunner {
                 }
                 Act::Idle(idle) => idle,
             };
+            if let Some(tx) = self.lifecycle.take_prepared() {
+                rows.extend(
+                    RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch()).of_run(self.run),
+                );
+                let folded = fold(&rows, &self.policies, &waits)?;
+                self.cx.clear_due(DueSource::RetryDue);
+                return Ok(PreparedRoundEnd::Prepared {
+                    round: SettledRound {
+                        fold: folded.clone(),
+                        run: self.run,
+                    },
+                    outcome: Box::new(DeferredOutcome {
+                        tx,
+                        folded,
+                        bodies: self.bodies,
+                    }),
+                });
+            }
             if settled && idle.quiet() {
                 self.cx.clear_due(DueSource::RetryDue);
-                return Ok(RoundEnd::Settled(SettledRound {
-                    fold: folded,
-                    run: self.run,
-                }));
+                return Ok(PreparedRoundEnd::Recorded(RoundEnd::Settled(
+                    SettledRound {
+                        fold: folded,
+                        run: self.run,
+                    },
+                )));
             }
             // Only rows are left to wait on: stay hot for `idle_evict`,
             // then suspend.
@@ -209,9 +304,9 @@ impl RoundRunner {
                 let since = *quiet_since.get_or_insert_with(|| clock.now());
                 let held = clock.now().saturating_duration_since(since);
                 if held >= idle_evict {
-                    return Ok(RoundEnd::Suspended {
+                    return Ok(PreparedRoundEnd::Recorded(RoundEnd::Suspended {
                         due: self.lifecycle.due(&idle).await?,
-                    });
+                    }));
                 }
                 Some(idle_evict - held)
             } else {

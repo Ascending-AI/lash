@@ -177,37 +177,9 @@ pub trait TurnServices: Send + Sync {
     }
 }
 
-/// Commit the record that `run`'s admission exported the admission of the
-/// trace scope it retained, discharging the export the admission owes
-/// (FIG-5457).
-async fn record_turn_traced(
-    cx: &ActorContext,
-    session: &SessionId,
-    run: &TurnId,
-) -> Result<(), TurnError> {
-    let mut tx = cx.begin().await?;
-    tx.write(DomainWrite::Turn(TurnWrite::TraceExported {
-        session: session.clone(),
-        run: run.clone(),
-    }));
-    cx.commit(tx, CommitLabel::TURN_TRACED).await?;
-    Ok(())
-}
-
-/// Settle `candidate`, the trace admission a commit retains, on that
-/// commit's result: selected once it landed, deferred to its adapter when
-/// its acknowledgement was lost (a reader of the retained admission then
-/// reconciles it), and refused when nothing landed (FIG-5395).
-pub(super) fn settle_trace_admission<T>(
-    candidate: Box<dyn lash_trace::TraceAdmissionCandidate>,
-    committed: &Result<T, DurableError>,
-) {
-    match committed {
-        Ok(_) => candidate.settle(lash_trace::TraceCandidateOutcome::Selected),
-        Err(DurableError::AckLost { .. }) => candidate.defer(),
-        Err(_) => candidate.settle(lash_trace::TraceCandidateOutcome::Refused),
-    }
-}
+mod trace;
+use trace::record_turn_traced;
+pub(super) use trace::settle_trace_admission;
 
 /// One admitted model attempt's ordinal, execution bound and cooperative stop.
 #[derive(Clone, Debug)]
@@ -229,6 +201,12 @@ pub struct ModelCallAttempt {
 /// the machine itself.
 #[async_trait::async_trait]
 pub trait TurnDrive: Send {
+    /// Plain final tool answers may ride the next output only when no
+    /// callback consumes their recorded state during preparation.
+    fn can_defer_tool_outcomes(&self) -> bool {
+        false
+    }
+
     /// The turn's machine.
     fn machine(&mut self) -> &mut TurnMachine;
 
@@ -863,6 +841,7 @@ impl SessionActivation {
             PhaseExit::Committed(_) | PhaseExit::CancelRequested => Ok(Pass::Again),
             PhaseExit::Cancelled => self.await_stop(cx, session, &row.run).await,
             PhaseExit::Lost => Ok(Pass::Lost),
+            PhaseExit::Released => Ok(Pass::Released),
             PhaseExit::Drained => drain_release(cx).await,
             PhaseExit::Suspended { due } => {
                 let next_due = due.into_iter().chain(cx.next_due()).min();
@@ -1226,6 +1205,8 @@ pub enum PhaseExit {
         /// The earliest due time.
         due: Option<DurableInstant>,
     },
+    /// Its last boundary also gave up the actor; no release write remains.
+    Released,
     /// Ownership was lost: drop everything held for the actor.
     Lost,
     /// The turn stopped for its session's requested close, or for a cancel

@@ -26,6 +26,13 @@ use crate::{
 /// plugin can poke at to the capabilities any protocol reasonably needs.
 #[async_trait::async_trait]
 pub trait ProtocolSessionPlugin: Send + Sync {
+    /// Whether model-call preparation consumes a tool outcome from recorded
+    /// state. Stateless protocols may opt into combining plain outcomes with
+    /// their next model admission; the default retains the recorded boundary.
+    fn requires_recorded_tool_outcomes(&self) -> bool {
+        true
+    }
+
     /// Refuse a candidate tool surface before it is published (FIG-5824).
     /// `state` supplies committed bindings for a capability preview that has
     /// not restored a live session; otherwise inspect the live execution.

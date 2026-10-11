@@ -671,6 +671,10 @@ struct StandardProtocolSession;
 
 #[async_trait]
 impl ProtocolSessionPlugin for StandardProtocolSession {
+    fn requires_recorded_tool_outcomes(&self) -> bool {
+        false
+    }
+
     async fn initialize_session(
         &self,
         _ctx: ProtocolSessionContext<'_>,

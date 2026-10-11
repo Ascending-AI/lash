@@ -531,6 +531,21 @@ pub(crate) struct SqliteConnection {
 }
 
 impl SqliteConnection {
+    /// Install this file's transaction-local wake capture after its schema exists.
+    pub(crate) async fn install_node_wakes(
+        &self,
+        writer: crate::durable::NodeWakeWriter,
+    ) -> rusqlite::Result<()> {
+        self.call(|c| c.execute_batch(crate::durable::NODE_WAKE_CAPTURE))
+            .await?;
+        *self
+            .writer
+            .node_wakes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(writer);
+        Ok(())
+    }
+
     /// The wake sink this connection's producer commits deliver to.
     pub(crate) fn wakes(&self) -> &lash_durable::runner::WakeSink {
         &self.wakes
@@ -673,6 +688,7 @@ impl SqliteConnection {
                 read_gate: Arc::clone(&reads),
                 checkpoint,
                 fence: Arc::clone(&fence),
+                node_wakes: Mutex::new(None),
                 #[cfg(feature = "testing")]
                 pauses: hooks.pauses.clone(),
             }),
@@ -746,6 +762,7 @@ impl SqliteConnection {
                 read_gate: Arc::clone(&reads),
                 checkpoint: None,
                 fence: Arc::clone(&fence),
+                node_wakes: Mutex::new(None),
                 #[cfg(feature = "testing")]
                 pauses: None,
             }),

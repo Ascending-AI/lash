@@ -18,11 +18,11 @@ use crate::{
 
 mod harness;
 
+pub use harness::{Claims, CountingStore, LawNode, serve_node};
 use harness::{
-    Claims, CountingStore, Evidence, WakeEvidence, actor, create, eventually, holding, listening,
-    liveness, mail, node, observing, owner_of, quiet, under,
+    Evidence, WakeEvidence, actor, create, eventually, holding, listening, liveness, mail, node,
+    observing, owner_of, quiet, under,
 };
-pub use harness::{LawNode, serve_node};
 
 /// One dialect's database, as the node-wake laws reach it.
 #[async_trait::async_trait]

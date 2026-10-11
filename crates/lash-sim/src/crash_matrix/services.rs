@@ -570,6 +570,10 @@ impl SimDrive {
 
 #[async_trait::async_trait]
 impl TurnDrive for SimDrive {
+    fn can_defer_tool_outcomes(&self) -> bool {
+        true
+    }
+
     fn machine(&mut self) -> &mut TurnMachine {
         &mut self.machine
     }

@@ -34,12 +34,16 @@
 //! turn's held terminal publishes only once the commit that ends it is
 //! acknowledged ([`TurnDrive::committed`]).
 
-use lash_durable::CommitLabel;
+use lash_durable::{CommitLabel, Release};
+
+#[path = "output_boundary.rs"]
+mod output_boundary;
 use lash_durable::DomainWrite;
 use lash_durable::DurableError;
 use lash_durable::domain::{
     ModelCallId, PromptCallKey, PromptWrite, RunSeq, SessionMailWrite, TurnWrite,
 };
+use output_boundary::OutputBoundary;
 
 use super::head::HeadCache;
 use super::phase_root::StagedPhase;
@@ -201,6 +205,7 @@ pub async fn run_phases(
     let mut carry: Option<lash_core_execution::runtime::actor::round::PresentRecord> = None;
     // An answered cell's tool calls, recorded with the turn's next commit.
     let mut answered_cell: Option<tool_round::AnsweredCell> = None;
+    let mut boundary = OutputBoundary::default();
     loop {
         let effect = match pending.take() {
             Some(effect) => effect,
@@ -209,6 +214,20 @@ pub async fn run_phases(
                 None => return Err(TurnError::Exec("the turn machine stalled".to_owned())),
             },
         };
+        // An output other than the next provider call, or a terminal whose
+        // finish drains activity, consumes recorded outcomes first.
+        if boundary.held()
+            && matches!(
+                &effect,
+                Effect::ExecCode { .. }
+                    | Effect::ToolCalls { .. }
+                    | Effect::ReportToolCalls { .. }
+                    | Effect::Done { .. }
+            )
+            && !boundary.flush(cx, drive.as_mut(), None).await?
+        {
+            return Ok(PhaseExit::CancelRequested);
+        }
         match effect {
             Effect::LlmCall { id, request } => {
                 // `model.start`'s open is the call's one read: the turn's
@@ -219,6 +238,16 @@ pub async fn run_phases(
                 // asks for commits here, with the step the turn finished
                 // (ADR 0039).
                 if tx.turn_cancel().is_some() || turn_cancel::close_requested_in(&tx) {
+                    if boundary.held() {
+                        if turn_cancel::immediate_in(&tx) || turn_cancel::close_requested_in(&tx) {
+                            return Ok(PhaseExit::CancelRequested);
+                        }
+                        drop(tx);
+                        if !boundary.flush(cx, drive.as_mut(), None).await? {
+                            return Ok(PhaseExit::CancelRequested);
+                        }
+                        tx = cx.begin().await?;
+                    }
                     let request = tx.turn_cancel().cloned();
                     drop(tx);
                     let mut stopped = stopped(drive, &mut carry, &mut answered_cell);
@@ -226,6 +255,16 @@ pub async fn run_phases(
                     return stop(cx, services, &row, request, stopped, heads).await;
                 }
                 if cx.draining() {
+                    if boundary.held() {
+                        drop(tx);
+                        if !boundary
+                            .flush(cx, drive.as_mut(), Some(Release::Ready))
+                            .await?
+                        {
+                            return Ok(PhaseExit::CancelRequested);
+                        }
+                        return Ok(PhaseExit::Released);
+                    }
                     return Ok(PhaseExit::Drained);
                 }
                 let current = iteration(drive.machine());
@@ -326,7 +365,12 @@ pub async fn run_phases(
                     // admission record (its prompt snapshot and request
                     // template), in one transaction. A resend commits its next
                     // attempt and records nothing.
-                    let label = tool_round::model_start_label(&carry);
+                    let label = if boundary.held() {
+                        CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START
+                    } else {
+                        tool_round::model_start_label(&carry)
+                    };
+                    boundary.append_to(&mut tx);
                     if let Some(present) = carry.take() {
                         present.write(&mut tx);
                     }
@@ -362,13 +406,21 @@ pub async fn run_phases(
                         },
                         iteration: current,
                     }));
+                    let released = cx.draining();
+                    if released {
+                        tx.give_up(Release::Ready);
+                    }
                     let committed = cx.commit(tx, label).await?;
+                    boundary.committed(cx, drive.as_mut()).await?;
                     stored.committed(drive.machine());
                     drive.run_changes_committed(&written);
                     drive.phase_committed().await;
                     unsettled = true;
                     if !resent {
                         calls = pin.call;
+                    }
+                    if released {
+                        return Ok(PhaseExit::Released);
                     }
                     // A cancel the turn accepted after the open is read
                     // inside the commit: the call is never sent.
@@ -477,7 +529,10 @@ pub async fn run_phases(
                     unsettled: &mut unsettled,
                 };
                 match tool_round::run(cx, drive.as_mut(), &row, id, calls, done).await? {
-                    RoundExit::Answered(present) => carry = present,
+                    RoundExit::Answered { present, outcome } => {
+                        carry = present;
+                        boundary.set(outcome);
+                    }
                     RoundExit::CancelRequested => {
                         let request = cx.begin().await?.turn_cancel().cloned();
                         let stopped = stopped(drive, &mut carry, &mut answered_cell);
@@ -624,6 +679,21 @@ pub async fn run_phases(
                 // for the deployment or the state it holds is the pass's
                 // failure: the session parks at the activation-loop budget
                 // with the turn and its input kept (FIG-5398).
+                let released = cx.draining();
+                if released {
+                    let more = tx.domain().iter().any(|write| {
+                        matches!(
+                            write,
+                            DomainWrite::Process(
+                                lash_durable::domain::ProcessWrite::CascadeBatch {
+                                    cursor: Some(_),
+                                    ..
+                                }
+                            )
+                        )
+                    });
+                    tx.give_up(if more { Release::Ready } else { Release::Idle });
+                }
                 cx.commit(tx, CommitLabel::TURN_COMMIT)
                     .await
                     .map_err(|error| {
@@ -637,13 +707,21 @@ pub async fn run_phases(
                 drive.committed().await;
                 // The commit moved the head: the next turn loads it again.
                 heads.evict();
-                return Ok(PhaseExit::Committed(kind));
+                return Ok(if released {
+                    PhaseExit::Released
+                } else {
+                    PhaseExit::Committed(kind)
+                });
             }
             local => {
                 if let Effect::Emit(SessionStreamEvent::TurnOutcome { outcome: ended }) = &local {
                     outcome = Some(ended.clone());
                 }
-                drive.local(cx, local).await?;
+                if boundary.held() && matches!(&local, Effect::Emit(_) | Effect::Log { .. }) {
+                    boundary.hold(local);
+                } else {
+                    drive.local(cx, local).await?;
+                }
             }
         }
     }

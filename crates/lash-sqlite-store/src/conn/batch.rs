@@ -78,6 +78,7 @@ pub(super) struct Writer {
     pub(super) read_gate: Arc<RwLock<()>>,
     pub(super) checkpoint: Option<Arc<CheckpointState>>,
     pub(super) fence: Arc<WriterFence>,
+    pub(super) node_wakes: Mutex<Option<crate::durable::NodeWakeWriter>>,
     #[cfg(feature = "testing")]
     pub(super) pauses: Option<crate::testing::SqlitePauses>,
 }
@@ -404,7 +405,19 @@ fn transact(
         }
         #[cfg(feature = "perf-witness")]
         let staged = witness.as_ref().map(|witness| witness.staged());
-        let outcome = member.run(&tx);
+        let mut outcome = member.run(&tx);
+        if matches!(outcome, Kept::Writes) && !tx.is_autocommit() {
+            let wakes = writer
+                .node_wakes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(wakes) = wakes.as_ref()
+                && let Err(error) = wakes.flush(&tx)
+            {
+                member.refuse(error);
+                outcome = Kept::Failed;
+            }
+        }
         writes.member(&tx);
         if tx.is_autocommit() {
             // SQLite ended the transaction itself (SQLITE_FULL, an I/O

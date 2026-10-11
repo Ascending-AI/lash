@@ -86,11 +86,26 @@ node_wake_laws!(
     an_appended_log_is_named_to_every_listening_node,
     mail_from_another_node_reaches_a_hot_owner_through_its_hint,
     mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_hint,
-    mail_whose_hint_is_lost_reaches_a_hot_owner_within_its_poll,
     a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses,
-    a_readied_actor_is_claimed_by_one_attempt_on_one_node,
-    a_hint_to_a_dead_node_is_backed_by_the_claim_poll,
 );
+
+#[path = "node_wakes_commit_tests.rs"]
+mod commit;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_readied_actor_is_claimed_by_one_attempt_on_one_node() {
+    commit::one_claim_per_readied_actor().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_hint_to_a_dead_node_is_backed_by_the_claim_poll() {
+    commit::lost_hint_reaches_the_claim_poll().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mail_whose_hint_is_lost_reaches_a_hot_owner_within_its_poll() {
+    commit::lost_owned_hint_reaches_the_mail_poll().await;
+}
 
 // ---- Nodes in processes of their own ----
 
@@ -266,8 +281,10 @@ fn swept() -> lash_core_execution::AttachmentId {
 /// Facts observed at the production runner's node-wake boundary.
 #[derive(Debug)]
 enum WakeEvidence {
+    Listening(NodeLease),
     Watched(Vec<BootLiveness>),
     Woke(Vec<ActorKey>),
+    Dropped(Vec<ActorKey>),
     Reaped(Vec<Reaped>),
 }
 
@@ -276,21 +293,29 @@ enum WakeEvidence {
 struct ObservedWakes {
     inner: Arc<dyn NodeWakes>,
     evidence: mpsc::UnboundedSender<WakeEvidence>,
+    drop_owned: bool,
 }
 
 struct ObservedFeed {
     inner: Box<dyn NodeWakeFeed>,
     evidence: mpsc::UnboundedSender<WakeEvidence>,
+    drop_owned: bool,
 }
 
 #[async_trait::async_trait]
 impl NodeWakeFeed for ObservedFeed {
     async fn next(&mut self) -> NodeWakeEvent {
-        let event = self.inner.next().await;
-        if let NodeWakeEvent::Owned(actors) = &event {
-            let _ = self.evidence.send(WakeEvidence::Woke(actors.clone()));
+        loop {
+            let event = self.inner.next().await;
+            if let NodeWakeEvent::Owned(actors) = &event {
+                if self.drop_owned {
+                    let _ = self.evidence.send(WakeEvidence::Dropped(actors.clone()));
+                    continue;
+                }
+                let _ = self.evidence.send(WakeEvidence::Woke(actors.clone()));
+            }
+            return event;
         }
-        event
     }
 
     fn session(&self) -> u64 {
@@ -304,10 +329,17 @@ impl NodeWakes for ObservedWakes {
         self.inner.publish(batch).await
     }
 
+    async fn committed(&self, batch: &WakeBatch) -> Result<(), DurableError> {
+        self.inner.committed(batch).await
+    }
+
     async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
+        let inner = self.inner.listen(lease).await?;
+        let _ = self.evidence.send(WakeEvidence::Listening(lease.clone()));
         Ok(Box::new(ObservedFeed {
-            inner: self.inner.listen(lease).await?,
+            inner,
             evidence: self.evidence.clone(),
+            drop_owned: self.drop_owned,
         }))
     }
 
@@ -390,6 +422,7 @@ async fn run_child(role: &str, database: &Path) {
         let observed: Arc<dyn NodeWakes> = Arc::new(ObservedWakes {
             inner: stores.node_wakes().expect("file node wakes"),
             evidence: send,
+            drop_owned: false,
         });
         Some(observed)
     } else {
@@ -473,6 +506,7 @@ async fn a_wake_crosses_processes_and_a_killed_process_is_reaped_by_its_lock() {
         Some(Arc::new(ObservedWakes {
             inner: stores.node_wakes().expect("file node wakes"),
             evidence: send,
+            drop_owned: false,
         })),
         "parent",
         DurableSettings::default(),
@@ -926,4 +960,83 @@ async fn a_grouped_commit_killed_before_or_after_its_commit_is_all_or_nothing() 
             }
         }
     }
+}
+
+/// FIG-5954: same-file owner mail and its hint become visible together;
+/// a listener never needs a second write transaction to discover the mail.
+#[tokio::test]
+async fn an_owned_mail_hint_is_already_committed_with_its_mail() {
+    let dir = tempfile::tempdir().unwrap();
+    let stores = SqliteStoreSet::open(dir.path().join("lash.db"), crate::SqliteSynchronous::Full)
+        .await
+        .unwrap();
+    let store = stores.durable_store();
+    let hot = actor("atomic-hint");
+    let mut tx = MailTx::new();
+    tx.create_actor(hot.clone(), formats());
+    store
+        .commit_mail(tx, CommitLabel::MAIL_SESSION)
+        .await
+        .unwrap();
+    let lease = store
+        .register_node(&lash_durable::NodeSpec {
+            node: NodeId::new("hint-owner"),
+            decodes: vec![formats()],
+            ttl_millis: 15_000,
+        })
+        .await
+        .unwrap();
+    assert_eq!(store.claim(&lease, 1).await.unwrap().len(), 1);
+    let mut tx = MailTx::new();
+    tx.append(hot.clone(), MailKind::new("law.note"), "note");
+    store
+        .commit_mail(tx, CommitLabel::MAIL_SESSION)
+        .await
+        .unwrap();
+    let node = lease.owner.node.as_str().to_owned();
+    let payloads = store
+        .conn
+        .read(move |c| {
+            c.prepare("SELECT actors FROM node_wakes WHERE node_id = ?1 ORDER BY seq")?
+                .query_map([node], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
+        .unwrap();
+    assert!(
+        payloads.iter().any(|payload| {
+            node_wake_payload::decode(payload) == Some(NodeWakeEvent::Owned(vec![hot.clone()]))
+        }),
+        "the source commit owes no later wake transaction: {payloads:?}"
+    );
+    let before = payloads.len();
+    let mut batch = WakeBatch::default();
+    batch.owned.insert(lease.owner.node, [hot.clone()].into());
+    stores
+        .node_wakes()
+        .unwrap()
+        .committed(&batch)
+        .await
+        .unwrap();
+    store
+        .conn
+        .write_flow(move |tx| {
+            tx.execute(crate::durable::NODE_WAKE_ROLLBACK_MAIL, [hot.as_str()])?;
+            Ok(crate::conn::TxOutcome::Rollback(()))
+        })
+        .await
+        .unwrap();
+    let after = store
+        .conn
+        .read(|c| {
+            c.query_row("SELECT count(*) FROM node_wakes", [], |row| {
+                row.get::<_, usize>(0)
+            })
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        after, before,
+        "neither post-commit signalling nor rolled-back mail writes a hint"
+    );
 }

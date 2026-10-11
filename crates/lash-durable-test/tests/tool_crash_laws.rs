@@ -148,6 +148,8 @@ fn actor() -> ActorKey {
 /// Which turn the scenario runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Turn {
+    /// A traced final answer with no tool.
+    Plain,
     /// Two steps of native calls: `LIMIT`, then `LIMIT + 1`.
     LimitStep,
     /// One cell of two aggregates: `LIMIT` calls, then one more.
@@ -191,7 +193,7 @@ impl Turn {
 
     /// Whether the core is served with the recording telemetry adapter.
     fn traced(self) -> bool {
-        matches!(self, Self::Trace | Self::CellTrace)
+        matches!(self, Self::Plain | Self::Trace | Self::CellTrace)
     }
 
     fn script(self) -> Vec<LlmResponse> {
@@ -200,6 +202,7 @@ impl Turn {
             range.map(|leaf| format!("leaf-{leaf}")).collect::<Vec<_>>()
         };
         match self {
+            Self::Plain => Vec::new(),
             Self::LimitStep => [leaves(0..LIMIT), leaves(LIMIT..2 * LIMIT + 1)]
                 .iter()
                 .map(|step| {
@@ -287,6 +290,7 @@ impl Turn {
             range.map(|leaf| format!("leaf-{leaf}")).collect::<Vec<_>>()
         };
         match self {
+            Self::Plain => (Vec::new(), Vec::new()),
             Self::LimitStep => (leaves(0..LIMIT), leaves(LIMIT..2 * LIMIT + 1)),
             Self::LimitCell => (leaves(0..LIMIT), leaves(LIMIT..LIMIT + 1)),
             Self::CellIdentity => (
@@ -329,7 +333,8 @@ impl Turn {
         let (counted, requested) = match self {
             Self::LimitStep => (0, LIMIT + 1),
             Self::LimitCell => (LIMIT, 1),
-            Self::CellIdentity
+            Self::Plain
+            | Self::CellIdentity
             | Self::Activity
             | Self::Put
             | Self::State
@@ -363,7 +368,8 @@ impl Turn {
     fn max_tool_calls(self) -> usize {
         match self {
             Self::LimitStep | Self::LimitCell => LIMIT,
-            Self::CellIdentity
+            Self::Plain
+            | Self::CellIdentity
             | Self::Activity
             | Self::Put
             | Self::State
@@ -425,8 +431,12 @@ impl World {
             .and_then(Weak::upgrade)
             .is_some_and(|nodes| {
                 nodes.script().trace().iter().any(|write| {
-                    [CommitLabel::ROUND_OUTCOME, CommitLabel::STEP_OUTCOME]
-                        .contains(&write.point.label)
+                    [
+                        CommitLabel::ROUND_OUTCOME,
+                        CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+                        CommitLabel::STEP_OUTCOME,
+                    ]
+                    .contains(&write.point.label)
                         && write.committed()
                 })
             })
@@ -759,6 +769,7 @@ struct Crash {
     /// The telemetry adapter the core of a [`Turn::traced`] turn is served
     /// with.
     telemetry: telemetry::Telemetry,
+    trace_adapter: bool,
     /// The host's session and its send, which [`Turn::Activity`] follows.
     host: Mutex<Option<(lash::DurableSession, lash::SendHandle)>>,
     /// The session opened for observation, and the updates of its
@@ -788,6 +799,7 @@ impl Crash {
             clock: Mutex::default(),
             core: Mutex::default(),
             telemetry: telemetry::Telemetry::default(),
+            trace_adapter: turn.traced(),
             host: Mutex::default(),
             chat: Mutex::default(),
             keep: Mutex::default(),
@@ -837,7 +849,7 @@ impl Crash {
                 } else {
                     builder
                 };
-                let builder = if self.turn.traced() {
+                let builder = if self.trace_adapter {
                     builder.trace_runtime(self.telemetry.runtime())
                 } else {
                     builder
@@ -940,9 +952,11 @@ impl Crash {
         if self.turn == Turn::Finish {
             violations.extend(self.finish_laws(nodes).await);
         }
-        if self.turn.traced() {
+        if self.trace_adapter {
             violations.extend(self.telemetry.first_turn_violations(SESSION));
-            violations.extend(self.telemetry.first_turn_tool_violations(SESSION));
+            if self.turn != Turn::Plain {
+                violations.extend(self.telemetry.first_turn_tool_violations(SESSION));
+            }
         }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
@@ -1277,7 +1291,10 @@ impl Scenario for Crash {
         .await;
         *self.backend.lock_recover() = Some(served::configured_backend(
             stores,
-            sim::settings(),
+            lash_core_execution::DurableSettings {
+                idle_evict: sim::IDLE_EVICT,
+                ..sim::settings()
+            },
             Vec::new(),
         ));
         database
@@ -1953,11 +1970,16 @@ async fn code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill(tier
     prove(Turn::CellIdentity, tier).await;
 }
 
-/// A native call cut at its `round.outcome` and redriven on the other node
+/// A native call cut at its combined outcome and model admission and redriven on the other node
 /// streams its start and completion to the host's sink, and the session's
 /// committed observation holds exactly one outcome for it (FIG-5251).
 async fn a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_outcome(tier: Tier) {
-    prove_at(Turn::Activity, tier, &[CommitLabel::ROUND_OUTCOME]).await;
+    prove_at(
+        Turn::Activity,
+        tier,
+        &[CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START],
+    )
+    .await;
 }
 
 /// A turn cut at its `turn.commit`, its acknowledgement or its owner lost
@@ -1995,7 +2017,7 @@ async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_TRACED,
-            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
         ],
     )
     .await;
@@ -2159,3 +2181,6 @@ mod puts {
 
     crate::tiered_laws!(current_thread: a_turns_puts_are_held_by_its_execution_across_a_crash);
 }
+
+#[path = "support/turn_commit_bound.rs"]
+mod turn_commit_bound;
