@@ -534,28 +534,42 @@ fn end(referrer: ArtifactReferrer) -> ResolvedArtifactCleanup {
     }
 }
 
+/// Hold `artifact_ref`'s mutation lock in an open transaction. Returns the
+/// transaction and its backend pid, which `wait_until_mutations_wait`
+/// names as the holder.
 async fn lock_artifact_mutations<'a>(
     storage: &'a PostgresStorage,
     artifact_ref: &str,
-) -> sqlx::Transaction<'a, sqlx::Postgres> {
+) -> (sqlx::Transaction<'a, sqlx::Postgres>, i32) {
     let mut tx = storage.pool().begin().await.expect("begin blocker");
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(format!("lash-artifact:kernel_document:{artifact_ref}"))
         .execute(&mut *tx)
         .await
         .expect("lock artifact mutation key");
-    tx
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("read blocker pid");
+    (tx, pid)
 }
 
-async fn wait_until_a_mutation_waits(storage: &PostgresStorage) {
+/// Wait until `count` other backends wait for the advisory lock `holder`
+/// holds. The lock table names the wait itself, so it is seen whether the
+/// client statement takes the lock or a server function it calls does.
+async fn wait_until_mutations_wait(storage: &PostgresStorage, holder: i32, count: i64) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let waiting: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-             WHERE pid <> pg_backend_pid() AND datname = current_database()
-               AND state = 'active' AND wait_event_type = 'Lock'
-               AND query LIKE '%pg_advisory_xact_lock%')",
+            "SELECT COUNT(DISTINCT waiting.pid) >= $2 FROM pg_locks waiting
+             JOIN pg_locks held ON held.locktype = waiting.locktype
+               AND held.database = waiting.database AND held.classid = waiting.classid
+               AND held.objid = waiting.objid AND held.objsubid = waiting.objsubid
+             WHERE waiting.locktype = 'advisory' AND NOT waiting.granted
+               AND waiting.pid <> $1 AND held.pid = $1 AND held.granted",
         )
+        .bind(holder)
+        .bind(count)
         .fetch_one(storage.pool())
         .await
         .expect("inspect lock wait");
@@ -585,7 +599,7 @@ async fn postgres_referrer_end_preserves_an_edge_committed_ahead_of_it() {
         .await
         .expect("publish first edge");
 
-    let mut publisher = lock_artifact_mutations(&storage, artifact_ref).await;
+    let (mut publisher, holder) = lock_artifact_mutations(&storage, artifact_ref).await;
     sqlx::query(
         "INSERT INTO lash_artifact_referrer_edges
         (namespace, artifact_ref, referrer_kind, referrer_id)
@@ -600,7 +614,7 @@ async fn postgres_referrer_end_preserves_an_edge_committed_ahead_of_it() {
 
     let ending = store.clone();
     let end_a = tokio::spawn(async move { ending.end_module_referrer(&end(a)).await });
-    wait_until_a_mutation_waits(&storage).await;
+    wait_until_mutations_wait(&storage, holder, 1).await;
     publisher.commit().await.expect("commit second edge");
     end_a.await.expect("join end").expect("end first referrer");
     assert_eq!(
@@ -641,12 +655,13 @@ async fn postgres_concurrent_final_referrer_ends_reclaim_bytes() {
         .acquire_module_artifact(&b_claim, artifact_ref)
         .await
         .expect("acquire");
-    let blocker = lock_artifact_mutations(&storage, artifact_ref).await;
+    let (blocker, holder) = lock_artifact_mutations(&storage, artifact_ref).await;
     let left_store = store.clone();
     let left = tokio::spawn(async move { left_store.end_module_referrer(&end(a)).await });
     let right_store = store.clone();
     let right = tokio::spawn(async move { right_store.end_module_referrer(&end(b)).await });
-    wait_until_a_mutation_waits(&storage).await;
+    // Both ends wait on the artifact lock, so they race for the last edge.
+    wait_until_mutations_wait(&storage, holder, 2).await;
     blocker.commit().await.expect("release lock");
     left.await
         .expect("join first end")
@@ -677,10 +692,10 @@ async fn postgres_referrer_fence_refuses_a_late_publisher() {
         .publish_module_artifact(&claim, artifact_ref, b"bytes")
         .await
         .expect("publish");
-    let blocker = lock_artifact_mutations(&storage, artifact_ref).await;
+    let (blocker, holder) = lock_artifact_mutations(&storage, artifact_ref).await;
     let ending = store.clone();
     let retirement = tokio::spawn(async move { ending.end_module_referrer(&end(referrer)).await });
-    wait_until_a_mutation_waits(&storage).await;
+    wait_until_mutations_wait(&storage, holder, 1).await;
     let publishing = store.clone();
     let late = tokio::spawn(async move {
         publishing

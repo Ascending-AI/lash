@@ -299,23 +299,14 @@ async fn cold_reopen_globals_across_turns(backend: Backend) {
         .await
         .expect("first turn");
     assert!(first.is_success());
-    let first_edges = wait_edges(&fixture, |edges| {
-        edges.len() == 2
-            && edges.iter().any(|edge| edge.kind == "frame_environment")
-            && edges.iter().any(|edge| edge.kind == "execution")
-    })
-    .await;
-    let frame_id = first_edges
-        .iter()
-        .find(|edge| edge.kind == "frame_environment")
-        .expect("frame edge")
-        .id
-        .clone();
-    let settled = wait_edges(&fixture, |edges| {
-        edges.len() == 1 && edges[0].kind == "frame_environment" && edges[0].id == frame_id
-    })
-    .await;
-    assert_eq!(settled.len(), 1, "the settled first turn holds no edge");
+    // The turn's own commit retires its execution edge (ADR 0113), so the
+    // finished turn leaves only its frame holding the definition.
+    let settled = fixture.edges().await;
+    assert!(
+        settled.len() == 1 && settled[0].kind == "frame_environment",
+        "the settled first turn holds only its frame's edge: {settled:#?}"
+    );
+    let frame_id = settled[0].id.clone();
     drop(first_session);
     drop(first_core);
 
