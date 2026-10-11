@@ -249,3 +249,160 @@ await control.finish(await handle);"#,
     core.shutdown().await?;
     Ok(())
 }
+
+/// The oversized result crosses the ordinary tool seam; the provider's
+/// overflow is scripted because a model window cannot be shrunk by a fixture.
+struct OverflowPayloadTools(Arc<AtomicUsize>);
+
+fn overflow_payload_definition() -> lash_core::ToolDefinition {
+    test_tool_definition_with_tool_binding(
+        lash_core::ToolDefinition::raw(
+            "tool:overflow_payload",
+            "overflow_payload",
+            "Return the oversized report.",
+            serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+            serde_json::json!({ "type": "string" }),
+        )
+        .expect("valid tool schemas")
+        .with_execution(std::time::Duration::from_secs(30)),
+        "overflow_payload",
+    )
+}
+
+#[async_trait]
+impl ToolProvider for OverflowPayloadTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![overflow_payload_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "overflow_payload").then(|| Arc::new(overflow_payload_definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        lash_core::ToolOutcome::ok(serde_json::json!("x".repeat(256 * 1024))).into()
+    }
+}
+
+/// FIG-5986: an RLM session that overflowed after a tool result accepts a
+/// subsequent turn on the same durable identity, retaining its committed
+/// binding. Both an explicit overflow and a classified failed call obey it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn context_overflow_mid_turn_continues_on_the_same_session() -> Result<()> {
+    for classified in [false, true] {
+        let requests = Arc::new(StdMutex::new(Vec::new()));
+        let tool_calls = Arc::new(AtomicUsize::new(0));
+        let provider = crate::testing::TestProvider::builder()
+            .kind("context-overflow-continuation")
+            .complete({
+                let requests = Arc::clone(&requests);
+                let tool_calls = Arc::clone(&tool_calls);
+                move |request| {
+                    let call = {
+                        let mut requests = requests.lock_recover();
+                        requests.push(request.clone());
+                        requests.len()
+                    };
+                    let tool_calls = Arc::clone(&tool_calls);
+                    async move {
+                        match call {
+                            1 => Ok(text_response(&typescript_block(
+                                "const overflow_payload = await tools.overflow_payload({});\nconsole.log(overflow_payload.length);",
+                            ))),
+                            2 => {
+                                assert_eq!(tool_calls.load(Ordering::SeqCst), 1);
+                                assert!(request_text(&request).contains("262144"));
+                                if classified {
+                                    Err(lash_core::llm::transport::LlmTransportError::new(
+                                        "This model's maximum context length is 128000 tokens",
+                                    )
+                                    .with_http_status(400))
+                                } else {
+                                    Ok(LlmResponse {
+                                        terminal_reason: lash_core::LlmTerminalReason::ContextOverflow,
+                                        terminal_diagnostic: Some("context window exceeded".into()),
+                                        ..Default::default()
+                                    })
+                                }
+                            }
+                            3 => Ok(text_response(&typescript_block(
+                                "await control.finish(overflow_payload.length);",
+                            ))),
+                            _ => panic!("unexpected provider call {call}"),
+                        }
+                    }
+                }
+            })
+            .build()
+            .into_handle();
+        let core =
+            explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
+                .serve_test_llm_profile(provider, mock_llm_profile_spec())
+                .tools(Arc::new(OverflowPayloadTools(Arc::clone(&tool_calls))))
+                .build(crate::testing::runtime_lease_owner())?;
+        let session_id = crate::SessionId::parse(format!("overflow-continuation-{classified}"))
+            .expect("nonblank session identity");
+        let session = core
+            .session(session_id.clone())
+            .created()
+            .await
+            .open()
+            .await?;
+        let overflow = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            session
+                .send(TurnInput::text("Read the oversized report."))
+                .output(),
+        )
+        .await
+        .expect("the overflow turn settles")?;
+        assert!(
+            overflow.result.is_context_overflow(),
+            "{:?}",
+            overflow.result.outcome
+        );
+        assert!(!overflow.result.is_success());
+        assert_eq!(committed(&session).await.turn_index(), 1);
+        drop(session);
+
+        // Open the existing session, never create a replacement. The answer
+        // reads the binding committed before the overflow, without rerunning
+        // the tool or restoring anything in host code.
+        let session = core.session(session_id.clone()).open().await?;
+        let continued = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            session
+                .send(TurnInput::text("Continue from the report."))
+                .output(),
+        )
+        .await
+        .expect("the continuing turn settles")?;
+        assert!(
+            continued.result.is_success(),
+            "{:?}",
+            continued.result.outcome
+        );
+        assert!(!continued.result.is_context_overflow());
+        assert_eq!(
+            continued.finished().map(|(_, value)| value),
+            Some(&serde_json::json!(262144))
+        );
+        assert_eq!(committed(&session).await.turn_index(), 2);
+        assert_eq!(tool_calls.load(Ordering::SeqCst), 1);
+        let requests = requests.lock_recover().clone();
+        assert_eq!(
+            requests.len(),
+            3,
+            "two calls before overflow, one to continue"
+        );
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.session_id() == Some(&session_id))
+        );
+        drop(session);
+        core.shutdown().await?;
+    }
+    Ok(())
+}
