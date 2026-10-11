@@ -38,7 +38,8 @@ tokio::task_local! {
 #[cfg(test)]
 tokio::task_local! {
     /// The round trips a law's task made to the server: every statement it
-    /// sent through the observed executor, and every checkout, which pings.
+    /// sent through the observed executor, and every checkout of a pool that
+    /// pings each one.
     pub(crate) static ROUND_TRIPS: std::cell::Cell<u64>;
 }
 
@@ -47,13 +48,15 @@ fn round_trip() {
     let _ = ROUND_TRIPS.try_with(|trips| trips.set(trips.get() + 1));
 }
 
-/// Check a connection out of `pool`: the pool pings it first, a round trip
-/// of its own.
+/// Check a connection out of `pool`: a pool that pings every checkout
+/// pays a round trip for it.
 pub(crate) async fn checkout(
     pool: &sqlx::PgPool,
 ) -> Result<sqlx::pool::PoolConnection<Postgres>, sqlx::Error> {
     #[cfg(test)]
-    round_trip();
+    if pool.options().get_test_before_acquire() {
+        round_trip();
+    }
     let started = Instant::now();
     let connection = pool.acquire().await;
     acquired(started.elapsed());

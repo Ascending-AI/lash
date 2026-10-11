@@ -27,13 +27,15 @@ crate::statements! {
     /// both backends issue verbatim. The session head is written by the
     /// session store's own commit, applied in the same transaction.
     pub struct TurnStatements @ "durable_turn" {
-        /// Whether session `?1` has an unfinished admitted run.
-        open_run = "SELECT run FROM session_runs
-             WHERE session_id = ?1 AND admission_json IS NOT NULL AND terminal_kind IS NULL";
-
-        /// Admit run `?2` of session `?1` with admission `?3`.
-        insert_run = "INSERT INTO session_runs (session_id, run, admission_json)
-             VALUES (?1, ?2, ?3)";
+        /// Admit run `?2` of session `?1` with admission `?3` when the
+        /// session has no unfinished admitted run. No row when it has one.
+        admit_run = "INSERT INTO session_runs (session_id, run, admission_json)
+             SELECT ?1, ?2, ?3
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM session_runs
+                 WHERE session_id = ?1 AND admission_json IS NOT NULL
+                   AND terminal_kind IS NULL)
+             RETURNING run";
 
         /// Insert run `?2` of session `?1`'s phase row: phase `?3`, phase argument
         /// `?4`, iteration `?5`, checkpoint `?6`, pinned request `?7`, model

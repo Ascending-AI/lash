@@ -364,14 +364,14 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
 > {
     use lash_core_execution::store_backend_support as support;
     let session_id = batch.session_id();
+    // The session's write authority, held to the commit: every ingress
+    // producer takes it before it allocates, so the absences read below
+    // hold and the block allocated below is contiguous (FIG-3842). The
+    // deletion check takes it first.
     ensure_session_not_deleted_tx(tx, session_id).await?;
     for draft in batch.drafts() {
         support::validate_turn_input_source_key(draft)?;
     }
-    // The session's write authority, held to the commit: every ingress
-    // producer takes it before it allocates, so the absences read below
-    // hold and the block allocated below is contiguous (FIG-3842).
-    super::lock_session_history_mutation_tx(tx, session_id).await?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let mut interned = std::collections::BTreeSet::new();
     let mut admitted = Vec::with_capacity(batch.drafts().len());
@@ -399,13 +399,13 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
                 .map_err(store_sqlx_error)?,
                 _ => None,
             };
-        let input_id = match support::decide_turn_input_draft_admission(
+        let (input_id, inserted) = match support::decide_turn_input_draft_admission(
             draft,
             &submission_digest,
             by_source_key,
             by_input_id,
         )? {
-            support::TurnInputDraftAdmission::Existing { input_id } => input_id,
+            support::TurnInputDraftAdmission::Existing { input_id } => (input_id, None),
             support::TurnInputDraftAdmission::New => {
                 ensure_session_not_closing_tx(tx, session_id).await?;
                 let ids = draft.input.stored_attachment_ids();
@@ -421,7 +421,8 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
                     let evidence = turn_address_evidence_tx(tx, session_id, turn_id).await?;
                     support::require_known_turn_address(session_id, turn_id, evidence)?;
                 }
-                let enqueue_seq = super::allocate_ingress_sequence_tx(tx, session_id).await?;
+                let enqueue_seq =
+                    super::allocate_locked_ingress_sequence_tx(tx, session_id).await?;
                 let input_id = match draft.input_id.clone() {
                     Some(input_id) => input_id,
                     None => support::derive_pending_turn_input_id(
@@ -433,7 +434,7 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
                 };
                 let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
                 let run_spec = admit_run_spec_tx(tx, draft, &mut interned).await?;
-                crate::observed_sql::query(sql.pending_inputs.insert_new.sql())
+                let inserted = crate::observed_sql::query(sql.pending_inputs.insert_new.sql())
                     .bind(enqueue_seq)
                     .bind(input_id.as_str())
                     .bind(session_id.as_str())
@@ -449,10 +450,10 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
                             &draft.trace_cause,
                         )?,
                     )
-                    .execute(crate::observed_sql::executor(&mut ***tx))
+                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
                     .await
                     .map_err(|err| pending_turn_input_insert_error(err, session_id, &input_id))?;
-                input_id
+                (input_id, Some(inserted))
             }
         };
         if draft.pin {
@@ -465,13 +466,16 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
             )
             .await?;
         }
-        admitted.push(
-            load_pending_turn_input(tx, session_id, &input_id)
-                .await?
-                .ok_or_else(|| {
-                    StoreError::Backend("admitted pending turn input disappeared".to_string())
-                })?,
-        );
+        // A new input is the row its insert returned; a replayed one is read.
+        let input = match inserted {
+            Some(row) => Some(crate::pending_turn_inputs::pending_turn_input_from_row(
+                crate::pending_turn_inputs::pending_turn_input_row(row)?,
+            )?),
+            None => load_pending_turn_input(tx, session_id, &input_id).await?,
+        };
+        admitted.push(input.ok_or_else(|| {
+            StoreError::Backend("admitted pending turn input disappeared".to_string())
+        })?);
     }
     // The rows and the session's wake commit together (ADR 0132 §12): no
     // crash between them can leave input that nothing will admit.

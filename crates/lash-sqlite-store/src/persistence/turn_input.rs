@@ -487,13 +487,13 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                 .map_err(sqlite_error)?,
             _ => None,
         };
-        let input_id = match support::decide_turn_input_draft_admission(
+        let (input_id, inserted) = match support::decide_turn_input_draft_admission(
             draft,
             &submission_digest,
             by_source_key,
             by_input_id,
         )? {
-            support::TurnInputDraftAdmission::Existing { input_id } => input_id,
+            support::TurnInputDraftAdmission::Existing { input_id } => (input_id, None),
             support::TurnInputDraftAdmission::New => {
                 ensure_session_not_closing_conn(tx, session_id)?;
                 let ids = draft.input.stored_attachment_ids();
@@ -519,35 +519,42 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                 });
                 let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
                 let run_spec = admit_run_spec_conn(tx, draft, &mut interned)?;
-                crate::conn::cached_execute(
-                    tx,
-                    sql.pending_inputs.insert_new.sql(),
-                    params![
-                        crate::session_ingress::allocate_sequence(tx, session_id)?,
-                        input_id.as_str(),
-                        session_id.as_str(),
-                        draft.source_key.as_deref(),
-                        encode_json(&draft.ingress)?,
-                        state.as_str(),
-                        encode_json(&draft.input)?,
-                        submission_digest.as_str(),
-                        now as i64,
-                        run_spec.column(),
-                        lash_core_execution::store_backend_support::encode_trace_cause(
-                            &draft.trace_cause,
-                        )?,
-                    ],
-                )
-                .map_err(|err| {
-                    crate::sqlite_pending_turn_input_insert_error(err, session_id, &input_id)
-                })?;
+                let sequence = crate::session_ingress::allocate_sequence(tx, session_id)?;
+                let ingress_json = encode_json(&draft.ingress)?;
+                let input_json = encode_json(&draft.input)?;
+                let trace_cause = lash_core_execution::store_backend_support::encode_trace_cause(
+                    &draft.trace_cause,
+                )?;
+                let inserted = tx
+                    .prepare_cached(sql.pending_inputs.insert_new.sql())
+                    .and_then(|mut statement| {
+                        statement.query_row(
+                            params![
+                                sequence,
+                                input_id.as_str(),
+                                session_id.as_str(),
+                                draft.source_key.as_deref(),
+                                ingress_json,
+                                state.as_str(),
+                                input_json,
+                                submission_digest.as_str(),
+                                now as i64,
+                                run_spec.column(),
+                                trace_cause,
+                            ],
+                            crate::pending_turn_inputs::pending_turn_input_row_from_sql,
+                        )
+                    })
+                    .map_err(|err| {
+                        crate::sqlite_pending_turn_input_insert_error(err, session_id, &input_id)
+                    })?;
                 #[cfg(feature = "perf-witness")]
                 lash_core_execution::perf_witness::latency::stage(|| {
                     lash_core_execution::perf_witness::latency::CommitMark::Accepted {
                         input: input_id.as_str().to_owned(),
                     }
                 });
-                input_id
+                (input_id, Some(inserted))
             }
         };
         if draft.pin {
@@ -559,11 +566,16 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                 &lash_core_execution::Target::Input(input_id.clone()),
             )?;
         }
-        admitted.push(
-            load_pending_turn_input_by_id_conn(tx, session_id, &input_id)?.ok_or_else(|| {
-                StoreError::Backend("admitted pending turn input disappeared".to_string())
-            })?,
-        );
+        // A new input is the row its insert returned; a replayed one is read.
+        let input = match inserted {
+            Some(row) => Some(crate::pending_turn_inputs::pending_turn_input_from_row(
+                row,
+            )?),
+            None => load_pending_turn_input_by_id_conn(tx, session_id, &input_id)?,
+        };
+        admitted.push(input.ok_or_else(|| {
+            StoreError::Backend("admitted pending turn input disappeared".to_string())
+        })?);
     }
     // The rows and the session's wake commit together (ADR 0132 §12): no
     // crash between them can leave input that nothing will admit.

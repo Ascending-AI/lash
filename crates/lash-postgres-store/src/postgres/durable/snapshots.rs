@@ -50,49 +50,43 @@ pub(super) async fn apply(
             commit_id,
         } => {
             let key = exec.stored();
-            let found = crate::observed_sql::query(SQL.root.sql())
-                .bind(&key)
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            let (found_rev, found_root) = match found {
-                None => (None, None),
-                Some(row) => {
-                    let rev: i64 = row.try_get(0).map_err(sqlx_failure)?;
-                    let stored: String = row.try_get(1).map_err(sqlx_failure)?;
-                    (Some(revision(rev)?), Some(node_ref(&stored)?))
-                }
-            };
-            if found_rev != *expected || found_root != *expected_root {
-                return Err(conflict(exec, *expected, found_rev));
-            }
-            match expected {
-                None => {
-                    crate::observed_sql::query(SQL.insert.sql())
-                        .bind(&key)
-                        .bind(root.to_hex())
-                        .bind(commit_id.0.to_vec())
-                        .bind(commit.epoch.0)
-                        .execute(crate::observed_sql::executor(&mut *tx))
-                        .await
-                        .map_err(sqlx_failure)?;
-                }
-                Some(rev) => {
-                    let replaced = crate::observed_sql::query(SQL.replace.sql())
+            // One guarded write: the first root when there is none, else
+            // the next over the expected revision and root. A put whose
+            // expectation names a revision without a root, or a root without
+            // a revision, never matches a row.
+            let put: Option<i64> = match (expected, expected_root) {
+                (None, None) => crate::observed_sql::query_scalar(SQL.put_first.sql())
+                    .bind(&key)
+                    .bind(root.to_hex())
+                    .bind(commit_id.0.to_vec())
+                    .bind(commit.epoch.0)
+                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?,
+                (Some(rev), Some(expected_root)) => {
+                    crate::observed_sql::query_scalar(SQL.put_next.sql())
                         .bind(&key)
                         .bind(integer::<i64>(rev.0)?)
                         .bind(root.to_hex())
                         .bind(commit_id.0.to_vec())
                         .bind(commit.epoch.0)
+                        .bind(expected_root.to_hex())
                         .fetch_optional(crate::observed_sql::executor(&mut *tx))
                         .await
-                        .map_err(sqlx_failure)?;
-                    if replaced.is_none() {
-                        return Err(conflict(exec, *expected, found_rev));
-                    }
+                        .map_err(sqlx_failure)?
                 }
+                _ => None,
+            };
+            if put.is_some() {
+                return Ok(());
             }
-            Ok(())
+            // Refused: read the revision it found, for the refusal's account.
+            let found: Option<i64> = crate::observed_sql::query_scalar(SQL.root.sql())
+                .bind(&key)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+            Err(conflict(exec, *expected, found.map(revision).transpose()?))
         }
         ExecRootWrite::Retire { exec, expected } => {
             let retired = crate::observed_sql::query(SQL.retire.sql())

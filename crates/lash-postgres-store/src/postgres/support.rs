@@ -77,31 +77,34 @@ pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
     }
 }
 
-pub(crate) fn graph_node_insert_error(
-    err: sqlx::Error,
+/// Why session `session_id`'s graph node `node_id`, planned at
+/// `generation`, was left out of its batch insert: another row holds its
+/// id, or else its session's generation.
+pub(crate) async fn graph_node_collision(
+    connection: &mut sqlx::PgConnection,
     session_id: &SessionId,
     generation: u64,
     node_id: &lash_core_execution::NodeId,
 ) -> StoreError {
-    if let sqlx::Error::Database(database) = &err
-        && database.code().as_deref() == Some("23505")
-    {
-        match database.constraint() {
-            Some("lash_graph_nodes_session_id_generation_key") => {
-                return StoreError::GraphGenerationCollision {
-                    session_id: session_id.clone(),
-                    generation,
-                };
-            }
-            Some("lash_graph_nodes_pkey") => {
-                return StoreError::NodeIdCollision {
-                    node_id: node_id.clone(),
-                };
-            }
-            _ => {}
-        }
+    let taken: Result<Vec<String>, _> = crate::observed_sql::query_scalar(
+        crate::session_sql::session_sql()
+            .graph_postgres
+            .select_occupied
+            .sql(),
+    )
+    .bind(vec![node_id.to_string()])
+    .fetch_all(crate::observed_sql::executor(connection))
+    .await;
+    match taken {
+        Err(error) => store_sqlx_error(error),
+        Ok(taken) if taken.is_empty() => StoreError::GraphGenerationCollision {
+            session_id: session_id.clone(),
+            generation,
+        },
+        Ok(_) => StoreError::NodeIdCollision {
+            node_id: node_id.clone(),
+        },
     }
-    store_sqlx_error(err)
 }
 
 /// The `pending_turn_inputs.input_id` column is globally `UNIQUE`: a draft

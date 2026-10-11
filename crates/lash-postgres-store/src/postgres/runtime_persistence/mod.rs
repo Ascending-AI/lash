@@ -8,6 +8,15 @@ pub(crate) async fn allocate_ingress_sequence_tx(
     session_id: &SessionId,
 ) -> Result<i64, StoreError> {
     lock_session_history_mutation_tx(tx, session_id).await?;
+    allocate_locked_ingress_sequence_tx(tx, session_id).await
+}
+
+/// Session `session_id`'s next ingress position, allocated by a
+/// transaction that already holds the session's write authority.
+pub(crate) async fn allocate_locked_ingress_sequence_tx(
+    tx: &mut sqlx::PgConnection,
+    session_id: &SessionId,
+) -> Result<i64, StoreError> {
     crate::observed_sql::query_scalar(
         crate::session_ingress::session_ingress_sql()
             .allocate_sequence

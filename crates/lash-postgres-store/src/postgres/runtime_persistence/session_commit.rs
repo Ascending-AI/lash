@@ -380,6 +380,64 @@ impl PostgresStore {
 /// commit, or a typed refusal. The caller commits `tx`; the runtime store's
 /// own commit and the session actor's head commits (in its fenced owner
 /// transaction) both apply a commit here, `writer` naming which.
+/// Insert `commit`'s graph nodes with their planned `facts`, in one
+/// statement. A node whose id or generation another row took is the
+/// first such node's collision, as its own insert would have answered.
+async fn insert_graph_nodes(
+    tx: &mut GuardedTx<'_>,
+    commit: &lash_core_execution::store::RuntimeCommit,
+    facts: &[lash_core_execution::store::PlannedNodeFacts],
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<(), StoreError> {
+    let nodes = commit.graph.nodes();
+    if nodes.is_empty() {
+        return Ok(());
+    }
+    let mut ids = Vec::with_capacity(nodes.len());
+    let mut parents = Vec::with_capacity(nodes.len());
+    let mut generations = Vec::with_capacity(nodes.len());
+    let mut frames = Vec::with_capacity(nodes.len());
+    let mut sizes = Vec::with_capacity(nodes.len());
+    let mut bodies = Vec::with_capacity(nodes.len());
+    for (node, facts) in nodes.iter().zip(facts) {
+        let node_json = node.encode_storage_body(fleet).map_err(|err| {
+            StoreError::Backend(format!("failed to encode graph node body: {err}"))
+        })?;
+        ids.push(node.node_id.to_string());
+        parents.push(node.parent_node_id.as_ref().map(ToString::to_string));
+        generations.push(i64::try_from(facts.generation).map_err(|_| {
+            StoreError::Backend("node generation does not fit PostgreSQL BIGINT".to_string())
+        })?);
+        frames.push(facts.frame_node_id.to_string());
+        sizes.push(i64::try_from(node_json.len()).map_err(|_| {
+            StoreError::Backend("graph node body exceeds PostgreSQL BIGINT".to_string())
+        })?);
+        bodies.push(node_json);
+    }
+    let inserted: std::collections::HashSet<String> =
+        crate::observed_sql::query_scalar(session_sql().graph_postgres.insert_batch.sql())
+            .bind(commit.session_id.as_str())
+            .bind(&ids)
+            .bind(&parents)
+            .bind(&generations)
+            .bind(&frames)
+            .bind(&sizes)
+            .bind(&bodies)
+            .fetch_all(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(store_sqlx_error)?
+            .into_iter()
+            .collect();
+    let Some((node, facts)) = nodes
+        .iter()
+        .zip(facts)
+        .find(|(node, _)| !inserted.contains(node.node_id.as_str()))
+    else {
+        return Ok(());
+    };
+    Err(graph_node_collision(tx, &commit.session_id, facts.generation, &node.node_id).await)
+}
+
 pub(crate) async fn apply_runtime_commit_tx(
     tx: &mut GuardedTx<'_>,
     planner: &lash_core_execution::store::RuntimeCommitPlanner,
@@ -621,28 +679,7 @@ pub(crate) async fn apply_runtime_commit_tx(
         plan.actual_head_revision(),
         plan.next_head_revision(),
     )?;
-    for (node, facts) in commit.graph.nodes().iter().zip(plan.planned_node_facts()) {
-        let node_json = node.encode_storage_body(fleet).map_err(|err| {
-            StoreError::Backend(format!("failed to encode graph node body: {err}"))
-        })?;
-        crate::observed_sql::query(session_sql().graph.insert.sql())
-            .bind(commit.session_id.as_str())
-            .bind(&*node.node_id)
-            .bind(node.parent_node_id.as_deref())
-            .bind(i64::try_from(facts.generation).map_err(|_| {
-                StoreError::Backend("node generation does not fit PostgreSQL BIGINT".to_string())
-            })?)
-            .bind(&*facts.frame_node_id)
-            .bind(i64::try_from(node_json.len()).map_err(|_| {
-                StoreError::Backend("graph node body exceeds PostgreSQL BIGINT".to_string())
-            })?)
-            .bind(node_json)
-            .execute(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(|error| {
-                graph_node_insert_error(error, &commit.session_id, facts.generation, &node.node_id)
-            })?;
-    }
+    insert_graph_nodes(tx, commit, plan.planned_node_facts(), fleet).await?;
     let meta = plan.head_meta(checkpoint_ref.clone());
     // The head row is locked by the publication verdict above. The
     // earlier head payload is stable under the session advisory lock.

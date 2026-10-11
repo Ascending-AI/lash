@@ -53,76 +53,26 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &RunFactWri
             record,
         } => {
             let owner_key = owner.stored();
-            let taken = tx
-                .prepare_cached(SQL.ordinal_taken.sql())?
+            let appended = tx
+                .prepare_cached(SQL.append.sql())?
                 .query_row(
                     rusqlite::params![
                         owner_key,
                         integer::<i64>(run.0)?,
-                        integer::<i64>(ordinal.0)?
+                        integer::<i64>(ordinal.0)?,
+                        kind.as_str(),
+                        call.as_ref().map(ToolCallId::as_str),
+                        record.to_hex(),
+                        commit.epoch.0,
                     ],
                     |_| Ok(()),
                 )
                 .optional()?;
-            if taken.is_some() {
-                return Ok(Err(DurableError::Domain(DomainRefusal::RunOrdinalTaken {
-                    owner: owner.clone(),
-                    run: *run,
-                    ordinal: *ordinal,
-                })));
+            if appended.is_some() {
+                return Ok(Ok(()));
             }
-            if let Some(previous) = ordinal.0.checked_sub(1) {
-                let follows = tx
-                    .prepare_cached(SQL.ordinal_taken.sql())?
-                    .query_row(
-                        rusqlite::params![
-                            owner_key,
-                            integer::<i64>(run.0)?,
-                            integer::<i64>(previous)?
-                        ],
-                        |_| Ok(()),
-                    )
-                    .optional()?;
-                if follows.is_none() {
-                    return Ok(Err(DurableError::Domain(DomainRefusal::RunOrdinalGap {
-                        owner: owner.clone(),
-                        run: *run,
-                        ordinal: *ordinal,
-                    })));
-                }
-            }
-            if *kind == RunFactKind::XOutcome
-                && let Some(call) = call
-            {
-                let exists = tx
-                    .prepare_cached(SQL.outcome_exists.sql())?
-                    .query_row(
-                        rusqlite::params![owner_key, integer::<i64>(run.0)?, call.as_str()],
-                        |_| Ok(()),
-                    )
-                    .optional()?;
-                if exists.is_some() {
-                    return Ok(Err(DurableError::Domain(DomainRefusal::OutcomeExists {
-                        owner: owner.clone(),
-                        run: *run,
-                        call: call.clone(),
-                    })));
-                }
-            }
-            cached_execute(
-                tx,
-                SQL.append.sql(),
-                rusqlite::params![
-                    owner_key,
-                    integer::<i64>(run.0)?,
-                    integer::<i64>(ordinal.0)?,
-                    kind.as_str(),
-                    call.as_ref().map(ToolCallId::as_str),
-                    record.to_hex(),
-                    commit.epoch.0,
-                ],
-            )?;
-            Ok(Ok(()))
+            let call = call.as_ref().filter(|_| *kind == RunFactKind::XOutcome);
+            refused(tx, owner, *run, *ordinal, call)
         }
         RunFactWrite::Prune { owner, before } => {
             cached_execute(
@@ -133,6 +83,64 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &RunFactWri
             Ok(Ok(()))
         }
     }
+}
+
+/// Whether owner `owner_key`'s run `run` has a fact at `ordinal`.
+fn ordinal_taken(
+    tx: &Connection,
+    owner_key: &str,
+    run: RunSeq,
+    ordinal: u64,
+) -> rusqlite::Result<bool> {
+    Ok(tx
+        .prepare_cached(SQL.ordinal_taken.sql())?
+        .query_row(
+            rusqlite::params![owner_key, integer::<i64>(run.0)?, integer::<i64>(ordinal)?],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+/// Why the append of `ordinal` of `owner`'s run `run` (for `call`, when
+/// an outcome) was refused, read only once it was, in the refusal's order:
+/// its ordinal taken, then the fact before it absent, then its call's
+/// outcome recorded.
+fn refused(
+    tx: &Connection,
+    owner: &OwnerKey,
+    run: RunSeq,
+    ordinal: Ordinal,
+    call: Option<&ToolCallId>,
+) -> Answer<()> {
+    let owner_key = owner.stored();
+    let refusal = if ordinal_taken(tx, &owner_key, run, ordinal.0)? {
+        DomainRefusal::RunOrdinalTaken {
+            owner: owner.clone(),
+            run,
+            ordinal,
+        }
+    } else if let Some(previous) = ordinal.0.checked_sub(1)
+        && !ordinal_taken(tx, &owner_key, run, previous)?
+    {
+        DomainRefusal::RunOrdinalGap {
+            owner: owner.clone(),
+            run,
+            ordinal,
+        }
+    } else if let Some(call) = call {
+        DomainRefusal::OutcomeExists {
+            owner: owner.clone(),
+            run,
+            call: call.clone(),
+        }
+    } else {
+        return Ok(Err(corrupt(
+            "run fact append",
+            "refused for no recorded reason",
+        )));
+    };
+    Ok(Err(DurableError::Domain(refusal)))
 }
 
 /// Delete every fact of the owner stored as `owner_key`.

@@ -614,6 +614,81 @@ pub async fn no_write_through_a_stale_epoch(
     Ok(())
 }
 
+/// FIG-5936: an owner commit reads its session's turn cancel under its
+/// fence, before its writes, and reports it on its receipt: a request
+/// accepted after the owner's open is seen by the commit, with no read of
+/// its own, and a commit with none to see reports none.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn an_owner_commit_reports_a_turn_cancel_accepted_after_its_open(
+    store: &dyn DurableStore,
+) -> LawOutcome {
+    use crate::domain::{DomainWrite, MailDomainWrite, TurnCancelRequest, TurnWrite};
+    use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord};
+    use lash_sansio::{SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId};
+
+    let id = SessionId::try_from("late-cancel-session".to_owned())
+        .map_err(|_| LawBroken("a constant session id".into()))?;
+    let run = TurnId::try_from("late-cancel-turn".to_owned())
+        .map_err(|_| LawBroken("a constant turn id".into()))?;
+    let actor = session(id.as_str())?;
+    create(store, std::slice::from_ref(&actor)).await?;
+    let owner = node(store, "late-cancel-owner").await?;
+    let claimed = store.claim(&owner, 1).await?;
+    ensure!(claimed.len() == 1, "the session was not claimed");
+    let epoch = claimed[0].epoch;
+    let mut tx = store.begin(&actor, epoch).await?;
+    tx.write(DomainWrite::Turn(TurnWrite::Admit {
+        session: id.clone(),
+        run: run.clone(),
+        admission: RunAdmissionRecord::Turn {
+            took: AdmittedTurnRows::Inputs {
+                ids: lash_core_store::store::AdmittedInputIds::one(lash_sansio::InputId::from(
+                    "late-cancel-batch",
+                )),
+            },
+            trace: None,
+        },
+        turn_deadline: None,
+    }))
+    .ack_seen();
+    let admitted = store.commit(tx, LABEL).await?;
+    ensure!(
+        admitted.turn_cancel.is_none(),
+        "a commit with no request reported {:?}",
+        admitted.turn_cancel
+    );
+
+    let tx = store.begin(&actor, epoch).await?;
+    ensure!(
+        tx.turn_cancel().is_none(),
+        "the open read a request none made"
+    );
+    let request = TurnCancelRequest {
+        session: id.clone(),
+        run: run.clone(),
+        request_id: "late".to_owned(),
+        origin: Some("law".to_owned()),
+        reason: None,
+        undelivered: TurnCancelUndeliveredInputPolicy::Defer,
+        mode: TurnCancelMode::Immediate,
+    };
+    let mut ask = MailTx::new();
+    ask.write(MailDomainWrite::RequestTurnCancel(request.clone()));
+    store
+        .commit_mail(ask, CommitLabel::new("law.cancel"))
+        .await?;
+    let committed = store.commit(tx, LABEL).await?;
+    ensure!(
+        committed.turn_cancel.as_ref() == Some(&request),
+        "the commit after a late request reported {:?}",
+        committed.turn_cancel
+    );
+    Ok(())
+}
+
 /// L3 (FIG-5172): a turn cancel request is a row on the turn plus a control
 /// wake, written by a non-owner in one mailbox transaction. The first
 /// request holds the undelivered-input policy; a request with that policy

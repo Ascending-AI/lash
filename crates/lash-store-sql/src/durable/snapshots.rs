@@ -27,15 +27,19 @@ crate::statements! {
              WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)
              ORDER BY exec_key";
 
-        /// Insert execution `?1`'s first root `?2` by commit `?3` at epoch `?4`.
-        insert = "INSERT INTO exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch)
-             VALUES (?1, 1, ?2, ?3, ?4)";
+        /// Insert execution `?1`'s first root `?2` by commit `?3` at epoch
+        /// `?4`, when it has none. No row when it has one.
+        put_first = "INSERT INTO exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch)
+             SELECT ?1, 1, ?2, ?3, ?4
+             WHERE NOT EXISTS (SELECT 1 FROM exec_snapshots WHERE exec_key = ?1)
+             RETURNING rev";
 
-        /// Replace execution `?1`'s root at revision `?2` with `?3` by commit
-        /// `?4` at epoch `?5`. No row when the stored revision is not `?2`.
-        replace = "UPDATE exec_snapshots
+        /// Replace execution `?1`'s root `?6` at revision `?2` with `?3` by
+        /// commit `?4` at epoch `?5`. No row when the stored revision is not
+        /// `?2` or its root not `?6`.
+        put_next = "UPDATE exec_snapshots
              SET rev = rev + 1, root_ref = ?3, commit_id = ?4, written_epoch = ?5
-             WHERE exec_key = ?1 AND rev = ?2
+             WHERE exec_key = ?1 AND rev = ?2 AND root_ref = ?6
              RETURNING rev";
 
         /// Retire execution `?1`'s root `?2`. No row when it is not `?2`.

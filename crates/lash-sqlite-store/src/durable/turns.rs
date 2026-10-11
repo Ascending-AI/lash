@@ -120,24 +120,22 @@ pub(super) fn apply(
                         .collect(),
                 }
             });
-            let open = tx
-                .prepare_cached(SQL.open_run.sql())?
-                .query_row([session.as_str()], |_| Ok(()))
-                .optional()?;
-            if open.is_some() {
-                return refuse(DomainRefusal::OpenTurnExists {
-                    session: session.clone(),
-                });
-            }
             let admission = match admission.to_stored() {
                 Ok(admission) => admission,
                 Err(error) => return Ok(Err(encoding(&error))),
             };
-            cached_execute(
-                tx,
-                SQL.insert_run.sql(),
-                rusqlite::params![session.as_str(), run.as_str(), admission],
-            )?;
+            let admitted = tx
+                .prepare_cached(SQL.admit_run.sql())?
+                .query_row(
+                    rusqlite::params![session.as_str(), run.as_str(), admission],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            if admitted.is_none() {
+                return refuse(DomainRefusal::OpenTurnExists {
+                    session: session.clone(),
+                });
+            }
             let (phase, argument) = UnfinishedPhase::Admitted.stored();
             cached_execute(
                 tx,

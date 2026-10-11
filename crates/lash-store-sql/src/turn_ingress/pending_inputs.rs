@@ -50,13 +50,17 @@ crate::statements! {
         /// (ADR 0101 §5.1); `?8` is the submission digest and `?10` the
         /// interned run spec's hash, NULL for the default spec (FIG-3838). `?11`
         /// is the submission's trace cause, NULL for a root cause, written
-        /// by this insert and by no later statement.
+        /// by this insert and by no later statement. Returns the admitted
+        /// row as `select_by_id` reads it.
         insert_new = "INSERT INTO pending_turn_inputs (
                  enqueue_seq, input_id, session_id, source_key, ingress_json, state,
                  input_json, submission_digest, enqueued_at_ms, run_spec_hash,
                  trace_cause_json
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             RETURNING enqueue_seq, input_id, session_id, source_key, ingress_json,
+                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
+                    terminal_at_ms, trace_cause_json";
 
         /// The id and admission-time submission digest session `?1` already
         /// filed under source key `?2`.

@@ -1,18 +1,28 @@
-//! The round trips a model call's critical path pays to commit
-//! `model.start` (FIG-5275), counted on an isolated database.
+//! The round trips the owner's commits pay on PostgreSQL (FIG-5275,
+//! FIG-5936), counted on an isolated database: the acceptance of one
+//! input, a turn's admission, `model.start`, a round's outcome, a VM park
+//! and `turn.commit`.
 
 // Test code: the server comes from the environment the target's runner
 // hands it.
 #![allow(clippy::disallowed_methods)]
 
 use lash_core_execution::store::{AdmittedTurnRows, RunAdmissionRecord};
-use lash_durable::domain::{DomainWrite, ModelPin, TurnWrite, UnfinishedPhase};
+use lash_core_store::checkpoint_graph::{
+    CommitId, EncodeBudget, ExplicitLimit, GraphStaging, NodeId as GraphNode, NodeKind,
+    TokenWriter, TypedBody,
+};
+use lash_durable::domain::{
+    DomainWrite, ExecKey, ExecRootWrite, ModelPin, Ordinal, OwnerKey, RunFactKind, RunFactWrite,
+    RunSeq, SessionMailWrite, SnapshotRev, TurnWrite, UnfinishedPhase,
+};
 use lash_durable::{
-    ActorKey, CommitLabel, DurableReads as _, DurableStore as _, FormatSet, MailTx, NodeId,
-    NodeSpec,
+    ActorKey, ActorTx, CommitLabel, DurableReads as _, DurableStore as _, Epoch, FormatSet, MailTx,
+    NodeId, NodeSpec, Release,
 };
 use lash_sansio::{SessionId, TurnId};
 
+use crate::PostgresStorage;
 use crate::observed_sql::ROUND_TRIPS;
 use crate::testing::IsolatedDatabase;
 
@@ -26,27 +36,32 @@ async fn round_trips<T>(work: impl std::future::Future<Output = T>) -> (T, u64) 
         .await
 }
 
-/// The most round trips a model call's critical path pays to commit
-/// `model.start`, measured at FIG-5275 (14 before it): the open, which also
-/// reads the turn's cancel and the clock, with its checkout; and the commit:
-/// its checkout, the fenced `BEGIN`, the envelope's one statement, the
-/// install of the phase's checkpoint node (FIG-5894), the phase's `Advance`
-/// and `COMMIT`.
-const MODEL_START_ROUND_TRIPS: u64 = 8;
+/// An isolated store whose session `name` is in the catalog, with its
+/// actor created and claimed; `None` without a database.
+struct Owned {
+    _database: IsolatedDatabase,
+    storage: PostgresStorage,
+    session: SessionId,
+    actor: ActorKey,
+    epoch: Epoch,
+}
 
-/// The owner's path from a model call's first poll to its committed
-/// `model.start` stays within its round-trip budget, so a read or an
-/// envelope statement added to it cannot land unnoticed.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_model_start_commit_stays_within_its_round_trip_budget() {
+async fn owned(name: &'static str) -> Option<Owned> {
     let Some(database_url) = crate::postgres_test_support::database_url() else {
-        eprintln!("skipping the model.start round-trip budget: database URL is not set");
-        return;
+        eprintln!("skipping the {name} round-trip budget: database URL is not set");
+        return None;
     };
     let database = IsolatedDatabase::create(&database_url).await;
     let storage = crate::testing::connect(database.url())
         .await
         .expect("open the isolated store");
+    let session = SessionId::from(name);
+    lash_core_execution::SessionCatalogStore::admit_session(
+        &storage.store(),
+        &lash_core_execution::testing::store_fixtures::root_session_request(&session),
+    )
+    .await
+    .expect("the catalog admits the session");
     let store = storage.durable_store();
     let formats = FormatSet::new("round-trips");
     let node = store
@@ -57,8 +72,6 @@ async fn a_model_start_commit_stays_within_its_round_trip_budget() {
         })
         .await
         .expect("register");
-    let session = SessionId::from("round-trips");
-    let run = TurnId::from("round-trips-turn");
     let actor = ActorKey::session(session.as_str()).expect("actor key");
     let mut create = MailTx::new();
     create.create_actor(actor.clone(), formats);
@@ -67,77 +80,200 @@ async fn a_model_start_commit_stays_within_its_round_trip_budget() {
         .await
         .expect("create");
     let epoch = store.claim(&node, 1).await.expect("claim")[0].epoch;
-    let mut admit = store
-        .begin(&actor, epoch)
+    Some(Owned {
+        _database: database,
+        storage,
+        session,
+        actor,
+        epoch,
+    })
+}
+
+/// Stage on `tx` one node of `kind` holding `text`, as a commit's
+/// checkpoint or record is staged.
+fn staged(tx: &mut ActorTx, kind: NodeKind, text: &str) -> GraphNode {
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let mut body = TokenWriter::new();
+    body.text(text);
+    let node = staging
+        .encode(kind, TypedBody::logical(&body.into_bytes()))
+        .expect("the node stages");
+    tx.stage_all(staging);
+    node
+}
+
+/// Accept input `id` for `owned`'s session, as a producer does.
+async fn accept(owned: &Owned, id: &str) -> lash_sansio::InputId {
+    use lash_core_execution::{PendingTurnInputBatch, TurnInputStore as _};
+    let draft = lash_core_execution::PendingTurnInputDraft::new(
+        &owned.session,
+        lash_core_execution::TurnInputIngress::NextTurn,
+        lash_core_execution::TurnInput::text("round trips"),
+    )
+    .with_source_key(id);
+    let accepted = owned
+        .storage
+        .store()
+        .enqueue_pending_turn_inputs(PendingTurnInputBatch::one(draft))
         .await
-        .expect("open the admission");
-    admit.write(DomainWrite::Turn(TurnWrite::Admit {
-        session: session.clone(),
+        .expect("accept the input");
+    accepted[0].input_id.clone()
+}
+
+/// Admit `run` with `input` on `tx`, as the session's drain does.
+fn admit(tx: &mut ActorTx, owned: &Owned, run: &TurnId, input: lash_sansio::InputId) {
+    tx.write(DomainWrite::SessionMail(SessionMailWrite::Admit {
+        session: owned.session.clone(),
+        run: run.clone(),
+        inputs: vec![input.clone()],
+        batches: Vec::new(),
+    }));
+    tx.write(DomainWrite::Turn(TurnWrite::Admit {
+        session: owned.session.clone(),
         run: run.clone(),
         admission: RunAdmissionRecord::Turn {
             took: AdmittedTurnRows::Inputs {
-                ids: lash_core_execution::store::AdmittedInputIds::one(lash_sansio::InputId::from(
-                    "round-trips-batch",
-                )),
+                ids: lash_core_execution::store::AdmittedInputIds::one(input),
             },
             trace: None,
         },
         turn_deadline: None,
     }));
+    tx.ack_seen();
+}
+
+/// Write `model.start` of model call `call` on `tx`: the call's pin with
+/// its checkpoint.
+fn model_start(tx: &mut ActorTx, owned: &Owned, run: &TurnId, call: u32) {
+    let deadline = tx.opened_at().after_millis(60_000);
+    let checkpoint = staged(tx, NodeKind::TURN_CONTENT, &format!("{{\"call\":{call}}}"));
+    tx.write(DomainWrite::Turn(TurnWrite::Advance {
+        session: owned.session.clone(),
+        run: run.clone(),
+        phase: UnfinishedPhase::Model {
+            pin: ModelPin {
+                call,
+                attempt: 1,
+                request_ref: "request".to_owned(),
+                deadline,
+                stream_from: "stream".to_owned(),
+            },
+            checkpoint,
+        },
+        iteration: 0,
+    }));
+}
+
+/// Assert that `operation` took at most `budget` round trips.
+fn within(operation: &str, trips: u64, budget: u64) {
+    eprintln!("{operation}: {trips} round trips");
+    assert!(
+        trips <= budget,
+        "{operation} took {trips} round trips, over its budget of {budget}"
+    );
+}
+
+/// The most round trips the acceptance of one input pays (FIG-5936; 17
+/// before it): its guarded transaction and fleet check, the session's
+/// write authority taken once with the deletion check, the replay,
+/// closing and referrer checks, the allocation, the insert, which returns
+/// the row, the session's wake and `COMMIT`.
+const ACCEPT_ROUND_TRIPS: u64 = 14;
+
+/// A producer's acceptance of one input stays within its round-trip
+/// budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_input_acceptance_stays_within_its_round_trip_budget() {
+    let Some(owned) = owned("round-trips-accept").await else {
+        return;
+    };
+    let (_, trips) = round_trips(accept(&owned, "accepted")).await;
+    within("accept", trips, ACCEPT_ROUND_TRIPS);
+}
+
+/// The most round trips a turn's admission pays from its open (FIG-5936;
+/// 12 before it): the open, the fenced `BEGIN`, the envelope, the input's
+/// binding and the run's record of it, the run's conditional admission,
+/// its phase, the mailbox acknowledgement and `COMMIT`.
+const ADMIT_ROUND_TRIPS: u64 = 9;
+
+/// A turn's admission of one input stays within its round-trip budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_turn_admission_stays_within_its_round_trip_budget() {
+    let Some(owned) = owned("round-trips-admit").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let input = accept(&owned, "admitted").await;
+    let run = TurnId::from("round-trips-turn");
+    let (_, trips) = round_trips(async {
+        let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+        admit(&mut tx, &owned, &run, input);
+        store
+            .commit(tx, CommitLabel::TURN_ADMIT)
+            .await
+            .expect("admit the turn")
+    })
+    .await;
+    within("turn.admit", trips, ADMIT_ROUND_TRIPS);
+    assert!(store.turn(&owned.session).await.expect("read").is_some());
+}
+
+/// The most round trips a model call's critical path pays to commit
+/// `model.start` (FIG-5275; 14 before it, 8 before FIG-5936): the open,
+/// which also reads the turn's cancel and the clock, and the commit.
+const MODEL_START_ROUND_TRIPS: u64 = 6;
+
+/// The most round trips `model.start`'s commit pays once the owner is open
+/// (FIG-5936; 7 before it): the fenced `BEGIN`, the envelope's one
+/// statement, which also reads the turn's cancel, the install of the
+/// phase's checkpoint node (FIG-5894), the phase's `Advance` and `COMMIT`.
+/// No checkout pings the server.
+const MODEL_START_COMMIT_ROUND_TRIPS: u64 = 5;
+
+/// The owner's path from a model call's first poll to its committed
+/// `model.start` stays within its round-trip budget, and its commit within
+/// its own, so a read or an envelope statement added to either cannot land
+/// unnoticed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_model_start_commit_stays_within_its_round_trip_budget() {
+    let Some(owned) = owned("round-trips-model-start").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let input = accept(&owned, "model-start").await;
+    let run = TurnId::from("round-trips-turn");
+    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    admit(&mut tx, &owned, &run, input);
     store
-        .commit(admit, CommitLabel::new("law.admit"))
+        .commit(tx, CommitLabel::TURN_ADMIT)
         .await
         .expect("admit the turn");
 
-    let ((), trips) = round_trips(async {
-        let mut tx = store.begin(&actor, epoch).await.expect("open model.start");
-        assert!(tx.turn_cancel().is_none(), "no cancel was requested");
-        let deadline = tx.opened_at().after_millis(60_000);
-        // The phase's checkpoint is a node the commit installs with it.
-        let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
-            lash_core_store::checkpoint_graph::EncodeBudget::new(
-                lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
-            ),
-        );
-        let checkpoint = staging
-            .encode(
-                lash_core_store::checkpoint_graph::NodeKind::TURN_CONTENT,
-                lash_core_store::checkpoint_graph::TypedBody::logical(&{
-                    let mut body = lash_core_store::checkpoint_graph::TokenWriter::new();
-                    body.text("{}");
-                    body.into_bytes()
-                }),
-            )
-            .expect("the checkpoint stages");
-        tx.stage_all(staging);
-        tx.write(DomainWrite::Turn(TurnWrite::Advance {
-            session: session.clone(),
-            run: run.clone(),
-            phase: UnfinishedPhase::Model {
-                pin: ModelPin {
-                    call: 1,
-                    attempt: 1,
-                    request_ref: "request".to_owned(),
-                    deadline,
-                    stream_from: "stream".to_owned(),
-                },
-                checkpoint,
-            },
-            iteration: 0,
-        }));
+    let (mut tx, opened) =
+        round_trips(async { store.begin(&owned.actor, owned.epoch).await.expect("open") }).await;
+    assert!(tx.turn_cancel().is_none(), "no cancel was requested");
+    model_start(&mut tx, &owned, &run, 1);
+    let (committed, commit_trips) = round_trips(async {
         store
             .commit(tx, CommitLabel::MODEL_START)
             .await
-            .expect("commit model.start");
+            .expect("commit model.start")
     })
     .await;
-    eprintln!("model.start critical path: {trips} round trips");
-    assert!(
-        trips <= MODEL_START_ROUND_TRIPS,
-        "model.start took {trips} round trips, over its budget of {MODEL_START_ROUND_TRIPS}"
+    assert!(committed.turn_cancel.is_none(), "no cancel was requested");
+    within(
+        "model.start",
+        opened + commit_trips,
+        MODEL_START_ROUND_TRIPS,
+    );
+    within(
+        "model.start's commit",
+        commit_trips,
+        MODEL_START_COMMIT_ROUND_TRIPS,
     );
     let row = store
-        .turn(&session)
+        .turn(&owned.session)
         .await
         .expect("read the turn")
         .expect("the turn is open");
@@ -145,4 +281,186 @@ async fn a_model_start_commit_stays_within_its_round_trip_budget() {
         matches!(row.phase, UnfinishedPhase::Model { .. }),
         "model.start committed its pin"
     );
+}
+
+/// The most round trips a round's outcome pays from its open (FIG-5936;
+/// 10 before it): the open, the fenced `BEGIN`, the envelope, the install
+/// of its record, the fact's one conditional append and `COMMIT`.
+const ROUND_OUTCOME_ROUND_TRIPS: u64 = 6;
+
+/// A round's outcome of one call stays within its round-trip budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_round_outcome_stays_within_its_round_trip_budget() {
+    let Some(owned) = owned("round-trips-outcome").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let call = lash_sansio::ToolCallId::parse(&format!("tc_{}", "ab".repeat(32))).expect("call");
+    let (_, trips) = round_trips(async {
+        let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+        let record = staged(&mut tx, NodeKind::ROUND_FACT, "outcome");
+        tx.write(DomainWrite::RunFact(RunFactWrite::Append {
+            owner: OwnerKey::Turn(owned.session.clone(), TurnId::from("round-trips-turn")),
+            run: RunSeq(0),
+            ordinal: Ordinal(0),
+            kind: RunFactKind::XOutcome,
+            call: Some(call),
+            record,
+        }));
+        store
+            .commit(tx, CommitLabel::ROUND_OUTCOME)
+            .await
+            .expect("commit the outcome")
+    })
+    .await;
+    within("round.outcome", trips, ROUND_OUTCOME_ROUND_TRIPS);
+}
+
+/// The most round trips a VM's park over its earlier park pays from its
+/// open (FIG-5936; 9 before it): the open, the fenced `BEGIN`, the
+/// envelope, the install of its state, the root's one guarded replace and
+/// `COMMIT`.
+const VM_PARK_ROUND_TRIPS: u64 = 6;
+
+/// A VM park over an earlier park stays within its round-trip budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_vm_park_stays_within_its_round_trip_budget() {
+    let Some(owned) = owned("round-trips-park").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let exec = ExecKey::Cell(
+        owned.session.clone(),
+        TurnId::from("round-trips-turn"),
+        lash_durable::domain::CellId::new("cell"),
+    );
+    let park = |tx: &mut ActorTx, state: &str, expected: Option<(u64, GraphNode)>| {
+        let root = staged(tx, NodeKind::EXEC_ROOT, state);
+        tx.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
+            exec: exec.clone(),
+            expected: expected.map(|(rev, _)| SnapshotRev(rev)),
+            expected_root: expected.map(|(_, root)| root),
+            root,
+            commit_id: CommitId::mint(),
+        }));
+        root
+    };
+    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    let first = park(&mut tx, "first park", None);
+    store
+        .commit(tx, CommitLabel::CELL_SNAPSHOT)
+        .await
+        .expect("the first park");
+    let (_, trips) = round_trips(async {
+        let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+        park(&mut tx, "second park", Some((1, first)));
+        store
+            .commit(tx, CommitLabel::CELL_SNAPSHOT)
+            .await
+            .expect("the second park")
+    })
+    .await;
+    within("cell.snapshot", trips, VM_PARK_ROUND_TRIPS);
+}
+
+/// The most round trips `turn.commit` pays from its open (FIG-5936; 45
+/// before it). Its head commit and terminal stay client-driven, an
+/// explicit transaction: the session store's planner reads the head it
+/// commits over.
+const TURN_COMMIT_ROUND_TRIPS: u64 = 42;
+
+/// A turn's commit, its session's head commit with the run's terminal and
+/// its scope's end, stays within its round-trip budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_turn_commit_stays_within_its_round_trip_budget() {
+    use lash_core_execution::store::SessionHistoryStore as _;
+    let Some(owned) = owned("round-trips-turn-commit").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let input = accept(&owned, "turn-commit").await;
+    let run = TurnId::from("round-trips-turn");
+    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    admit(&mut tx, &owned, &run, input);
+    store
+        .commit(tx, CommitLabel::TURN_ADMIT)
+        .await
+        .expect("admit the turn");
+    let factory = owned.storage.store();
+    let mut state = lash_core_execution::store::window_state(
+        factory
+            .load_session_window(
+                &owned.session,
+                lash_core_execution::store::WindowSelector::Current,
+            )
+            .await
+            .expect("the session's window")
+            .expect("the session's head"),
+        lash_core_execution::FleetFormat::current(),
+    )
+    .expect("the session's state")
+    .state;
+    let head = lash_core_execution::store::append_request_commit_with_clock_for_testing(
+        &mut state,
+        "round-trips",
+        &[lash_core_execution::SessionAppendNode::message(
+            lash_core_execution::PluginMessage::text(
+                lash_core_execution::MessageRole::Assistant,
+                "done",
+            ),
+        )],
+        None,
+        &lash_core::facade_support::SystemClock,
+    )
+    .expect("the head commit");
+    let expected_head = head.expected_head_revision;
+    let encoded = lash_core_execution::store::encode_session_commit(&head).expect("encode");
+    let scope = lash_durable::domain::ScopeKey::Turn(owned.session.clone(), run.clone());
+    let (_, trips) = round_trips(async {
+        let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+        if let Some(root) = encoded.execution
+            && !encoded.nodes.iter().any(|node| node.id == root)
+        {
+            tx.require(root);
+        }
+        tx.stage(encoded.nodes);
+        tx.write(DomainWrite::SessionCommit(
+            lash_durable::domain::SessionCommitWrite {
+                session: owned.session.clone(),
+                expected_head,
+                commit_json: encoded.json,
+            },
+        ));
+        tx.write(DomainWrite::Turn(TurnWrite::Terminal {
+            session: owned.session.clone(),
+            run: run.clone(),
+            cause: Box::new(lash_core_execution::store::RunTerminalCause::Committed {
+                commit: lash_core_execution::store::TurnCommitId::new(run.clone(), 0),
+                turn: run.clone(),
+                outcome: lash_core_execution::store::RunCommittedOutcome::Finished {
+                    finish: lash_sansio::TurnFinish::AssistantMessage {
+                        text: "done".to_owned(),
+                    },
+                    value_schema: None,
+                },
+            }),
+            head_revision: Some(expected_head.saturating_add(1)),
+        }));
+        tx.write(DomainWrite::Wait(
+            lash_durable::domain::WaitWrite::RevokeScope(scope.clone()),
+        ));
+        tx.write(DomainWrite::Process(
+            lash_durable::domain::ProcessWrite::ScopeClosed {
+                scope: scope.clone(),
+            },
+        ));
+        tx.give_up(Release::Idle);
+        store
+            .commit(tx, CommitLabel::TURN_COMMIT)
+            .await
+            .expect("commit the turn")
+    })
+    .await;
+    within("turn.commit", trips, TURN_COMMIT_ROUND_TRIPS);
+    assert!(store.turn(&owned.session).await.expect("read").is_none());
 }

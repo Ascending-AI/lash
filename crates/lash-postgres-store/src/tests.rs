@@ -403,22 +403,34 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
     .execute(storage.pool())
     .await
     .expect("seed graph-generation uniqueness fixture");
-    let raw = sqlx::query(
-        "INSERT INTO lash_graph_nodes
-         (session_id, node_id, parent_node_id, generation, frame_node_id, node_json, body_bytes)
-         VALUES ($1, $2, NULL, 3, $2, '{}', 2)",
+    let inserted: Vec<String> = sqlx::query_scalar(
+        crate::session_sql::session_sql()
+            .graph_postgres
+            .insert_batch
+            .sql(),
     )
     .bind(session_id.as_str())
-    .bind(&second_node)
-    .execute(storage.pool())
+    .bind(vec![second_node.clone()])
+    .bind(vec![Option::<String>::None])
+    .bind(vec![3_i64])
+    .bind(vec![second_node.clone()])
+    .bind(vec![2_i64])
+    .bind(vec!["{}".to_owned()])
+    .fetch_all(storage.pool())
     .await
-    .expect_err("duplicate generation must violate Postgres uniqueness");
-    let error = graph_node_insert_error(
-        raw,
+    .expect("a taken generation leaves the node out of its batch");
+    assert!(
+        inserted.is_empty(),
+        "the node at a taken generation was inserted"
+    );
+    let mut connection = storage.pool().acquire().await.expect("a connection");
+    let error = graph_node_collision(
+        &mut connection,
         &session_id,
         3,
         &lash_core_execution::NodeId::fixture(second_node.as_str()),
-    );
+    )
+    .await;
     assert!(matches!(
         error,
         StoreError::GraphGenerationCollision {
@@ -1448,8 +1460,9 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
                     // fenced `BEGIN`, one statement reading the fence, the
                     // clock, the transaction id and the epoch fence, and
                     // `COMMIT`. The grouped outcomes' facts are graph nodes,
-                    // installed in one statement (FIG-5894).
-                    assert_eq!(cost.sql_statements, [9, 4][index]);
+                    // installed in one statement (FIG-5894), and each fact
+                    // is one conditional append (FIG-5936).
+                    assert_eq!(cost.sql_statements, [6, 4][index]);
                     eprintln!("{label}: {cost:?}");
                 }
             });

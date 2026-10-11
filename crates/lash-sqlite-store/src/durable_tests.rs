@@ -77,6 +77,12 @@ law!(no_write_through_a_stale_epoch, |store, advance| {
     laws::no_write_through_a_stale_epoch(store, advance)
 });
 law!(
+    an_owner_commit_reports_a_turn_cancel_accepted_after_its_open,
+    |store, _advance| {
+        laws::an_owner_commit_reports_a_turn_cancel_accepted_after_its_open(store)
+    }
+);
+law!(
     a_turn_cancel_is_a_first_winner_row_with_a_wake,
     |store, _advance| { laws::a_turn_cancel_is_a_first_winner_row_with_a_wake(store) }
 );

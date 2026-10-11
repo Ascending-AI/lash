@@ -13,7 +13,7 @@ use lash_durable::{
 };
 
 use super::{
-    PostgresDurableStore, SQL, Tx, apply_mail, apply_owner, group_members, sqlx_failure,
+    PostgresDurableStore, SQL, Tx, apply_mail, apply_owner, get, group_members, sqlx_failure,
     store_failure,
 };
 use crate::guarded_tx::begin_durable;
@@ -148,24 +148,35 @@ impl PostgresDurableStore {
     /// [`open`](Self::open) for a replayable commit: its first statement
     /// also reads the transaction's id, by which a lost `COMMIT` is
     /// reconciled, and for an owner's commit `owner` runs the ownership
-    /// fence, answering the state revision it bumped (`None`: fenced out).
+    /// fence, answering what it read under it (`None`: fenced out).
     async fn open_replayable(
         &self,
         label: CommitLabel,
         owner: Option<&ActorTx>,
-    ) -> Result<(Tx, DurableInstant, Option<i64>), Attempt<DurableError>> {
+    ) -> Result<(Tx, DurableInstant, Option<FenceRead>), Attempt<DurableError>> {
         tracing::trace!(label = label.as_str(), "durable postgres commit");
         let route = self.route(label.capacity());
         let mut locked = begin_durable(route.pool, &self.fence, route.prelude)
             .await
             .map_err(|error| attempt(store_failure(error)))?;
-        let (recorded, now, xact, fence): (Option<i32>, i64, String, Option<i64>) = match owner {
-            Some(owner) => crate::observed_sql::query_as(SQL.postgres.owner_envelope.sql())
-                .bind(owner.actor().as_str())
-                .bind(owner.epoch().0)
-                .fetch_one(crate::observed_sql::executor(locked.connection()))
-                .await
-                .map_err(|error| attempt(sqlx_failure(error)))?,
+        let (recorded, now, xact, row) = match owner {
+            Some(owner) => {
+                let session = match owner.actor().kind() {
+                    lash_durable::ActorKind::Session => Some(owner.actor().id()),
+                    lash_durable::ActorKind::Process => None,
+                };
+                let row = crate::observed_sql::query(SQL.postgres.owner_envelope.sql())
+                    .bind(owner.actor().as_str())
+                    .bind(owner.epoch().0)
+                    .bind(session)
+                    .fetch_one(crate::observed_sql::executor(locked.connection()))
+                    .await
+                    .map_err(|error| attempt(sqlx_failure(error)))?;
+                let recorded: Option<i32> = get(&row, 0).map_err(Attempt::Failed)?;
+                let now: i64 = get(&row, 1).map_err(Attempt::Failed)?;
+                let xact: String = get(&row, 2).map_err(Attempt::Failed)?;
+                (recorded, now, xact, Some(row))
+            }
             None => {
                 let (recorded, now, xact): (Option<i32>, i64, String) =
                     crate::observed_sql::query_as(SQL.postgres.fence_clock_and_xact.sql())
@@ -181,6 +192,12 @@ impl PostgresDurableStore {
             .map_err(|error| attempt(store_failure(error)))?;
         tx.note_xact(XactId::new(xact));
         let now = self.instant_or(now).map_err(Attempt::Failed)?;
+        let fence = match (owner, row) {
+            (Some(owner), Some(row)) => {
+                fenced_read(owner.actor(), &row).map_err(Attempt::Failed)?
+            }
+            _ => None,
+        };
         Ok((tx, now, fence))
     }
 
@@ -230,4 +247,43 @@ impl PostgresDurableStore {
             }
         }
     }
+}
+
+/// What an owner commit's fence read: the state revision it bumped and,
+/// for a session actor, its unfinished turn's accepted cancel request.
+pub(super) struct FenceRead {
+    pub(super) revision: lash_durable::StateRevision,
+    pub(super) turn_cancel: Option<lash_durable::domain::TurnCancelRequest>,
+}
+
+/// What [`super::PostgresDurableStatements::owner_envelope`]'s `row` read under
+/// `actor`'s fence: `None` when the fence did not match.
+fn fenced_read(
+    actor: &lash_durable::ActorKey,
+    row: &sqlx::postgres::PgRow,
+) -> Result<Option<FenceRead>, DurableError> {
+    let Some(revision) = get::<Option<i64>>(row, 3)? else {
+        return Ok(None);
+    };
+    let turn_cancel = match (actor.kind(), get::<Option<String>>(row, 4)?) {
+        (lash_durable::ActorKind::Session, Some(run)) => {
+            let session = lash_sansio::SessionId::try_from(actor.id().to_owned())
+                .map_err(|_| super::corrupt("session id", actor.id()))?;
+            let run = lash_sansio::TurnId::try_from(run.clone())
+                .map_err(|_| super::corrupt("turn id", &run))?;
+            let stored = (
+                get(row, 5)?,
+                get(row, 6)?,
+                get(row, 7)?,
+                get(row, 8)?,
+                get(row, 9)?,
+            );
+            Some(super::turns::decode_cancel(&session, &run, stored)?)
+        }
+        _ => None,
+    };
+    Ok(Some(FenceRead {
+        revision: lash_durable::StateRevision(revision),
+        turn_cancel,
+    }))
 }

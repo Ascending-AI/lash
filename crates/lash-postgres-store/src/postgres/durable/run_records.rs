@@ -36,57 +36,7 @@ pub(super) async fn apply(
             record,
         } => {
             let owner_key = owner.stored();
-            let taken: Option<i32> = crate::observed_sql::query_scalar(SQL.ordinal_taken.sql())
-                .bind(&owner_key)
-                .bind(integer::<i64>(run.0)?)
-                .bind(integer::<i64>(ordinal.0)?)
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            if taken.is_some() {
-                return Err(DurableError::Domain(DomainRefusal::RunOrdinalTaken {
-                    owner: owner.clone(),
-                    run: *run,
-                    ordinal: *ordinal,
-                }));
-            }
-            if let Some(previous) = ordinal.0.checked_sub(1) {
-                let follows: Option<i32> =
-                    crate::observed_sql::query_scalar(SQL.ordinal_taken.sql())
-                        .bind(&owner_key)
-                        .bind(integer::<i64>(run.0)?)
-                        .bind(integer::<i64>(previous)?)
-                        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                        .await
-                        .map_err(sqlx_failure)?;
-                if follows.is_none() {
-                    return Err(DurableError::Domain(DomainRefusal::RunOrdinalGap {
-                        owner: owner.clone(),
-                        run: *run,
-                        ordinal: *ordinal,
-                    }));
-                }
-            }
-            if *kind == RunFactKind::XOutcome
-                && let Some(call) = call
-            {
-                let exists: Option<i32> =
-                    crate::observed_sql::query_scalar(SQL.outcome_exists.sql())
-                        .bind(&owner_key)
-                        .bind(integer::<i64>(run.0)?)
-                        .bind(call.as_str())
-                        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                        .await
-                        .map_err(sqlx_failure)?;
-                if exists.is_some() {
-                    return Err(DurableError::Domain(DomainRefusal::OutcomeExists {
-                        owner: owner.clone(),
-                        run: *run,
-                        call: call.clone(),
-                    }));
-                }
-            }
-            crate::observed_sql::query(SQL.append.sql())
+            let appended: Option<i64> = crate::observed_sql::query_scalar(SQL.append.sql())
                 .bind(&owner_key)
                 .bind(integer::<i64>(run.0)?)
                 .bind(integer::<i64>(ordinal.0)?)
@@ -94,10 +44,14 @@ pub(super) async fn apply(
                 .bind(call.as_ref().map(ToolCallId::as_str))
                 .bind(record.to_hex())
                 .bind(commit.epoch.0)
-                .execute(crate::observed_sql::executor(&mut *tx))
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
-            Ok(())
+            if appended.is_some() {
+                return Ok(());
+            }
+            let call = call.as_ref().filter(|_| *kind == RunFactKind::XOutcome);
+            Err(refused(tx, owner, *run, *ordinal, call).await?)
         }
         RunFactWrite::Prune { owner, before } => {
             crate::observed_sql::query(SQL.prune.sql())
@@ -108,6 +62,61 @@ pub(super) async fn apply(
                 .map_err(sqlx_failure)?;
             Ok(())
         }
+    }
+}
+
+/// Whether owner `owner_key`'s run `run` has a fact at `ordinal`.
+async fn ordinal_taken(
+    tx: &mut PgConnection,
+    owner_key: &str,
+    run: RunSeq,
+    ordinal: u64,
+) -> Result<bool, DurableError> {
+    let found: Option<i32> = crate::observed_sql::query_scalar(SQL.ordinal_taken.sql())
+        .bind(owner_key)
+        .bind(integer::<i64>(run.0)?)
+        .bind(integer::<i64>(ordinal)?)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    Ok(found.is_some())
+}
+
+/// Why the append of `ordinal` of `owner`'s run `run` (for `call`, when
+/// an outcome) was refused, read only once it was, in the refusal's order:
+/// its ordinal taken, then the fact before it absent, then its call's
+/// outcome recorded.
+async fn refused(
+    tx: &mut PgConnection,
+    owner: &OwnerKey,
+    run: RunSeq,
+    ordinal: Ordinal,
+    call: Option<&ToolCallId>,
+) -> Result<DurableError, DurableError> {
+    let owner_key = owner.stored();
+    if ordinal_taken(tx, &owner_key, run, ordinal.0).await? {
+        return Ok(DurableError::Domain(DomainRefusal::RunOrdinalTaken {
+            owner: owner.clone(),
+            run,
+            ordinal,
+        }));
+    }
+    if let Some(previous) = ordinal.0.checked_sub(1)
+        && !ordinal_taken(tx, &owner_key, run, previous).await?
+    {
+        return Ok(DurableError::Domain(DomainRefusal::RunOrdinalGap {
+            owner: owner.clone(),
+            run,
+            ordinal,
+        }));
+    }
+    match call {
+        Some(call) => Ok(DurableError::Domain(DomainRefusal::OutcomeExists {
+            owner: owner.clone(),
+            run,
+            call: call.clone(),
+        })),
+        None => Err(corrupt("run fact append", "refused for no recorded reason")),
     }
 }
 

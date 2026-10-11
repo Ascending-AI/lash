@@ -15,6 +15,43 @@ use sqlx::PgConnection;
 
 use super::{Committing, SQL, get, sqlx_failure};
 
+lash_store_sql::statements! {
+    /// The session-mail statements only PostgreSQL issues: `UNNEST` binds a
+    /// run's admitted mail as one list.
+    struct PostgresSessionMailStatements @ "durable_session_mail_postgres" {
+        /// Bind each input `?2[i]` of session `?1` to run `?3`, its admitting
+        /// owner, or keep it bound there, as the neutral `bind_input` does
+        /// one input; returns each input it bound.
+        bind_inputs = "UPDATE pending_turn_inputs AS input
+             SET admitted_run = ?3, admitted_by = ?3
+             FROM UNNEST(?2::text[]) AS named(input_id)
+             WHERE input.session_id = ?1 AND input.input_id = named.input_id
+               AND (input.admitted_run IS NULL OR input.admitted_run = ?3)
+               AND input.state IN ('deferred_next_turn', 'pending_active')
+             RETURNING input.input_id";
+
+        /// Record that run `?3` of session `?1` executes each input `?2[i]`.
+        record_run_inputs = "INSERT INTO session_run_inputs (session_id, input_id, run)
+             SELECT ?1, named.input_id, ?3 FROM UNNEST(?2::text[]) AS named(input_id)
+             ON CONFLICT (session_id, input_id) DO NOTHING";
+
+        /// Bind each batch `?2[i]` of session `?1` to run `?3`, as the
+        /// neutral `bind_batch` does one batch; returns each batch it bound.
+        bind_batches = "UPDATE queued_work_batches AS batch
+             SET admitted_run = ?3, admitted_by = ?3
+             FROM UNNEST(?2::text[]) AS named(batch_id)
+             WHERE batch.session_id = ?1 AND batch.batch_id = named.batch_id
+               AND (batch.admitted_run IS NULL OR batch.admitted_run = ?3)
+               AND batch.terminal_cause IS NULL
+             RETURNING batch.batch_id";
+    }
+}
+
+static POSTGRES_SQL: std::sync::LazyLock<PostgresSessionMailStatements> =
+    std::sync::LazyLock::new(|| {
+        PostgresSessionMailStatements::render(lash_store_sql::Dialect::postgres())
+    });
+
 impl super::PostgresDurableStore {
     /// Session `session`'s write authority, held to the commit: its actor
     /// row, then its history lock. Every session writer takes the two in
@@ -493,7 +530,9 @@ async fn enqueue(
     }
 }
 
-/// Bind the admitted mail to its run, each row still open and unbound.
+/// Bind the admitted mail to its run, each row still open and unbound: one
+/// statement per kind, whatever their number. The first item, in the
+/// order named, that did not bind refuses the commit.
 async fn admit(
     tx: &mut PgConnection,
     session: &SessionId,
@@ -507,37 +546,43 @@ async fn admit(
             item: item.to_owned(),
         })
     };
-    for input in inputs {
-        let bound: Option<String> =
-            crate::observed_sql::query_scalar(SQL.session_mail.bind_input.sql())
+    if !inputs.is_empty() {
+        let named: Vec<&str> = inputs.iter().map(InputId::as_str).collect();
+        let bound: std::collections::HashSet<String> =
+            crate::observed_sql::query_scalar(POSTGRES_SQL.bind_inputs.sql())
                 .bind(session.as_str())
-                .bind(input.as_str())
+                .bind(&named)
                 .bind(run.as_str())
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await
-                .map_err(sqlx_failure)?;
-        if bound.is_none() {
-            return Err(moved(input.as_str()));
+                .map_err(sqlx_failure)?
+                .into_iter()
+                .collect();
+        if let Some(input) = named.iter().find(|input| !bound.contains(**input)) {
+            return Err(moved(input));
         }
-        crate::observed_sql::query(SQL.session_mail.record_run_input.sql())
+        crate::observed_sql::query(POSTGRES_SQL.record_run_inputs.sql())
             .bind(session.as_str())
-            .bind(input.as_str())
+            .bind(&named)
             .bind(run.as_str())
             .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
     }
-    for batch in batches {
-        let bound: Option<String> =
-            crate::observed_sql::query_scalar(SQL.session_mail.bind_batch.sql())
+    if !batches.is_empty() {
+        let named: Vec<&str> = batches.iter().map(BatchId::as_str).collect();
+        let bound: std::collections::HashSet<String> =
+            crate::observed_sql::query_scalar(POSTGRES_SQL.bind_batches.sql())
                 .bind(session.as_str())
-                .bind(batch.as_str())
+                .bind(&named)
                 .bind(run.as_str())
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await
-                .map_err(sqlx_failure)?;
-        if bound.is_none() {
-            return Err(moved(batch.as_str()));
+                .map_err(sqlx_failure)?
+                .into_iter()
+                .collect();
+        if let Some(batch) = named.iter().find(|batch| !bound.contains(**batch)) {
+            return Err(moved(batch));
         }
     }
     Ok(())

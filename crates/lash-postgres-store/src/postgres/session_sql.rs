@@ -4,10 +4,9 @@ use std::sync::LazyLock;
 
 use lash_store_sql::Dialect;
 use lash_store_sql::session::{
-    fork_lineage::ForkLineageStatements, graph_nodes::GraphNodeStatements,
-    head::SessionHeadStatements as SharedHeadStatements, meta::SessionMetaStatements,
-    meta_pending_observer_intents::ObserverIntentStatements, pins::PinStatements,
-    revisions::SessionRevisionStatements, turn_commits::TurnCommitStatements,
+    fork_lineage::ForkLineageStatements, head::SessionHeadStatements as SharedHeadStatements,
+    meta::SessionMetaStatements, meta_pending_observer_intents::ObserverIntentStatements,
+    pins::PinStatements, revisions::SessionRevisionStatements, turn_commits::TurnCommitStatements,
 };
 
 lash_store_sql::statements! {
@@ -345,6 +344,22 @@ lash_store_sql::statements! {
              FROM graph_nodes
              WHERE node_id = ANY(?1)";
 
+        /// Insert session `?1`'s nodes `?2[i]` with parent `?3[i]`,
+        /// generation `?4[i]`, frame `?5[i]`, body size `?6[i]` and body
+        /// `?7[i]`, in one statement, and return each id it inserted: a node
+        /// whose id or generation is taken is left out, never an error.
+        insert_batch = "INSERT INTO graph_nodes
+                 (session_id, node_id, parent_node_id, generation, frame_node_id, body_bytes,
+                  node_json)
+             SELECT ?1, node.node_id, node.parent_node_id, node.generation, node.frame_node_id,
+                    node.body_bytes, node.node_json
+             FROM UNNEST(?2::text[], ?3::text[], ?4::bigint[], ?5::text[], ?6::bigint[],
+                         ?7::text[])
+                 AS node(node_id, parent_node_id, generation, frame_node_id, body_bytes,
+                         node_json)
+             ON CONFLICT DO NOTHING
+             RETURNING node_id";
+
         /// Every unreachable live leaf session `?1` still owns, newest first.
         select_unreachable_leaves = "SELECT node.node_id FROM graph_nodes AS node
          WHERE node.session_id = ?1 AND node.tombstoned = FALSE
@@ -639,8 +654,6 @@ pub(crate) struct SessionSql {
     /// Shared session-head statements.
     pub(crate) head: SharedHeadStatements,
     pub(crate) head_postgres: SessionHeadPostgresStatements,
-    /// `graph_nodes` statements both backends issue verbatim.
-    pub(crate) graph: GraphNodeStatements,
     /// `graph_nodes` statements only PostgreSQL issues.
     pub(crate) graph_postgres: GraphNodePostgresStatements,
     /// `session_revisions` statements, the retained-revisions relation
@@ -674,7 +687,6 @@ static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
         observer_intents: ObserverIntentStatements::render(dialect),
         head: SharedHeadStatements::render(dialect),
         head_postgres: SessionHeadPostgresStatements::render(dialect),
-        graph: GraphNodeStatements::render(dialect),
         graph_postgres: GraphNodePostgresStatements::render(dialect),
         revisions: SessionRevisionStatements::render(dialect),
         revisions_postgres: SessionRevisionPostgresStatements::render(dialect),

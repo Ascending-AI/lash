@@ -362,13 +362,19 @@ pub async fn run_phases(
                         },
                         iteration: current,
                     }));
-                    cx.commit(tx, label).await?;
+                    let committed = cx.commit(tx, label).await?;
                     stored.committed(drive.machine());
                     drive.run_changes_committed(&written);
                     drive.phase_committed().await;
                     unsettled = true;
                     if !resent {
                         calls = pin.call;
+                    }
+                    // A cancel the turn accepted after the open is read
+                    // inside the commit: the call is never sent.
+                    if let Some(request) = committed.turn_cancel {
+                        let stopped = stopped(drive, &mut carry, &mut answered_cell);
+                        return stop(cx, services, &row, Some(request), stopped, heads).await;
                     }
                 }
                 if !model_call::send(cx, drive.as_mut(), id, request, &admitted, &start).await? {

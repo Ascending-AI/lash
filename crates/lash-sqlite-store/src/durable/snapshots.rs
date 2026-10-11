@@ -60,50 +60,43 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
             commit_id,
         } => {
             let key = exec.stored();
+            // One guarded write: the first root when there is none, else
+            // the next over the expected revision and root. A put whose
+            // expectation names a revision without a root, or a root without
+            // a revision, never matches a row.
+            let put = match (expected, expected_root) {
+                (None, None) => tx
+                    .prepare_cached(SQL.put_first.sql())?
+                    .query_row(
+                        rusqlite::params![key, root.to_hex(), &commit_id.0[..], commit.epoch.0],
+                        |_| Ok(()),
+                    )
+                    .optional()?,
+                (Some(rev), Some(expected_root)) => tx
+                    .prepare_cached(SQL.put_next.sql())?
+                    .query_row(
+                        rusqlite::params![
+                            key,
+                            integer::<i64>(rev.0)?,
+                            root.to_hex(),
+                            &commit_id.0[..],
+                            commit.epoch.0,
+                            expected_root.to_hex(),
+                        ],
+                        |_| Ok(()),
+                    )
+                    .optional()?,
+                _ => None,
+            };
+            if put.is_some() {
+                return Ok(Ok(()));
+            }
+            // Refused: read the revision it found, for the refusal's account.
             let found = tx
                 .prepare_cached(SQL.root.sql())?
-                .query_row([&key], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                })
+                .query_row([&key], |row| row.get::<_, i64>(0))
                 .optional()?;
-            let (found_rev, found_root) = match found {
-                None => (None, None),
-                Some((rev, root)) => match node_ref(&root) {
-                    Ok(root) => (Some(revision(rev)?), Some(root)),
-                    Err(error) => return Ok(Err(error)),
-                },
-            };
-            if found_rev != *expected || found_root != *expected_root {
-                return conflict(exec, *expected, found_rev);
-            }
-            match expected {
-                None => {
-                    cached_execute(
-                        tx,
-                        SQL.insert.sql(),
-                        rusqlite::params![key, root.to_hex(), &commit_id.0[..], commit.epoch.0],
-                    )?;
-                }
-                Some(rev) => {
-                    let replaced = tx
-                        .prepare_cached(SQL.replace.sql())?
-                        .query_row(
-                            rusqlite::params![
-                                key,
-                                integer::<i64>(rev.0)?,
-                                root.to_hex(),
-                                &commit_id.0[..],
-                                commit.epoch.0
-                            ],
-                            |_| Ok(()),
-                        )
-                        .optional()?;
-                    if replaced.is_none() {
-                        return conflict(exec, *expected, found_rev);
-                    }
-                }
-            }
-            Ok(Ok(()))
+            conflict(exec, *expected, found.map(revision).transpose()?)
         }
         ExecRootWrite::Retire { exec, expected } => {
             let retired = tx

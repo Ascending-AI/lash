@@ -283,6 +283,11 @@ fn guard_settings(guards: &TransactionGuards) -> Vec<(&'static str, String)> {
     .collect()
 }
 
+/// How long a pooled connection sits idle before its next checkout pings
+/// it, when its pool does not ping every checkout
+/// ([`PoolPolicy::test_before_acquire`]).
+pub(crate) const STALE_IDLE: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// A transaction's guard profile, sent with its `BEGIN` in one simple query:
 /// the limits are in force before the transaction's first lock or data
 /// statement, on any connection, whether lash or the host built its pool.
@@ -506,14 +511,28 @@ impl PostgresConnectionFactory {
         policy: &PoolPolicy,
         session_guards: Option<&TransactionGuards>,
     ) -> PgPool {
-        PgPoolOptions::new()
+        let options = PgPoolOptions::new()
             .max_connections(policy.max_connections)
             .min_connections(policy.min_connections)
             .acquire_timeout(policy.acquire_timeout)
             .idle_timeout(policy.idle_timeout)
             .max_lifetime(policy.max_lifetime)
-            .test_before_acquire(policy.test_before_acquire)
-            .connect_lazy_with(self.connect_options(role, session_guards))
+            .test_before_acquire(policy.test_before_acquire);
+        let options = if policy.test_before_acquire {
+            options
+        } else {
+            // A connection that sat idle long enough for a server, proxy or
+            // firewall to have dropped it is pinged; a warm one is not.
+            options.before_acquire(|connection, meta| {
+                Box::pin(async move {
+                    if meta.idle_for < STALE_IDLE {
+                        return Ok(true);
+                    }
+                    sqlx::Connection::ping(connection).await.map(|()| true)
+                })
+            })
+        };
+        options.connect_lazy_with(self.connect_options(role, session_guards))
     }
 
     /// A lazily connecting pool of `connections` dedicated connections of

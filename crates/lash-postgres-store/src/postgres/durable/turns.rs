@@ -29,6 +29,32 @@ use super::{Committing, corrupt, integer, node_ref, sqlx_failure};
 static SQL: LazyLock<TurnStatements> =
     LazyLock::new(|| TurnStatements::render(Dialect::postgres()));
 
+lash_store_sql::statements! {
+    /// The turn statements only PostgreSQL issues: `UNNEST` records a run's
+    /// namespace writes as one list.
+    struct PostgresTurnStatements @ "durable_turn_postgres" {
+        /// Record each plugin `?3[i]`'s namespace entry `?4[i]` for run `?2`
+        /// of session `?1` with values root `?5[i]`, as the neutral
+        /// `upsert_namespace` does one: `?6[i]` retains the held root.
+        upsert_namespaces = "INSERT INTO turn_namespaces
+                 (session_id, run, plugin, entry, graph_root_ref)
+             SELECT ?1, ?2, written.plugin, written.entry, written.root
+             FROM UNNEST(?3::text[], ?4::text[], ?5::text[], ?6::boolean[])
+                 AS written(plugin, entry, root, held)
+             ON CONFLICT (session_id, run, plugin)
+             DO UPDATE SET entry = excluded.entry,
+                 graph_root_ref = CASE
+                     WHEN (SELECT written.held FROM UNNEST(?3::text[], ?6::boolean[])
+                               AS written(plugin, held)
+                           WHERE written.plugin = excluded.plugin)
+                     THEN turn_namespaces.graph_root_ref
+                     ELSE excluded.graph_root_ref END";
+    }
+}
+
+static POSTGRES_SQL: LazyLock<PostgresTurnStatements> =
+    LazyLock::new(|| PostgresTurnStatements::render(Dialect::postgres()));
+
 fn refuse<T>(refusal: DomainRefusal) -> Result<T, DurableError> {
     Err(DurableError::Domain(refusal))
 }
@@ -53,23 +79,18 @@ pub(super) async fn apply(
             admission,
             turn_deadline,
         } => {
-            let open: Option<String> = crate::observed_sql::query_scalar(SQL.open_run.sql())
+            let admitted: Option<String> = crate::observed_sql::query_scalar(SQL.admit_run.sql())
                 .bind(session.as_str())
+                .bind(run.as_str())
+                .bind(admission.to_stored().map_err(|error| encoding(&error))?)
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
-            if open.is_some() {
+            if admitted.is_none() {
                 return refuse(DomainRefusal::OpenTurnExists {
                     session: session.clone(),
                 });
             }
-            crate::observed_sql::query(SQL.insert_run.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .bind(admission.to_stored().map_err(|error| encoding(&error))?)
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
             let (phase, argument) = UnfinishedPhase::Admitted.stored();
             crate::observed_sql::query(SQL.insert_phase.sql())
                 .bind(session.as_str())
@@ -153,19 +174,42 @@ pub(super) async fn apply(
                     run: run.clone(),
                 });
             }
+            // One write per plugin: a later write of a plugin replaces an
+            // earlier one's entry, and its values unless it holds them.
+            let mut written: Vec<(&str, String, Option<String>, bool)> = Vec::new();
             for namespace in namespaces {
                 let entry = serde_json::to_string(&namespace.entry)
                     .map_err(|error| corrupt("turn namespace entry", &error.to_string()))?;
-                crate::observed_sql::query(SQL.upsert_namespace.sql())
+                let index = written
+                    .iter()
+                    .position(|(plugin, ..)| *plugin == namespace.plugin.as_str());
+                let earlier = index.map(|index| written.remove(index));
+                let (root, held) = match (&namespace.values, earlier) {
+                    (StoredValues::Root(root), _) => (Some(root.to_hex()), false),
+                    (StoredValues::Base, _) => (None, false),
+                    (StoredValues::Held, Some((_, _, root, held))) => (root, held),
+                    (StoredValues::Held, None) => (None, true),
+                };
+                written.push((namespace.plugin.as_str(), entry, root, held));
+            }
+            if !written.is_empty() {
+                let plugins: Vec<&str> = written.iter().map(|(plugin, ..)| *plugin).collect();
+                let entries: Vec<&str> = written
+                    .iter()
+                    .map(|(_, entry, ..)| entry.as_str())
+                    .collect();
+                let roots: Vec<Option<&str>> = written
+                    .iter()
+                    .map(|(_, _, root, _)| root.as_deref())
+                    .collect();
+                let held: Vec<bool> = written.iter().map(|(.., held)| *held).collect();
+                crate::observed_sql::query(POSTGRES_SQL.upsert_namespaces.sql())
                     .bind(session.as_str())
                     .bind(run.as_str())
-                    .bind(namespace.plugin.as_str())
-                    .bind(entry)
-                    .bind(match &namespace.values {
-                        StoredValues::Root(root) => Some(root.to_hex()),
-                        StoredValues::Base | StoredValues::Held => None,
-                    })
-                    .bind(matches!(namespace.values, StoredValues::Held))
+                    .bind(&plugins)
+                    .bind(&entries)
+                    .bind(&roots)
+                    .bind(&held)
                     .execute(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(sqlx_failure)?;

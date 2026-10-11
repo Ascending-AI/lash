@@ -606,6 +606,22 @@ fn apply_owner(
     let Some(revision) = fence else {
         return refuse(fenced(tx, write.actor(), write.epoch())?);
     };
+    // A session's unfinished turn's accepted cancel, read under the fence
+    // before the commit writes: the receipt reports a cancel that arrived
+    // after the owner's open.
+    let turn_cancel = match write.actor().kind() {
+        lash_durable::ActorKind::Session => {
+            let Ok(session) = lash_sansio::SessionId::try_from(write.actor().id().to_owned())
+            else {
+                return refuse(corrupt("session id", write.actor().id()));
+            };
+            match turns::turn(tx, &session)? {
+                Ok(row) => row.and_then(|row| row.cancel),
+                Err(error) => return refuse(error),
+            }
+        }
+        lash_durable::ActorKind::Process => None,
+    };
     let publications: Vec<_> = write
         .domain()
         .iter()
@@ -712,6 +728,7 @@ fn apply_owner(
     commit(ActorCommit {
         revision: StateRevision(revision),
         state,
+        turn_cancel,
     })
 }
 

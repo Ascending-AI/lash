@@ -199,7 +199,9 @@ lash_store_sql::statements! {
 
         /// An owner commit's first statement: [`Self::fence_clock_and_xact`]
         /// and actor `?1`'s ownership fence at epoch `?2`, its state revision
-        /// bumped, or no revision when the epoch is not current.
+        /// bumped (no revision when the epoch is not current), and, when `?3`
+        /// names its session, that session's unfinished turn's accepted
+        /// cancel request as the statement's snapshot holds it: one row.
         owner_envelope = "WITH fenced AS (
                  UPDATE actors SET state_revision = state_revision + 1
                  WHERE actor_key = ?1 AND epoch = ?2 AND state = 'owned'
@@ -208,7 +210,15 @@ lash_store_sql::statements! {
              SELECT (SELECT format_version FROM fleet_format WHERE singleton = TRUE),
                     (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
                     pg_current_xact_id()::text,
-                    (SELECT state_revision FROM fenced)";
+                    f.state_revision,
+                    c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode
+             FROM (SELECT 1) AS one
+             LEFT JOIN fenced f ON TRUE
+             LEFT JOIN session_runs r ON r.session_id = ?3 AND f.state_revision IS NOT NULL
+                 AND r.admission_json IS NOT NULL AND r.terminal_kind IS NULL
+             LEFT JOIN turn_phases p ON p.session_id = r.session_id AND p.run = r.run
+             LEFT JOIN turn_cancel_requests c ON c.session_id = p.session_id
+                 AND c.turn_id = p.run";
 
         /// Acknowledge actor `?1`'s mail through `?2` and delete it, in one
         /// statement.
@@ -719,18 +729,18 @@ fn group_members(tx: &ActorTx) -> u64 {
 
 /// Apply the owner's `write` after its ownership fence, which the commit's
 /// first statement ran ([`PostgresDurableStatements::owner_envelope`]):
-/// `fence` is the state revision it bumped, `None` when the epoch was not
+/// `fence` is what it read under the fence, `None` when the epoch was not
 /// current.
 async fn apply_owner(
     tx: &mut Tx,
     write: &ActorTx,
-    fence: Option<i64>,
+    fence: Option<replay::FenceRead>,
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
     checkpoint_ref_chunk: usize,
 ) -> Result<ActorCommit, DurableError> {
     let actor = write.actor().as_str();
-    let Some(revision) = fence else {
+    let Some(fence) = fence else {
         return Err(fenced(tx, write.actor(), write.epoch()).await?);
     };
     let publications: Vec<_> = write
@@ -823,8 +833,9 @@ async fn apply_owner(
         }
     };
     Ok(ActorCommit {
-        revision: StateRevision(revision),
+        revision: fence.revision,
         state,
+        turn_cancel: fence.turn_cancel,
     })
 }
 

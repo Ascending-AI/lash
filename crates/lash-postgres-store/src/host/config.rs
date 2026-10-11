@@ -196,7 +196,9 @@ pub struct PoolPolicy {
     /// Recycle a connection this old; `null` never recycles it for age.
     #[serde(rename = "max_lifetime_ms", with = "serde_ms::option")]
     pub max_lifetime: Option<Duration>,
-    /// Ping a connection before handing it out.
+    /// Ping every connection before handing it out. Default false: only a
+    /// connection idle for 10 s or longer is pinged, so a checkout on the
+    /// hot path costs no round trip.
     pub test_before_acquire: bool,
 }
 
@@ -208,7 +210,7 @@ impl PoolPolicy {
             acquire_timeout,
             idle_timeout: Some(Duration::from_secs(600)),
             max_lifetime: Some(Duration::from_secs(1800)),
-            test_before_acquire: true,
+            test_before_acquire: false,
         }
     }
 }

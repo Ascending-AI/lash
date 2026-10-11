@@ -164,13 +164,20 @@ pub struct Reaped {
 }
 
 /// An owner commit's receipt.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorCommit {
     /// The actor's state revision after the commit.
     pub revision: StateRevision,
     /// The state the actor was left in: [`ActorState::Owned`] unless the
     /// commit released it.
     pub state: ActorState,
+    /// For a session actor, the cancel request its unfinished turn had
+    /// accepted as the commit read it under its fence, before its writes: a
+    /// cancel accepted after the owner's open is seen here, inside the
+    /// commit, with no read of its own. One accepted while the fence waited
+    /// may be missed; the owner's next open reads it. `None` for any other
+    /// actor.
+    pub turn_cancel: Option<crate::domain::TurnCancelRequest>,
 }
 
 /// One actor a mailbox commit woke, for the post-commit hint.
