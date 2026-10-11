@@ -522,10 +522,17 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             messages[0] =
                 "{\"role\":\"user\",\"content\":\"changed prefix: 🦀\\\"\\\\\"}".to_owned();
         }
-        messages.push(format!(
-            "{{\"role\":\"user\",\"content\":\"{ordinal}:{}\"}}",
-            "x".repeat(2048)
-        ));
+        messages.push(serde_json::json!({
+            "blocks": [{"ToolResult": {
+                "call_id": format!("call-{ordinal}"),
+                "tool_name": "fixture_lookup",
+                "content": [{"type": "text", "text": format!(
+                    "{{\n  \"key\": \"item-{ordinal}\",\n  \"tags\": [\"replay\", \"fixture\"],\n  \"record\": \"{}\"\n}}",
+                    "x".repeat(2048)
+                )}]
+            }}],
+            "role": "User"
+        }).to_string());
         let wire = format!("{{\"messages\":[{}],\"stream\":true}}", messages.join(","));
         let template =
             RecordedRequestTemplate::literal(route.clone(), true, None, wire.as_str()).unwrap();
@@ -585,6 +592,12 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             })
             .map(|(_, shape)| shape.bound_bytes)
             .sum();
+        if ordinal == 1 || ordinal == 128 {
+            eprintln!(
+                "PREFIX-DELTA SQL call {ordinal}: {}",
+                serde_json::to_string(&receipt).unwrap()
+            );
+        }
         let logarithm = u64::from(ordinal.ilog2() + 1);
         assert!(
             nodes > 0 && edges > 0,

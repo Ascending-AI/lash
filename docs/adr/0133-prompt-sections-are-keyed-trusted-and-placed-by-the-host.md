@@ -243,16 +243,24 @@ call is its run and ordinal, and an owned call (§8) is its owner's execution
 scope and its stable key there, with no turn required. The root also holds
 the call's request template (§6): one content-addressed binary fragment
 index over exact literal segments and ordered attachment slots (FIG-5956),
-rather than a list of the full request's chunks. Fragment boundaries follow
-JSON lexical segments and escaped line boundaries within strings; a large
-segment splits on UTF-8 boundaries at 32 KiB
-from its own start. Index branches name two children. The canonical tree
+rather than a list of the full request's chunks. Fragment boundaries follow groups of eight messages in the top-level
+history array once the current fragment reaches 8 KiB, so appending rewrites
+only a bounded unfinished group. Earlier completed groups remain immutable. The opening envelope rides
+in the first group; the closing envelope stays together. Long rendered history
+strings also split at groups of eight escaped line boundaries within each
+string, once both that string and its current fragment reach 4 KiB. Short
+multiline tool results stay in their message group. A large
+segment splits on UTF-8 boundaries at 32 KiB from its own start. JSON fields
+and punctuation within a message are not separate index nodes. Index branches name two children. The canonical tree
 keeps each completed power-of-two prefix subtree unchanged on append, so a
 new call installs only new fragments and logarithmic index paths. Stores
 probe from roots and stop at a held immutable node, publishing its new edges
 only once. A separate content domain keeps arbitrary audit text from standing
-for an installed index. The response context and owned deadline are still
-recorded beside the index. A slot records its ref, position, acceptance and
+for an installed index. For a reusable history, the full-body root and closing-envelope fragments
+live directly in the
+call's admission record, with their content addresses, rather than in SQL
+index rows. The response context, its addressed contract chunks and owned
+deadline also live in that record. A slot records its ref, position, acceptance and
 codec, never a delivered value.
 
 A session owns one reusable lowered history prefix through its last message,
@@ -263,7 +271,7 @@ Frame switches, compaction and configuration commands invalidate it in their
 own commits; session deletion releases it. A changed lowerer or wire contract
 publishes its new exact prefix and retires the previous one at admission.
 Owned calls have no reusable session prefix. Settlement still releases each
-call's own request root, suffix, response and deadline. Immutable index edges
+call's own admission record and history root edges. Immutable index edges
 (`prompt_text_edges`) retain only reachable fragments; severing the last root
 peels unreferenced nodes and their edges in the same transaction. PostgreSQL
 settlement locks the session prefix row until commit, excluding its immutable

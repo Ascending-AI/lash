@@ -55,6 +55,11 @@ lash_store_sql::statements! {
              SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
                FROM json_each(?1)";
 
+        /// Whether calls eligible for settlement hold a snapshot.
+        settling_calls = "SELECT snapshot IS NOT NULL FROM prompt_snapshots
+             WHERE session_id = ?1 AND owner = ?2 AND request IS NOT NULL
+               AND (?3 IS NULL OR call <> ?3)";
+
         /// Release the request edges of every call of owner `?2` in session
         /// `?1` but call `?3` (none when `?3` is null), returning each text
         /// they named.
@@ -74,6 +79,20 @@ lash_store_sql::statements! {
         settle_requests = "UPDATE prompt_snapshots SET request = NULL
              WHERE session_id = ?1 AND owner = ?2 AND request IS NOT NULL
                AND (?3 IS NULL OR call <> ?3)";
+
+        /// The reusable prefix currently owned by this session.
+        read_prefix = "SELECT hash FROM prompt_prefixes WHERE session_id = ?1";
+
+        /// Candidates whose last root or immutable parent was released.
+        unreferenced_texts = "SELECT stored.hash FROM prompt_texts AS stored
+             WHERE stored.hash IN (SELECT value FROM json_each(?1))
+               AND NOT EXISTS (
+                   SELECT 1 FROM prompt_snapshot_texts AS edge WHERE edge.hash = stored.hash
+               ) AND NOT EXISTS (
+                   SELECT 1 FROM prompt_prefixes AS prefix WHERE prefix.hash = stored.hash
+               ) AND NOT EXISTS (
+                   SELECT 1 FROM prompt_text_edges AS edge WHERE edge.child = stored.hash
+               )";
 
         /// Reclaim every text in the JSON array `?1` no root references any
         /// more.
@@ -220,7 +239,9 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                             .map(move |child| (*hash, child.as_str()))
                     })
                     .collect();
-                cached_execute(tx, SQLITE_SQL.insert_index_edges.sql(), [encode(&paths)?])?;
+                if !paths.is_empty() {
+                    cached_execute(tx, SQLITE_SQL.insert_index_edges.sql(), [encode(&paths)?])?;
+                }
             }
             cached_execute(
                 tx,
@@ -233,10 +254,19 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                 ],
             )?;
             if matches!(call.call, ModelCallId::Turn { .. }) {
-                let old = hash_set(tx, SQL.release_prefix.sql(), [session.as_str()])?;
-                if let Some(prefix) = prefix {
-                    cached_execute(tx, SQL.set_prefix.sql(), rusqlite::params![session, prefix])?;
-                }
+                let old = if let Some(prefix) = prefix {
+                    let old = hash_set(tx, SQLITE_SQL.read_prefix.sql(), [session.as_str()])?;
+                    if !old.contains(prefix) {
+                        cached_execute(
+                            tx,
+                            SQL.set_prefix.sql(),
+                            rusqlite::params![session, prefix],
+                        )?;
+                    }
+                    old
+                } else {
+                    hash_set(tx, SQL.release_prefix.sql(), [session.as_str()])?
+                };
                 reclaim(tx, &old)?;
             }
             Ok(Ok(()))
@@ -250,9 +280,20 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
             let owner = ModelCallId::turn_owner(run);
             let open = open.map(|call| call.to_string());
             let params = rusqlite::params![session.as_str(), owner, open];
+            let mut statement = tx.prepare_cached(SQLITE_SQL.settling_calls.sql())?;
+            let snapshots = statement
+                .query_map(params, |row| row.get::<_, bool>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            if snapshots.is_empty() {
+                return Ok(Ok(()));
+            }
             let released = hash_set(tx, SQLITE_SQL.settle_edges.sql(), params)?;
-            cached_execute(tx, SQLITE_SQL.settle_bare_roots.sql(), params)?;
-            cached_execute(tx, SQLITE_SQL.settle_requests.sql(), params)?;
+            if snapshots.contains(&false) {
+                cached_execute(tx, SQLITE_SQL.settle_bare_roots.sql(), params)?;
+            }
+            if snapshots.contains(&true) {
+                cached_execute(tx, SQLITE_SQL.settle_requests.sql(), params)?;
+            }
             reclaim(tx, &released)?;
             Ok(Ok(()))
         }
@@ -325,6 +366,17 @@ fn edges<'a>(
 fn reclaim(tx: &Connection, released: &BTreeSet<String>) -> rusqlite::Result<()> {
     let mut frontier = released.clone();
     while !frontier.is_empty() {
+        // Admission can leave the old root held by an open call, and
+        // settlement can release the current session prefix. Neither
+        // needs a write or a traversal of its retained closure.
+        frontier = hash_set(
+            tx,
+            SQLITE_SQL.unreferenced_texts.sql(),
+            [encode(&frontier)?],
+        )?;
+        if frontier.is_empty() {
+            break;
+        }
         let children: BTreeMap<_, _> = frontier
             .iter()
             .map(|hash| {

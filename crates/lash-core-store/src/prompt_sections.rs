@@ -527,6 +527,9 @@ pub struct ChunkedRequestTemplate {
     /// Lowered history through its final message, without the closing
     /// envelope. Session ownership keeps this prefix between calls.
     pub prefix: Option<PromptTextRef>,
+    /// Request-only envelope nodes, addressed and verified like stored nodes,
+    /// but owned directly by this call's record rather than SQL index edges.
+    pub inline: Vec<(BlobRef, String)>,
 }
 
 /// A stored wire fragment or a binary index node. Its encoded bytes have
@@ -612,6 +615,16 @@ fn keep_fragment(fragment: &RequestFragment, texts: &mut Vec<(BlobRef, String)>)
     reference
 }
 
+/// Keep one exact literal segment as a leaf, including its JSON structure.
+fn literal_fragment(text: &str, texts: &mut Vec<(BlobRef, String)>) -> PromptTextRef {
+    keep_fragment(
+        &RequestFragment::Literal {
+            text: text.to_owned(),
+        },
+        texts,
+    )
+}
+
 /// A canonical append tree: the left subtree is the largest complete
 /// power-of-two prefix smaller than the sequence. Every completed subtree
 /// keeps its address when the sequence grows.
@@ -626,10 +639,10 @@ fn fragment_tree(fragments: &[PromptTextRef], texts: &mut Vec<(BlobRef, String)>
 }
 
 impl ChunkedRequestTemplate {
-    /// Content-aligned JSON lexical segments, including punctuation, keep
-    /// their boundaries when a message is appended or an earlier message
-    /// changes. Large lexical segments split from their own start on UTF-8
-    /// boundaries, rather than from the start of the whole literal.
+    /// Split on groups of eight messages once a fragment reaches 8 KiB,
+    /// keeping completed history stable and bounding the unfinished tail. Long rendered messages also
+    /// split at groups of eight escaped line boundaries. The
+    /// request envelope stays together instead of indexing every JSON field.
     pub fn chunk(
         template: &lash_sansio::llm::types::RecordedRequestTemplate,
     ) -> (Self, Vec<(BlobRef, String)>) {
@@ -639,7 +652,11 @@ impl ChunkedRequestTemplate {
         let mut depth = 0usize;
         let mut history_depth = None;
         let mut history_key = false;
+        let mut messages = 0usize;
+        let mut lines = 0usize;
         let mut prefix_end = None;
+        let mut quoted = false;
+        let mut escaped = false;
         for segment in template.segments() {
             match segment {
                 RequestSegment::Attachment { slot } => fragments.push(keep_fragment(
@@ -648,80 +665,105 @@ impl ChunkedRequestTemplate {
                 )),
                 RequestSegment::Literal { text } => {
                     let mut start = 0;
-                    let mut quoted = false;
-                    let mut escaped = false;
-                    let mut cuts = Vec::new();
+                    let mut string_start = 0;
                     for (offset, ch) in text.char_indices() {
+                        // Oversize messages split from their own start, on
+                        // UTF-8 boundaries, without shifting earlier chunks.
+                        if offset + ch.len_utf8() - start > PROVIDER_BODY_CHUNK_BYTES {
+                            fragments.push(literal_fragment(&text[start..offset], &mut texts));
+                            start = offset;
+                        }
                         if quoted {
                             if escaped {
                                 escaped = false;
-                                // Rendered history carried in one JSON string
-                                // still has content-aligned line boundaries.
+                                // A rendered history can occupy one string.
+                                // Keep short message bodies intact; completed
+                                // line groups in a long string stay reusable.
                                 if ch == 'n' {
-                                    cuts.push(&text[start..offset + 1]);
-                                    start = offset + 1;
+                                    lines += 1;
+                                    if lines.is_multiple_of(8)
+                                        && offset + 1 - string_start >= 4096
+                                        && offset + 1 - start >= 4096
+                                    {
+                                        fragments.push(literal_fragment(
+                                            &text[start..offset + 1],
+                                            &mut texts,
+                                        ));
+                                        start = offset + 1;
+                                    }
                                 }
                             } else if ch == '\\' {
                                 escaped = true;
                             } else if ch == '"' {
                                 quoted = false;
+                                if depth == 1 {
+                                    history_key = matches!(
+                                        &text[string_start..offset + 1],
+                                        "\"messages\"" | "\"contents\"" | "\"input\""
+                                    );
+                                }
                             }
                         } else if ch == '"' {
                             quoted = true;
-                        } else if matches!(ch, '{' | '}' | '[' | ']' | ',' | ':') {
-                            if start < offset {
-                                cuts.push(&text[start..offset]);
+                            string_start = offset;
+                            lines = 0;
+                        } else {
+                            if ch == ']' && history_depth == Some(depth) {
+                                if start < offset {
+                                    fragments
+                                        .push(literal_fragment(&text[start..offset], &mut texts));
+                                }
+                                start = offset;
+                                prefix_end = Some(fragments.len());
+                                history_depth = None;
+                            } else if ch == ',' && history_depth == Some(depth) {
+                                messages += 1;
+                                if messages.is_multiple_of(8) && offset - start >= 8192 {
+                                    if start < offset {
+                                        fragments.push(literal_fragment(
+                                            &text[start..offset],
+                                            &mut texts,
+                                        ));
+                                    }
+                                    // The comma belongs to the next group, so
+                                    // appending leaves completed groups unchanged.
+                                    start = offset;
+                                }
                             }
-                            cuts.push(&text[offset..offset + 1]);
-                            start = offset + 1;
+                            if ch == '[' && history_key && depth == 1 {
+                                // The opening envelope rides in the first
+                                // group rather than owning another index path.
+                                history_depth = Some(depth + 1);
+                                history_key = false;
+                                messages = 0;
+                            }
+                            match ch {
+                                '{' | '[' => depth += 1,
+                                '}' | ']' => depth = depth.saturating_sub(1),
+                                _ => {}
+                            }
                         }
                     }
                     if start < text.len() {
-                        cuts.push(&text[start..]);
-                    }
-                    for token in cuts {
-                        let trimmed = token.trim();
-                        if trimmed == "]" && history_depth == Some(depth) {
-                            prefix_end = Some(fragments.len());
-                            history_depth = None;
-                        }
-                        if trimmed == "[" && history_key {
-                            history_depth = Some(depth + 1);
-                        }
-                        match trimmed {
-                            "{" | "[" => depth += 1,
-                            "}" | "]" => depth = depth.saturating_sub(1),
-                            ":" => {}
-                            _ => {
-                                history_key = depth == 1
-                                    && matches!(
-                                        trimmed,
-                                        "\"messages\"" | "\"contents\"" | "\"input\""
-                                    )
-                            }
-                        }
-                        let mut rest = token;
-                        while !rest.is_empty() {
-                            let mut end = rest.len().min(PROVIDER_BODY_CHUNK_BYTES);
-                            while !rest.is_char_boundary(end) {
-                                end -= 1;
-                            }
-                            let (part, tail) = rest.split_at(end);
-                            fragments.push(keep_fragment(
-                                &RequestFragment::Literal {
-                                    text: part.to_owned(),
-                                },
-                                &mut texts,
-                            ));
-                            rest = tail;
-                        }
+                        fragments.push(literal_fragment(&text[start..], &mut texts));
                     }
                 }
             }
         }
+        let prefix_start = texts.len();
         let prefix = prefix_end
             .filter(|end| *end > 0 && *end < fragments.len())
             .map(|end| fragment_tree(&fragments[..end], &mut texts));
+        let prefix_hashes: std::collections::BTreeSet<_> = prefix_end
+            .filter(|_| prefix.is_some())
+            .into_iter()
+            .flat_map(|end| {
+                fragments[..end]
+                    .iter()
+                    .map(|reference| reference.blob.clone())
+            })
+            .chain(texts[prefix_start..].iter().map(|(hash, _)| hash.clone()))
+            .collect();
         let root = if let (Some(prefix), Some(end)) = (&prefix, prefix_end) {
             let right = fragment_tree(&fragments[end..], &mut texts);
             keep_fragment(
@@ -734,6 +776,13 @@ impl ChunkedRequestTemplate {
         } else {
             fragment_tree(&fragments, &mut texts)
         };
+        let (texts, inline) = if prefix.is_some() {
+            texts
+                .into_iter()
+                .partition(|(hash, _)| prefix_hashes.contains(hash))
+        } else {
+            (texts, Vec::new())
+        };
         (
             Self {
                 fetch_horizon: template.fetch_horizon,
@@ -743,6 +792,7 @@ impl ChunkedRequestTemplate {
                 wire_features: template.wire_features.clone(),
                 root,
                 prefix,
+                inline,
             },
             texts,
         )
@@ -758,9 +808,15 @@ impl ChunkedRequestTemplate {
         let mut segments = Vec::new();
         let mut literal = String::new();
         while let Some(reference) = stack.pop() {
-            let stored = text(&reference.blob).ok_or_else(|| ProviderBodyError::MissingChunk {
-                hash: reference.blob.as_str().to_owned(),
-            })?;
+            let stored = self
+                .inline
+                .iter()
+                .find(|(hash, _)| hash == &reference.blob)
+                .map(|(_, body)| body.as_str())
+                .or_else(|| text(&reference.blob))
+                .ok_or_else(|| ProviderBodyError::MissingChunk {
+                    hash: reference.blob.as_str().to_owned(),
+                })?;
             if RequestFragment::reference(stored) != reference {
                 return Err(ProviderBodyError::FragmentMismatch {
                     hash: reference.blob.as_str().to_owned(),
@@ -806,46 +862,48 @@ impl ChunkedRequestTemplate {
 
 /// What reading an admitted call's response needs, as its admission records
 /// it: the call's scope, and its response contract (the pinned route's
-/// model, the output it asked for and its tools' input schemas) stored by
-/// content beside the section texts and chunked as a template's literals
-/// are, so calls that share a contract store it once.
+/// model, the output it asked for and its tools' input schemas), addressed
+/// in chunks owned directly by the call's admission record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedResponseContext {
     pub scope: lash_sansio::llm::types::LlmRequestScope,
     /// The JSON of the call's `ResponseContract`, in order.
     pub contract: Vec<PromptTextRef>,
+    /// The request-only contract chunks, kept in the admission record.
+    pub inline: Vec<(BlobRef, String)>,
 }
 
 impl RecordedResponseContext {
-    /// Record `scope` and `contract`, the JSON of the call's response
-    /// contract: the record, and each chunk's text by its content address.
-    pub fn chunk(
-        scope: lash_sansio::llm::types::LlmRequestScope,
-        contract: &str,
-    ) -> (Self, Vec<(BlobRef, String)>) {
-        let mut texts = Vec::new();
-        let contract = chunk_text(contract, &mut texts);
-        (Self { scope, contract }, texts)
+    /// Record the exact response contract beside this call's envelope.
+    pub fn record(scope: lash_sansio::llm::types::LlmRequestScope, contract: &str) -> Self {
+        let mut inline = Vec::new();
+        let contract = chunk_text(contract, &mut inline);
+        Self {
+            scope,
+            contract,
+            inline,
+        }
     }
 
-    /// The contract's JSON, each chunk read from `text` by its address.
+    /// The contract's JSON, each chunk read from its recorded address.
     ///
     /// # Errors
     ///
     /// [`ProviderBodyError::MissingChunk`] when a chunk is missing; the
     /// caller verified every text against its address.
-    pub fn assemble<'a>(
-        &self,
-        text: impl Fn(&BlobRef) -> Option<&'a str>,
-    ) -> Result<String, ProviderBodyError> {
+    pub fn assemble(&self) -> Result<String, ProviderBodyError> {
         let mut contract = String::new();
         for chunk in &self.contract {
-            contract.push_str(text(&chunk.blob).ok_or_else(|| {
-                ProviderBodyError::MissingChunk {
-                    hash: chunk.blob.as_str().to_owned(),
-                }
-            })?);
+            contract.push_str(
+                self.inline
+                    .iter()
+                    .find(|(hash, _)| hash == &chunk.blob)
+                    .map(|(_, body)| body.as_str())
+                    .ok_or_else(|| ProviderBodyError::MissingChunk {
+                        hash: chunk.blob.as_str().to_owned(),
+                    })?,
+            );
         }
         Ok(contract)
     }

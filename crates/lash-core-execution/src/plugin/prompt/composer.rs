@@ -211,8 +211,9 @@ pub struct ComposedPrompt {
 /// its section texts, and an [`AdmittedRequest`] of the request `template`,
 /// the scope and contract of `response` (what every send of the call reads
 /// its response under; its senders are live and not recorded) and, for a
-/// call no turn row pins, its `deadline`, over every literal chunk and the
-/// contract stored by content. It belongs in the commit that admits the
+/// call no turn row pins, its `deadline`. Retained history uses the
+/// content-addressed index; the request envelope and response contract
+/// live in the call record. It belongs in the commit that admits the
 /// call, once per new call: a second record of one call is refused. The
 /// request goes when the call settles; the snapshot stays (FIG-5946).
 ///
@@ -226,8 +227,8 @@ pub fn admission_record(
     response: &ResponseContext,
     deadline: Option<DurableInstant>,
 ) -> Result<DomainWrite, serde_json::Error> {
-    let (recorded_body, mut request_texts) = ChunkedRequestTemplate::chunk(template);
-    let (recorded_response, contract) = RecordedResponseContext::chunk(
+    let (recorded_body, request_texts) = ChunkedRequestTemplate::chunk(template);
+    let recorded_response = RecordedResponseContext::record(
         LlmRequestScope {
             // The attempt is each send's own.
             attempt: None,
@@ -250,7 +251,6 @@ pub fn admission_record(
                 .map(|prefix| prefix.blob.as_str().to_owned())
         })
         .flatten();
-    request_texts.extend(contract);
     let request = AdmittedRequest {
         version: PromptSnapshotVersion,
         body: recorded_body,
@@ -487,14 +487,19 @@ pub async fn load_admitted_call(
     };
     let admitted: AdmittedRequest = serde_json::from_str(&request)?;
     let texts = verified_texts(reads, &row.request_texts).await?;
+    for (hash, body) in admitted.body.inline.iter().chain(&admitted.response.inline) {
+        if PromptTextRef::of(body).blob != *hash && RequestFragment::reference(body).blob != *hash {
+            return Err(AdmittedCallLoadError::TextMismatch {
+                hash: hash.as_str().to_owned(),
+            });
+        }
+    }
     let template = Arc::new(
         admitted
             .body
             .assemble(|blob| texts.get(blob).map(String::as_str))?,
     );
-    let contract = admitted
-        .response
-        .assemble(|blob| texts.get(blob).map(String::as_str))?;
+    let contract = admitted.response.assemble()?;
     let contract: Arc<ResponseContract> = Arc::new(serde_json::from_str(&contract)?);
     Ok(Some(LoadedAdmittedCall {
         template,
