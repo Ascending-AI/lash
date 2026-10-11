@@ -95,7 +95,7 @@ impl ProcessEngine for ReceiverEngine {
         _reference: &lash::process::ProcessDefinitionRef,
     ) -> std::result::Result<
         lash::process::ProcessDefinitionResolution,
-        lash::process::ProcessDefinitionRefusal,
+        lash::process::ProcessDefinitionError,
     > {
         Ok(lash::process::ProcessDefinitionResolution::new(
             lash::process::ProcessSignature::Unknown,
@@ -219,7 +219,7 @@ impl ProcessEngine for SourceEngine {
         _reference: &lash::process::ProcessDefinitionRef,
     ) -> std::result::Result<
         lash::process::ProcessDefinitionResolution,
-        lash::process::ProcessDefinitionRefusal,
+        lash::process::ProcessDefinitionError,
     > {
         Ok(lash::process::ProcessDefinitionResolution::new(
             lash::process::ProcessSignature::Unknown,
@@ -333,7 +333,7 @@ impl ProcessEngine for SleeperEngine {
         _reference: &lash::process::ProcessDefinitionRef,
     ) -> std::result::Result<
         lash::process::ProcessDefinitionResolution,
-        lash::process::ProcessDefinitionRefusal,
+        lash::process::ProcessDefinitionError,
     > {
         Ok(lash::process::ProcessDefinitionResolution::new(
             lash::process::ProcessSignature::Unknown,

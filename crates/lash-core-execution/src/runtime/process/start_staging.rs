@@ -1303,12 +1303,7 @@ async fn stage_definition<'a>(
                 &super::ProcessDefinition::new(definition_id.clone(), signature.clone()),
             )
             .await
-            .map_err(|error| {
-                crate::PluginError::Runtime(crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::DefinitionRefused,
-                    error.to_string(),
-                ))
-            })?;
+            .map_err(crate::PluginError::from)?;
     }
     let kind = resolved.draft.engine_kind().as_str().to_owned();
     let payload = resolved.start_payload(args)?;

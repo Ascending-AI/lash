@@ -33,10 +33,15 @@ fn assert_artifact_storage_failure<T>(
     result: Result<T, lash_core::ArtifactStoreError>,
 ) {
     match result {
-        Err(lash_core::ArtifactStoreError::Backend(message)) => assert!(
-            message.starts_with("sqlite storage failure:"),
-            "expected SQLite storage failure from {label}, got {message}"
-        ),
+        Err(lash_core::ArtifactStoreError::StoreFault(
+            lash_core::store::StoreFault::StorageFailure { backend, message },
+        )) => {
+            assert_eq!(backend, "sqlite", "the artifact port preserves the backend");
+            assert!(
+                !message.is_empty(),
+                "the port preserves the fault detail from {label}"
+            );
+        }
         Err(error) => panic!("expected SQLite storage failure from {label}, got {error}"),
         Ok(_) => panic!("expected SQLite storage failure from {label}"),
     }

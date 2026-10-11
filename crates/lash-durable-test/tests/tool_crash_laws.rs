@@ -1607,7 +1607,7 @@ impl lash_core_execution::ProcessEngine for StateEngine {
         _reference: &lash_core_execution::ProcessDefinitionRef,
     ) -> Result<
         lash_core_execution::ProcessDefinitionResolution,
-        lash_core_execution::ProcessDefinitionRefusal,
+        lash_core_execution::ProcessDefinitionError,
     > {
         Ok(lash_core_execution::ProcessDefinitionResolution::new(
             lash_core_execution::ProcessSignature::Unknown,

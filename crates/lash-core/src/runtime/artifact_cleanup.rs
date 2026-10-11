@@ -520,16 +520,19 @@ impl ArtifactCleanupRelay {
                     .resolve_definition(&draft)
                     .await
                     .map_err(|refusal| match refusal {
-                        refusal @ crate::ProcessDefinitionRefusal::WorkerCheckoutTimedOut {
-                            ..
-                        } => retryable("definition siblings")(PluginError::from(refusal)),
-                        refusal => DeliveryFailure::Refused(
-                            DeliveryError::new(
-                                RuntimeErrorCode::DefinitionRefused,
-                                refusal.to_string(),
+                        crate::ProcessDefinitionError::Fault(error) => {
+                            retryable("definition siblings")(error)
+                        }
+                        crate::ProcessDefinitionError::Refused(refusal) => {
+                            DeliveryFailure::Refused(
+                                DeliveryError::new(
+                                    RuntimeErrorCode::DefinitionRefused,
+                                    refusal.to_string(),
+                                )
+                                .in_context("definition siblings"),
                             )
-                            .in_context("definition siblings"),
-                        ),
+                        }
+                        error => retryable("definition siblings")(PluginError::from(error)),
                     })?;
                 for sibling in &resolution.siblings {
                     names.push(ArtifactName {

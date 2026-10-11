@@ -191,7 +191,7 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
         _reference: &lash_core::ProcessDefinitionRef,
     ) -> std::result::Result<
         lash_core::ProcessDefinitionResolution,
-        lash_core::ProcessDefinitionRefusal,
+        lash_core::ProcessDefinitionError,
     > {
         Ok(lash_core::ProcessDefinitionResolution::new(
             lash_core::ProcessSignature::Unknown,

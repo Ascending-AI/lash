@@ -37,7 +37,6 @@
 use super::definition::{
     ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionId, ProcessDefinitionStoredError,
 };
-use super::definition_ref::ProcessDefinitionRefusal;
 use super::{ArtifactReferrerPorts, ProcessEngineRegistry, ReferrerAcquisition};
 use crate::{
     ArtifactName, ArtifactStoreError, ArtifactStoreId, ReferrerClaim, ResolvedArtifactCleanup,
@@ -165,10 +164,7 @@ impl ArtifactReferrerPorts {
         claim: &ReferrerClaim,
         draft: &ProcessDefinitionDraft,
     ) -> Result<ProcessDefinition, crate::PluginError> {
-        let resolution = engines
-            .resolve_definition(draft)
-            .await
-            .map_err(refusal_error)?;
+        let resolution = engines.resolve_definition(draft).await?;
         let ended = || ArtifactStoreError::ReferrerEnded {
             referrer: claim.referrer(),
         };
@@ -316,10 +312,7 @@ impl ArtifactReferrerPorts {
         let Some(draft) = self.read_definition_draft(id).await? else {
             return Ok(None);
         };
-        let resolution = engines
-            .resolve_definition(&draft)
-            .await
-            .map_err(refusal_error)?;
+        let resolution = engines.resolve_definition(&draft).await?;
         let definition = ProcessDefinition::new(draft.id(), resolution.signature);
         Ok(Some((
             ResolvedProcessDefinition { draft, definition },
@@ -377,13 +370,6 @@ fn definition_refused(message: String) -> crate::PluginError {
         crate::RuntimeErrorCode::DefinitionRefused,
         message,
     ))
-}
-
-fn refusal_error(refusal: ProcessDefinitionRefusal) -> crate::PluginError {
-    match refusal {
-        refusal @ ProcessDefinitionRefusal::WorkerCheckoutTimedOut { .. } => refusal.into(),
-        refusal => definition_refused(refusal.to_string()),
-    }
 }
 
 fn definition_corrupt(

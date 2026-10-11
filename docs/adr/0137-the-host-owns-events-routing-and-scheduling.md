@@ -66,9 +66,11 @@ owns its drive and continuation; hosts send and observe its handle.
 while the process is retained. The start-args check,
 `core.process_definitions()` (a `lash::process::ProcessDefinitions`) and its
 `async check_args(&self, definition: &ProcessDefinition, args:
-&serde_json::Map<String, Value>, mode: ArgsMode) -> Result<(), ArgsMismatch>`,
+&serde_json::Map<String, Value>, mode: ArgsMode) -> lash::Result<std::result::Result<(), ArgsMismatch>>`,
 validates a host's input mapping against the definition's authoritative
-signature: `ArgsMode::Partial` at registration and `ArgsMode::Complete` before
+signature. `Ok(Err(refusal))` carries a stable local `code()`; an outer error
+preserves the store or transport fault without judging the arguments.
+Use `ArgsMode::Partial` at registration and `ArgsMode::Complete` before
 start. Checking arguments does not register a process or pin its
 definition.
 

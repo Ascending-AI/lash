@@ -266,7 +266,7 @@ impl crate::ProcessEngine for HeldProcessEngine {
     async fn resolve(
         &self,
         _reference: &crate::ProcessDefinitionRef,
-    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
+    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionError> {
         Ok(crate::ProcessDefinitionResolution::new(
             crate::ProcessSignature::Unknown,
         ))
@@ -361,7 +361,7 @@ impl crate::ProcessEngine for FixtureProcessEngine {
     async fn resolve(
         &self,
         _reference: &crate::ProcessDefinitionRef,
-    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
+    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionError> {
         Ok(crate::ProcessDefinitionResolution::new(
             crate::ProcessSignature::Unknown,
         ))

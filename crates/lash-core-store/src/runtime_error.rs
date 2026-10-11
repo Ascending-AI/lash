@@ -103,6 +103,8 @@ runtime_error_codes! {
         // the bytes are not stored; a redrive reads the same state.
         /// An artifact acquire named bytes that are not stored.
         ArtifactMissing = "artifact_missing" => Terminal,
+        /// An immutable artifact id is already held with different bytes.
+        ArtifactConflict = "artifact_conflict" => Terminal,
         // the bytes are not stored; a redrive reads the same state.
         ReferrerKindRefused = "referrer_kind_refused" => Terminal,
         // no referrer holds the descriptor; a redrive reads the same state.

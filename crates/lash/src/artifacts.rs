@@ -23,6 +23,50 @@ use lash_core::{
 
 use crate::Result;
 
+/// The host-visible judgment of an artifact operation.
+/// Operational faults have no artifact refusal; their typed cause stays on
+/// [`crate::EmbedError`]. The original error retains the judgment's detail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HostArtifactRefusal {
+    PinReleased,
+    DefinitionMissing,
+    ArtifactMissing,
+    Conflict,
+    DefinitionRefused,
+}
+
+impl HostArtifactRefusal {
+    /// A stable local snake_case name for this top-level alternative.
+    /// Existing names keep their meaning; new alternatives add names. These
+    /// are not HTTP statuses, and old clients may not recognize future names.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::PinReleased => "pin_released",
+            Self::DefinitionMissing => "definition_missing",
+            Self::ArtifactMissing => "artifact_missing",
+            Self::Conflict => "conflict",
+            Self::DefinitionRefused => "definition_refused",
+        }
+    }
+
+    pub(crate) fn of_runtime(error: &lash_core::RuntimeError) -> Option<Self> {
+        use lash_core::RuntimeErrorCode;
+        match error.code {
+            RuntimeErrorCode::ArtifactReferrerEnded
+                if matches!(error.ended_referrer(), Some(ArtifactReferrer::HostPin(_))) =>
+            {
+                Some(Self::PinReleased)
+            }
+            RuntimeErrorCode::DefinitionMissing => Some(Self::DefinitionMissing),
+            RuntimeErrorCode::ArtifactMissing => Some(Self::ArtifactMissing),
+            RuntimeErrorCode::ArtifactConflict => Some(Self::Conflict),
+            RuntimeErrorCode::DefinitionRefused => Some(Self::DefinitionRefused),
+            _ => None,
+        }
+    }
+}
+
 /// The artifact stores of one core, as a host publishes into them.
 #[derive(Clone)]
 pub struct HostArtifacts {
@@ -417,33 +461,43 @@ impl ProcessDefinitions {
     /// The stored artifact's signature is authoritative. A forged signature claim,
     /// a missing definition, or an engine without argument validation is refused.
     /// This read acquires no lasting artifact pin and writes nothing.
+    /// `Ok(Err(refusal))` carries a stable [`lash_core::ArgsMismatch::code`].
+    /// Store and transport faults are outer errors; they never judge arguments.
     pub async fn check_args(
         &self,
         definition: &ProcessDefinition,
         args: &serde_json::Map<String, serde_json::Value>,
         mode: lash_core::ArgsMode,
-    ) -> std::result::Result<(), lash_core::ArgsMismatch> {
-        let resolved = self
+    ) -> Result<std::result::Result<(), lash_core::ArgsMismatch>> {
+        let Some(draft) = self
             .artifacts
             .definition_ports
-            .read_definition(&self.artifacts.engines, &definition.id)
-            .await
-            .map_err(|source| lash_core::ArgsMismatch::DefinitionRead { source })?
-            .ok_or_else(|| lash_core::ArgsMismatch::DefinitionMissing {
+            .read_definition_draft(&definition.id)
+            .await?
+        else {
+            return Ok(Err(lash_core::ArgsMismatch::DefinitionMissing {
                 definition_id: definition.id.clone(),
-            })?;
-        self.artifacts
+            }));
+        };
+        let authoritative = match self
+            .artifacts
             .engines
-            .verify_definition_claim(&resolved.draft, definition)
+            .verify_definition_claim(&draft, definition)
             .await
-            .map_err(|source| lash_core::ArgsMismatch::DefinitionRefused { source })?;
+        {
+            Ok(definition) => definition,
+            Err(lash_core::ProcessDefinitionError::Refused(source)) => {
+                return Ok(Err(lash_core::ArgsMismatch::DefinitionRefused { source }));
+            }
+            Err(lash_core::ProcessDefinitionError::Fault(error)) => return Err(error.into()),
+            Err(error) => return Err(lash_core::PluginError::from(error).into()),
+        };
         let engine = self
             .artifacts
             .engines
-            .require(resolved.draft.engine_kind().as_str())
-            .map_err(|source| lash_core::ArgsMismatch::DefinitionRead { source })?;
-        engine
-            .check_args(&resolved.definition.signature, args, mode)
-            .await
+            .require(draft.engine_kind().as_str())?;
+        Ok(engine
+            .check_args(&authoritative.signature, args, mode)
+            .await)
     }
 }

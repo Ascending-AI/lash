@@ -374,12 +374,12 @@ impl ProcessEngineRegistry {
     ///
     /// # Errors
     ///
-    /// The engine's [`ProcessDefinitionRefusal`]: no engine of that kind, or
-    /// one that cannot resolve the value.
+    /// A [`super::ProcessDefinitionError::Refused`] judgment (no engine of
+    /// that kind or an unresolvable value), or a typed operational fault.
     pub async fn derive_definition(
         &self,
         draft: &ProcessDefinitionDraft,
-    ) -> Result<ProcessDefinition, ProcessDefinitionRefusal> {
+    ) -> Result<ProcessDefinition, super::ProcessDefinitionError> {
         let resolution = self.resolve_definition(draft).await?;
         Ok(ProcessDefinition::new(draft.id(), resolution.signature))
     }
@@ -390,12 +390,12 @@ impl ProcessEngineRegistry {
     ///
     /// # Errors
     ///
-    /// The engine's [`ProcessDefinitionRefusal`], for `draft` or for a
-    /// sibling it names.
+    /// A [`super::ProcessDefinitionError::Refused`] judgment for `draft` or
+    /// a sibling it names, or a typed operational fault.
     pub async fn resolve_definition(
         &self,
         draft: &ProcessDefinitionDraft,
-    ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal> {
+    ) -> Result<ProcessDefinitionResolution, super::ProcessDefinitionError> {
         self.check_definition_manifest(draft)?;
         let mut resolution = self.resolve(&draft.unclaimed_reference()).await?;
         let id = draft.id();
@@ -408,7 +408,8 @@ impl ProcessEngineRegistry {
                         "definition `{id}` names a sibling of engine `{}`",
                         sibling.engine_kind.as_str()
                     ),
-                });
+                }
+                .into());
             }
             self.check_definition_manifest(sibling)?;
         }
@@ -426,11 +427,12 @@ impl ProcessEngineRegistry {
     /// [`ProcessDefinitionRefusal::UnknownEngine`], an
     /// [`ProcessDefinitionRefusal::UnresolvableDefinition`] for a value the
     /// engine cannot name artifacts for, and
-    /// [`ProcessDefinitionRefusal::ManifestMismatch`].
+    /// [`ProcessDefinitionRefusal::ManifestMismatch`], wrapped as a judgment.
+    /// An operational error from the engine stays a typed fault.
     pub fn check_definition_manifest(
         &self,
         draft: &ProcessDefinitionDraft,
-    ) -> Result<(), ProcessDefinitionRefusal> {
+    ) -> Result<(), super::ProcessDefinitionError> {
         let engine = self.get(draft.engine_kind.as_str()).ok_or_else(|| {
             ProcessDefinitionRefusal::UnknownEngine {
                 engine_kind: draft.engine_kind.clone(),
@@ -440,9 +442,17 @@ impl ProcessEngineRegistry {
             engine_kind: draft.engine_kind.clone(),
             message,
         };
-        let resolved = engine
-            .start_artifacts(draft.value.as_json())
-            .map_err(|error| unresolvable(error.to_string()))?;
+        let resolved =
+            engine
+                .start_artifacts(draft.value.as_json())
+                .map_err(|error| match error {
+                    crate::PluginError::Runtime(error)
+                        if error.code == crate::RuntimeErrorCode::DefinitionRefused =>
+                    {
+                        super::ProcessDefinitionError::Refused(unresolvable(error.message))
+                    }
+                    error => super::ProcessDefinitionError::Fault(error),
+                })?;
         // The engine's names in the draft's own order: sorted by leaf bytes
         // and deduplicated.
         let resolved =
@@ -454,7 +464,8 @@ impl ProcessEngineRegistry {
                 engine_kind: draft.engine_kind.clone(),
                 declared: draft.artifacts.clone(),
                 resolved,
-            });
+            }
+            .into());
         }
         Ok(())
     }
@@ -475,13 +486,14 @@ impl ProcessEngineRegistry {
         &self,
         draft: &ProcessDefinitionDraft,
         claimed: &ProcessDefinition,
-    ) -> Result<ProcessDefinition, ProcessDefinitionRefusal> {
+    ) -> Result<ProcessDefinition, super::ProcessDefinitionError> {
         let derived_id = draft.id();
         if claimed.id != derived_id {
             return Err(ProcessDefinitionRefusal::DefinitionIdMismatch {
                 claimed: claimed.id.clone(),
                 derived: derived_id,
-            });
+            }
+            .into());
         }
         let derived = self.derive_definition(draft).await?;
         if !claimed.signature.is_unknown() && claimed.signature != derived.signature {
@@ -489,7 +501,8 @@ impl ProcessEngineRegistry {
                 engine_kind: draft.engine_kind.clone(),
                 claimed: claimed.signature.clone(),
                 authoritative: derived.signature,
-            });
+            }
+            .into());
         }
         Ok(derived)
     }

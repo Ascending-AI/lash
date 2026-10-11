@@ -55,12 +55,13 @@ impl ProcessEngine for SignedEngine {
     async fn resolve(
         &self,
         reference: &ProcessDefinitionRef,
-    ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal> {
+    ) -> Result<ProcessDefinitionResolution, crate::ProcessDefinitionError> {
         if reference.definition.as_json().get("program").is_none() {
             return Err(ProcessDefinitionRefusal::UnresolvableDefinition {
                 engine_kind: reference.engine_kind.clone(),
                 message: "definition names no program".to_string(),
-            });
+            }
+            .into());
         }
         Ok(ProcessDefinitionResolution::new(authoritative_signature()))
     }
@@ -169,10 +170,14 @@ async fn unresolvable_and_unknown_engines_are_distinct_refusals() {
         .await
         .expect_err("the engine cannot resolve a definition naming no program");
     assert!(matches!(
-        unresolvable,
-        ProcessDefinitionRefusal::UnresolvableDefinition { .. }
+        unresolvable.refusal(),
+        Some(ProcessDefinitionRefusal::UnresolvableDefinition { .. })
     ));
 
+    assert_eq!(
+        unresolvable.refusal().unwrap().code(),
+        "unresolvable_definition"
+    );
     let unknown = registry
         .resolve(&ProcessDefinitionRef::unclaimed(
             "never-registered",
@@ -181,9 +186,10 @@ async fn unresolvable_and_unknown_engines_are_distinct_refusals() {
         .await
         .expect_err("no engine owns that kind");
     assert!(matches!(
-        unknown,
-        ProcessDefinitionRefusal::UnknownEngine { .. }
+        unknown.refusal(),
+        Some(ProcessDefinitionRefusal::UnknownEngine { .. })
     ));
+    assert_eq!(unknown.refusal().unwrap().code(), "unknown_engine");
 }
 
 /// ADR 0013: an engine kind is registered once on a runtime host. The

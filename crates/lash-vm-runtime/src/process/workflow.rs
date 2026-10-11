@@ -295,13 +295,7 @@ impl KernelDocumentProvider {
         document: &DocumentId,
         entry: WorkflowDocumentEntry,
     ) -> Result<Option<WorkflowDocument>, lash_core::PluginError> {
-        let Some(stored) = self
-            .engine
-            .documents
-            .get(document)
-            .await
-            .map_err(|error| unresolvable(error.to_string()))?
-        else {
+        let Some(stored) = self.engine.documents.get(document).await? else {
             return Ok(None);
         };
         WorkflowDocument::derive(stored, entry, &self.engine.functions)

@@ -67,6 +67,9 @@ pub enum ArtifactStoreError {
     /// Artifact verification could not obtain a worker on this host.
     #[error("worker checkout exceeded its bounded wait")]
     WorkerCheckoutTimedOut,
+    /// A typed substrate fault, before the artifact operation answered.
+    #[error(transparent)]
+    StoreFault(crate::store::StoreFault),
     #[error("artifact store backend error: {0}")]
     Backend(String),
 }
@@ -99,7 +102,10 @@ impl From<crate::StoreError> for ArtifactStoreError {
             crate::StoreError::Incompatible { refusal } => Self::Incompatible { refusal },
             other => match crate::store::StoreRefusal::of_store_error(&other) {
                 Some(refusal) => Self::StoreRefusal(refusal),
-                None => Self::Backend(other.to_string()),
+                None => match crate::store::StoreFault::of_store_error(&other) {
+                    Some(fault) => Self::StoreFault(fault),
+                    None => Self::Backend(other.to_string()),
+                },
             },
         }
     }
@@ -150,15 +156,20 @@ impl From<ArtifactStoreError> for crate::PluginError {
             ArtifactStoreError::Incompatible { refusal } => {
                 crate::StoreError::Incompatible { refusal }.into()
             }
+            ArtifactStoreError::StoreFault(fault) => crate::PluginError::StoreUnavailable { fault },
+            ArtifactStoreError::Immutable { .. } => {
+                crate::PluginError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::ArtifactConflict,
+                    error.to_string(),
+                ))
+            }
             // The store did not answer: a fact about this attempt.
             ArtifactStoreError::Backend(message) => crate::PluginError::StoreUnavailable {
                 fault: crate::store::StoreFault::Backend { message },
             },
             // What the store holds refuses the write or the read: every retry
             // by this build meets it again.
-            ArtifactStoreError::Encode(_)
-            | ArtifactStoreError::Immutable { .. }
-            | ArtifactStoreError::CarryArtifactMissing { .. } => {
+            ArtifactStoreError::Encode(_) | ArtifactStoreError::CarryArtifactMissing { .. } => {
                 crate::PluginError::Invoke(error.to_string())
             }
         }

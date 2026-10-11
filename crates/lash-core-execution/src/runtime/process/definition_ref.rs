@@ -300,9 +300,6 @@ pub enum ProcessDefinitionRefusal {
         engine_kind: ProcessEngineKind,
         message: String,
     },
-    /// The host could not obtain a worker to inspect the artifact. No
-    /// definition was judged; a later attempt with capacity may resolve it.
-    WorkerCheckoutTimedOut { engine_kind: ProcessEngineKind },
     /// The signature travelling on the reference disagrees with the artifact.
     SignatureMismatch {
         engine_kind: ProcessEngineKind,
@@ -343,10 +340,6 @@ impl std::fmt::Display for ProcessDefinitionRefusal {
                 formatter,
                 "process engine `{engine_kind}` cannot resolve the definition: {message}"
             ),
-            Self::WorkerCheckoutTimedOut { engine_kind } => write!(
-                formatter,
-                "process engine `{engine_kind}` could not inspect the definition: worker checkout exceeded its bounded wait"
-            ),
             Self::SignatureMismatch {
                 engine_kind,
                 claimed,
@@ -376,19 +369,58 @@ impl std::fmt::Display for ProcessDefinitionRefusal {
 
 impl std::error::Error for ProcessDefinitionRefusal {}
 
+impl ProcessDefinitionRefusal {
+    /// A stable local snake_case name for this top-level alternative.
+    /// Existing names keep their meaning; new alternatives add names. These
+    /// are not HTTP statuses, and old clients may not recognize future names.
+    /// The name is independent of payloads and display text.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UnknownEngine { .. } => "unknown_engine",
+            Self::UnsupportedByEngine { .. } => "unsupported",
+            Self::UnresolvableDefinition { .. } => "unresolvable_definition",
+            Self::SignatureMismatch { .. } => "signature_mismatch",
+            Self::DefinitionIdMismatch { .. } => "definition_id_mismatch",
+            Self::ManifestMismatch { .. } => "manifest_mismatch",
+        }
+    }
+}
+
 impl From<ProcessDefinitionRefusal> for crate::PluginError {
     fn from(refusal: ProcessDefinitionRefusal) -> Self {
-        match refusal {
-            ProcessDefinitionRefusal::WorkerCheckoutTimedOut { .. } => {
-                crate::PluginError::RuntimeEffectController(
-                    crate::RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::WorkerCheckoutTimedOut,
-                        refusal.to_string(),
-                    )
-                    .retryable_uncommitted_derivation(),
-                )
-            }
-            refusal => crate::PluginError::Session(refusal.to_string()),
+        Self::Runtime(crate::RuntimeError::new(
+            crate::RuntimeErrorCode::DefinitionRefused,
+            refusal.to_string(),
+        ))
+    }
+}
+
+/// An engine's definition judgment or the operational error that prevented it.
+/// Store and transport faults never constitute a definition refusal.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ProcessDefinitionError {
+    #[error(transparent)]
+    Refused(#[from] ProcessDefinitionRefusal),
+    #[error(transparent)]
+    Fault(#[from] crate::PluginError),
+}
+
+impl ProcessDefinitionError {
+    /// The definition judgment, if the engine produced one.
+    pub fn refusal(&self) -> Option<&ProcessDefinitionRefusal> {
+        match self {
+            Self::Refused(refusal) => Some(refusal),
+            Self::Fault(_) => None,
+        }
+    }
+}
+
+impl From<ProcessDefinitionError> for crate::PluginError {
+    fn from(error: ProcessDefinitionError) -> Self {
+        match error {
+            ProcessDefinitionError::Refused(refusal) => refusal.into(),
+            ProcessDefinitionError::Fault(error) => error,
         }
     }
 }
@@ -437,6 +469,7 @@ pub enum ArgsMode {
 
 /// A typed refusal of a definition's argument check; checking writes nothing.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ArgsMismatch {
     #[error("argument `{path}`: {message}")]
     Argument { path: String, message: String },
@@ -448,6 +481,23 @@ pub enum ArgsMismatch {
     },
     #[error(transparent)]
     DefinitionRefused { source: ProcessDefinitionRefusal },
-    #[error(transparent)]
-    DefinitionRead { source: crate::PluginError },
+    #[error("argument `{path}` is required")]
+    ArgumentMissing { path: String },
+}
+
+impl ArgsMismatch {
+    /// A stable local snake_case name for this top-level alternative.
+    /// Existing names keep their meaning; new alternatives add names. These
+    /// are not HTTP statuses, and old clients may not recognize future names.
+    /// `definition_refused` retains its nested reason; inspect
+    /// [`ProcessDefinitionRefusal::code`] for that reason's name.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Argument { .. } => "argument_invalid",
+            Self::ArgumentMissing { .. } => "argument_missing",
+            Self::UnsupportedSignature { .. } => "unsupported",
+            Self::DefinitionMissing { .. } => "definition_missing",
+            Self::DefinitionRefused { .. } => "definition_refused",
+        }
+    }
 }

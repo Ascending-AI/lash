@@ -226,6 +226,21 @@ impl From<SendError> for EmbedError {
 }
 
 impl EmbedError {
+    /// The artifact judgment, with a stable local code, when this operation
+    /// refused a released pin, unavailable content, conflicting bytes or a
+    /// definition. Store and transport faults return `None`; inspect their
+    /// typed cause and [`Self::is_retryable`] instead. The error retains detail.
+    pub fn artifact_refusal(&self) -> Option<crate::process::HostArtifactRefusal> {
+        match self {
+            Self::Runtime(error)
+            | Self::Plugin(lash_core::PluginError::Runtime(error))
+            | Self::Session(SessionError::Plugin(lash_core::PluginError::Runtime(error))) => {
+                crate::process::HostArtifactRefusal::of_runtime(error)
+            }
+            _ => None,
+        }
+    }
+
     /// The [`SendError`] this is, when it is one.
     pub fn send_error(&self) -> Option<&SendError> {
         match self {
@@ -1018,6 +1033,67 @@ mod tests {
                 assert_eq!(facade.is_terminal(), engine.is_terminal(), "{facade:?}");
                 assert_eq!(facade.is_retryable(), engine.is_retryable(), "{facade:?}");
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod artifact_code_tests {
+    use super::*;
+
+    /// FIG-6014: public artifact judgments keep their names across the port
+    /// conversion; infrastructure faults have no refusal name.
+    #[test]
+    fn artifact_refusals_have_stable_local_codes() {
+        use lash_core::{ArtifactStoreError, PluginError, RuntimeError, RuntimeErrorCode};
+        let errors = [
+            (
+                PluginError::from(ArtifactStoreError::ReferrerEnded {
+                    referrer: lash_core::ArtifactReferrer::HostPin(
+                        crate::process::HostArtifactPin::mint(),
+                    ),
+                }),
+                "pin_released",
+            ),
+            (
+                PluginError::Runtime(RuntimeError::new(
+                    RuntimeErrorCode::DefinitionMissing,
+                    "gone",
+                )),
+                "definition_missing",
+            ),
+            (
+                PluginError::from(ArtifactStoreError::ArtifactMissing {
+                    artifact_ref: "gone".into(),
+                }),
+                "artifact_missing",
+            ),
+            (
+                PluginError::from(ArtifactStoreError::Immutable {
+                    artifact_ref: "held".into(),
+                }),
+                "conflict",
+            ),
+            (
+                PluginError::from(lash_core::ProcessDefinitionRefusal::UnknownEngine {
+                    engine_kind: "absent".into(),
+                }),
+                "definition_refused",
+            ),
+        ];
+        for (error, code) in errors {
+            let error = EmbedError::from(error);
+            assert_eq!(error.artifact_refusal().unwrap().code(), code);
+            assert!(error.is_terminal());
+            assert!(!error.is_retryable());
+        }
+        for error in [
+            ArtifactStoreError::StoreFault(lash_core::store::StoreFault::Contended),
+            ArtifactStoreError::WorkerCheckoutTimedOut,
+        ] {
+            let error = EmbedError::from(PluginError::from(error));
+            assert!(error.artifact_refusal().is_none());
+            assert!(error.is_retryable());
         }
     }
 }

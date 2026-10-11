@@ -73,12 +73,16 @@ impl ProcessEngine for SignedEngine {
         &self,
         payload: &serde_json::Value,
     ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
-        Ok(payload
+        let program = payload
             .get("program")
             .and_then(serde_json::Value::as_str)
-            .map(|program| module(&format!("module:{program}")))
-            .into_iter()
-            .collect())
+            .ok_or_else(|| {
+                crate::PluginError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::DefinitionRefused,
+                    "definition names no program",
+                ))
+            })?;
+        Ok(vec![module(&format!("module:{program}"))])
     }
 
     async fn end_artifact_referrer(
@@ -99,12 +103,13 @@ impl ProcessEngine for SignedEngine {
     async fn resolve(
         &self,
         reference: &ProcessDefinitionRef,
-    ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal> {
+    ) -> Result<ProcessDefinitionResolution, crate::ProcessDefinitionError> {
         if reference.definition.as_json().get("program").is_none() {
             return Err(ProcessDefinitionRefusal::UnresolvableDefinition {
                 engine_kind: reference.engine_kind.clone(),
                 message: "definition names no program".to_string(),
-            });
+            }
+            .into());
         }
         Ok(ProcessDefinitionResolution::new(authoritative_signature()))
     }
@@ -275,12 +280,12 @@ async fn forged_signature_claim_is_refused() {
         .await
         .expect_err("a forged signature claim is refused");
     assert_eq!(
-        refusal,
-        ProcessDefinitionRefusal::SignatureMismatch {
+        refusal.refusal(),
+        Some(&ProcessDefinitionRefusal::SignatureMismatch {
             engine_kind: ProcessEngineKind::from(SIGNED_ENGINE_KIND),
             claimed: forged.signature.clone(),
             authoritative: authoritative_signature(),
-        }
+        })
     );
 
     assert_eq!(
@@ -313,11 +318,11 @@ async fn forged_signature_claim_is_refused() {
         .await
         .expect_err("the descriptor is not the claimed id's");
     assert_eq!(
-        refusal,
-        ProcessDefinitionRefusal::DefinitionIdMismatch {
+        refusal.refusal(),
+        Some(&ProcessDefinitionRefusal::DefinitionIdMismatch {
             claimed: draft.id(),
             derived: other.id(),
-        }
+        })
     );
 }
 
@@ -598,8 +603,12 @@ async fn a_manifest_that_disagrees_with_the_engine_is_refused() {
             artifacts,
         );
         assert_eq!(
-            registry.derive_definition(&declared).await,
-            Err(ProcessDefinitionRefusal::ManifestMismatch {
+            registry
+                .derive_definition(&declared)
+                .await
+                .unwrap_err()
+                .refusal(),
+            Some(&ProcessDefinitionRefusal::ManifestMismatch {
                 engine_kind: ProcessEngineKind::from(SIGNED_ENGINE_KIND),
                 declared: declared.artifacts().to_vec(),
                 resolved: vec![module("module:payout")],
@@ -612,12 +621,26 @@ async fn a_manifest_that_disagrees_with_the_engine_is_refused() {
                     &ProcessDefinition::new(declared.id(), ProcessSignature::Unknown)
                 )
                 .await,
-            Err(ProcessDefinitionRefusal::ManifestMismatch { .. })
+            Err(crate::ProcessDefinitionError::Refused(
+                ProcessDefinitionRefusal::ManifestMismatch { .. }
+            ))
         ));
     }
+    let malformed = registry
+        .derive_definition(&draft(SIGNED_ENGINE_KIND, serde_json::json!({}), []))
+        .await
+        .unwrap_err();
     assert_eq!(
-        registry.check_definition_manifest(&draft("absent-engine", serde_json::json!({}), [])),
-        Err(ProcessDefinitionRefusal::UnknownEngine {
+        malformed.refusal().unwrap().code(),
+        "unresolvable_definition",
+        "the engine's typed input judgment remains a definition refusal"
+    );
+    assert_eq!(
+        registry
+            .check_definition_manifest(&draft("absent-engine", serde_json::json!({}), []))
+            .unwrap_err()
+            .refusal(),
+        Some(&ProcessDefinitionRefusal::UnknownEngine {
             engine_kind: ProcessEngineKind::from("absent-engine"),
         })
     );

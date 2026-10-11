@@ -281,7 +281,7 @@ impl ProcessEngine for Integrator {
     async fn resolve(
         &self,
         reference: &ProcessDefinitionRef,
-    ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal> {
+    ) -> Result<ProcessDefinitionResolution, lash::process::ProcessDefinitionError> {
         unreachable!("external signature witness")
     }
 }

@@ -174,11 +174,14 @@ pub trait ProcessEngine: Send + Sync {
     /// The signature on the reference is a claim this method never reads; an
     /// engine that stores no artifacts answers `ProcessSignature::Unknown`.
     ///
+    /// Store and transport faults return `ProcessDefinitionError::Fault`;
+    /// only a definition judgment returns `ProcessDefinitionError::Refused`.
+    ///
     /// This is an **integrator class 3: process-engine implementor** seam.
     async fn resolve(
         &self,
         reference: &ProcessDefinitionRef,
-    ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal>;
+    ) -> Result<ProcessDefinitionResolution, super::ProcessDefinitionError>;
 }
 
 /// A definition's language document, as its engine's
@@ -753,18 +756,16 @@ impl ProcessEngineRegistry {
         let resolution = match self.resolve(&reference).await {
             Ok(resolution) => resolution,
             // An engine that cannot read its definition right now has said
-            // nothing about the claim. Start admission is a recorded-input
-            // decision (FIG-1838/FIG-1521): a live artifact-store outage belongs
-            // to retryable execution after the row is durable, so an *unclaimed*
-            // reference is admitted unresolved rather than refused for the
-            // lifetime of the intent. A reference that does claim a signature is
-            // still refused — an unverifiable claim never creates a row.
-            Err(ProcessDefinitionRefusal::UnresolvableDefinition { .. })
-                if reference.signature.is_unknown() =>
-            {
+            // nothing about an unclaimed reference's signature. Admit the
+            // reference unresolved; acquisition later checks its availability.
+            // Operational faults are separate and propagate for retry, never
+            // as a recorded definition refusal.
+            Err(super::ProcessDefinitionError::Refused(
+                ProcessDefinitionRefusal::UnresolvableDefinition { .. },
+            )) if reference.signature.is_unknown() => {
                 return Ok(AdmittedProcessIdentity::admitted(identity));
             }
-            Err(refusal) => return Err(refusal.into()),
+            Err(error) => return Err(error.into()),
         };
         // The durable row pins the engine's authority, not the claim that
         // arrived: they are equal by the check above when a claim was made, and
@@ -780,7 +781,7 @@ impl ProcessEngineRegistry {
     pub async fn resolve(
         &self,
         reference: &ProcessDefinitionRef,
-    ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal> {
+    ) -> Result<ProcessDefinitionResolution, super::ProcessDefinitionError> {
         let engine = self.get(reference.engine_kind.as_str()).ok_or_else(|| {
             ProcessDefinitionRefusal::UnknownEngine {
                 engine_kind: reference.engine_kind.clone(),
@@ -795,7 +796,8 @@ impl ProcessEngineRegistry {
                 engine_kind: reference.engine_kind.clone(),
                 claimed: reference.signature.clone(),
                 authoritative: resolution.signature,
-            });
+            }
+            .into());
         }
         Ok(resolution)
     }

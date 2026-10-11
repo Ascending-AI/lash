@@ -1160,7 +1160,9 @@ pub mod process {
     pub use lash_sansio::HandleTarget;
 
     pub use crate::admin::process_admin::SessionProcessAdmin;
-    pub use crate::artifacts::{HostArtifactPin, HostArtifacts, ProcessDefinitions};
+    pub use crate::artifacts::{
+        HostArtifactPin, HostArtifactRefusal, HostArtifacts, ProcessDefinitions,
+    };
     pub use crate::process_admin::Processes;
     pub use crate::process_feed::{
         ObservableProcess, ProcessObservationEventId, ProcessObservationStream,
@@ -1189,14 +1191,14 @@ pub mod process {
         MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork, PROCESS_EFFECT_OCCURRENCE_CAP,
         PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE, ProcessAwaitOutput,
         ProcessChangeBounds, ProcessChangeCursor, ProcessDefinition, ProcessDefinitionDraft,
-        ProcessDefinitionDraftError, ProcessDefinitionId, ProcessDefinitionRef,
-        ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionTarget,
-        ProcessDefinitionValue, ProcessEffectNodeReport, ProcessEffectOccurrence,
-        ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
-        ProcessEffectReport, ProcessEffectReportError, ProcessEngineKind, ProcessEvent,
-        ProcessEventAppendReceipt, ProcessEventHistoryRetention, ProcessEventKind,
-        ProcessEventLite, ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore,
-        ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease,
+        ProcessDefinitionDraftError, ProcessDefinitionError, ProcessDefinitionId,
+        ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
+        ProcessDefinitionTarget, ProcessDefinitionValue, ProcessEffectNodeReport,
+        ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
+        ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError,
+        ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt, ProcessEventHistoryRetention,
+        ProcessEventKind, ProcessEventLite, ProcessEventPage, ProcessEventPageEvents,
+        ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease,
         ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
         ProcessExternalRef, ProcessIdentity, ProcessInput, ProcessLifecycleFact, ProcessLineage,
         ProcessListMode, ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter,

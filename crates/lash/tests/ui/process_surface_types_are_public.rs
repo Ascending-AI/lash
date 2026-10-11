@@ -24,25 +24,26 @@ use lash::persistence::{
 };
 use lash::process::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, CausalRef,
-    DeclaredProcessIdentity, HandleId, HostArtifactPin, HostArtifacts, Lifetime, LifetimeDecision,
-    LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, ObservedProcess,
-    ObservedProcessEvent, ObservedWorkItem, ObservedWorkItemState, ParentEndPlan,
+    DeclaredProcessIdentity, HandleId, HostArtifactPin, HostArtifactRefusal, HostArtifacts,
+    Lifetime, LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork,
+    ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ObservedWorkItemState, ParentEndPlan,
     ProcessAwaitOutput, ProcessChangeCursor, ProcessChangeHub, ProcessChangeSubscription,
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionValue, ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite, ProcessEventPage,
-    ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
-    ProcessEventSink, ProcessEventsRead, ProcessExecutionContext, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHistoryContinuation, ProcessIdentity,
-    ProcessInput, ProcessLifecycleFact, ProcessLineage, ProcessListMode, ProcessObserverBy,
-    ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance,
-    ProcessPruneReport, ProcessRegistration, ProcessRegistryCursor, ProcessRuntimeHost,
-    ProcessService, ProcessSessionDeleteReport, ProcessSignature, ProcessStartOptions,
-    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait,
-    ProcessTombstone, ProcessToolVisibilityFilter, ProcessWorkObserver, ProcessWorkSnapshot,
-    ProcessWorkSubstrate, ProcessWorkWiring, Processes, ProjectionWatermark, ScopeGrant, ScopeId,
-    ScopeRef, SessionProcessAdmin, SessionScope, SessionScopeId, StartCx, StartCxError, WaitKind,
-    WaitState, WatchedRegistry, lifetime, watch_process_registry,
+    ProcessDefinitionError, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEngineKind, ProcessEvent,
+    ProcessEventAppendReceipt, ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite,
+    ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
+    ProcessEventReadOutcome, ProcessEventSink, ProcessEventsRead, ProcessExecutionContext,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExternalRef,
+    ProcessHistoryContinuation, ProcessIdentity, ProcessInput, ProcessLifecycleFact,
+    ProcessLineage, ProcessListMode, ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter,
+    ProcessOutcome, ProcessProvenance, ProcessPruneReport, ProcessRegistration,
+    ProcessRegistryCursor, ProcessRuntimeHost, ProcessService, ProcessSessionDeleteReport,
+    ProcessSignature, ProcessStartOptions, ProcessStartRequest, ProcessStarted, ProcessStatus,
+    ProcessStatusFilter, ProcessTerminalWait, ProcessTombstone, ProcessToolVisibilityFilter,
+    ProcessWorkObserver, ProcessWorkSnapshot, ProcessWorkSubstrate, ProcessWorkWiring, Processes,
+    ProjectionWatermark, ScopeGrant, ScopeId, ScopeRef, SessionProcessAdmin, SessionScope,
+    SessionScopeId, StartCx, StartCxError, WaitKind, WaitState, WatchedRegistry, lifetime,
+    watch_process_registry,
 };
 // FIG-4656: the lifecycle state a record holds, the outcome a terminal state
 // owns, the statuses derived from them, and the start target a request names.
@@ -71,4 +72,14 @@ fn main() {
     local_serde::<lash::ChangePage<lash::process::ObservedProcessChange, ProcessChangeCursor>>();
     local_serde::<ProcessEventsRead>();
     let _: Option<lash::process::ProcessRosterTokenError> = None;
+}
+
+async fn args_check_signature_is_public(
+    checker: &lash::process::ProcessDefinitions,
+    definition: &lash::process::ProcessDefinition,
+    args: &serde_json::Map<String, serde_json::Value>,
+) {
+    let _: lash::Result<Result<(), lash::process::ArgsMismatch>> = checker
+        .check_args(definition, args, lash::process::ArgsMode::Complete)
+        .await;
 }

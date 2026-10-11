@@ -452,7 +452,14 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
     ) -> Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
         Ok(vec![lash_core::ArtifactName {
             store: lash_core::ArtifactStoreId::KernelDocument,
-            artifact_ref: payload_definition(payload)?.artifact_ref(),
+            artifact_ref: KernelProcessDefinition::from_payload(payload)
+                .map_err(|error| {
+                    lash_core::PluginError::Runtime(lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::DefinitionRefused,
+                        format!("invalid kernel process payload: {error}"),
+                    ))
+                })?
+                .artifact_ref(),
         }])
     }
 
@@ -511,10 +518,9 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
                 }
                 None if param.optional || mode != lash_core::ArgsMode::Complete => {}
                 None => {
-                    return Err(argument(
-                        param.name.as_str(),
-                        "the entry requires this argument".to_owned(),
-                    ));
+                    return Err(lash_core::ArgsMismatch::ArgumentMissing {
+                        path: param.name.to_string(),
+                    });
                 }
             }
         }
@@ -524,7 +530,7 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
     async fn resolve(
         &self,
         reference: &lash_core::ProcessDefinitionRef,
-    ) -> Result<lash_core::ProcessDefinitionResolution, lash_core::ProcessDefinitionRefusal> {
+    ) -> Result<lash_core::ProcessDefinitionResolution, lash_core::ProcessDefinitionError> {
         let unresolvable =
             |message: String| lash_core::ProcessDefinitionRefusal::UnresolvableDefinition {
                 engine_kind: reference.engine_kind.clone(),
@@ -535,7 +541,7 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
         let (document, signature) = self
             .entry(&definition)
             .await
-            .map_err(|error| unresolvable(error.to_string()))?
+            .map_err(|error| lash_core::ProcessDefinitionError::Fault(error.into()))?
             .map_err(unresolvable)?;
         // Every entry of the document: a process of this definition starts
         // the others by function reference.

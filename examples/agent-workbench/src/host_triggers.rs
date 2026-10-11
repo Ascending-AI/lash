@@ -364,7 +364,13 @@ impl HostTriggers {
         core.process_definitions()
             .check_args(&input.definition, &args, lash::process::ArgsMode::Complete)
             .await
-            .map_err(|error| format!("the inputs do not fit the definition: {error}"))?;
+            .map_err(|error| format!("the definition could not be checked: {error}"))?
+            .map_err(|refusal| {
+                format!(
+                    "the inputs do not fit the definition ({}): {refusal}",
+                    refusal.code()
+                )
+            })?;
         let (pin, state) = self
             .insert_pending(call_id, owner, &input)
             .map_err(|error| error.to_string())?;

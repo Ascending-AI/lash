@@ -29,6 +29,18 @@ pub enum DocumentStoreError {
     Store(#[from] ArtifactStoreError),
 }
 
+impl From<DocumentStoreError> for lash_core::PluginError {
+    fn from(error: DocumentStoreError) -> Self {
+        match error {
+            DocumentStoreError::Store(error) => error.into(),
+            error => Self::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::RuntimeStoreCorrupt,
+                error.to_string(),
+            )),
+        }
+    }
+}
+
 /// The store of admitted documents.
 #[derive(Clone)]
 pub struct KernelDocuments {

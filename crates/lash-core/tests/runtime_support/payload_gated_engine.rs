@@ -86,7 +86,7 @@ impl lash_core::ProcessEngine for PayloadGatedEngine {
     async fn resolve(
         &self,
         _reference: &lash_core::ProcessDefinitionRef,
-    ) -> Result<lash_core::ProcessDefinitionResolution, lash_core::ProcessDefinitionRefusal> {
+    ) -> Result<lash_core::ProcessDefinitionResolution, lash_core::ProcessDefinitionError> {
         Ok(lash_core::ProcessDefinitionResolution::new(
             lash_core::ProcessSignature::Unknown,
         ))

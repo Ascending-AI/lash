@@ -591,6 +591,14 @@ Hosts invoke it through
 and rejects undeclared names; Complete also requires every declared argument.
 The facade reads the retained definition, verifies its signature claim, and
 checks arguments without starting a process or acquiring a lasting pin.
+The outer `lash::Result` reports operational errors, including the typed
+`PluginError::StoreUnavailable` store fault. `Ok(Err(ArgsMismatch))` is an
+argument or definition judgment with a stable local `code()`; `Ok(Ok(()))`
+accepts the arguments. An outage never reads as invalid input.
+Host-artifact errors expose `EmbedError::artifact_refusal()` and the refusal's
+stable `code()` (`pin_released`, `definition_missing`, `artifact_missing`,
+`conflict`, `definition_refused`). Operational failures return `None` and keep
+their typed cause and retryability. These codes do not choose HTTP statuses.
 
 ### Worked example: a 40-minute CI suite
 

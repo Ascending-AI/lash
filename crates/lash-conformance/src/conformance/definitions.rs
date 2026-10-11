@@ -88,7 +88,7 @@ impl crate::ProcessEngine for ModuleDefinitionEngine {
     async fn resolve(
         &self,
         reference: &crate::ProcessDefinitionRef,
-    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
+    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionError> {
         module_of(reference.definition.as_json()).map_err(|error| {
             crate::ProcessDefinitionRefusal::UnresolvableDefinition {
                 engine_kind: reference.engine_kind.clone(),

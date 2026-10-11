@@ -46,7 +46,7 @@ pub use definition::{
     ProcessDefinitionTarget,
 };
 pub use definition_ref::{
-    ArgsMismatch, ArgsMode, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ArgsMismatch, ArgsMode, ProcessDefinitionError, ProcessDefinitionRef, ProcessDefinitionRefusal,
     ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEngineKind, ProcessSignature,
 };
 pub use definition_store::{

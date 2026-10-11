@@ -479,7 +479,7 @@ impl crate::ProcessEngine for Engine {
     async fn resolve(
         &self,
         _reference: &crate::ProcessDefinitionRef,
-    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
+    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionError> {
         Ok(crate::ProcessDefinitionResolution::new(
             crate::ProcessSignature::Unknown,
         ))
