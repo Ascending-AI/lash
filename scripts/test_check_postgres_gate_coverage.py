@@ -220,6 +220,25 @@ async fn opens_once_on_postgres() {
         inventory.write_text(json.dumps({"packages": [{"manifest": "crates/durable/Cargo.toml",
             "targets": [{"kind": "test", "label": "//crates/durable:proof__test", "tags": list(tags)}]}]}))
 
+    def test_facade_ui_type_witness_is_not_a_postgres_leg(self):
+        self.write_source("tests/ui.rs", '#[path = "ui/backend.rs"] mod backend;')
+        witness = 'fn pool(_: &lash::postgres::sqlx::PgPool) {}'
+        self.write_source("tests/ui/backend.rs", witness)
+        self.write_source("tests/integration.rs", witness)
+        (self.root / "crates/lash/BUCK").write_text(
+            'lash_rust_integration_test(name="ui__test", crate_root="tests/ui.rs")\n'
+            'lash_rust_integration_test(name="integration__test", crate_root="tests/integration.rs")'
+        )
+        inventory = self.root / "tools/buck2/target-inventory.json"
+        inventory.parent.mkdir(parents=True, exist_ok=True)
+        inventory.write_text(json.dumps({"packages": [{"manifest": "crates/lash/Cargo.toml",
+            "targets": [{"kind": "test", "label": "//crates/lash:" + name, "tags": []}
+                        for name in ["ui__test", "integration__test"]]}]}))
+        self.assertEqual(
+            ["//crates/lash:integration__test"],
+            [target["label"] for target, _, _ in checker.postgres_targets(self.root)],
+        )
+
     def test_postgres_leg_without_any_runner_is_rejected(self):
         self.target()
         self.assertTrue(any("//crates/durable:proof__test" in v.detail for v in self.violations()))

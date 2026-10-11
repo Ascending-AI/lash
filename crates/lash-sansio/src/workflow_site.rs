@@ -12,6 +12,7 @@ pub use lash_kernel_doc::{EffectIdentity, LoopIteration, Site, SpawnIdentity, Ta
 
 /// Occurrence `occurrence` of the body of a function named `label`, run by
 /// `main` outside every loop, in a test fixture.
+#[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub fn effect_identity_fixture(label: &str, occurrence: u64) -> EffectIdentity {
     EffectIdentity {

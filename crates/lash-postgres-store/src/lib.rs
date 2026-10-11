@@ -31,6 +31,9 @@
 //! [`PostgresStorage::schema_advisory_lock_key`] publishes the key so a host's
 //! migrations can participate.
 
+/// The dependency version used by this backend's public signatures.
+pub use sqlx;
+
 use lash_sansio::SessionId;
 mod namespace;
 mod observed_sql;

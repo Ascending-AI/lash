@@ -98,7 +98,7 @@ impl TurnReport {
     /// [`Cancelled`](crate::TurnStatus::Cancelled). A report exists only for
     /// a settled turn, so it is never [`Parked`](crate::TurnStatus::Parked).
     pub fn status(&self) -> crate::TurnStatus {
-        crate::send::status_of_outcome(&self.outcome)
+        crate::TurnStatus::of_outcome(&self.outcome)
     }
 
     /// Durable cancellation evidence, present exactly when this turn was

@@ -322,6 +322,19 @@ impl EmbedError {
         }
     }
 
+    /// Borrow the store error in a direct or session-wrapped store refusal.
+    ///
+    /// Runtime, plugin and durable cause chains are distinct and are not
+    /// traversed by this accessor.
+    pub fn store_error(&self) -> Option<&lash_core::StoreError> {
+        match self {
+            Self::Store(error) | Self::Session(SessionError::Store { source: error, .. }) => {
+                Some(error)
+            }
+            _ => None,
+        }
+    }
+
     /// Whether opening or writing the session met store contention.
     ///
     /// Unlike [`is_retryable`](Self::is_retryable), this excludes other
@@ -654,6 +667,54 @@ mod tests {
         let err = runtime_error(RuntimeErrorCode::SessionExecutionLeaseLost);
         assert!(!err.is_retryable(), "{err}");
         assert!(!err.is_terminal(), "{err}");
+    }
+
+    #[test]
+    fn store_error_borrows_both_existing_store_shells() {
+        for error in [
+            EmbedError::Store(StoreError::Contended),
+            EmbedError::Session(SessionError::Store {
+                context: "open session".to_string(),
+                source: StoreError::Contended,
+            }),
+            EmbedError::Store(StoreError::ExecutionStateCaptureFailed {
+                message: "capture failed".into(),
+            }),
+            EmbedError::Session(SessionError::Store {
+                context: "capture session".into(),
+                source: StoreError::ExecutionStateCaptureFailed {
+                    message: "capture failed".into(),
+                },
+            }),
+        ] {
+            let source = match &error {
+                EmbedError::Store(source)
+                | EmbedError::Session(SessionError::Store { source, .. }) => source,
+                _ => unreachable!(),
+            };
+            assert!(std::ptr::eq(
+                error.store_error().expect("store shell"),
+                source
+            ));
+        }
+        for error in [
+            runtime_error(RuntimeErrorCode::StoreCommitContended),
+            EmbedError::Plugin(PluginError::RuntimeEffectController(
+                RuntimeEffectControllerError::from(StoreError::Contended),
+            )),
+            EmbedError::Session(SessionError::Plugin(PluginError::Session("store".into()))),
+            EmbedError::Durable(lash_core::durable_port::DurableError::Store(
+                lash_core::durable_port::StoreFailure {
+                    kind: lash_core::durable_port::StoreFailureKind::Contended,
+                    message: "store contention".into(),
+                },
+            )),
+            EmbedError::UnknownSession {
+                session_id: "unknown".into(),
+            },
+        ] {
+            assert!(error.store_error().is_none(), "{error}");
+        }
     }
 
     #[test]

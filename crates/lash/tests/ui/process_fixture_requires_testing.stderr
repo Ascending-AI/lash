@@ -1,0 +1,7 @@
+error[E0308]: mismatched types
+ --> tests/ui/process_fixture_requires_testing.rs:2:17
+  |
+2 |     let _: () = lash::ProcessId::fixture("fixture");
+  |            --   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `()`, found `ProcessId`
+  |            |
+  |            expected due to this

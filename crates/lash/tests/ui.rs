@@ -52,6 +52,8 @@ fn facade_compile_time_contracts() {
     if cfg!(feature = "rlm") {
         t.compile_fail("tests/ui/rlm_protocol_event_decode_is_not_public.rs");
     }
+    t.compile_fail("tests/ui/tool_call_fixture_requires_testing.rs");
+    t.compile_fail("tests/ui/process_fixture_requires_testing.rs");
     register_facade_contracts(&t);
     register_store_seam_contracts(&t);
     register_rlm_config_builder_contracts(&t);

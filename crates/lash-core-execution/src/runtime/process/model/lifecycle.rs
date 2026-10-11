@@ -181,6 +181,7 @@ impl ProcessLifecycleState {
     /// A representative state of `status`, for fixtures that need a record
     /// in a status and do not care what put it there: a terminal status
     /// holds a minimal outcome of that status, and `waiting` a call wait.
+    #[cfg(any(test, feature = "testing"))]
     pub fn fixture(status: ProcessStatus) -> Self {
         let settled = |output| Self::Terminal {
             outcome: ProcessTerminal::from_tool_output(output),

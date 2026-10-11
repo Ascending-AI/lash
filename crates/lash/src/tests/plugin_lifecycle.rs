@@ -54,7 +54,7 @@ async fn observer_failure_is_advisory_and_keeps_committed_state() -> Result<()> 
                                 .forget();
                             finalized
                                 .lock_recover()
-                                .push(crate::send::status_of_outcome(&turn.outcome));
+                                .push(crate::TurnStatus::of_outcome(&turn.outcome));
                             observed
                                 .send(())
                                 .expect("the law receives each observation");
@@ -94,7 +94,7 @@ async fn observer_failure_is_advisory_and_keeps_committed_state() -> Result<()> 
             .output()
             .await?;
         assert_eq!(
-            crate::send::status_of_outcome(&output.result.outcome),
+            crate::TurnStatus::of_outcome(&output.result.outcome),
             crate::TurnStatus::Answered,
             "turn {turn} answers despite its failing observer"
         );

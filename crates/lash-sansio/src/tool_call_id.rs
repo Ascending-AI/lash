@@ -343,6 +343,7 @@ impl ToolCallId {
     /// A derived id standing for the call `label` in a test fixture: one id
     /// per label, from a fixed fixture root. Production admits every call
     /// under its own root instead.
+    #[cfg(any(test, feature = "testing"))]
     #[doc(hidden)]
     pub fn fixture(label: &str) -> Self {
         Self::derive(

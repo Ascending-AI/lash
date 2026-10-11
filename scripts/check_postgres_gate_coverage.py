@@ -548,7 +548,10 @@ def postgres_targets(root: Path):
                     if PG_READ.search(concrete[opening:matching_close(concrete, opening)]):
                         markers.append(f"{relative}:{line_of(text, function.start())}")
                         fragments.add("::".join((*prefix, function[1])))
-                if target["kind"] == "test" and re.search(r'\bpostgres::', concrete):
+                # Facade trybuild UI fixtures only compile; they never run a PostgreSQL leg.
+                if (target["kind"] == "test"
+                        and not relative.is_relative_to("crates/lash/tests/ui")
+                        and re.search(r'\bpostgres::', concrete)):
                     markers.append(str(relative))
                 if target["kind"] == "test" and re.search(r'#\[(?:tokio::)?test\b', text) and PG_READ.search(text):
                     markers.append(str(relative))

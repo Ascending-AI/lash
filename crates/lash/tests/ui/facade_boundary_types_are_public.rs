@@ -423,3 +423,30 @@ fn runtime_host_strings_are_validated_before_binding(
     let _batch_input = lash::BatchInput::new(lash::TurnInput::text("host input")).id(input);
     Ok(())
 }
+
+#[cfg(feature = "postgres")]
+async fn backend_schema_checks_use_the_exported_dependency(
+    pool: &lash::postgres::sqlx::PgPool,
+    connection: &mut lash::postgres::sqlx::PgConnection,
+) -> Result<(), lash::persistence::StoreError> {
+    let _ = lash::postgres::PostgresStorage::verify_schema_for(pool).await?;
+    let _ = lash::postgres::PostgresStorage::verify_schema_on(connection).await?;
+    Ok(())
+}
+
+#[cfg(feature = "s3")]
+fn backend_object_store_uses_the_exported_dependency() -> lash::s3::S3AttachmentStore {
+    lash::s3::S3AttachmentStore::from_object_store(
+        Arc::new(lash::s3::object_store::memory::InMemory::new()),
+        None,
+    )
+}
+
+fn committed_turns_page_supports_serde() {
+    fn serde_value<T: serde::Serialize + serde::de::DeserializeOwned>() {}
+    serde_value::<lash::transcript::CommittedTurnsPage>();
+}
+
+fn settled_outcome_status_is_public(outcome: &lash::TurnOutcome) -> lash::TurnStatus {
+    lash::TurnStatus::of_outcome(outcome)
+}

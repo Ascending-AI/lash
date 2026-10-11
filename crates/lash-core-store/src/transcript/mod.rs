@@ -303,7 +303,7 @@ pub struct CommittedTurn {
 
 /// One page of a session's committed turns, oldest first by commit, read
 /// after a [`CommittedTurnCursor`](crate::store::CommittedTurnCursor).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CommittedTurnsPage {
     pub turns: Vec<CommittedTurn>,
     /// Persist it only after applying every turn of the page; the next read

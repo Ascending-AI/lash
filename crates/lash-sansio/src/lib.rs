@@ -156,9 +156,9 @@ pub use turn_driver::{
     reasoning_part, visible_response_parts, visible_response_text_from_parts,
 };
 pub use value_shape::{FieldShape, ValueShape};
-pub use workflow_site::{
-    EffectIdentity, LoopIteration, Site, SpawnIdentity, TaskIdentity, Unit, effect_identity_fixture,
-};
+#[cfg(any(test, feature = "testing"))]
+pub use workflow_site::effect_identity_fixture;
+pub use workflow_site::{EffectIdentity, LoopIteration, Site, SpawnIdentity, TaskIdentity, Unit};
 mod execution_node_kind;
 pub use execution_node_kind::ExecutionNodeKind;
 

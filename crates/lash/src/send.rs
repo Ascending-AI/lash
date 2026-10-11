@@ -746,14 +746,18 @@ impl SendOutcome {
     }
 }
 
-/// The status a committed outcome answers.
-pub(crate) fn status_of_outcome(outcome: &TurnOutcome) -> TurnStatus {
-    match outcome {
-        TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. } => TurnStatus::Answered,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. }) => {
-            TurnStatus::Cancelled
+impl TurnStatus {
+    /// Classify a committed outcome, using the same rule as [`crate::TurnReport::status`].
+    /// A frame switch answers its turn; a cancelled stop is cancelled and
+    /// every other stop is failed.
+    pub fn of_outcome(outcome: &TurnOutcome) -> Self {
+        match outcome {
+            TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. } => TurnStatus::Answered,
+            TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. }) => {
+                TurnStatus::Cancelled
+            }
+            TurnOutcome::Stopped(_) => TurnStatus::Failed,
         }
-        TurnOutcome::Stopped(_) => TurnStatus::Failed,
     }
 }
 
@@ -1335,4 +1339,47 @@ pub enum CancelReceipt {
     /// No queued input or open run accepts this request: the id is unknown,
     /// revoked, already withdrawn, or its completion won the race.
     UnknownOrRevoked,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_core::facade_support::{TurnCancellationEvidence, TurnFinish, TurnStop};
+
+    #[test]
+    fn settled_outcome_status_uses_the_reports_existing_classification() {
+        for (outcome, expected) in [
+            (
+                TurnOutcome::Finished(TurnFinish::AssistantMessage {
+                    text: "answer".into(),
+                }),
+                TurnStatus::Answered,
+            ),
+            (
+                TurnOutcome::AgentFrameSwitch {
+                    frame_key: lash_sansio::FrameKey::from_caller_material("frame")
+                        .expect("frame key"),
+                    task: "next task".into(),
+                    initial_nodes: Vec::new(),
+                },
+                TurnStatus::Answered,
+            ),
+            (
+                TurnOutcome::Stopped(TurnStop::Cancelled {
+                    evidence: TurnCancellationEvidence::internal("test"),
+                }),
+                TurnStatus::Cancelled,
+            ),
+            (
+                TurnOutcome::Stopped(TurnStop::RuntimeError),
+                TurnStatus::Failed,
+            ),
+            (
+                TurnOutcome::Stopped(TurnStop::AgentFrameSwitchLimit),
+                TurnStatus::Failed,
+            ),
+        ] {
+            assert_eq!(TurnStatus::of_outcome(&outcome), expected);
+        }
+    }
 }

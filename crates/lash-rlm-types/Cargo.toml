@@ -25,3 +25,6 @@ lash-render = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+lash-sansio = { workspace = true, features = ["testing"] }

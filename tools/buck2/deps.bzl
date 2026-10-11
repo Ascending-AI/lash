@@ -752,7 +752,9 @@ PACKAGE_DEPS = {
     },
     "lash-internal-rlm-types": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "lash_sansio": "//crates/lash-sansio:lash-sansio"
+        },
         "normal": {
             "lash_render": "//crates/lash-render:lash-render",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",

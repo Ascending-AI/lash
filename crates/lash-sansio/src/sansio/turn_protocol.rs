@@ -1097,6 +1097,7 @@ impl ModelToolCalls {
     }
 
     /// The admission of a fixture turn, for machines built by tests.
+    #[cfg(any(test, feature = "testing"))]
     #[doc(hidden)]
     pub fn fixture() -> Self {
         Self {

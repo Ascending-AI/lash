@@ -1351,6 +1351,10 @@ pub mod json_decode {
 /// Trace context, events, and sink configuration.
 pub mod tracing;
 
+/// Fixture constructors and test support for non-shipped targets only.
+///
+/// Cargo features are additive: keep `testing` out of shipped dependency
+/// feature sets, including features enabled by other workspace members.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 

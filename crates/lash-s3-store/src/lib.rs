@@ -4,6 +4,9 @@
 //! including AWS S3 and Garage. Runtime metadata and attachment manifests remain
 //! in the configured [`lash_core::RuntimeStore`] backend.
 
+/// The dependency version used by this backend's public signatures.
+pub use object_store;
+
 use futures_util::TryStreamExt;
 use lash_core::attachments::{ContentMismatchDetail, validate_attachment_bytes};
 use lash_core::{

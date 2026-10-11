@@ -1,0 +1,7 @@
+error[E0308]: mismatched types
+ --> tests/ui/tool_call_fixture_requires_testing.rs:2:17
+  |
+2 |     let _: () = lash::ToolCallId::fixture("fixture");
+  |            --   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `()`, found `ToolCallId`
+  |            |
+  |            expected due to this

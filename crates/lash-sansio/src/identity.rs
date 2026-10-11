@@ -105,7 +105,7 @@ macro_rules! string_identity {
             /// # Panics
             ///
             /// When `label` is blank.
-            $(#[$literal_cfg])*
+            #[cfg(any(test, feature = "testing"))]
             pub fn fixture(label: impl Into<String>) -> Self {
                 match Self::parse(label) {
                     Ok(id) => id,
@@ -352,7 +352,7 @@ impl std::error::Error for InvalidProcessId {}
 /// Only the registrar's mint (`lash_core_store::ProcessIdMint`) holds it: no
 /// facade re-exports it, so host, tool and plugin code cannot mint an id,
 /// only parse one a registrar minted. A test names a process it never
-/// registered with [`ProcessId::fixture`].
+/// registered with `ProcessId::fixture` (requires `testing`).
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug)]
 pub struct ProcessIdRegistrar(());
@@ -386,6 +386,7 @@ impl ProcessId {
     /// takes one — the registrar mints every registered id. FNV-1a over 128
     /// bits with the version nibble pinned, so it reads as a UUIDv7 and needs
     /// no registered hash domain.
+    #[cfg(any(test, feature = "testing"))]
     #[doc(hidden)]
     pub fn fixture(label: &str) -> Self {
         let mut value: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
