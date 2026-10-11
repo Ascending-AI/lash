@@ -216,7 +216,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
             if moved.is_some() {
                 return Ok(Ok(()));
             }
-            let found = match self::process(tx, process)? {
+            let found = match process_row(tx, process)? {
                 Ok(row) => row.filter(|row| !row.terminal).map(|row| row.state_rev),
                 Err(error) => return Ok(Err(error)),
             };
@@ -400,7 +400,21 @@ pub(super) fn request_cancel(
     )
 }
 
-pub(super) fn process(tx: &Connection, process: &ProcessId) -> Answer<Option<ProcessActorRow>> {
+/// One statement owns the process row's complete snapshot; an explicit
+/// transaction would only add a BEGIN and a ROLLBACK around that statement.
+pub(super) async fn process(
+    store: &super::SqliteDurableStore,
+    process: &ProcessId,
+) -> Result<Option<ProcessActorRow>, DurableError> {
+    let process = process.clone();
+    store
+        .conn
+        .call(move |tx| process_row(tx, &process))
+        .await
+        .map_err(super::store_failure)?
+}
+
+fn process_row(tx: &Connection, process: &ProcessId) -> Answer<Option<ProcessActorRow>> {
     let row = tx
         .prepare_cached(SQL.process.row.sql())?
         .query_row([process.as_str()], |row| {

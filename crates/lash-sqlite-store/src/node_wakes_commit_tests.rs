@@ -3,6 +3,43 @@
 use super::*;
 use lash_durable::laws::node_wakes::{Claims, CountingStore};
 
+/// WAKE-CAPTURE-WORK: a producer reads both capture buffers together, even
+/// when a heartbeat has no hint to publish.
+#[tokio::test]
+async fn an_empty_wake_capture_is_one_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let stores = SqliteStoreSet::open(dir.path().join("lash.db"), crate::SqliteSynchronous::Full)
+        .await
+        .unwrap();
+    let store = stores.durable_store();
+    let lease = store
+        .register_node(&lash_durable::NodeSpec {
+            node: NodeId::new("capture-owner"),
+            decodes: vec![formats()],
+            ttl_millis: 15_000,
+        })
+        .await
+        .unwrap();
+    let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+        "node.heartbeat",
+        "sqlite",
+        store.heartbeat(&lease),
+    )
+    .await;
+    answer.unwrap();
+    let reads: u64 = receipt
+        .shapes
+        .iter()
+        .filter(|(sql, _)| sql.starts_with("select ") && sql.contains("temp.lash_"))
+        .map(|(_, shape)| shape.statements)
+        .sum();
+    eprintln!(
+        "WAKE-CAPTURE SQL {}",
+        serde_json::to_string(&receipt).unwrap()
+    );
+    assert_eq!(reads, 1, "capture buffers must share a statement");
+}
+
 /// A node that claims every `poll` and holds `max_active` actors. Its
 /// startup attempt gets the hang guard's bound, not production's: a
 /// registration that misses its bound is retried after `claim_backoff`,

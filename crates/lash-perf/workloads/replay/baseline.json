@@ -1,6 +1,6 @@
 {
   "format": "lash-perf-replay-baseline/1",
-  "blessed_from": "9fcc8bd9ee866c2216dd501eb234fded20bdd5b2",
+  "blessed_from": "0f4d137b188d148fadd30c9dbf4f03cc908385b6",
   "build": "debug",
   "workloads": {
     "chat-long-compacting": {
@@ -15,10 +15,10 @@
         "model_calls": 2.0,
         "sql_rows_read": 1013.0,
         "sql_rows_written": 200.0,
-        "sql_selects": 278.0,
-        "sql_statements": 474.0,
+        "sql_selects": 352.0,
+        "sql_statements": 599.0,
         "sql_transactions": 52.0,
-        "sql_writes": 98.0,
+        "sql_writes": 132.0,
         "store_bytes_written": 1540096.0
       },
       "depth_slope": {
@@ -48,10 +48,10 @@
         "model_calls": 2.0,
         "sql_rows_read": 517.5,
         "sql_rows_written": 168.0,
-        "sql_selects": 264.0,
-        "sql_statements": 457.0,
+        "sql_selects": 333.0,
+        "sql_statements": 568.0,
         "sql_transactions": 50.0,
-        "sql_writes": 99.0,
+        "sql_writes": 130.0,
         "store_bytes_written": 1069056.0
       },
       "depth_slope": {
@@ -85,7 +85,7 @@
         "sql_rows_written": 436.0,
         "sql_selects": 650.0,
         "sql_statements": 974.0,
-        "sql_transactions": 78.0,
+        "sql_transactions": 89.0,
         "sql_writes": 190.0,
         "store_bytes_written": 2334720.0,
         "worker_executions": 1.0,

@@ -9,6 +9,42 @@ use lash_durable::laws;
 
 use crate::SqliteStoreSet;
 
+/// PROCESS-ROW-WORK: a single-statement row read needs no explicit read
+/// transaction; SQLite supplies its snapshot for the statement itself.
+#[tokio::test]
+async fn a_process_row_read_uses_only_its_select() {
+    use lash_core_execution::ProcessRegistrar as _;
+    use lash_durable::DurableReads as _;
+
+    let set = SqliteStoreSet::memory().await.unwrap();
+    lash_core_execution::testing::process_execution_env_fixture(set.process_env_store().as_ref())
+        .await;
+    let registered = set
+        .process_registry()
+        .register_process(lash_core_execution::testing::held_engine_registration(
+            serde_json::Value::Null,
+            lash_core_execution::ProcessProvenance::host(),
+            lash_core_execution::Lifetime::Detached,
+        ))
+        .await
+        .unwrap();
+    let store = set.durable_store();
+    let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+        "process.row",
+        "sqlite",
+        store.process(&registered.id),
+    )
+    .await;
+    let row = answer.unwrap().unwrap();
+    assert_eq!(row.process, registered.id);
+    assert!(!row.terminal);
+    eprintln!(
+        "PROCESS-ROW SQL {}",
+        serde_json::to_string(&receipt).unwrap()
+    );
+    assert_eq!(receipt.statements, 1, "the SELECT owns its snapshot");
+}
+
 /// A fresh store set on a clock the law moves, and the directory a file set
 /// lives in.
 async fn world(file: bool) -> (Option<tempfile::TempDir>, SqliteStoreSet, Arc<TestClock>) {
@@ -716,4 +752,199 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
     eprintln!(
         "PREFIX-DELTA: 128 sequential calls, max new nodes={maximum_nodes}, max new edges={maximum_edges}, byte-exact after every settlement and changed prefix"
     );
+}
+
+/// PROMPT-RECLAIM-WORK: releasing an index reads its outgoing edges once
+/// per level, rather than once per node. A subtree another call roots stays
+/// stored until that call releases it.
+#[tokio::test]
+async fn prompt_reclamation_reads_one_edge_batch_per_level() {
+    use lash_durable::domain::{ModelCallId, PromptCallKey, PromptText, PromptWrite};
+    use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore};
+
+    let (_root, set, _clock) = world(false).await;
+    let store = set.durable_store();
+    let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
+    let actor = ActorKey::session("sql-work-owner").unwrap();
+    let session = lash_sansio::SessionId::from("sql-work-owner");
+    let mut texts: Vec<_> = (0..16)
+        .map(|leaf| PromptText {
+            hash: format!("leaf-{leaf}"),
+            text: format!("leaf {leaf}"),
+            children: Vec::new(),
+        })
+        .collect();
+    let mut frontier: Vec<_> = texts.iter().map(|text| text.hash.clone()).collect();
+    let mut level = 0;
+    while frontier.len() > 1 {
+        let mut next = Vec::new();
+        for (index, pair) in frontier.as_chunks::<2>().0.iter().enumerate() {
+            let hash = format!("branch-{level}-{index}");
+            texts.push(PromptText {
+                hash: hash.clone(),
+                text: format!("branch {level} {index}"),
+                children: pair.to_vec(),
+            });
+            next.push(hash);
+        }
+        frontier = next;
+        level += 1;
+    }
+    let root = texts.last().unwrap();
+    let held = texts
+        .iter()
+        .find(|text| text.hash == root.children[0])
+        .unwrap()
+        .clone();
+    let mut survivors = std::collections::BTreeSet::new();
+    let mut pending = vec![held.hash.clone()];
+    while let Some(hash) = pending.pop() {
+        let text = texts.iter().find(|text| text.hash == hash).unwrap();
+        pending.extend(text.children.iter().cloned());
+        survivors.insert(hash);
+    }
+    let call = |run: &'static str| PromptCallKey {
+        session: session.clone(),
+        call: ModelCallId::Turn {
+            run: lash_sansio::TurnId::from(run),
+            ordinal: 1,
+        },
+    };
+    let mut tx = store
+        .begin(&actor, lash_durable::Epoch(identity.epoch))
+        .await
+        .unwrap();
+    for (run, request_texts) in [("whole", texts.clone()), ("held", vec![held])] {
+        tx.write(DomainWrite::Prompt(PromptWrite::Record {
+            call: call(run),
+            snapshot: None,
+            request: run.to_owned(),
+            snapshot_texts: Vec::new(),
+            request_texts,
+            prefix: None,
+        }));
+    }
+    store
+        .commit(tx, CommitLabel::new("model.start"))
+        .await
+        .unwrap();
+    let hashes: Vec<_> = texts.iter().map(|text| text.hash.clone()).collect();
+    for (run, levels) in [("whole", 5), ("held", 4)] {
+        let mut tx = store
+            .begin(&actor, lash_durable::Epoch(identity.epoch))
+            .await
+            .unwrap();
+        tx.write(DomainWrite::Prompt(PromptWrite::Release {
+            session: session.clone(),
+            run: Some(lash_sansio::TurnId::from(run)),
+        }));
+        let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+            "prompt.release",
+            "sqlite",
+            store.commit(tx, CommitLabel::new("prompt.release")),
+        )
+        .await;
+        answer.unwrap();
+        let edge_reads: u64 = receipt
+            .shapes
+            .iter()
+            .filter(|(sql, _)| {
+                sql.starts_with("select child from") || sql.starts_with("select parent, child from")
+            })
+            .map(|(_, shape)| shape.statements)
+            .sum();
+        eprintln!(
+            "PROMPT-RECLAIM SQL {run}: {}",
+            serde_json::to_string(&receipt).unwrap()
+        );
+        assert_eq!(
+            edge_reads, levels,
+            "edge reads must follow levels, not nodes"
+        );
+        let remaining: std::collections::BTreeSet<_> = store
+            .prompt_texts(&hashes)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|text| text.hash)
+            .collect();
+        if run == "whole" {
+            assert_eq!(remaining, survivors);
+        } else {
+            assert!(remaining.is_empty());
+        }
+    }
+}
+
+/// PROMPT-READ-WORK: an admitted request reads its text and index metadata
+/// in one statement, retaining caller order, duplicate hashes and missing-hash
+/// omission.
+#[tokio::test]
+async fn prompt_text_reads_are_batched_in_request_order() {
+    use lash_durable::domain::{ModelCallId, PromptCallKey, PromptText, PromptWrite};
+    use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore, Epoch};
+
+    let (_root, set, _clock) = world(false).await;
+    let store = set.durable_store();
+    let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
+    let actor = ActorKey::session("sql-work-owner").unwrap();
+    let mut texts: Vec<_> = (0..16)
+        .map(|index| PromptText {
+            hash: format!("text-{index}"),
+            text: format!("text {index}"),
+            children: Vec::new(),
+        })
+        .collect();
+    texts.push(PromptText {
+        hash: "branch".to_owned(),
+        text: "branch".to_owned(),
+        children: vec!["text-0".to_owned(), "text-1".to_owned()],
+    });
+    let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+    tx.write(DomainWrite::Prompt(PromptWrite::Record {
+        call: PromptCallKey {
+            session: lash_sansio::SessionId::from("sql-work-owner"),
+            call: ModelCallId::Turn {
+                run: lash_sansio::TurnId::from("batch-read"),
+                ordinal: 1,
+            },
+        },
+        snapshot: None,
+        request: "batch read".to_owned(),
+        snapshot_texts: Vec::new(),
+        request_texts: texts.clone(),
+        prefix: None,
+    }));
+    store
+        .commit(tx, CommitLabel::new("model.start"))
+        .await
+        .unwrap();
+    let mut hashes: Vec<_> = texts.iter().rev().map(|text| text.hash.clone()).collect();
+    hashes.insert(2, "missing".to_owned());
+    hashes.push("branch".to_owned());
+    let expected: Vec<_> = hashes
+        .iter()
+        .filter_map(|hash| texts.iter().find(|text| text.hash == *hash).cloned())
+        .collect();
+    let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+        "prompt.texts",
+        "sqlite",
+        store.prompt_texts(&hashes),
+    )
+    .await;
+    assert_eq!(answer.unwrap(), expected);
+    let reads: u64 = receipt
+        .shapes
+        .iter()
+        .filter(|(sql, _)| {
+            sql.starts_with("select ")
+                && (sql.contains("prompt_texts") || sql.contains("prompt_text_edges"))
+        })
+        .map(|(_, shape)| shape.statements)
+        .sum();
+    eprintln!(
+        "PROMPT-READ SQL {}",
+        serde_json::to_string(&receipt).unwrap()
+    );
+    assert_eq!(reads, 1, "text and edge reads must share their snapshot");
 }

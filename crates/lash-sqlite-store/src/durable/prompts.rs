@@ -55,6 +55,18 @@ lash_store_sql::statements! {
              SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
                FROM json_each(?1)";
 
+        /// Outgoing edges of one reclamation level, including every parent
+        /// in the JSON array `?1` in the same read.
+        read_index_edges = "SELECT parent, child FROM prompt_text_edges
+             WHERE parent IN (SELECT value FROM json_each(?1)) ORDER BY parent, child";
+
+        /// Stored texts in caller order, including repeated addresses and
+        /// omitting missing ones, just like individual lookups.
+        read_texts = "SELECT wanted.key, stored.hash, stored.text, edge.child
+             FROM json_each(?1) AS wanted JOIN prompt_texts AS stored ON stored.hash = wanted.value
+             LEFT JOIN prompt_text_edges AS edge ON edge.parent = stored.hash
+             ORDER BY wanted.key, edge.child";
+
         /// Whether calls eligible for settlement hold a snapshot.
         settling_calls = "SELECT snapshot IS NOT NULL FROM prompt_snapshots
              WHERE session_id = ?1 AND owner = ?2 AND request IS NOT NULL
@@ -377,20 +389,33 @@ fn reclaim(tx: &Connection, released: &BTreeSet<String>) -> rusqlite::Result<()>
         if frontier.is_empty() {
             break;
         }
-        let children: BTreeMap<_, _> = frontier
-            .iter()
-            .map(|hash| {
-                hash_set(tx, SQL.read_children.sql(), [hash])
-                    .map(|children| (hash.clone(), children))
-            })
-            .collect::<rusqlite::Result<_>>()?;
-        let removed = hash_set(tx, SQLITE_SQL.reclaim_texts.sql(), [encode(&frontier)?])?;
+        let list = encode(&frontier)?;
+        let mut children = index_edges(tx, &list)?;
+        let removed = hash_set(tx, SQLITE_SQL.reclaim_texts.sql(), [&list])?;
         frontier = removed
-            .iter()
-            .flat_map(|hash| children[hash].iter().cloned())
+            .into_iter()
+            .filter_map(|hash| children.remove(&hash))
+            .flatten()
             .collect();
     }
     Ok(())
+}
+
+/// Read one batch's outgoing index edges in the existing child order.
+fn index_edges(
+    tx: &Connection,
+    list: &str,
+) -> rusqlite::Result<BTreeMap<String, BTreeSet<String>>> {
+    let mut children: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut statement = tx.prepare_cached(SQLITE_SQL.read_index_edges.sql())?;
+    let edges = statement.query_map([list], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for edge in edges {
+        let (parent, child) = edge?;
+        children.entry(parent).or_default().insert(child);
+    }
+    Ok(children)
 }
 
 /// A statement's JSON list argument.
@@ -451,21 +476,34 @@ pub(super) fn snapshot(tx: &Connection, call: &PromptCallKey) -> Answer<Option<P
 }
 
 pub(super) fn texts(tx: &Connection, hashes: &[String]) -> Answer<Vec<PromptText>> {
-    let mut statement = tx.prepare_cached(SQL.read_text.sql())?;
-    let mut found = Vec::with_capacity(hashes.len());
-    for hash in hashes {
-        if let Some(text) = statement
-            .query_row([hash], |row| row.get::<_, String>(0))
-            .optional()?
-        {
-            found.push(PromptText {
-                hash: hash.clone(),
-                children: hash_set(tx, SQL.read_children.sql(), [hash])?
-                    .into_iter()
-                    .collect(),
+    if hashes.is_empty() {
+        return Ok(Ok(Vec::new()));
+    }
+    let list = encode(&hashes)?;
+    let mut statement = tx.prepare_cached(SQLITE_SQL.read_texts.sql())?;
+    let found = statement.query_map([&list], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    })?;
+    let mut texts: Vec<PromptText> = Vec::new();
+    let mut previous = None;
+    for row in found {
+        let (index, hash, text, child) = row?;
+        if previous != Some(index) {
+            texts.push(PromptText {
+                hash,
                 text,
+                children: Vec::new(),
             });
+            previous = Some(index);
+        }
+        if let (Some(child), Some(text)) = (child, texts.last_mut()) {
+            text.children.push(child);
         }
     }
-    Ok(Ok(found))
+    Ok(Ok(texts))
 }

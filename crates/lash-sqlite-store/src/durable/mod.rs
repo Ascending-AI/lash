@@ -81,9 +81,10 @@ CREATE TEMP TRIGGER lash_capture_appended AFTER INSERT ON main.process_events BE
 END;
 ";
 
-pub(super) const NODE_WAKE_ACTORS: &str = "
+pub(super) const NODE_WAKE_ROWS: &str = "
 SELECT a.actor_key, a.state, a.owner_node, a.owner_boot
-FROM temp.lash_woken w JOIN main.actors a ON a.actor_key = w.actor";
+FROM temp.lash_woken w JOIN main.actors a ON a.actor_key = w.actor
+UNION ALL SELECT actor, NULL, NULL, NULL FROM temp.lash_appended";
 pub(super) const NODE_WAKE_PEERS: &str =
     "SELECT node_id FROM nodes WHERE draining = 0 AND heartbeat_expires_at_ms > ?1";
 #[cfg(test)]
@@ -1553,8 +1554,7 @@ impl DurableReads for SqliteDurableStore {
         &self,
         process: &lash_sansio::ProcessId,
     ) -> Result<Option<ProcessActorRow>, DurableError> {
-        let process = process.clone();
-        self.read(move |tx| processes::process(tx, &process)).await
+        processes::process(self, process).await
     }
 
     async fn live_until_descendants(
