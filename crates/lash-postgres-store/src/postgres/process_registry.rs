@@ -807,6 +807,17 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(plugin_store_error)?;
+        if matches!(
+            owner.opener(),
+            Some(lash_core_execution::EffectOpener::Turn { .. })
+        ) {
+            parent_end::lock_parent_scope_tx(&mut tx, owner).await?;
+            if parent_end::plan_exists_tx(&mut tx, owner).await? {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(Vec::new());
+            }
+        }
+        parent_end::mark_holds_tx(&mut tx, owner).await?;
         parent_end::lock_consumer_hold_tx(&mut tx, key).await?;
         crate::observed_sql::query(process_sql().abandoned_hold.mark.sql())
             .bind(key)

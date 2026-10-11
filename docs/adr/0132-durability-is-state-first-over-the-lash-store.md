@@ -134,15 +134,16 @@ effect the checkpoint names.
   completed response commits with the next checkpoint and the round's
   admission in one transaction.
 - The turn commit is one transaction: the session head compare-and-set,
-  terminal evidence, the parent-end of `Until(turn)` processes and the
-  retirement of the turn's working state. The head compare-and-set makes it
-  idempotent. The turn's commit and its cancel retire the same state: the
-  exec root, effect admissions and run records of every cell the turn stopped
-  in, the turn's cancel request, and the turn's waits, compacted to tombstones
-  (§6). The turn's own run records stay. They are its one tool-call ledger:
-  its report folds them alone and reads no wait after the turn ended, so a
-  report read after a crash and a redrive is the report the live turn gave
-  (FIG-5939). Recovery of a live turn still reads its full waits.
+  terminal evidence (also the turn-scope close fact), the parent-end of
+  `Until(turn)` processes and retirement of the turn's working state. The
+  head compare-and-set makes it idempotent. The turn's commit and its cancel
+  retire the same state: the exec root, effect admissions and run records of
+  every cell the turn stopped in, the turn's cancel request, and the turn's
+  waits, compacted to tombstones (§6). The turn's own run records stay. They
+  are its one tool-call ledger: its report folds them alone and reads no wait
+  after the turn ended, so a report read after a crash and a redrive is the
+  report the live turn gave (FIG-5939). Recovery of a live turn still reads
+  its full waits.
 - A preparation hook recomputes from committed state when its phase did not
   commit, so hooks are repeat-safe. An at-most-once external mutation is an
   admitted `Once` execution, not a hook.

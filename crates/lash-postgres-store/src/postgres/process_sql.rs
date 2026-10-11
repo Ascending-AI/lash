@@ -471,6 +471,14 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `parent_end_plans` statements only PostgreSQL issues.
     pub(crate) struct ParentEndPlanPostgresStatements @ "parent_end_plan" {
+        /// A turn's run row serializes registration with its terminal write.
+        /// Joined aliases take the same row lock as their physical run.
+        lock_turn = "SELECT run FROM session_runs
+             WHERE session_id = ?1 AND (run = ?2 OR run IN (
+                 SELECT admitted_run FROM pending_turn_inputs
+                 WHERE session_id = ?1 AND COALESCE(source_key, input_id) = ?2))
+             ORDER BY run FOR UPDATE";
+
         /// Reclaim plans of scopes that ended before `?1` and that no live
         /// child still names.
         ///

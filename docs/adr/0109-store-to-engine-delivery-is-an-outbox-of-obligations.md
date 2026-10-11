@@ -217,7 +217,7 @@ retain their own eligibility checks. Every close still checks its refusals,
 since new work can race readiness.
 
 A run's terminal transaction closes its scope, revokes its pending wait rows
-and writes its parent-end plan (ADR 0132 §4 and §11). The answer and the
+and uses its terminal as the turn-scope close fact (ADR 0132 §4 and §11). The answer and the
 scope close commit together; the parent-end cascade proceeds in batches after
 them.
 

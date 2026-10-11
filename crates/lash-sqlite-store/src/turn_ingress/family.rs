@@ -6,10 +6,8 @@ lash_store_sql::statements! {
     pub(crate) struct TurnIngressSqliteStatements @ "turn_ingress" {
         /// States of inputs bound to run `?2` in session `?1`, read under
         /// the write transaction that records its park.
-        run_bound_input_states = "SELECT pti.state FROM session_run_inputs binding
-             JOIN pending_turn_inputs pti
-               ON pti.session_id = binding.session_id AND pti.input_id = binding.input_id
-             WHERE binding.session_id = ?1 AND binding.run = ?2
+        run_bound_input_states = "SELECT pti.state FROM pending_turn_inputs pti
+             WHERE pti.session_id = ?1 AND pti.admitted_run = ?2
              ORDER BY pti.input_id";
 
         /// Whether session `?1`'s run `?4` has checkpoint input for turn

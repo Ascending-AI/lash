@@ -20,7 +20,7 @@ use lash_durable::{
     Woken,
 };
 use lash_sansio::{CancelOrigin, ProcessId};
-use sqlx::PgConnection;
+use sqlx::{PgConnection, Row};
 
 use super::{Committing, SQL, corrupt, get, integer, sqlx_failure, wake_within};
 use crate::process_helpers::{
@@ -338,6 +338,26 @@ async fn close_scope(
     crate::process_registry::parent_end::record_tx(tx, &closed, millis(commit.now)?, commit.fleet)
         .await
         .map_err(|error| registry_failure(&error))?;
+    if let ScopeKey::Turn(session, run) = scope {
+        let row =
+            crate::observed_sql::query(crate::process_sql::process_sql().plan.turn_close.sql())
+                .bind(session.as_str())
+                .bind(run.as_str())
+                .bind(closed.storage_id())
+                .fetch_one(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+        if row.get::<bool, _>(0) {
+            crate::process_registry::parent_end::release_holds_tx(tx, &closed)
+                .await
+                .map_err(|error| registry_failure(&error))?;
+        }
+        return if row.get::<bool, _>(1) {
+            super::session_close::record_ending(tx, commit, session, scope).await
+        } else {
+            Ok(())
+        };
+    }
     let (ScopeKey::Turn(session, _) | ScopeKey::Operation(session, _)) = scope else {
         return Ok(());
     };

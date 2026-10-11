@@ -140,6 +140,7 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
         owner: &lash_core_execution::ScopeId,
     ) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
         let key = key.to_string();
+        let owner = owner.clone();
         let owner_kind = owner.storage_kind();
         let owner_id = owner.storage_id();
         let now = self.clock.timestamp_ms() as i64;
@@ -148,6 +149,19 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
         let ids = self
             .conn
             .write_flow(move |tx| {
+                if matches!(
+                    owner.opener(),
+                    Some(lash_core_execution::EffectOpener::Turn { .. })
+                ) {
+                    match super::parent_end::plan_exists_conn(tx, &owner) {
+                        Ok(true) => return Ok(tx_outcome(Ok(Vec::new()))),
+                        Ok(false) => {}
+                        Err(error) => return Ok(tx_outcome(Err(error))),
+                    }
+                }
+                if let Err(error) = super::parent_end::mark_holds_conn(tx, &owner) {
+                    return Ok(tx_outcome(Err(error)));
+                }
                 Ok(tx_outcome(
                     (|| {
                         crate::conn::cached_execute(

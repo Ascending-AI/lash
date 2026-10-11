@@ -15,7 +15,7 @@ pub(crate) struct PendingTurnInputRow {
     state: lash_core_execution::TurnInputState,
     input_json: String,
     enqueued_at_ms: u64,
-    /// The run whose admission holds the row; `None` while it is open.
+    /// The run that took the input, retained after settlement; absent while unbound.
     pub(crate) admitted_run: Option<String>,
     run_spec_hash: Option<String>,
     trace_cause: lash_core_execution::TraceCause,
@@ -75,7 +75,9 @@ pub(crate) fn pending_turn_input_read_from_row(
     row: PgRow,
 ) -> Result<lash_core_execution::PendingTurnInputRead, StoreError> {
     let row = pending_turn_input_row(row)?;
-    let admitted_run = row.admitted_run.clone();
+    let admitted_run = (!matches!(row.state.as_str(), "completed" | "cancelled"))
+        .then(|| row.admitted_run.clone())
+        .flatten();
     let input = pending_turn_input_from_row(row)?;
     Ok(match admitted_run {
         Some(run) => lash_core_execution::PendingTurnInputRead::admitted(

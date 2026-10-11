@@ -174,8 +174,6 @@ pub struct StoreSnapshot {
     pub obligations: Vec<ObligationRow>,
     pub inputs: Vec<InputRow>,
     pub runs: Vec<RunRow>,
-    /// `(session, input, run)` of every `session_run_inputs` binding.
-    pub run_inputs: Vec<(String, String, String)>,
     pub artifacts: Vec<ArtifactRow>,
     /// `(referrer_kind, referrer_id)` of every ended referrer's fence.
     pub fences: BTreeSet<(String, String)>,
@@ -263,17 +261,6 @@ impl StoreSnapshot {
                 admitted: text(&row, "admitted").as_deref() == Some("1"),
                 terminal_kind: text(&row, "terminal_kind"),
             });
-        }
-        for row in read(
-            stores,
-            "SELECT session_id, input_id, run FROM session_run_inputs \
-             ORDER BY session_id, input_id",
-        )? {
-            snapshot.run_inputs.push((
-                required(&row, "session_id"),
-                required(&row, "input_id"),
-                required(&row, "run"),
-            ));
         }
         for row in read(
             stores,

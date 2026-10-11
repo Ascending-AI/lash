@@ -31,11 +31,6 @@ lash_store_sql::statements! {
                AND input.state IN ('deferred_next_turn', 'pending_active')
              RETURNING input.input_id";
 
-        /// Record that run `?3` of session `?1` executes each input `?2[i]`.
-        record_run_inputs = "INSERT INTO session_run_inputs (session_id, input_id, run)
-             SELECT ?1, named.input_id, ?3 FROM UNNEST(?2::text[]) AS named(input_id)
-             ON CONFLICT (session_id, input_id) DO NOTHING";
-
         /// Bind each batch `?2[i]` of session `?1` to run `?3`, as the
         /// neutral `bind_batch` does one batch; returns each batch it bound.
         bind_batches = "UPDATE queued_work_batches AS batch
@@ -531,19 +526,14 @@ pub(super) static BIND_INPUTS: Entry = Entry::new(
     &[Ty::Text, Ty::Texts, Ty::Text],
     Shape::Returning,
 );
-pub(super) static RECORD_RUN_INPUTS: Entry = Entry::new(
-    || &POSTGRES_SQL.record_run_inputs,
-    &[Ty::Text, Ty::Texts, Ty::Text],
-    Shape::Exec,
-);
 pub(super) static BIND_BATCHES: Entry = Entry::new(
     || &POSTGRES_SQL.bind_batches,
     &[Ty::Text, Ty::Texts, Ty::Text],
     Shape::Returning,
 );
 
-/// `write`'s step program: an admission binds its inputs, records the run
-/// executes them, and binds its batches, one statement per kind whatever
+/// `write`'s step program: an admission binds its inputs and batches,
+/// retaining each input's run on its row, one statement per kind whatever
 /// their number, each bind answering every item it names. An enqueue or an
 /// operation's entry has none: what it admits is read.
 pub(super) fn steps(write: &SessionMailWrite) -> Option<Vec<Step>> {
@@ -576,7 +566,6 @@ pub(super) fn steps(write: &SessionMailWrite) -> Option<Vec<Step>> {
             named(items.clone()),
             Some(items.len() as u64),
         ));
-        program.push(Step::any(&RECORD_RUN_INPUTS, named(items)));
     }
     if !batches.is_empty() {
         let items: Vec<&str> = batches.iter().map(BatchId::as_str).collect();

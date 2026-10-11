@@ -278,7 +278,9 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
         mail: MailStatements::render(dialect),
         park: ActorParkStatements::render(dialect),
         process: ProcessActorStatements::render(dialect),
-        session_mail: SessionMailStatements::render(dialect),
+        session_mail: SessionMailStatements::render(
+            dialect.with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE),
+        ),
         postgres: PostgresDurableStatements::render(dialect),
     }
 });

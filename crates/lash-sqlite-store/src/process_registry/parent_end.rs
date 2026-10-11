@@ -1,11 +1,7 @@
-//! The scope-close ledger: one row per closed scope (FIG-3607 R9).
-//!
-//! The ledger is keyed by the scope itself — `(kind, id)` — not by a process
-//! row. A turn run or a session has no process row, and a process scope's row
-//! may be pruned before its children settle, so a foreign key onto
-//! `processes` cannot express the fact this table records.
+//! Turn scopes derive their close from the retained run terminal. Other
+//! scopes retain their typed close ledger, including after a process is pruned.
 
-use lash_core_execution::{ParentEndPlan, PluginError, ScopeId};
+use lash_core_execution::{EffectOpener, ParentEndPlan, PluginError, ScopeId};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::sql::process_sql;
@@ -57,6 +53,9 @@ pub(crate) fn record_conn(
     ended_at_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), PluginError> {
+    if matches!(parent.opener(), Some(EffectOpener::Turn { .. })) {
+        return Ok(());
+    }
     let (kind, id) = ledger_key(parent);
     crate::conn::cached_execute(
         conn,
@@ -94,6 +93,21 @@ pub(crate) fn record_conn(
 /// Registration reads this inside its own transaction to fence a late start
 /// (FIG-3607 R11).
 pub(super) fn plan_exists_conn(conn: &Connection, parent: &ScopeId) -> Result<bool, PluginError> {
+    if let Some(EffectOpener::Turn {
+        session_id,
+        turn_id,
+    }) = parent.opener()
+    {
+        return conn
+            .query_row(
+                process_sql().plan.turn_terminal.sql(),
+                params![session_id.as_str(), turn_id.as_str()],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|row| row.is_some())
+            .map_err(process_sqlite_error);
+    }
     let (kind, id) = ledger_key(parent);
     conn.query_row(process_sql().plan.exists.sql(), params![kind, id], |_| {
         Ok(())
@@ -129,6 +143,30 @@ pub(super) async fn get(
     registry: &SqliteProcessRegistry,
     parent: &ScopeId,
 ) -> Result<Option<ParentEndPlan>, PluginError> {
+    if let Some(EffectOpener::Turn {
+        session_id,
+        turn_id,
+    }) = parent.opener()
+    {
+        let session_id = session_id.clone();
+        let turn_id = turn_id.clone();
+        let ended = registry
+            .conn
+            .call(move |conn| {
+                conn.query_row(
+                    process_sql().plan.turn_terminal.sql(),
+                    params![session_id.as_str(), turn_id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+            })
+            .await
+            .map_err(process_sqlite_error)?;
+        return Ok(ended.map(|ended| ParentEndPlan {
+            parent: parent.clone(),
+            ended_at_ms: ended.max(0) as u64,
+        }));
+    }
     let (kind, id) = ledger_key(parent);
     let inside = (kind, id.clone());
     let row = registry
@@ -145,4 +183,38 @@ pub(super) async fn get(
         .map_err(process_sqlite_error)?;
     row.map(|(payload, ended)| decode_plan(kind, &id, &payload, ended, registry.conn.fleet()))
         .transpose()
+}
+
+/// Registration/abandonment marks only turn owners; other scopes keep their ledger.
+pub(crate) fn mark_holds_conn(conn: &Connection, owner: &ScopeId) -> Result<(), PluginError> {
+    if let Some(EffectOpener::Turn {
+        session_id,
+        turn_id,
+    }) = owner.opener()
+    {
+        conn.prepare_cached(process_sql().plan.mark_turn_holds.sql())
+            .map_err(process_sqlite_error)?
+            .query_row(params![session_id.as_str(), turn_id.as_str()], |_| Ok(()))
+            .optional()
+            .map_err(process_sqlite_error)?;
+    }
+    Ok(())
+}
+
+/// The close releases only holds the scope registered.
+pub(crate) fn release_holds_conn(conn: &Connection, owner: &ScopeId) -> Result<(), PluginError> {
+    let (kind, id) = ledger_key(owner);
+    crate::conn::cached_execute(
+        conn,
+        process_sql().process.release_consumer_holds_owned_by.sql(),
+        params![kind, id],
+    )
+    .map_err(process_sqlite_error)?;
+    crate::conn::cached_execute(
+        conn,
+        process_sql().abandoned_hold.forget_owned_by.sql(),
+        params![kind, id],
+    )
+    .map_err(process_sqlite_error)?;
+    Ok(())
 }

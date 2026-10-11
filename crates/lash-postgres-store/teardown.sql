@@ -60,8 +60,6 @@ DROP TABLE IF EXISTS lash_session_ingress_sequence CASCADE;
 
 DROP TABLE IF EXISTS lash_session_runs CASCADE;
 
-DROP TABLE IF EXISTS lash_session_run_inputs CASCADE;
-
 DROP TABLE IF EXISTS lash_control_intents CASCADE;
 
 DROP TABLE IF EXISTS lash_attachment_referrer_edges CASCADE;

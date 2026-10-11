@@ -107,6 +107,9 @@ pub(crate) async fn apply_registration_tx(
             ));
         }
     }
+    if let Some(hold) = consumer_hold.as_ref() {
+        parent_end::mark_holds_tx(tx, &hold.owner).await?;
+    }
     let mut record = ProcessRecord::from_prepared_registration(registration, process_id, now);
     let record_json = serde_json::to_string(&record).map_err(process_decode_error)?;
     let result =

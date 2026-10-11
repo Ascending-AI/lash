@@ -280,15 +280,15 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     input_json        TEXT NOT NULL,
     submission_digest TEXT NOT NULL,
     enqueued_at_ms    INTEGER NOT NULL,
-    admitted_run     TEXT, -- The run whose fenced admission holds the input; NULL while open.
+    admitted_run     TEXT, -- The run that took the input, retained after settlement; NULL while unbound.
     admitted_by       TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     run_spec_hash     TEXT,
     terminal_at_ms    INTEGER, -- When the input's tombstone was written; NULL until then.
     trace_cause_json  TEXT, -- The submission's trace cause, written once at acceptance; NULL is a root cause.
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK ((json_extract(ingress_json, '$.scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR (json_extract(ingress_json, '$.scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
-    CONSTRAINT ck_pending_turn_inputs_admission_all_or_none CHECK ((admitted_run IS NULL) = (admitted_by IS NULL)),
-    CONSTRAINT ck_pending_turn_inputs_settled_unadmitted CHECK (admitted_run IS NULL OR state NOT IN ('cancelled', 'completed')),
+    CONSTRAINT ck_pending_turn_inputs_admission_all_or_none CHECK (state IN ('cancelled', 'completed') OR (admitted_run IS NULL) = (admitted_by IS NULL)),
+    CONSTRAINT ck_pending_turn_inputs_settled_unadmitted CHECK (admitted_by IS NULL OR state NOT IN ('cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_terminal_at CHECK ((state IN ('cancelled', 'completed')) = (terminal_at_ms IS NOT NULL)),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)

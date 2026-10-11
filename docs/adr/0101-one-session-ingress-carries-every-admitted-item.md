@@ -281,7 +281,8 @@ releases the row binding at its own sequence position; subsequent admission
 recomposes open rows. A stale epoch fails the fence: admission and settlement
 write nothing, and the stale owner drops the actor. Settlement checks that every named row belongs to the run.
 Completed input carries application evidence. Run terminal writes release
-remaining bindings, so terminal runs cannot retain admitted rows.
+remaining live bindings, so terminal runs cannot retain admitted rows.
+Settled inputs keep their run identity, without a live admission.
 
 Evidence: `crates/lash-core-store/src/store/admission_plan.rs:67`, `:197`,
 `crates/lash-core-store/src/store/run.rs`, and
@@ -307,9 +308,14 @@ allocation, and a mixed input request is refused atomically. Plugin commands
 queue their inputs as one request, with generated keys under `input:command:`;
 an admission refusal retains its typed cause through command settlement to the host.
 
+A settled input retains `admitted_run` on its own row; `admitted_by` is cleared.
+The state distinguishes that retained run identity from a live admission. A
+release clears both columns on nonterminal inputs, so a fork can rebind them.
+Run lookup and input-pin retention use this one retained column.
+
 Terminal items stay in place as tombstones. Tombstones preserve kind, source
 key, sequence, submitted delivery, digest, terminal cause, and terminal time,
-with no admission binding. A queued-work tombstone records `terminal_cause`
+with no live admission. A queued-work tombstone records `terminal_cause`
 and `terminal_at_ms`; an input's terminal state owns its cause and terminal time, decoded together
 from `state`, `ingress_json` and `terminal_at_ms`. Cancelled items cannot reopen on retry. Terminal causes
 distinguish delivered input or work, applied command, stale config revision,

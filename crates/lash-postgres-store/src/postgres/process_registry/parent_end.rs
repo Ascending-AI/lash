@@ -1,11 +1,7 @@
-//! The scope-close ledger: one row per closed scope (FIG-3607 R9).
-//!
-//! The ledger is keyed by the scope itself — `(kind, id)` — not by a process
-//! row. A turn run or a session has no process row, and a process scope's row
-//! may be pruned before its children settle, so a foreign key onto
-//! `lash_processes` cannot express the fact this table records.
+//! Turn scopes derive their close from the retained run terminal. Other
+//! scopes retain their typed close ledger, including after a process is pruned.
 
-use lash_core_execution::{ParentEndPlan, PluginError, ScopeId};
+use lash_core_execution::{EffectOpener, ParentEndPlan, PluginError, ScopeId};
 use sqlx::{PgPool, Row};
 
 use crate::process_sql::process_sql;
@@ -48,22 +44,27 @@ fn decode_plan(
     })
 }
 
-/// Serialize every decision about one parent scope at a stable advisory-lock
-/// key, held for the caller's transaction.
-///
-/// PostgreSQL is the only tier where registration and the ledger write are
-/// concurrent: SQLite serializes both through one write flow and the in-memory
-/// registry through one transaction mutex. Without this lock the fence is a
-/// check-then-act under READ COMMITTED — a start reads "no row",
-/// the ledger row commits, the sweep pages children without seeing the
-/// uncommitted child, settles the row, and the child then commits live with an
-/// ended scope that no later pass revisits. Taking the lock in registration,
-/// and in the ledger write orders those two writes: the child either commits
-/// before the row, or sees the row and is refused.
+/// Serialize registration with the scope's close for this transaction. A
+/// turn locks its run row, the same row its terminal writes: taking a turn
+/// advisory lock before updating the hold marker would reverse the terminal
+/// writer's row-then-close order. Other scopes retain their advisory lock.
 pub(crate) async fn lock_parent_scope_tx(
     tx: &mut sqlx::PgConnection,
     parent: &ScopeId,
 ) -> Result<(), PluginError> {
+    if let Some(EffectOpener::Turn {
+        session_id,
+        turn_id,
+    }) = parent.opener()
+    {
+        crate::observed_sql::query(process_sql().plan_postgres.lock_turn.sql())
+            .bind(session_id.as_str())
+            .bind(turn_id.as_str())
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(plugin_sqlx_error)?;
+        return Ok(());
+    }
     let (kind, id) = ledger_key(parent);
     crate::observed_sql::query(
         crate::connection_sql::connection_sql()
@@ -88,6 +89,9 @@ pub(crate) async fn record_tx(
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), PluginError> {
     lock_parent_scope_tx(tx, parent).await?;
+    if matches!(parent.opener(), Some(EffectOpener::Turn { .. })) {
+        return Ok(());
+    }
     let (kind, id) = ledger_key(parent);
     crate::observed_sql::query(process_sql().plan.insert_if_absent.sql())
         .bind(kind)
@@ -147,6 +151,19 @@ pub(crate) async fn plan_exists_tx(
     tx: &mut sqlx::PgConnection,
     parent: &ScopeId,
 ) -> Result<bool, PluginError> {
+    if let Some(EffectOpener::Turn {
+        session_id,
+        turn_id,
+    }) = parent.opener()
+    {
+        return crate::observed_sql::query(process_sql().plan.turn_terminal.sql())
+            .bind(session_id.as_str())
+            .bind(turn_id.as_str())
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map(|row| row.is_some())
+            .map_err(plugin_sqlx_error);
+    }
     let (kind, id) = ledger_key(parent);
     let row = crate::observed_sql::query(process_sql().plan.exists.sql())
         .bind(kind)
@@ -162,6 +179,23 @@ pub(super) async fn get(
     parent: &ScopeId,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<Option<ParentEndPlan>, PluginError> {
+    if let Some(EffectOpener::Turn {
+        session_id,
+        turn_id,
+    }) = parent.opener()
+    {
+        let ended: Option<i64> =
+            crate::observed_sql::query_scalar(process_sql().plan.turn_terminal.sql())
+                .bind(session_id.as_str())
+                .bind(turn_id.as_str())
+                .fetch_optional(crate::observed_sql::executor(pool))
+                .await
+                .map_err(plugin_sqlx_error)?;
+        return Ok(ended.map(|ended| ParentEndPlan {
+            parent: parent.clone(),
+            ended_at_ms: ended.max(0) as u64,
+        }));
+    }
     let (kind, id) = ledger_key(parent);
     let row = crate::observed_sql::query(process_sql().plan.select_stamps.sql())
         .bind(kind)
@@ -174,4 +208,45 @@ pub(super) async fn get(
         decode_plan(kind, &id, &payload, row.get(1), fleet_format)
     })
     .transpose()
+}
+
+/// Registration/abandonment marks only turn owners; other scopes keep their ledger.
+pub(crate) async fn mark_holds_tx(
+    tx: &mut sqlx::PgConnection,
+    owner: &ScopeId,
+) -> Result<(), PluginError> {
+    if let Some(EffectOpener::Turn {
+        session_id,
+        turn_id,
+    }) = owner.opener()
+    {
+        crate::observed_sql::query(process_sql().plan.mark_turn_holds.sql())
+            .bind(session_id.as_str())
+            .bind(turn_id.as_str())
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(plugin_sqlx_error)?;
+    }
+    Ok(())
+}
+
+/// The close releases only holds the scope registered.
+pub(crate) async fn release_holds_tx(
+    tx: &mut sqlx::PgConnection,
+    owner: &ScopeId,
+) -> Result<(), PluginError> {
+    let (kind, id) = ledger_key(owner);
+    crate::observed_sql::query(process_sql().process.release_consumer_holds_owned_by.sql())
+        .bind(kind)
+        .bind(&id)
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(plugin_sqlx_error)?;
+    crate::observed_sql::query(process_sql().abandoned_hold.forget_owned_by.sql())
+        .bind(kind)
+        .bind(&id)
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(plugin_sqlx_error)?;
+    Ok(())
 }

@@ -437,12 +437,6 @@ fn admit(
         if bound.is_none() {
             return moved(input.as_str());
         }
-        tx.prepare_cached(SQL.session_mail.record_run_input.sql())?
-            .execute(rusqlite::params![
-                session.as_str(),
-                input.as_str(),
-                run.as_str()
-            ])?;
     }
     for batch in batches {
         let bound = tx
@@ -471,4 +465,30 @@ pub(crate) fn cut_session_wakes(conn: &Connection, armed: bool) -> rusqlite::Res
     } else {
         "DROP TRIGGER lash_test_cut_wake"
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// INPUT-BIND-WORK: one durable column is one statement per input.
+    #[tokio::test]
+    async fn each_admitted_input_is_bound_with_one_statement() {
+        let conn = crate::tests::input_run_sql_fixture();
+        crate::observed_sql::enable(&conn);
+        let (answer, receipt) =
+            lash_core_execution::facade_support::sql::collect("session.admit", "sqlite", async {
+                admit(
+                    &conn,
+                    &"session".into(),
+                    &"run".into(),
+                    &["input".into()],
+                    &[],
+                )
+            })
+            .await;
+        answer.expect("SQL").expect("admit");
+        assert_eq!(receipt.statements, 1, "one fewer statement per bound input");
+        eprintln!("INPUT_BIND_STATEMENTS {}", receipt.statements);
+    }
 }

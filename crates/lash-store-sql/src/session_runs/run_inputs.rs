@@ -1,23 +1,18 @@
-//! `session_run_inputs`: the run each accepted input of a session is bound
-//! to. The recorded admission step binds the rows it admitted, the commit
-//! that applies a checkpoint-admitted input binds it to the run that
-//! applied it, and a fork rebinds held inputs to its new run.
-
-/// The table's unprefixed name.
-pub const TABLE: &str = "session_run_inputs";
-
-/// Every column, in insert order.
-pub const INSERT_COLUMNS: &str = "session_id, input_id, run";
+//! An input's run is retained on its pending_turn_inputs row, including after
+//! settlement. Fork release clears only live bindings.
 
 crate::statements! {
-    /// `session_run_inputs` statements both backends issue verbatim.
+    /// Input-run readers and explicit bindings, shared by both stores.
     pub struct SessionRunInputStatements @ "session_run_input" {
-        /// Bind input `?2` of session `?1` to run `?3` unless it is bound.
-        insert = "INSERT INTO session_run_inputs (session_id, input_id, run) VALUES (?1, ?2, ?3)
-             ON CONFLICT (session_id, input_id) DO NOTHING";
+        /// Bind an existing input, keeping an equal binding and refusing a
+        /// different one in the caller's transaction.
+        bind = "UPDATE pending_turn_inputs
+             SET admitted_run = ?3,
+                 admitted_by = CASE WHEN {{nonterminal_turn_input_state(state)}} THEN CAST(?3 AS TEXT) ELSE NULL END
+             WHERE session_id = ?1 AND input_id = ?2
+               AND (admitted_run IS NULL OR admitted_run = ?3)";
 
-        /// The run input `?2` of session `?1` is bound to.
-        select_run = "SELECT run FROM session_run_inputs WHERE session_id = ?1 AND input_id = ?2";
+        select_run = "SELECT admitted_run FROM pending_turn_inputs WHERE session_id = ?1 AND input_id = ?2";
 
         /// What a follower of input `?2` of session `?1` reads, in one
         /// statement and so one snapshot: the run it is bound to, whether its
@@ -25,7 +20,7 @@ crate::statements! {
         /// instant. A claim binds the input and moves its row in one
         /// transaction, so no read here sees one without the other.
         select_status = "SELECT
-             (SELECT b.run FROM session_run_inputs b
+             (SELECT b.admitted_run FROM pending_turn_inputs b
               WHERE b.session_id = ?1 AND b.input_id = ?2),
              EXISTS (SELECT 1 FROM pending_turn_inputs i
                      WHERE i.session_id = ?1 AND i.input_id = ?2
@@ -35,21 +30,12 @@ crate::statements! {
 
         /// Turn scopes of inputs admitted to run `?2` of session `?1`.
         /// The source key names the input's turn; an unkeyed input uses its id.
-        bound_turn_scopes = "SELECT DISTINCT COALESCE(i.source_key, i.input_id)
-             FROM session_run_inputs b
-             JOIN pending_turn_inputs i ON i.session_id = b.session_id AND i.input_id = b.input_id
-             WHERE b.session_id = ?1 AND b.run = ?2
+        bound_turn_scopes = "SELECT DISTINCT COALESCE(source_key, input_id)
+             FROM pending_turn_inputs
+             WHERE session_id = ?1 AND admitted_run = ?2
              ORDER BY 1";
 
-        /// Every binding of session `?1`: its deletion.
-        /// The unsettled inputs run `?2` of session `?1` took as its own.
-        bound_inputs = "SELECT b.input_id FROM session_run_inputs b
-             JOIN pending_turn_inputs i ON i.session_id = b.session_id AND i.input_id = b.input_id
-             WHERE b.session_id = ?1 AND b.run = ?2 AND {{nonterminal_turn_input_state(i.state)}}";
-
-        /// Forget which run took input `?2` of session `?1`.
-        unbind = "DELETE FROM session_run_inputs WHERE session_id = ?1 AND input_id = ?2";
-
-        delete_by_session = "DELETE FROM session_run_inputs WHERE session_id = ?1";
+        bound_inputs = "SELECT input_id FROM pending_turn_inputs
+             WHERE session_id = ?1 AND admitted_run = ?2 AND {{nonterminal_turn_input_state(state)}}";
     }
 }

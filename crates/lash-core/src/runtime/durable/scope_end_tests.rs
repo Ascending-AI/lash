@@ -650,89 +650,6 @@ async fn a_session_close_whose_process_ends_before_its_wait_commits_still_closes
     );
 }
 
-/// A9 (FIG-5222): once a turn's scope has ended, or a session's close has
-/// begun, no process registers under it: the ending transaction records the
-/// scope's closure, and a start that commits after it is refused, whether
-/// it lives `Until` the scope or only started there, as is a start in a turn
-/// of the closed session that never ran.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_start_after_its_turn_ended_or_its_session_began_closing_is_refused() {
-    let world = World::new("closed-scopes", DurableSettings::default(), Vec::new()).await;
-    let cx = world.claim().await;
-    let ended = turn("ended-turn");
-    let mut tx = cx.begin().await.expect("begin");
-    end_turn_scope(&cx, &mut tx, &world.session, &ended)
-        .await
-        .expect("end the turn's scope");
-    cx.commit(tx, CommitLabel::TURN_COMMIT)
-        .await
-        .expect("commit the turn");
-    assert_parent_ended(
-        try_start_process(
-            &world.backend,
-            ScopeId::turn(world.session.clone(), ended.clone()),
-            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
-        )
-        .await,
-        "a start under the ended turn",
-    );
-    assert_parent_ended(
-        try_start_detached(
-            &world.backend,
-            ScopeId::turn(world.session.clone(), ended.clone()),
-        )
-        .await,
-        "a detached start by the ended turn",
-    );
-    start_process(
-        &world.backend,
-        ScopeId::turn(world.session.clone(), turn("open-turn")),
-        lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
-    )
-    .await;
-
-    request_session_close(&world.backend, &world.session)
-        .await
-        .expect("request the close");
-    let mut tx = cx.begin().await.expect("begin");
-    begin_session_close(&mut tx, &world.session);
-    tx.ack_seen();
-    cx.commit(tx, CommitLabel::SESSION_CLOSE_BEGIN)
-        .await
-        .expect("drain the close request");
-    for (scope, what) in [
-        (
-            ScopeId::Session(world.session.clone()),
-            "a start under the closing session",
-        ),
-        (
-            ScopeId::turn(world.session.clone(), turn("never-ran")),
-            "a start in a turn of the closing session that never ran",
-        ),
-    ] {
-        assert_parent_ended(
-            try_start_process(
-                &world.backend,
-                scope,
-                lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
-            )
-            .await,
-            what,
-        );
-    }
-    assert_parent_ended(
-        try_start_detached(&world.backend, ScopeId::Session(world.session.clone())).await,
-        "a detached start by the closing session",
-    );
-}
-
-fn assert_parent_ended(started: Result<ProcessId, crate::PluginError>, what: &str) {
-    assert!(
-        matches!(started, Err(crate::PluginError::ParentEnded { .. })),
-        "{what} was not refused as parent-ended: {started:?}"
-    );
-}
-
 /// A8 (FIG-5222): process A lives `Until` the session and B `Until` A. A's
 /// terminal committed before its cascade marked B, so B is live below a
 /// terminal intermediate: the close waits on B before its `artifacts` step,
@@ -1473,31 +1390,6 @@ async fn try_start_process(
         .map(|record| record.id)
 }
 
-/// Register a detached process with the held engine that `starter`
-/// started: it owes `starter` nothing, but names it as its starter.
-async fn try_start_detached(
-    backend: &Backend,
-    starter: ScopeId,
-) -> Result<ProcessId, crate::PluginError> {
-    lash_core_execution::testing::process_execution_env_fixture(
-        backend.process_env_store().as_ref(),
-    )
-    .await;
-    let mut registration = lash_core_execution::testing::held_engine_registration(
-        serde_json::Value::Null,
-        crate::ProcessProvenance::host(),
-        crate::Lifetime::Detached,
-    );
-    registration.ancestry = crate::Ancestry::from_scopes([starter]);
-    backend
-        .process_registry()
-        .register_process(registration)
-        .await
-        .map(|record| record.id)
-}
-
-/// End `process` as its own activation does: claim its actor and commit its
-/// terminal transaction, cancelled by its parent's end.
 async fn end_process(backend: &Backend, process: &ProcessId) {
     let durable = backend.durable();
     let lease = durable

@@ -163,7 +163,7 @@ impl HeldTexts {
 pub(crate) const FUNCTION: &str = "lash_owner_commit";
 
 /// Every statement a step may name: what the function dispatches on.
-pub(super) fn entries() -> [&'static Entry; 26] {
+pub(super) fn entries() -> [&'static Entry; 25] {
     [
         &run_records::APPEND,
         &run_records::PRUNE,
@@ -179,7 +179,6 @@ pub(super) fn entries() -> [&'static Entry; 26] {
         &turns::UPSERT_NAMESPACES,
         &turns::WORKING_SET,
         &session_mail::BIND_INPUTS,
-        &session_mail::RECORD_RUN_INPUTS,
         &session_mail::BIND_BATCHES,
         &prompts::INSERT_SNAPSHOT,
         &prompts::LOCK_TEXTS,

@@ -15,6 +15,215 @@ use std::sync::atomic::Ordering;
 static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static SESSION_LIST_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+pub(crate) fn input_run_sql_fixture() -> Connection {
+    let connection = Connection::open_in_memory().expect("SQLite");
+    for ddl in crate::schema::provisioning_statements() {
+        connection.execute_batch(ddl).expect("schema");
+    }
+    connection
+        .execute_batch(
+            "INSERT INTO session_runs (session_id, run) VALUES ('session', 'run');
+         INSERT INTO pending_turn_inputs (enqueue_seq, input_id, session_id, source_key,
+             ingress_json, state, input_json, submission_digest, enqueued_at_ms)
+         VALUES (1, 'input', 'session', 'alias', '{\"scope\":\"next_turn\"}',
+             'deferred_next_turn', '{}', 'digest', 0);",
+        )
+        .expect("input and run");
+    connection
+}
+
+/// INPUT-RUN-SURVIVES-SETTLEMENT: the retained binding also resolves an input pin.
+#[test]
+fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
+    let connection = input_run_sql_fixture();
+    let session = SessionId::from("session");
+    let input = lash_core_execution::InputId::from("input");
+    let run = lash_core_execution::TurnId::from("run");
+    crate::session_runs::bind_run_inputs_conn(
+        &connection,
+        &session,
+        &run,
+        std::slice::from_ref(&input),
+    )
+    .expect("bind");
+    connection
+        .execute(
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs
+                .settle_admitted
+                .sql(),
+            params!["session", "input", "completed", "run", 42],
+        )
+        .expect("settle");
+    let status = connection
+        .query_row(
+            crate::session_runs::session_runs_sql()
+                .inputs
+                .select_status
+                .sql(),
+            params![session.as_str(), input.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, bool>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            },
+        )
+        .expect("keyed input status");
+    assert_eq!(status, (Some(run.to_string()), false, None, None));
+    assert_eq!(
+        crate::session_runs::run_binding_conn(&connection, &session, &input).expect("run of input"),
+        Some(run)
+    );
+    connection
+        .execute(
+            "UPDATE session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}',
+                 terminal_at_ms = 42, terminal_head_revision = 1",
+            [],
+        )
+        .expect("terminal");
+    for revision in [1, 2] {
+        crate::revisions::record_revision_conn(&connection, &session, revision, None, None, "{}")
+            .expect("revision");
+    }
+    connection
+        .execute(
+            "INSERT INTO session_head (session_id, head_revision) VALUES ('session', 2)",
+            [],
+        )
+        .expect("head");
+    crate::revisions::pin_conn(
+        &connection,
+        &session,
+        &lash_core_execution::Target::Input(input),
+    )
+    .expect("pin");
+    assert_eq!(
+        crate::revisions::release_unretained_conn(&connection, true, Some(&session))
+            .expect("collect"),
+        0
+    );
+    connection.execute("DELETE FROM pins", []).expect("unpin");
+    assert_eq!(
+        crate::revisions::release_unretained_conn(&connection, true, Some(&session))
+            .expect("collect unpinned"),
+        1
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = 'session_run_inputs'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .expect("schema"),
+        0
+    );
+}
+
+/// FORK-REBIND: releasing a live input changes its next owner in one column.
+#[test]
+fn a_fork_rebinds_only_the_inputs_the_old_run_released() {
+    let connection = input_run_sql_fixture();
+    let session = SessionId::from("session");
+    let input = lash_core_execution::InputId::from("input");
+    let run = lash_core_execution::TurnId::from("run");
+    crate::session_runs::bind_run_inputs_conn(
+        &connection,
+        &session,
+        &run,
+        std::slice::from_ref(&input),
+    )
+    .expect("bind");
+    connection
+        .execute(
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs
+                .release_run
+                .sql(),
+            params!["session", "run"],
+        )
+        .expect("fork release");
+    let fork = lash_core_execution::TurnId::from("fork");
+    crate::session_runs::bind_run_inputs_conn(
+        &connection,
+        &session,
+        &fork,
+        std::slice::from_ref(&input),
+    )
+    .expect("fork bind");
+    assert_eq!(
+        crate::session_runs::run_binding_conn(&connection, &session, &input).expect("binding"),
+        Some(fork)
+    );
+    assert!(
+        crate::session_runs::bind_run_inputs_conn(&connection, &session, &run, &[input]).is_err(),
+        "a competing run cannot steal the fork's input"
+    );
+}
+
+/// TERMINAL-FENCES-LATE-CHILD: a turn's terminal is its only close fact.
+#[test]
+fn a_terminal_turn_refuses_registration_without_a_parent_end_row() {
+    let connection = rusqlite::Connection::open_in_memory().expect("SQLite");
+    for ddl in crate::schema::provisioning_statements() {
+        connection.execute_batch(ddl).expect("schema");
+    }
+    connection.execute(
+        "INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms)
+         VALUES ('session', 'run', 'answered', '{\"cause\":\"commands_applied\"}', 42)",
+        [],
+    ).expect("terminal");
+    connection.execute(
+        "INSERT INTO pending_turn_inputs (enqueue_seq, input_id, session_id, source_key, ingress_json,
+             state, input_json, submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
+         VALUES (1, 'input', 'session', 'alias', '{\"scope\":\"next_turn\"}', 'completed', '{}', 'digest', 0, 'run', 42)", []
+    ).expect("settled alias");
+    let scope = lash_core_execution::ScopeId::turn("session", "run");
+    crate::process_registry::parent_end::record_conn(
+        &connection,
+        &scope,
+        42,
+        lash_core_execution::FleetFormat::current(),
+    )
+    .expect("close");
+    let plans: i64 = connection
+        .query_row("SELECT count(*) FROM parent_end_plans", [], |row| {
+            row.get(0)
+        })
+        .expect("plans");
+    assert_eq!(plans, 0, "turn closure must come from its terminal");
+    for scope in [
+        scope,
+        lash_core_execution::ScopeId::turn("session", "alias"),
+    ] {
+        for lifetime in [
+            lash_core_execution::LifetimeDecision::Detached,
+            lash_core_execution::LifetimeDecision::Until {
+                scope: scope.clone(),
+                grant: lash_core_execution::ScopeGrant::Ancestor,
+            },
+        ] {
+            let mut registration = lash_core_execution::testing::held_engine_registration(
+                serde_json::json!({}),
+                lash_core_execution::ProcessProvenance::host(),
+                lash_core_execution::Lifetime::Detached,
+            );
+            registration.ancestry = lash_core_execution::Ancestry::from_scopes([scope.clone()]);
+            registration.lifetime = lifetime;
+            assert!(matches!(
+                SqliteProcessRegistry::apply_registration_conn(
+                    &connection, registration, vec![], ProcessId::fixture("late-child"), false, 43,
+                    lash_core_execution::FleetFormat::current(),
+                ),
+                Err(lash_core_execution::PluginError::ParentEnded { parent, .. }) if parent == scope
+            ));
+        }
+    }
+}
+
 lash_conformance::tool_access_persistence_tests!({
     let dir = tempfile::tempdir().expect("tool-access SQLite tempdir");
     let stores = SqliteStoreSet::open(dir.path().join("lash.db"), crate::SqliteSynchronous::Normal)

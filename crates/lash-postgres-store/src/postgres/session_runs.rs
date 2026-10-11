@@ -254,7 +254,7 @@ pub(crate) async fn write_run_terminal_conn(
 /// recorded once on the request's outcome. No open row is bound to a run
 /// with terminal evidence.
 ///
-/// An input the run's admission took as its own (`session_run_inputs`)
+/// An input the run's admission took as its own (its retained input-row binding)
 /// that is still open is unbound from the run too, so a later run can
 /// admit it: a terminal run answers nothing more.
 async fn release_run_rows_conn(
@@ -263,21 +263,6 @@ async fn release_run_rows_conn(
     run: &TurnId,
     at_ms: u64,
 ) -> Result<(), StoreError> {
-    let verbs = &session_runs_sql().inputs;
-    let own: Vec<String> = crate::observed_sql::query_scalar(verbs.bound_inputs.sql())
-        .bind(session_id.as_str())
-        .bind(run.as_str())
-        .fetch_all(crate::observed_sql::executor(&mut *conn))
-        .await
-        .map_err(store_sqlx_error)?;
-    for input in own {
-        crate::observed_sql::query(verbs.unbind.sql())
-            .bind(session_id.as_str())
-            .bind(&input)
-            .execute(crate::observed_sql::executor(&mut *conn))
-            .await
-            .map_err(store_sqlx_error)?;
-    }
     let sql = crate::turn_ingress::turn_ingress_sql();
     crate::observed_sql::query(sql.pending_inputs.release_run.sql())
         .bind(session_id.as_str())
@@ -656,15 +641,18 @@ pub(crate) async fn run_binding_conn(
     session_id: &SessionId,
     input: &InputId,
 ) -> Result<Option<TurnId>, StoreError> {
-    crate::observed_sql::query_scalar::<_, String>(session_runs_sql().inputs.select_run.sql())
-        .bind(session_id.as_str())
-        .bind(input.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut *conn))
-        .await
-        .map_err(store_sqlx_error)?
-        .map(TurnId::parse)
-        .transpose()
-        .map_err(StoreError::from)
+    crate::observed_sql::query_scalar::<_, Option<String>>(
+        session_runs_sql().inputs.select_run.sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(input.as_str())
+    .fetch_optional(crate::observed_sql::executor(&mut *conn))
+    .await
+    .map_err(store_sqlx_error)?
+    .flatten()
+    .map(TurnId::parse)
+    .transpose()
+    .map_err(StoreError::from)
 }
 
 /// What a follower of `input` of `session_id` reads, in one statement on
@@ -695,26 +683,6 @@ async fn input_status_conn(
     })
 }
 
-/// Bind `input` to `run` in the caller's transaction, set-if-absent: the
-/// commit that applies a checkpoint-admitted input records the run that
-/// applied it. A run admission already wrote the same binding for its own
-/// inputs, so the insert is a no-op for them.
-pub(crate) async fn bind_applied_input_tx(
-    conn: &mut PgConnection,
-    session_id: &SessionId,
-    input: &InputId,
-    run: &TurnId,
-) -> Result<(), StoreError> {
-    crate::observed_sql::query(session_runs_sql().inputs.insert.sql())
-        .bind(session_id.as_str())
-        .bind(input.as_str())
-        .bind(run.as_str())
-        .execute(crate::observed_sql::executor(&mut *conn))
-        .await
-        .map_err(store_sqlx_error)?;
-    Ok(())
-}
-
 /// Bind each of `inputs` to `run`, set-if-absent, and open `run`'s row, in
 /// the caller's transaction. A binding to another run refuses the whole
 /// write.
@@ -739,7 +707,7 @@ pub(crate) async fn bind_run_inputs_conn(
         .await
         .map_err(store_sqlx_error)?;
     for input in inputs {
-        crate::observed_sql::query(sql.inputs.insert.sql())
+        crate::observed_sql::query(sql.inputs.bind.sql())
             .bind(session_id.as_str())
             .bind(input.as_str())
             .bind(run.as_str())
@@ -915,25 +883,18 @@ pub(crate) async fn begin_session_close_tx(
     Ok((Some(intent), woken))
 }
 
-/// Forget what session `session_id`'s runs hold, in its deletion's
-/// transaction: its runs, the head documents their terminals named, and its
-/// bindings. A `close_session` intent stays: it is the tombstone the factory
-/// answers the deleted session's runs from.
+/// Forget the session's run records and their owned window references in its
+/// deletion transaction. A `close_session` intent stays: it is the tombstone
+/// the factory answers the deleted session's runs from.
 pub(crate) async fn delete_session_runs_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
-    let sql = session_runs_sql();
-    for statement in [
-        sql.runs.delete_by_session.sql(),
-        sql.inputs.delete_by_session.sql(),
-    ] {
-        crate::observed_sql::query(statement)
-            .bind(session_id.as_str())
-            .execute(crate::observed_sql::executor(&mut *conn))
-            .await
-            .map_err(store_sqlx_error)?;
-    }
+    crate::observed_sql::query(session_runs_sql().runs.delete_by_session.sql())
+        .bind(session_id.as_str())
+        .execute(crate::observed_sql::executor(&mut *conn))
+        .await
+        .map_err(store_sqlx_error)?;
     Ok(())
 }
 

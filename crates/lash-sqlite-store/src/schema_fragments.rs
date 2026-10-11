@@ -25,15 +25,15 @@ CREATE TABLE IF NOT EXISTS session_ingress_sequence (
 /// names the window it ended on by reference (FIG-5931): the head's revision,
 /// leaf and checkpoint, and its head document in `blobs`,
 /// stored once per distinct document of the session. The leaf and the
-/// checkpoint are roots while the row lives. `session_run_inputs`
-/// binds each accepted input to the run that executes it. `control_intents`
-/// records a session's close; a `close_session` row outlives its session as
-/// the deletion tombstone.
+/// checkpoint are roots while the row lives. Each input row retains the run
+/// that executes it. `control_intents` records a session's close; a
+/// `close_session` row outlives its session as the deletion tombstone.
 pub(crate) const SESSION_RUNS_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS session_runs (
     session_id              TEXT NOT NULL,
     run                    TEXT NOT NULL,
     admission_json          TEXT,
+    scope_has_holds         BOOLEAN NOT NULL DEFAULT FALSE,
     terminal_kind           TEXT,
     terminal_cause_json     TEXT,
     terminal_head_revision  INTEGER,
@@ -75,14 +75,6 @@ CREATE INDEX IF NOT EXISTS idx_session_runs_terminal_head_revision
     ON session_runs(session_id, terminal_head_revision);
 CREATE INDEX IF NOT EXISTS idx_session_runs_terminal_window_config_ref
     ON session_runs(terminal_window_config_ref);
-
-CREATE TABLE IF NOT EXISTS session_run_inputs (
-    session_id  TEXT NOT NULL,
-    input_id    TEXT NOT NULL,
-    run        TEXT NOT NULL,
-    PRIMARY KEY (session_id, input_id)
-);
-
 CREATE TABLE IF NOT EXISTS control_intents (
     intent_id      INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id     TEXT NOT NULL,

@@ -1036,7 +1036,12 @@ fn postgres_statement_name(query: &str) -> &'static str {
             "txn-clock-ms"
         }
         q if q.starts_with("SELECT pg_advisory_xact_lock(") => "advisory-lock",
-        q if q.contains("FROM lash_pending_turn_inputs") => "pending-inputs-lock",
+        q if q.starts_with("SELECT")
+            && q.contains("FROM lash_pending_turn_inputs")
+            && q.contains("FOR UPDATE") =>
+        {
+            "pending-inputs-lock"
+        }
         q if q.starts_with("UPDATE lash_pending_turn_inputs") => "pending-input-admit",
         // pg_stat_statements stores this statement's own text when the row is
         // created by a cached-plan execution, but its constant-normalized form
@@ -1085,9 +1090,10 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("UPDATE lash_session_meta SET admission_base_checkpoint_ref") => {
             "admission-base-retain"
         }
-        q if q.starts_with("SELECT run FROM lash_session_run_inputs") => "run-binding-read",
+        q if q.starts_with("SELECT admitted_run FROM lash_pending_turn_inputs") => {
+            "run-binding-read"
+        }
         q if q.starts_with("INSERT INTO lash_session_runs") => "run-open",
-        q if q.starts_with("INSERT INTO lash_session_run_inputs") => "run-input-bind",
         q if q.starts_with("UPDATE lash_session_meta") => "session-meta-touch",
         q if q.starts_with("LOCK TABLE lash_blobs") => "blob-table-lock",
         q if q.starts_with("SELECT checkpoint_ref FROM lash_session_revisions") => {

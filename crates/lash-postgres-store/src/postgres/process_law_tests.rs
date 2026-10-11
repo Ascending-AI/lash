@@ -244,3 +244,85 @@ async fn a_cancel_behind_an_owner_commit_holds_no_lock_on_its_process() {
         "the cancel recorded its request"
     );
 }
+
+/// TURN-REGISTRATION-FENCE: a start waiting on the terminal's run row holds
+/// no turn advisory lock that the terminal's close would need in reverse order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_turn_registration_behind_a_terminal_holds_no_lock_the_close_needs() {
+    use lash_core_execution::{PluginError, ProcessRegistrar as _};
+    let url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("store");
+    lash_core_execution::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    sqlx::query(
+        "INSERT INTO lash_session_runs (session_id, run) VALUES ('held-session', 'held-run')",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("run");
+    let scope = lash_core_execution::ScopeId::turn("held-session", "held-run");
+    let mut registration = lash_core_execution::testing::held_engine_registration(
+        serde_json::Value::Null,
+        lash_core_execution::ProcessProvenance::host(),
+        lash_core_execution::Lifetime::Detached,
+    );
+    registration.ancestry = lash_core_execution::Ancestry::from_scopes([scope.clone()]);
+    registration.consumer_hold = Some(lash_core_execution::ConsumerHold {
+        key: "held-call".into(),
+        owner: scope.clone(),
+        cancels: false,
+    });
+    let mut closing = storage.pool().begin().await.expect("close transaction");
+    sqlx::query("UPDATE lash_session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}', terminal_at_ms = 42")
+        .execute(&mut *closing).await.expect("terminal takes the run row");
+    let starting = tokio::spawn({
+        let registry = storage.process_registry();
+        async move { registry.register_process(registration).await }
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let waiting: i64 = sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'")
+            .fetch_one(storage.pool()).await.expect("lock waiters");
+        if waiting > 0 {
+            break;
+        }
+        assert!(
+            !starting.is_finished(),
+            "registration did not wait for the terminal"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "registration never waited"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    let available: bool =
+        sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("lash-parent-end:turn:{}", scope.storage_id()))
+            .fetch_one(&mut *closing)
+            .await
+            .expect("probe the old close lock");
+    assert!(
+        available,
+        "registration took the close lock before waiting on the run row"
+    );
+    crate::process_registry::parent_end::record_tx(
+        &mut closing,
+        &scope,
+        42,
+        lash_core_execution::FleetFormat::current(),
+    )
+    .await
+    .expect("close cannot deadlock behind registration");
+    closing.commit().await.expect("terminal commits");
+    let refused = starting
+        .await
+        .expect("registration task")
+        .expect_err("late registration");
+    assert!(
+        matches!(refused, PluginError::ParentEnded { .. }),
+        "{refused:?}"
+    );
+}

@@ -232,7 +232,7 @@ and one registry, `CHECKERS`, hold six checkers, one file each:
 | `obligations-settled-or-stalled` | every ADR 0109 obligation column family in every store database |
 | `artifact-reachable-or-collected` | artifact refs, referrer edges, fences and cleanup obligations |
 | `tool-call-identity` | tool-body runs and committed tool calls; keyed on today's call id, with the `ToolCallId` extension point on `CallIdentity` for FIG-4080 |
-| `input-settles-exactly-once` | `pending_turn_inputs`, `queued_work_batches`, `session_runs`, `session_run_inputs` |
+| `input-settles-exactly-once` | `pending_turn_inputs`, `queued_work_batches`, `session_runs` |
 
 Store rows are read raw through `lash_sqlite_store::testing::read_rows_for_testing`
 (the store's `testing` feature). Tool facts come from lash-sim's own tools

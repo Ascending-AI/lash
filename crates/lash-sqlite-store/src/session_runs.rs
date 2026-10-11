@@ -267,7 +267,7 @@ pub(crate) fn write_run_terminal_conn(
 /// recorded once on the request's outcome. No open row is bound to a run
 /// with terminal evidence.
 ///
-/// An input the run's admission took as its own (`session_run_inputs`)
+/// An input the run's admission took as its own (its retained input-row binding)
 /// that is still open is unbound from the run too, so a later run can
 /// admit it: a terminal run answers nothing more.
 fn release_run_rows_conn(
@@ -276,22 +276,6 @@ fn release_run_rows_conn(
     run: &TurnId,
     at_ms: u64,
 ) -> Result<(), StoreError> {
-    let verbs = &session_runs_sql().inputs;
-    let own = {
-        let mut stmt = tx
-            .prepare_cached(verbs.bound_inputs.sql())
-            .map_err(sqlite_error)?;
-        stmt.query_map(params![session_id.as_str(), run.as_str()], |row| {
-            row.get::<_, String>(0)
-        })
-        .map_err(sqlite_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(sqlite_error)?
-    };
-    for input in own {
-        crate::conn::cached_execute(tx, verbs.unbind.sql(), params![session_id.as_str(), input])
-            .map_err(sqlite_error)?;
-    }
     let sql = crate::turn_ingress::turn_ingress_sql();
     crate::conn::cached_execute(
         tx,
@@ -681,10 +665,14 @@ pub(crate) fn run_binding_conn(
     conn.query_row(
         session_runs_sql().inputs.select_run.sql(),
         params![session_id.as_str(), input.as_str()],
-        |row| crate::codec::sql_identity(row.get::<_, String>(0)?),
+        |row| row.get::<_, Option<String>>(0),
     )
     .optional()
-    .map_err(sqlite_error)
+    .map_err(sqlite_error)?
+    .flatten()
+    .map(TurnId::parse)
+    .transpose()
+    .map_err(StoreError::from)
 }
 
 /// What a follower of `input` of `session_id` reads, in one statement on
@@ -721,25 +709,6 @@ fn input_status_conn(
     })
 }
 
-/// Bind `input` to `run` in the caller's transaction, set-if-absent: the
-/// commit that applies a checkpoint-admitted input records the run that
-/// applied it. A run admission already wrote the same binding for its own
-/// inputs, so the insert is a no-op for them.
-pub(crate) fn bind_applied_input_conn(
-    tx: &Connection,
-    session_id: &SessionId,
-    input: &InputId,
-    run: &TurnId,
-) -> Result<(), StoreError> {
-    crate::conn::cached_execute(
-        tx,
-        session_runs_sql().inputs.insert.sql(),
-        params![session_id.as_str(), input.as_str(), run.as_str()],
-    )
-    .map_err(sqlite_error)?;
-    Ok(())
-}
-
 /// Bind each of `inputs` to `run`, set-if-absent, and open `run`'s row, in
 /// the caller's transaction. A binding to another run refuses the whole
 /// write.
@@ -766,7 +735,7 @@ pub(crate) fn bind_run_inputs_conn(
     for input in inputs {
         crate::conn::cached_execute(
             tx,
-            sql.inputs.insert.sql(),
+            sql.inputs.bind.sql(),
             params![session_id.as_str(), input.as_str(), run.as_str()],
         )
         .map_err(sqlite_error)?;
@@ -961,22 +930,19 @@ pub(crate) fn begin_session_close_conn(
     Ok((Some(intent), woken))
 }
 
-/// Forget what session `session_id`'s runs hold, in its deletion's
-/// transaction: its runs, the head documents their terminals named, and its
-/// bindings. A `close_session` intent stays: it is the tombstone the factory
-/// answers the deleted session's runs from.
+/// Forget the session's run records and their owned window references in its
+/// deletion transaction. A `close_session` intent stays: it is the tombstone
+/// the factory answers the deleted session's runs from.
 pub(crate) fn delete_session_runs_conn(
     tx: &Connection,
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
-    let sql = session_runs_sql();
-    for statement in [
-        sql.runs.delete_by_session.sql(),
-        sql.inputs.delete_by_session.sql(),
-    ] {
-        crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
-            .map_err(sqlite_error)?;
-    }
+    crate::conn::cached_execute(
+        tx,
+        session_runs_sql().runs.delete_by_session.sql(),
+        params![session_id.as_str()],
+    )
+    .map_err(sqlite_error)?;
     Ok(())
 }
 

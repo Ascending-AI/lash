@@ -7,11 +7,11 @@
 //!   `turn.commit` and `turn.cancel` transactions call [`end_turn_scope`] on
 //!   their own `tx`: it revokes the turn's waits and compacts each to its
 //!   tombstone, marks the first batch of the turn's `Until` children for
-//!   cancel through L6's `end_scope`, and
-//!   closes the turn's scope (`ProcessWrite::ScopeClosed`), so no process
-//!   registers under it once `tx` commits. The closure reads the children
-//!   again inside `tx`, after it: when one is left unmarked, the same `tx`
-//!   records the turn scope as ending in the session's row set.
+//!   cancel through L6's `end_scope`, and uses the run's terminal to close
+//!   the turn's scope, so no process registers under it once `tx` commits.
+//!   The closure reads the children again inside `tx`, after it: when one
+//!   is left unmarked, the same `tx` records the turn scope as ending in
+//!   the session's row set.
 //! - **The rest is cursor work on the session actor.** After either commit,
 //!   and on every claim before anything else, the session activation runs
 //!   [`continue_scope_ends`]: one `cascade.batch` transaction per further

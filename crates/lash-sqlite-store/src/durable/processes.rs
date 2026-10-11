@@ -337,6 +337,29 @@ fn close_scope(tx: &Connection, commit: &Committing<'_>, scope: &ScopeKey) -> An
     ) {
         return Ok(Err(registry_failure(&error)));
     }
+    if let ScopeKey::Turn(session, run) = scope {
+        let (holds, children) = tx
+            .prepare_cached(
+                crate::process_registry::sql::process_sql()
+                    .plan
+                    .turn_close
+                    .sql(),
+            )?
+            .query_row(
+                rusqlite::params![session.as_str(), run.as_str(), closed.storage_id()],
+                |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
+            )?;
+        if holds
+            && let Err(error) = crate::process_registry::parent_end::release_holds_conn(tx, &closed)
+        {
+            return Ok(Err(registry_failure(&error)));
+        }
+        return if children {
+            super::session_close::record_ending(tx, commit, session, scope)
+        } else {
+            Ok(Ok(()))
+        };
+    }
     let (ScopeKey::Turn(session, _) | ScopeKey::Operation(session, _)) = scope else {
         return Ok(Ok(()));
     };
@@ -448,4 +471,83 @@ pub(super) fn live_until_descendants(
         .into_iter()
         .map(|id| ProcessId::parse(&id).map_err(|_| super::corrupt("process id", &id)))
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// TURN-CLOSE-WORK: no hold registration means three fewer statements.
+    #[tokio::test]
+    async fn a_turn_close_with_no_holds_uses_only_its_child_probe() {
+        let conn = crate::tests::input_run_sql_fixture();
+        conn.execute("UPDATE session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}', terminal_at_ms = 42", []).expect("terminal");
+        crate::observed_sql::enable(&conn);
+        let actor = ActorKey::session("session").expect("actor");
+        let commit = Committing {
+            actor: &actor,
+            epoch: Epoch(1),
+            now: DurableInstant(42),
+            fleet: lash_core_execution::FleetFormat::current(),
+            blob_profile: crate::BuiltinBlobProfile::default(),
+        };
+        let scope = ScopeKey::Turn("session".into(), "run".into());
+        let (answer, receipt) =
+            lash_core_execution::facade_support::sql::collect("turn.commit", "sqlite", async {
+                close_scope(&conn, &commit, &scope)
+            })
+            .await;
+        answer.expect("SQL").expect("close");
+        assert_eq!(
+            receipt.statements, 1,
+            "four statements before terminal derivation, one child probe after"
+        );
+        eprintln!("TURN_CLOSE_STATEMENTS {}", receipt.statements);
+    }
+    /// TURN-HOLDS: registration persists the marker and closing releases its hold and marks.
+    #[tokio::test]
+    async fn a_turn_close_releases_registered_consumer_holds_and_abandonment_marks() {
+        use lash_core_execution::{ProcessRegistrar as _, ProcessRetention as _};
+        let stores = crate::SqliteStoreSet::memory().await.expect("stores");
+        let store = stores.open_store().await.expect("store");
+        lash_core_execution::testing::process_execution_env_fixture(
+            stores.process_env_store().as_ref(),
+        )
+        .await;
+        store.conn.call(|conn| conn.execute("INSERT INTO session_runs (session_id, run) VALUES ('held-session', 'held-run')", [])).await.expect("run");
+        let owner = lash_core_execution::ScopeId::turn("held-session", "held-run");
+        let mut registration = lash_core_execution::testing::held_engine_registration(
+            serde_json::json!({}),
+            lash_core_execution::ProcessProvenance::host(),
+            lash_core_execution::Lifetime::Detached,
+        );
+        registration.ancestry = lash_core_execution::Ancestry::from_scopes([owner.clone()]);
+        registration.consumer_hold = Some(lash_core_execution::ConsumerHold {
+            key: "held-call".into(),
+            owner: owner.clone(),
+            cancels: false,
+        });
+        let registry = stores.process_registry();
+        registry
+            .register_process(registration)
+            .await
+            .expect("registration");
+        registry
+            .abandon_consumer_hold("held-call", &owner)
+            .await
+            .expect("mark");
+        store.conn.call(move |conn| {
+            assert!(conn.query_row("SELECT scope_has_holds FROM session_runs", [], |row| row.get::<_, bool>(0))?);
+            conn.execute("UPDATE session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}', terminal_at_ms = 42", [])?;
+            let actor = ActorKey::session("held-session").expect("actor");
+            let commit = Committing {
+                actor: &actor, epoch: Epoch(1), now: DurableInstant(42),
+                fleet: lash_core_execution::FleetFormat::current(), blob_profile: crate::BuiltinBlobProfile::default(),
+            };
+            close_scope(conn, &commit, &ScopeKey::Turn("held-session".into(), "held-run".into()))?.expect("close");
+            assert_eq!(conn.query_row("SELECT count(*) FROM processes WHERE consumer_hold_key IS NOT NULL", [], |row| row.get::<_, i64>(0))?, 0);
+            assert_eq!(conn.query_row("SELECT count(*) FROM abandoned_consumer_holds", [], |row| row.get::<_, i64>(0))?, 0);
+            Ok(())
+        }).await.expect("cleanup");
+    }
 }

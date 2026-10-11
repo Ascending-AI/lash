@@ -38,10 +38,6 @@ pub(super) async fn settle_commit_ingress_tx(
                     now,
                 )
                 .await?;
-                // The completing commit binds the input to the run that
-                // applied it: a checkpoint-admitted input carries no binding
-                // until now, and a run-admitted input's is this same row.
-                crate::session_runs::bind_applied_input_tx(tx, session_id, input_id, run).await?;
             }
         }
         for completion in &ingress.completed_batches {

@@ -197,12 +197,11 @@ crate::statements! {
 
         /// Settle input `?2` of session `?1` into the terminal state `?3`
         /// under run `?4`, which must hold it, at `?5`: completed when the
-        /// run delivered it, cancelled when the run drops it. The binding
-        /// goes with the settlement; the tombstone keeps the submission.
+        /// run delivered it, cancelled when the run drops it. The run
+        /// stays on the tombstone; only the live admission step is cleared.
         settle_admitted = "UPDATE pending_turn_inputs
              SET state = ?3,
                  terminal_at_ms = ?5,
-                 admitted_run = NULL,
                  admitted_by = NULL
              WHERE session_id = ?1 AND input_id = ?2 AND admitted_run = ?4";
 
@@ -228,7 +227,7 @@ crate::statements! {
              SET state = {{released_turn_input_state(state)}},
                  admitted_run = NULL,
                  admitted_by = NULL
-             WHERE session_id = ?1 AND admitted_run = ?2";
+             WHERE session_id = ?1 AND admitted_run = ?2 AND {{nonterminal_turn_input_state(state)}}";
 
         /// Reclaim session `?1`'s withdrawn inputs: cancelled before any
         /// run took them. Every other settled input keeps its submission
@@ -238,17 +237,13 @@ crate::statements! {
         /// run's whole retained life (FIG-3837).
         delete_withdrawn = "DELETE FROM pending_turn_inputs
              WHERE session_id = ?1 AND {{cancelled_turn_input_state(state)}}
-               AND NOT EXISTS (
-                 SELECT 1 FROM session_run_inputs binding
-                 WHERE binding.session_id = pending_turn_inputs.session_id
-                   AND binding.input_id = pending_turn_inputs.input_id
-               )";
+               AND admitted_run IS NULL";
 
         /// Cancel input `?2` of session `?1`, bound to a run that ends
         /// unanswered, into its tombstone at `?3` with the cancelled state
         /// `?4`, letting go of any admission.
         cancel_input = "UPDATE pending_turn_inputs SET state = ?4,
-            terminal_at_ms = ?3, admitted_run = NULL, admitted_by = NULL
+            terminal_at_ms = ?3, admitted_by = NULL
             WHERE session_id = ?1 AND input_id = ?2 AND {{nonterminal_turn_input_state(state)}}";
 
         delete_by_session = "DELETE FROM pending_turn_inputs WHERE session_id = ?1";

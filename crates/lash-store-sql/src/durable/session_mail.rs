@@ -20,6 +20,7 @@ crate::statements! {
         /// The run session `?1`'s bound, unsettled ingress names, if any.
         bound_run = "SELECT admitted_run FROM pending_turn_inputs
              WHERE session_id = ?1 AND admitted_run IS NOT NULL
+               AND {{nonterminal_turn_input_state(state)}}
              UNION ALL
              SELECT admitted_run FROM queued_work_batches
              WHERE session_id = ?1 AND admitted_run IS NOT NULL
@@ -116,17 +117,12 @@ crate::statements! {
                AND state IN ('deferred_next_turn', 'pending_active')
              RETURNING input_id";
 
-        /// Record that run `?3` of session `?1` executes input `?2`.
-        record_run_input = "INSERT INTO session_run_inputs (session_id, input_id, run)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT (session_id, input_id) DO NOTHING";
-
         /// Settle the inputs run `?2` of session `?1` still holds as it
         /// ends with no commit that settled them (a cancelled turn): into
         /// state `?3` at `?4`.
         settle_held_inputs = "UPDATE pending_turn_inputs
-             SET state = ?3, terminal_at_ms = ?4, admitted_run = NULL, admitted_by = NULL
-             WHERE session_id = ?1 AND admitted_run = ?2";
+             SET state = ?3, terminal_at_ms = ?4, admitted_by = NULL
+             WHERE session_id = ?1 AND admitted_run = ?2 AND {{nonterminal_turn_input_state(state)}}";
 
         /// Settle the batches run `?2` of session `?1` still holds as it
         /// ends with no commit that settled them: into their `cancelled`

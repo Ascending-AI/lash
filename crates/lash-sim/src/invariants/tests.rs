@@ -333,7 +333,7 @@ fn an_artifact_nobody_holds_breaks_reachability() {
 }
 
 #[test]
-fn an_input_left_open_or_settled_twice_breaks_input_settlement() {
+fn an_input_left_open_or_settled_before_its_run_ends_breaks_input_settlement() {
     let mut history = clean();
     let input = history.stores[0]
         .inputs
@@ -352,14 +352,8 @@ fn an_input_left_open_or_settled_twice_breaks_input_settlement() {
         .find(|input| input.table == "pending_turn_inputs")
         .expect("the fixture admitted an input");
     input.state = Some("cancelled".to_owned());
-    let (session, id) = (input.session.clone(), input.id.clone());
-    if !store
-        .run_inputs
-        .iter()
-        .any(|(bound_session, bound, _)| *bound_session == session && *bound == id)
-    {
-        let run = store.runs[0].run.clone();
-        store.run_inputs.push((session, id, run));
+    if input.admitted_run.is_none() {
+        input.admitted_run = Some(store.runs[0].run.clone());
     }
     for run in &mut store.runs {
         run.terminal_kind = None;

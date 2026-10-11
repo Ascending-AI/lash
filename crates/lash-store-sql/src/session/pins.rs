@@ -4,7 +4,7 @@
 //! a statement about a name, not about a state: it can be written before its
 //! target exists, while the target runs, or after it ended, and writing it
 //! never reads or moves the session's head. It resolves to a revision by
-//! query, through rows that already exist (`session_run_inputs`, then
+//! query, through rows that already exist (`pending_turn_inputs.admitted_run`, then
 //! `session_runs.terminal_head_revision`), and the only reader of that
 //! resolution is the retained-revisions relation
 //! ([`super::revisions::SessionRevisionStatements::prune_unretained`]).

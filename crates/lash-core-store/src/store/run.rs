@@ -529,7 +529,7 @@ pub trait RunStore: Send + Sync {
 
     /// The run that took accepted input `input`: the run its admission bound
     /// it to, or for a checkpoint delivery the run whose commit applied it.
-    /// `None` while it is pending or while a checkpoint delivery is in flight.
+    /// `None` until a run admits it. Settlement retains the binding.
     async fn run_of_input(
         &self,
         session_id: &SessionId,
@@ -564,7 +564,7 @@ pub trait RunStore: Send + Sync {
         run: &TurnId,
     ) -> Result<Vec<TurnId>, StoreError>;
 
-    /// Bind each of `inputs` to `run`, set-if-absent, and open `run`'s
+    /// Bind each existing accepted input in `inputs` to `run`, set-if-absent, and open `run`'s
     /// record if it has none. The run's admission binds the rows it
     /// admitted. A binding to another run is refused and nothing is written.
     async fn bind_run_inputs(

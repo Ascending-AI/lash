@@ -147,10 +147,10 @@ crate::statements! {
                                AND ended.terminal_head_revision = revision.head_revision
                          ))
                          OR (pin.target_kind = 'input' AND EXISTS (
-                             SELECT 1 FROM session_run_inputs AS bound
+                             SELECT 1 FROM pending_turn_inputs AS bound
                              JOIN session_runs AS ended
                                ON ended.session_id = bound.session_id
-                              AND ended.run = bound.run
+                              AND ended.run = bound.admitted_run
                              WHERE bound.session_id = pin.session_id
                                AND bound.input_id = pin.target_id
                                AND ended.terminal_head_revision = revision.head_revision

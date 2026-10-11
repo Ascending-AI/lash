@@ -80,7 +80,11 @@ and `crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs:399`
 
 ### 5. A scope closes once, after its end is durable
 
-The scope-close ledger, `parent_end_plans`, records one row per closed scope.
+A turn scope's end is its `session_runs` terminal, with input aliases resolved
+through `pending_turn_inputs.admitted_run`. It writes no `parent_end_plans` row.
+Process, operation and session scopes retain one typed ledger row per close.
+Turn registrations remember consumer holds on the run; closing releases holds
+and forgets abandonment marks only when the run registered or abandoned one.
 
 - A process's terminal transaction records its process scope's end.
 - A logical turn run's terminal transaction records its run scope's end: the
@@ -94,7 +98,7 @@ The scope-close ledger, `parent_end_plans`, records one row per closed scope.
 
 The next run's admission does not wait for the terminal run's cascade, which
 affects only the terminal run's `Until` children. A repeated close finds its
-row and writes nothing.
+terminal or ledger row; child cancellation remains idempotent.
 
 Applying a close plan owes cancellation to processes living `Until` that
 scope. The cascade writes cancel requests to the children's mailboxes in

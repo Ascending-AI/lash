@@ -1,7 +1,7 @@
 //! Every admitted input settles exactly once.
 //!
 //! ADR 0101 §7: an admitted input is either executed
-//! by exactly one run, bound to it in `session_run_inputs`, and settled
+//! by exactly one run, recorded on its input row, and settled
 //! when that run ends (completed, or cancelled with it); or it is cancelled
 //! unexecuted. At the end of a history no input is still open, no completed
 //! input lacks its one run, and no input is settled while the run bound to
@@ -33,15 +33,8 @@ impl HistoryChecker for InputSettlement {
                 .iter()
                 .map(|run| ((run.session.as_str(), run.run.as_str()), run))
                 .collect::<BTreeMap<_, _>>();
-            let bindings = store
-                .run_inputs
-                .iter()
-                .map(|(session, input, run)| ((session.as_str(), input.as_str()), run.as_str()))
-                .collect::<BTreeMap<_, _>>();
             for input in &store.inputs {
-                let bound = bindings
-                    .get(&(input.session.as_str(), input.id.as_str()))
-                    .copied();
+                let bound = input.admitted_run.as_deref();
                 let run_of = |run: &str| runs.get(&(input.session.as_str(), run)).copied();
                 let problem = match (input.table.as_str(), input.state.as_deref()) {
                     ("pending_turn_inputs", Some("completed")) => match bound {
@@ -81,13 +74,7 @@ impl HistoryChecker for InputSettlement {
                         ),
                     }),
                 };
-                let twice = match (&input.admitted_run, bound) {
-                    (Some(admitted), Some(bound)) if admitted != bound => Some(format!(
-                        "admitted by run {admitted} but bound to run {bound}"
-                    )),
-                    _ => None,
-                };
-                for problem in problem.into_iter().chain(twice) {
+                if let Some(problem) = problem {
                     let mut violation = Violation::new(
                         INVARIANT,
                         format!(
