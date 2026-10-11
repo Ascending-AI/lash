@@ -934,9 +934,9 @@ async fn the_listing_names_a_refused_session_cell_with_its_reason() {
                     last = reads.turn(&id).await.expect("the turn row is read");
                     if let Some(turn) = &last
                         && !reads
-                            .cell_snapshots(&id, &turn.run)
+                            .cell_roots(&id, &turn.run)
                             .await
-                            .expect("the cell snapshots are read")
+                            .expect("the cell roots are read")
                             .is_empty()
                     {
                         break;
@@ -945,9 +945,9 @@ async fn the_listing_names_a_refused_session_cell_with_its_reason() {
                 }
                 let parked = match &last {
                     Some(turn) => reads
-                        .cell_snapshots(&id, &turn.run)
+                        .cell_roots(&id, &turn.run)
                         .await
-                        .expect("the cell snapshots are read"),
+                        .expect("the cell roots are read"),
                     None => Vec::new(),
                 };
                 assert!(

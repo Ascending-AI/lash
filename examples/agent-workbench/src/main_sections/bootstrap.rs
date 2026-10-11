@@ -664,7 +664,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         );
     }
     let tool_provider =
-        dev_provider_scenario.and_then(failure_provider::DevProviderScenario::tool_provider);
+        if dev_provider_scenario == Some(failure_provider::DevProviderScenario::CrashResume) {
+            Some(crate::crash_fixture::tools(&data_dir)?)
+        } else {
+            dev_provider_scenario.and_then(failure_provider::DevProviderScenario::tool_provider)
+        };
     #[cfg(feature = "e2e-tools")]
     let tool_provider = match &tool_fixture {
         Some(fixture) => Some(fixture.tools()?),

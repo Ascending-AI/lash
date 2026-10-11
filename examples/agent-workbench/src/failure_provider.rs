@@ -24,6 +24,8 @@ pub(crate) enum DevProviderScenario {
     PartialOutputFailure,
     FailedProcess,
     ExecBlocked,
+    CrashResume,
+    MigrationSweep,
     ToolValue,
     RenderedSurface,
     TranscriptProjection,
@@ -50,6 +52,8 @@ impl DevProviderScenario {
             "partial-output-failure" => Self::PartialOutputFailure,
             "failed-process" => Self::FailedProcess,
             "exec-blocked" => Self::ExecBlocked,
+            "crash-resume" => Self::CrashResume,
+            "migration-sweep" => Self::MigrationSweep,
             "tool-value" => Self::ToolValue,
             "rendered-surface" => Self::RenderedSurface,
             "transcript-projection" => Self::TranscriptProjection,
@@ -69,7 +73,7 @@ impl DevProviderScenario {
             other => bail!(
                 "invalid {DEV_PROVIDER_SCENARIO_ENV} `{other}`; expected one of: \
                  mcp-fixture, auth-failure-once, rate-limit-once, partial-output-failure, failed-process, \
-                 exec-blocked, tool-value, rendered-surface, transcript-projection, code-failure, retry-reset-partial, \
+                 exec-blocked, crash-resume, migration-sweep, tool-value, rendered-surface, transcript-projection, code-failure, retry-reset-partial, \
                  replay-route-change, valid-empty-completion"
             ),
         };
@@ -84,6 +88,8 @@ impl DevProviderScenario {
             Self::PartialOutputFailure => "partial-output-failure",
             Self::FailedProcess => "failed-process",
             Self::ExecBlocked => "exec-blocked",
+            Self::CrashResume => "crash-resume",
+            Self::MigrationSweep => "migration-sweep",
             Self::ToolValue => "tool-value",
             Self::RenderedSurface => "rendered-surface",
             Self::TranscriptProjection => "transcript-projection",
@@ -162,6 +168,8 @@ impl DevProviderScenario {
 await processes.start({ definition: FIG425_deterministic_failure, args: { request: 1 } });
 await chat.reply("started deterministic failing process");"#,
             ),
+            (Self::CrashResume, _) => cell(crate::crash_fixture::CELL),
+            (Self::MigrationSweep, _) => cell(crate::crash_fixture::MIGRATION_SEED),
             (Self::ExecBlocked, 0) => cell(
                 "await sleep(600000);\nawait chat.reply(\"exec block unexpectedly returned\");",
             ),
@@ -304,6 +312,19 @@ impl Provider for DevFailureProvider {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         match self.scenario {
             DevProviderScenario::McpFixture => Ok(mcp_fixture_response(&request)),
+            DevProviderScenario::MigrationSweep => {
+                let seeded = request.messages.iter().any(|message| {
+                    message.role == LlmRole::Assistant && message.blocks.iter().any(|block| {
+                        matches!(block, LlmContentBlock::Text { text, .. } if text.contains("migration-sweep seeded"))
+                    })
+                });
+                let text = cell(if seeded {
+                    crate::crash_fixture::MIGRATION_READ
+                } else {
+                    crate::crash_fixture::MIGRATION_SEED
+                });
+                Ok(streamed_response(&request, &text))
+            }
             DevProviderScenario::AuthFailureOnce if call == 0 => {
                 send_delta(&request, "provider authentication check started");
                 Err(
@@ -361,6 +382,7 @@ impl Provider for DevFailureProvider {
             }
             DevProviderScenario::FailedProcess
             | DevProviderScenario::ExecBlocked
+            | DevProviderScenario::CrashResume
             | DevProviderScenario::ToolValue
             | DevProviderScenario::CodeFailure => Ok(streamed_response(&request, &self.cell(call))),
             DevProviderScenario::RenderedSurface | DevProviderScenario::TranscriptProjection => {
