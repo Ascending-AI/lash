@@ -38,7 +38,7 @@ example a host would read; `typescript-host-flows` is a collection of TypeScript
 cells exercised by its own judged row. The sibling witness `transcript-contract`
 lives under `crates/`, beside the file it checks.
 
-## One judged row per scenario and served dialect
+## One judged row per scenario, served dialect and store
 
 [ADR 0139](../docs/adr/0139-the-lash-vm-is-a-dialect-free-kernel.md) defines
 one dialect-free Lash VM kernel. TypeScript and Python are shipped dialects
@@ -55,6 +55,16 @@ certify them until that prerequisite lands. The three Python smoke entries carry
 `pending_dialects = { python = "FIG-5990" }`, and their runner skips them.
 The selectors and Python tutorial front-end checks are present; they do not
 claim that a Python worker is installed.
+
+The SQL store axis defaults to `stores = ["sqlite"]`. G4 rows
+(`workbench-crash-resume`, `workbench-session-resume`, and
+`workbench-process-lifecycle`) declare `stores = ["sqlite", "postgres"]`
+as they land. Each emitted row carries `store`; artifact directories are
+`<run-root>/<scenario>/<label>/<store>`, so two stores never overwrite evidence.
+Use the same scenario scorecard and tier on both stores. On PostgreSQL,
+follow [the store-axis procedure](postgres-store.md): boot inside `kiln gate`,
+confirm `store_backend`, run the named PG companions by executed count,
+and retain a clean `lashctl preflight` after the host stops.
 
 Each row still gets a fresh session id, data directory, ports, trace offset, and artifact
 directory. A carried-over store serves a previous row's processes, leases and
@@ -108,11 +118,12 @@ Independent scenario rows may execute concurrently from the start, subject to th
 repository's two-heavy-job limit and each runbook's port/container isolation rules.
 Judging is a separate sharded phase over completed evidence bundles, so a judge never owns
 or mutates the app it scores. `python3 scripts/judged_runbook_matrix.py --shard I/N` emits a
-stable JSON work shard. The matrix currently expands to **32 rows**: 22 RLM scenarios (including `host-flows`),
-eight additional Python rows, and two no-RLM-session rows. The three smoke
+stable JSON work shard. The matrix currently expands to **35 rows**: 22 RLM scenarios (including `host-flows`),
+eight additional Python rows, two no-RLM-session rows, and three PostgreSQL rows
+(two TypeScript and one pending Python). The three smoke
 cases declare six scripted rows outside the judged shard; three Python rows
-are pending FIG-5990. Of the 32 judged inventory rows, eight Python rows are
-pending and 24 rows are runnable.
+are pending FIG-5990. Of the 35 judged inventory rows, nine Python rows are
+pending and 26 rows are runnable.
 Every `runbooks/*/` directory is a row or a declared `scripted_harness`. The arithmetic
 is asserted by `scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave
 this number stale without turning CI red.

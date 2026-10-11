@@ -25,7 +25,7 @@ def parse_shard(value: str) -> tuple[int, int]:
     return index, count
 
 
-def row(config: dict[str, object], group: str, scenario: str, label: str) -> dict[str, str]:
+def row(config: dict[str, object], group: str, scenario: str, label: str, store: str) -> dict[str, str]:
     """One judged row, carrying its artifact label and the tier it is funded at.
 
     `label` is the row's artifact directory and evidence claim: a declared
@@ -41,6 +41,7 @@ def row(config: dict[str, object], group: str, scenario: str, label: str) -> dic
     result = {
         "scenario": scenario,
         "label": label,
+        "store": store,
         "runbook": f"runbooks/{scenario}/runbook.md",
         "tier": entry["tier"],
         "model": entry["model"],
@@ -62,7 +63,11 @@ def rows(config: dict[str, object]) -> list[dict[str, str]]:
                 if policy["label"] == "dialect"
                 else [policy["label"]]
             )
-            result.extend(row(config, group, scenario, label) for label in labels)
+            result.extend(
+                row(config, group, scenario, label, store)
+                for label in labels
+                for store in entry.get("stores", ["sqlite"])
+            )
     return result
 
 
@@ -91,6 +96,23 @@ def dialect_violations(config: dict[str, object]) -> list[str]:
                 set(dialects)
             ) != len(dialects):
                 problems.append(f"`{scenario}` has undeclared or duplicate dialects: {dialects}")
+    return problems
+
+
+def store_violations(config: dict[str, object]) -> list[str]:
+    """A store axis names runnable SQL backends without duplicate paid rows."""
+    problems = []
+    for group, policy in config["groups"].items():
+        if not policy["emits"]:
+            continue
+        for scenario, entry in config[group].items():
+            stores = entry.get("stores", ["sqlite"])
+            if not isinstance(stores, list) or not stores:
+                problems.append(f"`{scenario}` needs a nonempty store list")
+            elif any(store not in config["stores"] for store in stores) or len(
+                set(stores)
+            ) != len(stores):
+                problems.append(f"`{scenario}` has undeclared or duplicate stores: {stores}")
     return problems
 
 
@@ -231,7 +253,7 @@ def main() -> int:
     args = parser.parse_args()
     with MATRIX.open("rb") as handle:
         config = tomllib.load(handle)
-    violations = dialect_violations(config) + discovery_violations(config)
+    violations = dialect_violations(config) + store_violations(config) + discovery_violations(config)
     if violations:
         print(f"matrix violations: {'; '.join(violations)}", file=sys.stderr)
         return 2

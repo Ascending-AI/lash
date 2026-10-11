@@ -31,6 +31,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         finish_cell("resume answer one"),
         finish_cell("resume answer two"),
     ]))
+    .stores(runbook_stores(data_dir.path()).await)
     .sessions(WorkbenchSessions::persistent(session_id_path.clone()).expect("the roster"))
     .build()
     .await;

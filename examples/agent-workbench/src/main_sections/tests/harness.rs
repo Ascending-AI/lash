@@ -7,6 +7,26 @@ use lash::TurnId;
 // `workbench_app_state`, `start_workbench`) over a SQLite memory store set.
 // The engine is the durable backend's own; nothing here reaches into it.
 
+/// G4 companions use an explicitly supplied private PostgreSQL service;
+/// ordinary developer selection keeps the cheapest SQLite memory tier.
+#[allow(clippy::disallowed_methods)] // The test harness owns its service selector.
+pub(crate) async fn runbook_stores(data_dir: &std::path::Path) -> Arc<dyn lash::StoreSet> {
+    match std::env::var("LASH_RUNBOOK_POSTGRES_URL") {
+        Ok(url) => {
+            WorkbenchStores::open_postgres(data_dir, &url)
+                .await
+                .expect("open the runbook's PostgreSQL store set")
+                .stores
+        }
+        Err(std::env::VarError::NotPresent) => Arc::new(
+            lash::sqlite::SqliteStoreSet::memory()
+                .await
+                .expect("open the runbook's SQLite memory store set"),
+        ),
+        Err(error) => panic!("invalid LASH_RUNBOOK_POSTGRES_URL: {error}"),
+    }
+}
+
 /// The model every harness session runs, served by the test's provider
 /// through the workbench's open model catalog.
 pub(crate) const TEST_MODEL: &str = "test-model";

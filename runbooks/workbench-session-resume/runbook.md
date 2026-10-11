@@ -26,6 +26,12 @@ string and nothing in the scenario depends on model behaviour — so it is funde
 `deterministic` / `scripted-provider` rung `judged-matrix.toml` gives it, and any judge may
 shift it. Retain the executing prompt and verdict with the run artifacts.
 
+**Store axis.** The matrix emits this row for SQLite and PostgreSQL.
+Follow [the PostgreSQL procedure](../postgres-store.md) for the PG boot,
+companion selector, table mapping, startup record and post-host preflight.
+Apply every phase and scorecard gate below unchanged; store selection does
+not change process lifetimes or session-deletion expectations.
+
 ## Scenario-specific golden rules
 
 1. **Restart only committed history.** Wait for the idle pill and an empty

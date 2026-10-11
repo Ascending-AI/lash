@@ -15,6 +15,12 @@ work API.
 named process cards, process ids, durable lifecycle/event rows, and API/UI agreement—not
 on surrounding model prose.
 
+**Store axis.** The matrix emits this row for SQLite and PostgreSQL.
+Follow [the PostgreSQL procedure](../postgres-store.md) for the PG boot,
+companion selector, table mapping, startup record and post-host preflight.
+Apply every phase and scorecard gate below unchanged; store selection does
+not change process lifetimes or session-deletion expectations.
+
 ## Scenario-specific golden rules
 
 1. **Both processes must be running first.** Do not delete the session until `/api/work`

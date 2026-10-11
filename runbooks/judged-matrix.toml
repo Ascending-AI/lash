@@ -1,10 +1,12 @@
 schema_version = 4
 judge_model_floor = "gpt-6-sol"
-artifact_layout = "<run-root>/<scenario>/<label>"
+artifact_layout = "<run-root>/<scenario>/<label>/<store>"
 
 # ADR 0139: TypeScript and Python lower to one dialect-free kernel. An RLM
 # scenario emits once per listed dialect, defaulting to TypeScript.
 dialects = ["typescript", "python"]
+# SQL stores default to SQLite; G4 scenarios also certify PostgreSQL.
+stores = ["sqlite", "postgres"]
 
 # Execution tiers. A judged row's execution model is a claim about what the row
 # is testing, not a uniform quality floor: the old blanket `gpt-5.6-sol`
@@ -54,11 +56,11 @@ workbench-durable-stop = { tier = "economy", model = "deepseek/deepseek-v4-pro" 
 workbench-execution-state-rehydration = { tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
 workbench-failure-paths = { tier = "deterministic", model = "scripted-provider" }
 workbench-inbox-world = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
-workbench-process-lifecycle = { tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
+workbench-process-lifecycle = { stores = ["sqlite", "postgres"], tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"], pending_dialects = { python = "FIG-5990" } }
 workbench-reconnect-resilience = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 workbench-session-id-retirement = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-session-isolation = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
-workbench-session-resume = { tier = "deterministic", model = "scripted-provider" }
+workbench-session-resume = { stores = ["sqlite", "postgres"], tier = "deterministic", model = "scripted-provider" }
 workbench-shared-session-multi-tab = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-tool-membership = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 workbench-trigger-lifecycle = { tier = "economy", model = "deepseek/deepseek-v4-pro" }

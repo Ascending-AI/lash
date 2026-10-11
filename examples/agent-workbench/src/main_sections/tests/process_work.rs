@@ -2,7 +2,7 @@ use super::*;
 use lash::ProcessId;
 use lash::SessionId;
 
-use super::tests::{RecordingTrace, Workbench, silent_provider};
+use super::tests::{RecordingTrace, Workbench, runbook_stores, silent_provider};
 
 /// Register a held process `provenance` originated in `workbench`'s registry,
 /// labelled `label` for the work rail.
@@ -141,8 +141,10 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events() {
 /// that originated it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally() {
+    let data_dir = tempfile::tempdir().expect("the runbook attachment directory");
     let trace = Arc::new(RecordingTrace::default());
     let workbench = Workbench::builder(silent_provider())
+        .stores(runbook_stores(data_dir.path()).await)
         .trace_sink(Arc::clone(&trace) as Arc<dyn TraceSink>)
         .build()
         .await;

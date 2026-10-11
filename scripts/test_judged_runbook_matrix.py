@@ -90,6 +90,34 @@ def workflow_ci_names() -> set:
 
 
 class JudgedRunbookMatrixTests(unittest.TestCase):
+    def test_store_axes_preserve_dialect_tiers_and_isolate_artifacts(self) -> None:
+        # G4: each requested store gets the same scenario scorecard and funding.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        entry = config["scenarios"]["workbench-process-lifecycle"]
+        entry["stores"] = ["sqlite", "postgres"]
+        emitted = [row for row in MATRIX.rows(config)
+                   if row["scenario"] == "workbench-process-lifecycle"]
+        self.assertEqual([(row["label"], row["store"]) for row in emitted],
+                         [(dialect, store) for dialect in entry["dialects"]
+                          for store in entry["stores"]])
+        for row in emitted:
+            self.assertEqual((row["tier"], row["model"]),
+                             (entry["tier"], entry["model"]))
+            self.assertEqual(row.get("pending"),
+                             entry.get("pending_dialects", {}).get(row["label"]))
+        self.assertTrue(all(row["store"] == "sqlite" for row in MATRIX.rows(config)
+                            if row["scenario"] == "workbench-weather"))
+
+    def test_store_axes_refuse_unknown_duplicate_or_empty_backends(self) -> None:
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        entry = config["scenarios"]["workbench-session-resume"]
+        for invalid in (["memory"], ["postgres", "postgres"], [], "postgres"):
+            with self.subTest(stores=invalid):
+                entry["stores"] = invalid
+                self.assertTrue(MATRIX.store_violations(config))
+
     def test_host_flows_keep_their_typescript_cells_and_dialect_rows(self) -> None:
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
@@ -131,8 +159,9 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         rows = MATRIX.rows(config)
         for scenario, entry in config["scenarios"].items():
             self.assertEqual(
-                [row["label"] for row in rows if row["scenario"] == scenario],
-                entry.get("dialects", ["typescript"]),
+                [(row["label"], row["store"]) for row in rows if row["scenario"] == scenario],
+                [(dialect, store) for dialect in entry.get("dialects", ["typescript"])
+                 for store in entry.get("stores", ["sqlite"])],
             )
         self.assertEqual({row["label"] for row in rows}, {"typescript", "python", "standard"})
 
@@ -141,7 +170,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             config = MATRIX.tomllib.load(handle)
         rows = MATRIX.rows(config)
         pending = [row for row in rows if "pending" in row]
-        self.assertEqual(len(pending), 8)
+        self.assertEqual(len(pending), 9)
         self.assertTrue(all(row["label"] == "python" and row["pending"] == "FIG-5990" for row in pending))
         self.assertTrue(all("pending" not in row for row in rows if row["label"] != "python"))
         for entry in config["scripted_live_model"].values():
@@ -172,7 +201,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         duplicates = sorted({name for name in listed if listed.count(name) > 1})
         self.assertEqual(duplicates, [], f"the matrix classifies {duplicates} twice")
         rows = MATRIX.rows(config)
-        keys = [(row["scenario"], row["label"]) for row in rows]
+        keys = [(row["scenario"], row["label"], row["store"]) for row in rows]
         repeated = sorted({key for key in keys if keys.count(key) > 1})
         self.assertEqual(repeated, [], f"the matrix emits {repeated} more than once")
 
@@ -213,16 +242,16 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             config = MATRIX.tomllib.load(handle)
         expected = sum(
             sum(
-                len(entry.get("dialects", ["typescript"]))
-                if policy["label"] == "dialect"
-                else 1
+                (len(entry.get("dialects", ["typescript"]))
+                 if policy["label"] == "dialect" else 1)
+                * len(entry.get("stores", ["sqlite"]))
                 for entry in config[group].values()
             )
             for group, policy in config["groups"].items()
             if policy["emits"]
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 32)
+        self.assertEqual(expected, 35)
 
     def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
         # The tier word is what a reader trusts; the slug is what the bill is
@@ -340,15 +369,15 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
                     "sharding must be lossless and non-overlapping",
                 )
                 self.assertEqual(
-                    [(row["scenario"], row["label"]) for row in expected],
+                    [(row["scenario"], row["label"], row["store"]) for row in expected],
                     sorted(
                         (
-                            (row["scenario"], row["label"])
+                            (row["scenario"], row["label"], row["store"])
                             for shard in shards
                             for row in shard
                         ),
                         key=lambda key: [
-                            (row["scenario"], row["label"]) for row in expected
+                            (row["scenario"], row["label"], row["store"]) for row in expected
                         ].index(key),
                     ),
                     "every row must appear in exactly one shard",
