@@ -63,6 +63,28 @@ pub(crate) async fn checkout(
     connection
 }
 
+/// Check a connection out of `pool` that answers a ping: one the server
+/// closed is dropped for the next, through every connection the pool holds
+/// and then a fresh one.
+pub(crate) async fn verified(
+    pool: &sqlx::PgPool,
+) -> Result<sqlx::pool::PoolConnection<Postgres>, sqlx::Error> {
+    let mut lost = None;
+    for _ in 0..=pool.options().get_max_connections() {
+        let mut connection = checkout(pool).await?;
+        #[cfg(test)]
+        round_trip();
+        match sqlx::Connection::ping(&mut *connection).await {
+            Ok(()) => return Ok(connection),
+            Err(error) => {
+                connection.close_on_drop();
+                lost = Some(error);
+            }
+        }
+    }
+    Err(lost.unwrap_or(sqlx::Error::PoolTimedOut))
+}
+
 struct Observation<'a> {
     state: Shared,
     observer: &'a StoreObserver,

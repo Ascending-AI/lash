@@ -15,8 +15,8 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 use lash_durable::{
-    ActorKey, CommitLabel, DurableError, DurableStore, FormatSet, MailKind, MailTx, NodeId,
-    NodeLease, NodeSpec, Release, StateRevision, StoreFailure, StoreFailureKind,
+    ActorKey, CommitLabel, DurableError, DurableReads as _, DurableStore, FormatSet, MailKind,
+    MailTx, NodeId, NodeLease, NodeSpec, Release, StateRevision, StoreFailure, StoreFailureKind,
 };
 
 use super::PostgresDurableStore;
@@ -829,4 +829,47 @@ async fn durable_retries_end_within_the_operation_deadline() {
         0,
         "no aborted attempt left a trace"
     );
+}
+
+/// A read whose pooled connection the server closed while it sat idle
+/// answers from a live connection (FIG-5975). A checkout pings only a
+/// connection idle for 10 s (FIG-5936), so after a restart the first sign of
+/// a dead connection is the read's own statement failing on it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_read_on_a_connection_the_server_closed_answers_from_a_live_one() {
+    let Some((database, storage)) = storage(
+        "a_read_on_a_connection_the_server_closed_answers_from_a_live_one",
+        &crate::testing::fixture_config(),
+    )
+    .await
+    else {
+        return;
+    };
+    let store = storage.durable_store();
+    assert!(
+        !store.pools.work.options().get_test_before_acquire(),
+        "the work pool does not ping every checkout"
+    );
+    let session = lash_sansio::SessionId::from("closed-under-a-read");
+    let warm = store.turn(&session).await.expect("the warm read answers");
+    assert_eq!(warm, None);
+    let mut server = <sqlx::PgConnection as sqlx::Connection>::connect(database.url())
+        .await
+        .expect("the server's own connection");
+    let closed: Vec<bool> = sqlx::query_scalar(
+        "SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity
+         WHERE datname = current_database() AND pid <> pg_backend_pid()",
+    )
+    .fetch_all(&mut server)
+    .await
+    .expect("the server closes the store's connections");
+    assert!(
+        !closed.is_empty() && closed.iter().all(|closed| *closed),
+        "the server closed every pooled connection: {closed:?}"
+    );
+    let read = store
+        .turn(&session)
+        .await
+        .expect("the read answers from a live connection");
+    assert_eq!(read, None);
 }

@@ -1,6 +1,15 @@
 //! The PostgreSQL durable domain read port.
+use std::future::Future;
+use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
+use std::pin::Pin;
+
+use sqlx::pool::PoolConnection;
+use sqlx::{PgConnection, Postgres};
+
 use super::{
-    PostgresDurableStore, processes, prompts, session_close, session_mail, snapshots, turns, waits,
+    PostgresDurableStore, processes, prompts, session_close, session_mail, snapshots, sqlx_failure,
+    turns, waits,
 };
 use lash_durable::domain::{
     ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
@@ -14,10 +23,8 @@ impl DurableReads for PostgresDurableStore {
         &self,
         session: &lash_sansio::SessionId,
     ) -> Result<Option<TurnRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            turns::turn(&mut *self.reader().await?, session).await
-        })
-        .await
+        self.read(|connection| Box::pin(turns::turn(connection, session)))
+            .await
     }
 
     async fn turn_end(
@@ -25,10 +32,8 @@ impl DurableReads for PostgresDurableStore {
         session: &lash_sansio::SessionId,
         run: &lash_sansio::TurnId,
     ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            turns::turn_end(&mut *self.reader().await?, session, run).await
-        })
-        .await
+        self.read(|connection| Box::pin(turns::turn_end(connection, session, run)))
+            .await
     }
 
     async fn turn_namespaces(
@@ -36,10 +41,8 @@ impl DurableReads for PostgresDurableStore {
         session: &lash_sansio::SessionId,
         run: &lash_sansio::TurnId,
     ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            turns::turn_namespaces(&mut *self.reader().await?, session, run).await
-        })
-        .await
+        self.read(|connection| Box::pin(turns::turn_namespaces(connection, session, run)))
+            .await
     }
 
     async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
@@ -55,10 +58,8 @@ impl DurableReads for PostgresDurableStore {
     }
 
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            snapshots::read(&mut *self.reader().await?, exec).await
-        })
-        .await
+        self.read(|connection| Box::pin(snapshots::read(connection, exec)))
+            .await
     }
 
     async fn hydrate(
@@ -76,34 +77,26 @@ impl DurableReads for PostgresDurableStore {
         run: &lash_sansio::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         let prefix = ExecKey::turn_cells(session, run);
-        self.within(CommitCapacity::Work, async {
-            snapshots::under(&mut *self.reader().await?, &prefix).await
-        })
-        .await
+        self.read(|connection| Box::pin(snapshots::under(connection, &prefix)))
+            .await
     }
 
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            waits::pending(&mut *self.reader().await?, owner).await
-        })
-        .await
+        self.read(|connection| Box::pin(waits::pending(connection, owner)))
+            .await
     }
 
     async fn wait(&self, id: &WaitId) -> Result<Option<WaitRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            waits::wait(&mut *self.reader().await?, id).await
-        })
-        .await
+        self.read(|connection| Box::pin(waits::wait(connection, id)))
+            .await
     }
 
     async fn process(
         &self,
         process: &lash_sansio::ProcessId,
     ) -> Result<Option<ProcessActorRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            processes::process(&mut *self.reader().await?, process).await
-        })
-        .await
+        self.read(|connection| Box::pin(processes::process(connection, process)))
+            .await
     }
 
     async fn live_until_descendants(
@@ -111,8 +104,8 @@ impl DurableReads for PostgresDurableStore {
         scope: &ScopeKey,
         limit: usize,
     ) -> Result<Vec<lash_sansio::ProcessId>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            processes::live_until_descendants(&mut *self.reader().await?, scope, limit).await
+        self.read(|connection| {
+            Box::pin(processes::live_until_descendants(connection, scope, limit))
         })
         .await
     }
@@ -123,58 +116,111 @@ impl DurableReads for PostgresDurableStore {
         after: Option<&lash_sansio::ProcessId>,
         limit: usize,
     ) -> Result<Vec<lash_sansio::ProcessId>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            processes::until_children(&mut *self.reader().await?, scope, after, limit).await
-        })
-        .await
+        self.read(|connection| Box::pin(processes::until_children(connection, scope, after, limit)))
+            .await
     }
 
     async fn session_close(
         &self,
         session: &lash_sansio::SessionId,
     ) -> Result<Option<SessionCloseRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            session_close::read(&mut *self.reader().await?, session).await
-        })
-        .await
+        self.read(|connection| Box::pin(session_close::read(connection, session)))
+            .await
     }
 
     async fn ending_scopes(
         &self,
         session: &lash_sansio::SessionId,
     ) -> Result<Vec<ScopeKey>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            session_close::ending_scopes(&mut *self.reader().await?, session).await
-        })
-        .await
+        self.read(|connection| Box::pin(session_close::ending_scopes(connection, session)))
+            .await
     }
 
     async fn session_mailbox(
         &self,
         session: &lash_sansio::SessionId,
     ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            session_mail::read(&mut *self.reader().await?, session).await
-        })
-        .await
+        self.read(|connection| Box::pin(session_mail::read(connection, session)))
+            .await
     }
 
     async fn prompt_snapshot(
         &self,
         call: &lash_durable::domain::PromptCallKey,
     ) -> Result<Option<lash_durable::domain::PromptSnapshotRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            prompts::snapshot(&mut *self.reader().await?, call).await
-        })
-        .await
+        self.read(|connection| Box::pin(prompts::snapshot(connection, call)))
+            .await
     }
 
     async fn prompt_texts(
         &self,
         hashes: &[String],
     ) -> Result<Vec<lash_durable::domain::PromptText>, DurableError> {
+        self.read(|connection| Box::pin(prompts::texts(connection, hashes)))
+            .await
+    }
+}
+
+/// A read's body: its statements on the connection it is handed.
+pub(super) type ReadBody<'c, T> =
+    Pin<Box<dyn Future<Output = Result<T, DurableError>> + Send + 'c>>;
+
+/// The work connection one unfenced read runs on, for as long as the read
+/// borrows `'a`.
+pub(super) struct ReadConnection<'a> {
+    connection: PoolConnection<Postgres>,
+    read: PhantomData<&'a ()>,
+}
+
+impl Deref for ReadConnection<'_> {
+    type Target = PgConnection;
+
+    fn deref(&self) -> &PgConnection {
+        &self.connection
+    }
+}
+
+impl DerefMut for ReadConnection<'_> {
+    fn deref_mut(&mut self) -> &mut PgConnection {
+        &mut self.connection
+    }
+}
+
+impl PostgresDurableStore {
+    /// Run `body`, an unfenced read, on a work connection under the work
+    /// capacity's admission and deadline.
+    ///
+    /// A checkout pings only a connection idle for 10 s (FIG-5936), so a
+    /// connection the server closed while it sat in the pool, as a restart
+    /// closes every one, is first met by a read's own statement (FIG-5975).
+    /// A read writes nothing: one that failed on a connection that no longer
+    /// answers a ping runs once more, on a connection that does. A failure
+    /// on a live connection is the read's answer.
+    pub(super) async fn read<'a, T>(
+        &self,
+        body: impl for<'c> Fn(&'c mut ReadConnection<'a>) -> ReadBody<'c, T>,
+    ) -> Result<T, DurableError> {
         self.within(CommitCapacity::Work, async {
-            prompts::texts(&mut *self.reader().await?, hashes).await
+            let mut connection = ReadConnection {
+                connection: self.reader().await?,
+                read: PhantomData,
+            };
+            let failure = match body(&mut connection).await {
+                Ok(value) => return Ok(value),
+                Err(failure) => failure,
+            };
+            if sqlx::Connection::ping(&mut *connection).await.is_ok() {
+                return Err(failure);
+            }
+            connection.connection.close_on_drop();
+            drop(connection);
+            let mut connection = ReadConnection {
+                connection: crate::observed_sql::verified(&self.pools.work)
+                    .await
+                    .map_err(sqlx_failure)?,
+                read: PhantomData,
+            };
+            body(&mut connection).await
         })
         .await
     }

@@ -132,7 +132,10 @@ A pool policy is `{max_connections, min_connections, acquire_timeout_ms,
 idle_timeout_ms, max_lifetime_ms, test_before_acquire}`; pooled roles default
 to `min 0`, `idle 600000`, `lifetime 1800000`, `test_before_acquire false`:
 a checkout pings only a connection idle for 10 s or more, so the hot path
-pays no round trip for it; `true` pings every checkout.
+pays no round trip for it; `true` pings every checkout. A connection the
+server closed while it sat in the pool, as a restart closes every one, is
+then first met by a statement: a durable read that fails on a connection that
+no longer answers a ping runs once more on one that does.
 `null` idle or lifetime really disables recycling. Dedicated connections
 (renewal, listener) are never recycled for idleness or age.
 

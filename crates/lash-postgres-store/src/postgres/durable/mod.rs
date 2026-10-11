@@ -993,11 +993,8 @@ async fn apply_mail(
 #[async_trait::async_trait]
 impl DurableStore for PostgresDurableStore {
     async fn now(&self) -> Result<DurableInstant, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            let mut connection = self.reader().await?;
-            self.instant_on(&mut connection).await
-        })
-        .await
+        self.read(|connection| Box::pin(self.instant_on(connection)))
+            .await
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
@@ -1261,73 +1258,76 @@ impl DurableStore for PostgresDurableStore {
     }
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            let session = match actor.kind() {
-                lash_durable::ActorKind::Session => Some(actor.id()),
-                lash_durable::ActorKind::Process => None,
-            };
-            let rows = crate::observed_sql::query(SQL.postgres.open.sql())
-                .bind(actor.as_str())
-                .bind(session)
-                .fetch_all(crate::observed_sql::executor(&mut *self.reader().await?))
-                .await
-                .map_err(sqlx_failure)?;
-            let Some(first) = rows.first() else {
-                return Err(DurableError::OwnershipLost(Fenced {
-                    actor: actor.clone(),
-                    held: epoch,
-                    current: None,
-                }));
-            };
-            let current = Epoch(get(first, 0)?);
-            if current != epoch || get::<String>(first, 1)? != ActorState::Owned.as_str() {
-                return Err(DurableError::OwnershipLost(Fenced {
-                    actor: actor.clone(),
-                    held: epoch,
-                    current: Some(current),
-                }));
-            }
-            let turn_cancel = match (session, get::<Option<String>>(first, 10)?) {
-                (Some(session), Some(run)) => {
-                    let session = lash_sansio::SessionId::try_from(session.to_owned())
-                        .map_err(|_| corrupt("session id", session))?;
-                    let run = lash_sansio::TurnId::try_from(run.clone())
-                        .map_err(|_| corrupt("turn id", &run))?;
-                    let stored = (
-                        get(first, 11)?,
-                        get(first, 12)?,
-                        get(first, 13)?,
-                        get(first, 14)?,
-                        get(first, 15)?,
-                    );
-                    Some(turns::decode_cancel(&session, &run, stored)?)
-                }
-                _ => None,
-            };
-            let at = self.instant_or(get(first, 9)?)?;
-            let mut opened = OpenedActor {
+        let session = match actor.kind() {
+            lash_durable::ActorKind::Session => Some(actor.id()),
+            lash_durable::ActorKind::Process => None,
+        };
+        let rows = self
+            .read(|connection| {
+                Box::pin(async move {
+                    crate::observed_sql::query(SQL.postgres.open.sql())
+                        .bind(actor.as_str())
+                        .bind(session)
+                        .fetch_all(crate::observed_sql::executor(&mut **connection))
+                        .await
+                        .map_err(sqlx_failure)
+                })
+            })
+            .await?;
+        let Some(first) = rows.first() else {
+            return Err(DurableError::OwnershipLost(Fenced {
                 actor: actor.clone(),
-                epoch,
-                revision: StateRevision(get(first, 2)?),
-                acked: MailSeq(get(first, 3)?),
-                seen: MailSeq(get(first, 4)?),
-                mail: Vec::new(),
-                at,
-                turn_cancel,
-            };
-            for row in &rows {
-                if let Some(seq) = get::<Option<i64>>(row, 5)? {
-                    opened.mail.push(Mail {
-                        seq: MailSeq(seq),
-                        kind: MailKind::new(get::<String>(row, 6)?),
-                        body: get(row, 7)?,
-                        appended_at: DurableInstant(get(row, 8)?),
-                    });
-                }
+                held: epoch,
+                current: None,
+            }));
+        };
+        let current = Epoch(get(first, 0)?);
+        if current != epoch || get::<String>(first, 1)? != ActorState::Owned.as_str() {
+            return Err(DurableError::OwnershipLost(Fenced {
+                actor: actor.clone(),
+                held: epoch,
+                current: Some(current),
+            }));
+        }
+        let turn_cancel = match (session, get::<Option<String>>(first, 10)?) {
+            (Some(session), Some(run)) => {
+                let session = lash_sansio::SessionId::try_from(session.to_owned())
+                    .map_err(|_| corrupt("session id", session))?;
+                let run = lash_sansio::TurnId::try_from(run.clone())
+                    .map_err(|_| corrupt("turn id", &run))?;
+                let stored = (
+                    get(first, 11)?,
+                    get(first, 12)?,
+                    get(first, 13)?,
+                    get(first, 14)?,
+                    get(first, 15)?,
+                );
+                Some(turns::decode_cancel(&session, &run, stored)?)
             }
-            Ok(ActorTx::opened(opened))
-        })
-        .await
+            _ => None,
+        };
+        let at = self.instant_or(get(first, 9)?)?;
+        let mut opened = OpenedActor {
+            actor: actor.clone(),
+            epoch,
+            revision: StateRevision(get(first, 2)?),
+            acked: MailSeq(get(first, 3)?),
+            seen: MailSeq(get(first, 4)?),
+            mail: Vec::new(),
+            at,
+            turn_cancel,
+        };
+        for row in &rows {
+            if let Some(seq) = get::<Option<i64>>(row, 5)? {
+                opened.mail.push(Mail {
+                    seq: MailSeq(seq),
+                    kind: MailKind::new(get::<String>(row, 6)?),
+                    body: get(row, 7)?,
+                    appended_at: DurableInstant(get(row, 8)?),
+                });
+            }
+        }
+        Ok(ActorTx::opened(opened))
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
