@@ -46,6 +46,12 @@ pub struct SqliteOperationalSettings {
     pub graph_insert_chunk: NonZeroUsize,
     /// Process events hydrated and released per page.
     pub process_event_release_page: NonZeroUsize,
+    /// Most queued write transactions the writer commits together in one
+    /// `BEGIN IMMEDIATE` (FIG-5958); `1` commits each alone.
+    pub write_batch_members: NonZeroUsize,
+    /// Rows a write batch may change before no further queued write starts
+    /// in it (FIG-5958). A write alone may change more.
+    pub write_batch_rows: NonZeroUsize,
 }
 
 impl Default for SqliteOperationalSettings {
@@ -61,8 +67,10 @@ impl SqliteOperationalSettings {
     /// WAL retry: 1–50 ms. Locks: 8 attempts / 10 ms poll. Wakes: 25 ms poll,
     /// 10 s retention, 5 s lock wait, 25 ms–1 s reopen. Migration poll: 10 ms.
     /// Working chunks: checkpoint refs and occupied ids 16,384, inserts 512,
-    /// released events 256. Ref chunks bound requests around 1 MiB; the
-    /// remaining numerical choices have no workload measurements behind them.
+    /// released events 256. Write batches: 32 members, 4,096 rows. Ref
+    /// chunks bound requests around 1 MiB; at 16 lanes under `Full`, 32-member
+    /// batches halved syncs per turn (FIG-5958). The remaining numerical
+    /// choices have no workload measurements behind them.
     pub fn standard() -> Self {
         let count = |n| NonZeroUsize::new(n).unwrap_or(NonZeroUsize::MIN);
         Self {
@@ -85,6 +93,8 @@ impl SqliteOperationalSettings {
             occupied_node_chunk: count(16_384),
             graph_insert_chunk: count(512),
             process_event_release_page: count(256),
+            write_batch_members: count(32),
+            write_batch_rows: count(4_096),
         }
     }
 

@@ -374,6 +374,14 @@ also corrupt the database. Both are explicit weaker contracts: losing a
 recorded start after its body ran can admit that body again. The host still
 states the SQLite mode explicitly; there is no default (D-DEFAULTS2).
 
+The SQLite writer group-commits (FIG-5958): the writes already queued when it
+becomes free share one `BEGIN IMMEDIATE`, one writer fence and one durable
+`COMMIT`, each in its own savepoint, so one member's refusal undoes only that
+member. No member answers before the shared commit returns, and a failed commit
+fails every member. Nothing waits for a batch to fill, and a lone write runs as
+a plain transaction. The synchronous mode stays the connection's, fixed before
+any transaction begins.
+
 PostgreSQL requires `fsync=on` and synchronous commit (`synchronous_commit=on`
 or a synchronous level that waits for local WAL flush). Asynchronous commit
 can lose acknowledged starts; disabling fsync also risks corruption. Every

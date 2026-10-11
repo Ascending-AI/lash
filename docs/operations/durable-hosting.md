@@ -837,8 +837,12 @@ and count remain configurable.
 
 The connection policy's `operational` field exposes readonly busy/cache,
 statement cache, checkpoint pacing/busy, WAL retry, wake poll/retention/reopen,
-lock attempts and polling, migration polling, checkpoint/graph chunks and
-event-release paging. `SqliteOperationalSettings::standard()` documents every
+lock attempts and polling, migration polling, checkpoint/graph chunks,
+event-release paging and write batches. The writer commits the writes already
+queued when it becomes free as one transaction, each in its own savepoint
+(`write_batch_members`, 32; `write_batch_rows`, 4,096): one sync under `Full`
+covers them all, no write answers before that commit returns, and nothing waits
+for a batch to fill. `SqliteOperationalSettings::standard()` documents every
 value and its evidence; `::development()` reduces working capacities.
 FIG-3975 found a 16-statement cache evicted the store's statement mix, leading
 to 256 in standard. The timing and reduced development values are unmeasured.

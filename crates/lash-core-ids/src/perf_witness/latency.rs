@@ -135,6 +135,20 @@ impl Transaction {
         MARKS.with(|marks| *marks.borrow_mut() = Some(Vec::new()));
         Some(Self)
     }
+    /// How many marks are staged: where a savepoint inside this
+    /// transaction starts.
+    pub fn staged(&self) -> usize {
+        MARKS.with(|marks| marks.borrow().as_ref().map_or(0, Vec::len))
+    }
+    /// Drop the marks staged since `staged`: their savepoint rolled back,
+    /// so they never commit.
+    pub fn undo(&self, staged: usize) {
+        MARKS.with(|marks| {
+            if let Some(marks) = marks.borrow_mut().as_mut() {
+                marks.truncate(staged);
+            }
+        });
+    }
     pub fn committed(self, before: Stamp, returned: Stamp) {
         let marks = MARKS.with(|marks| marks.borrow_mut().take().unwrap_or_default());
         with_recording(|snapshot| {

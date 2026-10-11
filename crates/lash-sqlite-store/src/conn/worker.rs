@@ -1,12 +1,47 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use tokio::sync::oneshot;
+
+use super::batch::{self, Member};
 
 type Work = Box<dyn FnOnce(&mut rusqlite::Connection) + Send>;
 
 enum Command {
     Call(Work),
+    /// A write transaction: it may share a batch with the writes queued
+    /// behind it (FIG-5958).
+    Write(Member),
     Close(oneshot::Sender<rusqlite::Result<()>>),
+}
+
+/// The writes queued right behind `first` that may join its batch, taken
+/// in queue order without waiting: from `held` first, then the channel. The
+/// first command that cannot join stays at the head of `held`.
+fn gather(
+    first: Member,
+    held: &mut VecDeque<Command>,
+    receiver: &mpsc::Receiver<Command>,
+) -> Vec<Member> {
+    let limit = first.limit();
+    let mut members = vec![first];
+    while members.len() < limit {
+        let next = match held.pop_front() {
+            Some(next) => next,
+            None => match receiver.try_recv() {
+                Ok(next) => next,
+                Err(_) => break,
+            },
+        };
+        match next {
+            Command::Write(member) if member.joins(&members[0]) => members.push(member),
+            other => {
+                held.push_front(other);
+                break;
+            }
+        }
+    }
+    members
 }
 
 struct Owner {
@@ -61,9 +96,16 @@ impl Connection {
                 if opened.send(Ok(())).is_err() {
                     return;
                 }
-                while let Ok(command) = receiver.recv() {
+                let mut held = VecDeque::new();
+                while let Some(command) = held.pop_front().or_else(|| receiver.recv().ok()) {
                     match command {
                         Command::Call(work) => work(&mut connection),
+                        Command::Write(first) => {
+                            let members = gather(first, &mut held, &receiver);
+                            for unrun in batch::run(&mut connection, members).into_iter().rev() {
+                                held.push_front(Command::Write(unrun));
+                            }
+                        }
                         Command::Close(answer) => match connection.close() {
                             Ok(()) => {
                                 let _ = answer.send(Ok(()));
@@ -121,6 +163,12 @@ impl Connection {
             .map_err(tokio_rusqlite::Error::Error)
     }
 
+    /// Queue `member` as a write transaction; it answers through its own
+    /// reply once its batch is settled.
+    pub(super) fn write(&self, member: Member) -> tokio_rusqlite::Result<()> {
+        self.send(Command::Write(member))
+    }
+
     pub(super) async fn close(self) -> tokio_rusqlite::Result<()> {
         let (answer, result) = oneshot::channel();
         if self.send(Command::Close(answer)).is_err() {
@@ -157,7 +205,7 @@ impl Connection {
                     Command::Call(work)
                 }
             }
-            close => close,
+            other => other,
         };
         self.0
             .sender

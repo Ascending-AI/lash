@@ -57,6 +57,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock, Weak};
 use std::time::Duration;
+mod batch;
 mod worker;
 use worker::Connection as AsyncConnection;
 
@@ -517,8 +518,9 @@ pub(crate) struct SqliteConnection {
     /// on (FIG-3975), shared by all connections that open it.
     write_gate: Arc<Mutex<()>>,
     read_gate: Arc<RwLock<()>>,
-    checkpoint: Option<Arc<CheckpointState>>,
     fence: Arc<WriterFence>,
+    /// What this connection's queued writes share on its thread.
+    writer: Arc<batch::Writer>,
     /// Where a producer commit on this connection hands the actor it woke,
     /// after the commit: the store set's [`WakeSink`](lash_durable::runner::WakeSink).
     wakes: lash_durable::runner::WakeSink,
@@ -652,21 +654,31 @@ impl SqliteConnection {
         lash_core_execution::perf_witness::startup::record(
             lash_core_execution::perf_witness::startup::Phase::StoreSetupFinished,
         );
+        let checkpoint = checkpoint_state(
+            target,
+            &gate,
+            &reads,
+            policy.wal_autocheckpoint_pages,
+            policy.operational,
+        );
+        let fence = WriterFence::new();
         Ok(Self {
             operational: policy.operational,
             inner,
             #[cfg(feature = "perf-witness")]
             reader: false,
-            checkpoint: checkpoint_state(
-                target,
-                &gate,
-                &reads,
-                policy.wal_autocheckpoint_pages,
-                policy.operational,
-            ),
+            writer: Arc::new(batch::Writer {
+                operational: policy.operational,
+                write_gate: Arc::clone(&gate),
+                read_gate: Arc::clone(&reads),
+                checkpoint,
+                fence: Arc::clone(&fence),
+                #[cfg(feature = "testing")]
+                pauses: hooks.pauses.clone(),
+            }),
             write_gate: gate,
             read_gate: reads,
-            fence: WriterFence::new(),
+            fence,
             wakes: lash_durable::runner::WakeSink::default(),
             #[cfg(feature = "testing")]
             pauses: hooks.pauses,
@@ -721,15 +733,25 @@ impl SqliteConnection {
                 Ok(())
             })
             .await?;
+        let reads = read_gate(target);
+        let fence = WriterFence::new();
         Ok(Self {
             operational,
             inner,
             #[cfg(feature = "perf-witness")]
             reader: true,
+            writer: Arc::new(batch::Writer {
+                operational,
+                write_gate: Arc::clone(&gate),
+                read_gate: Arc::clone(&reads),
+                checkpoint: None,
+                fence: Arc::clone(&fence),
+                #[cfg(feature = "testing")]
+                pauses: None,
+            }),
             write_gate: gate,
-            read_gate: read_gate(target),
-            checkpoint: None,
-            fence: WriterFence::new(),
+            read_gate: reads,
+            fence,
             wakes: lash_durable::runner::WakeSink::default(),
             #[cfg(feature = "testing")]
             pauses: None,
@@ -1056,100 +1078,33 @@ impl SqliteConnection {
         T: Send + 'static,
         F: FnOnce(&FencedTx<'_>) -> rusqlite::Result<TxOutcome<T>> + Send + 'static,
     {
-        let write_gate = Arc::clone(&self.write_gate);
-        let read_gate = Arc::clone(&self.read_gate);
-        let checkpoint = self.checkpoint.clone();
-        let fence = Arc::clone(&self.fence);
-        let operational = self.operational;
         #[cfg(feature = "testing")]
-        let pauses = self.pauses.clone();
+        if self.inline_calls {
+            let (answer, result) = std::sync::mpsc::sync_channel(1);
+            flatten(
+                self.inner
+                    .write(batch::Member::new(&self.writer, f, move |value| {
+                        let _ = answer.send(value);
+                    }))
+                    .map(Ok),
+            )?;
+            return result.recv().unwrap_or_else(|_| closed());
+        }
+        let (answer, result) = tokio::sync::oneshot::channel();
         flatten(
-            self.run(move |c| {
-                #[cfg(feature = "perf-witness")]
-                let mut read_timing =
-                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
-                let _read_gate = timed_gate(|| {
-                    read_gate
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                });
-                #[cfg(feature = "perf-witness")]
-                if let Some(timing) = &mut read_timing {
-                    timing.start_service();
-                    timing.complete();
-                }
-                #[cfg(feature = "perf-witness")]
-                let mut write_timing =
-                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.write_gate");
-                let write_gate = timed_gate(|| {
-                    write_gate
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                });
-                #[cfg(feature = "perf-witness")]
-                if let Some(timing) = &mut write_timing {
-                    timing.start_service();
-                }
-                let result = (|| {
-                    #[cfg(feature = "perf-witness")]
-                    let witness = lash_core_execution::perf_witness::latency::Transaction::begin();
-                    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                    #[cfg(feature = "perf-witness")]
-                    lash_core_execution::perf_witness::latency::began_write();
-                    let fleet = fence.check(&tx)?;
-                    #[cfg(feature = "testing")]
-                    if let Some(pauses) = pauses.as_ref() {
-                        pauses.reach_after_fence();
-                    }
-                    let tx = FencedTx {
-                        operational,
-                        tx,
-                        fleet,
-                        writable: fence.writable(),
-                    };
-                    let outcome = f(&tx)?;
-                    let value = match outcome {
-                        TxOutcome::Commit(value) => {
-                            #[cfg(feature = "perf-witness")]
-                            let before = witness
-                                .as_ref()
-                                .map(|_| lash_core_execution::perf_witness::latency::Stamp::now());
-                            tx.tx.commit()?;
-                            #[cfg(feature = "perf-witness")]
-                            if let Some((witness, before)) = witness.zip(before) {
-                                witness.committed(
-                                    before,
-                                    lash_core_execution::perf_witness::latency::Stamp::now(),
-                                );
-                            }
-                            value
-                        }
-                        TxOutcome::Rollback(value) => {
-                            // SQLITE_FULL may already have rolled the transaction
-                            // back. Preserve the closure's original refusal then.
-                            if !tx.tx.is_autocommit() {
-                                tx.tx.rollback()?;
-                            }
-                            value
-                        }
-                    };
-                    Ok(Ok(value))
-                })();
-                drop(write_gate);
-                #[cfg(feature = "perf-witness")]
-                if let Some(mut timing) = write_timing.take() {
-                    timing.complete();
-                }
-                if result.is_ok()
-                    && let Some(checkpoint) = &checkpoint
-                {
-                    checkpoint.commits.fetch_add(1, Ordering::Release);
-                }
-                result
-            })
-            .await,
-        )
+            self.inner
+                .write(batch::Member::new(&self.writer, f, move |value| {
+                    let _ = answer.send(value);
+                }))
+                .map(Ok),
+        )?;
+        result.await.unwrap_or_else(|_| closed())
     }
+}
+
+/// The answer of a write whose connection thread ended before answering.
+fn closed<T>() -> rusqlite::Result<T> {
+    flatten(Err(tokio_rusqlite::Error::ConnectionClosed))
 }
 
 /// `Connection::execute` through the connection's prepared-statement cache
@@ -1379,7 +1334,7 @@ mod tests {
 
     /// A connection to a bare scratch database whose installer laid down only
     /// its `lash_compat` row, so its writes pass the fence.
-    async fn installed(
+    pub(super) async fn installed(
         target: &DatabaseTarget,
         policy: SqliteConnectionPolicy,
     ) -> SqliteConnection {

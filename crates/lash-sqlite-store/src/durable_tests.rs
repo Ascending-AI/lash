@@ -284,3 +284,170 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
         "every held text reads back"
     );
 }
+
+/// FIG-5958: an owner commit that lost its fence (a stale epoch) shares a
+/// write batch with a live owner's commit. Only the stale commit is
+/// refused, with `OwnershipLost`, by undoing its own savepoint: the live
+/// commit lands in the same transaction, which no rollback ends, and the
+/// lost actor's state does not move.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_lost_fence_in_a_write_batch_refuses_only_its_own_commit() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use lash_durable::{
+        ActorKey, CommitLabel, DurableError, DurableStore, FormatSet, MailKind, MailTx, NodeId,
+        NodeSpec, Release,
+    };
+
+    let root = tempfile::tempdir().expect("store root");
+    let pauses = crate::testing::SqlitePauses::default();
+    let set = SqliteStoreSet::open_with_options_and_clock(
+        root.path().join("lash.db"),
+        crate::SqliteStoreSetOptions {
+            pauses: Some(pauses.clone()),
+            ..crate::SqliteStoreSetOptions::standard(crate::SqliteSynchronous::Full)
+        },
+        Arc::new(TestClock::new(1_000_000)),
+    )
+    .await
+    .expect("open the store set");
+    let store = set.durable_store();
+    let label = CommitLabel::new("law.batch");
+    let formats = FormatSet::new("batch-fence-formats");
+    let live = ActorKey::session("batch-live").expect("a session actor key");
+    let lost = ActorKey::session("batch-lost").expect("a session actor key");
+    let mut create = MailTx::new();
+    create.create_actor(live.clone(), formats.clone());
+    create.create_actor(lost.clone(), formats.clone());
+    store
+        .commit_mail(create, label)
+        .await
+        .expect("create the actors");
+    let node = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("batch-owner"),
+            decodes: vec![formats],
+            ttl_millis: 15_000,
+        })
+        .await
+        .expect("register the owner");
+    let claimed = store.claim(&node, 2).await.expect("claim both actors");
+    let epoch = |actor: &ActorKey| {
+        claimed
+            .iter()
+            .find(|claim| &claim.actor == actor)
+            .map(|claim| claim.epoch)
+            .expect("the actor was claimed")
+    };
+    let stale = store
+        .begin(&lost, epoch(&lost))
+        .await
+        .expect("open the soon-stale owner");
+    let mut give_up = store
+        .begin(&lost, epoch(&lost))
+        .await
+        .expect("open the owner");
+    give_up.give_up(Release::Idle);
+    store
+        .commit(give_up, label)
+        .await
+        .expect("release the actor");
+    let mut wake = MailTx::new();
+    wake.append(lost.clone(), MailKind::new("law.note"), "wake");
+    store
+        .commit_mail(wake, label)
+        .await
+        .expect("wake the actor");
+    let reclaimed = store.claim(&node, 1).await.expect("claim it again");
+    assert_eq!(
+        reclaimed.len(),
+        1,
+        "the woken actor is claimed under a new epoch"
+    );
+    let current = store
+        .begin(&live, epoch(&live))
+        .await
+        .expect("open the live owner");
+    let revision = |actor: &ActorKey| {
+        let store = &store;
+        let actor = actor.clone();
+        async move {
+            store
+                .actor(&actor)
+                .await
+                .expect("read the actor")
+                .expect("the actor exists")
+                .revision
+        }
+    };
+    let (live_before, lost_before) = (revision(&live).await, revision(&lost).await);
+
+    let commits = Arc::new(AtomicUsize::new(0));
+    let rollbacks = Arc::new(AtomicUsize::new(0));
+    let (counted_commits, counted_rollbacks) = (Arc::clone(&commits), Arc::clone(&rollbacks));
+    set.process_env_store()
+        .conn
+        .call(move |c| {
+            c.commit_hook(Some(move || {
+                counted_commits.fetch_add(1, Ordering::SeqCst);
+                false
+            }));
+            c.rollback_hook(Some(move || {
+                counted_rollbacks.fetch_add(1, Ordering::SeqCst);
+            }));
+            Ok(())
+        })
+        .await
+        .expect("count the writer's transaction ends");
+
+    // Hold the writer after a heartbeat's fence, so both owner commits
+    // queue behind it and form the next batch, the stale one first.
+    let pause = pauses.pause_after_fence();
+    let holding = tokio::spawn({
+        let store = set.durable_store();
+        let node = node.clone();
+        async move { store.heartbeat(&node).await }
+    });
+    pause.wait_until_reached().await;
+    let mut refused = Box::pin(store.commit(stale, label));
+    let mut landed = Box::pin(store.commit(current, label));
+    std::future::poll_fn(|cx| {
+        use std::future::Future;
+        assert!(refused.as_mut().poll(cx).is_pending());
+        assert!(landed.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    pause.release();
+    holding
+        .await
+        .expect("heartbeat task")
+        .expect("the held heartbeat commits");
+    let refused = refused.await;
+    assert!(
+        matches!(refused, Err(DurableError::OwnershipLost(_))),
+        "the stale commit answered {refused:?}"
+    );
+    landed
+        .await
+        .expect("the live commit lands beside the refusal");
+    assert_eq!(
+        rollbacks.load(Ordering::SeqCst),
+        0,
+        "the refusal ended the shared transaction instead of its own savepoint"
+    );
+    assert_eq!(
+        commits.load(Ordering::SeqCst),
+        2,
+        "the heartbeat and the shared batch commit once each"
+    );
+    assert!(
+        revision(&live).await > live_before,
+        "the live commit moved its actor"
+    );
+    assert_eq!(
+        revision(&lost).await,
+        lost_before,
+        "the stale commit moved nothing"
+    );
+}
