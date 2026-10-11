@@ -839,7 +839,7 @@ async fn prove(shape: Shape, tier: Tier) {
         CommitLabel::TURN_COMMIT,
     ];
     if shape == Shape::Cell {
-        expected.push(CommitLabel::CELL_SNAPSHOT);
+        expected.push(CommitLabel::CELL_SNAPSHOT_ADMIT);
     }
     for label in expected {
         assert!(

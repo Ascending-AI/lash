@@ -202,7 +202,7 @@ impl RuntimeDrive {
     }
 
     fn assemble(
-        driver: Box<RuntimeTurnDriver<'static>>,
+        mut driver: Box<RuntimeTurnDriver<'static>>,
         machine: TurnMachine,
         before_turn: Vec<crate::plugin::RecordedTurnContribution>,
         attachments: Option<crate::attachments::AttachmentExecutionBinding>,
@@ -222,6 +222,10 @@ impl RuntimeDrive {
             driver.turn_phase_probe.clone(),
             RuntimeTurnPhase::EffectLoop,
         ));
+        // A cell's end rides the commit that consumes its answer unless a
+        // callback of the host's runs between the two (FIG-5999).
+        driver.cell_end =
+            crate::CellEndHandoff::holding(driver.session.plugins().can_hold_cell_end());
         Self {
             effect_phase,
             commit_phase: None,
@@ -598,14 +602,11 @@ impl TurnDrive for RuntimeDrive {
 
     async fn consume_cell(
         &mut self,
-        cx: &ActorContext,
+        _cx: &ActorContext,
         tx: &mut lash_durable::ActorTx,
         id: crate::EffectId,
         working: bool,
     ) -> Result<(), TurnError> {
-        use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
-        use lash_durable::domain::{CellId, ExecKey};
-
         let Some(code_executor) = self.driver.session.plugins().code_executor() else {
             return Ok(());
         };
@@ -640,40 +641,36 @@ impl TurnDrive for RuntimeDrive {
             }
             self.staged_working = staged;
         }
-        // The cell's ended root is consumed with its answer: the turn holds
-        // its outcome in its report and its state as its working state. A
-        // root still parked belongs to a cell the turn stopped in, which its
-        // end does not consume.
-        let invocation = self
+        // The cell's root is consumed with its answer: the turn holds its
+        // outcome in its report and its state as its working state, and the
+        // store reclaims the cell's records and admissions with the root.
+        // The cell named its execution and the root when it ended: the one
+        // that records its end, or, for an end held in memory, its last
+        // park (FIG-5999). The turn derives neither again: by this commit
+        // its machine stands past the step the cell's key was derived in.
+        // A cell the turn stopped in named none, and its root stays until
+        // the turn ends.
+        if let Some((_, ended)) = self
             .driver
-            .turn_effect_invocation(&self.machine, id, RuntimeEffectKind::ExecCode)
-            .map_err(|error| TurnError::Exec(error.to_string()))?;
-        let exec = ExecKey::Cell(
-            session,
-            self.driver.turn_id.clone(),
-            CellId::new(invocation.effect_replay_key()),
-        );
-        let Some(cell) = stored_cell(cx, exec).await? else {
-            return Ok(());
-        };
-        let body: ExecRoot = lash_core_store::checkpoint_graph::GraphDecoder::new(
-            &cell.graph,
-            lash_durable::domain::graph::OWNER_READ_LIMITS,
-        )
-        .decode(
-            cell.row.root,
-            lash_core_store::checkpoint_graph::NodeKind::EXEC_ROOT,
-        )
-        .map_err(|error| TurnError::Exec(format!("the cell's root does not read: {error}")))?;
-        if body.status == ExecStatus::Ended {
+            .answered_cell_end
+            .as_ref()
+            .filter(|(cell, _)| *cell == id)
+        {
             tx.write(lash_durable::DomainWrite::ExecRoot(
                 lash_durable::domain::graph::ExecRootWrite::Retire {
-                    exec: cell.exec,
-                    expected: cell.row.root,
+                    exec: ended.exec.clone(),
+                    expected: ended.root,
                 },
             ));
         }
         Ok(())
+    }
+
+    fn answered_cell_end_held(&self, id: crate::EffectId) -> bool {
+        self.driver
+            .answered_cell_end
+            .as_ref()
+            .is_some_and(|(cell, ended)| *cell == id && ended.held)
     }
 
     async fn phase_committed(&mut self) {

@@ -449,10 +449,15 @@ impl RuntimeTurnDriver<'_> {
         // the recorded `ExecResponse` carries no wall-clock fields, so the
         // Completed activity and its trace mirror take the live window here.
         let cell_started = self.host.core.clock.now();
-        let result = match self
+        self.answered_cell_end = None;
+        drop(self.cell_end.take());
+        let invoked = self
             .invoke_turn_exec_effect(machine, invocation, code.clone(), event_tx)
-            .await
-        {
+            .await;
+        // What the cell left of its end, whether it answers with its result
+        // or with a failure met after it ended.
+        self.answered_cell_end = self.cell_end.take().map(|ended| (id, ended));
+        let result = match invoked {
             Ok(result) => result,
             Err(err) => {
                 let message = err.to_string();

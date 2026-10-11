@@ -206,7 +206,11 @@ async fn stopped_cell(
         return Ok(None);
     }
     let calls = drive.stopped_cell_calls(cx, id).await?;
-    Ok((!calls.is_empty()).then_some(AnsweredCell { id, calls }))
+    Ok((!calls.is_empty()).then_some(AnsweredCell {
+        id,
+        calls,
+        held: None,
+    }))
 }
 
 /// End `row`'s turn for its accepted `request` in one `turn.cancel` commit
@@ -297,8 +301,12 @@ async fn end(
         between_steps: _,
     }) = stopped
     {
-        if let Some(cell) = &cell {
+        if let Some(cell) = &mut cell {
             stopped.finishing_cell_calls(&cell.calls);
+            // The stop's commit drains the turn's activity first: what the
+            // turn held of the cell's emissions goes before it.
+            let held = cell.held.take().unwrap_or_default();
+            super::tool_round::release_cell_emissions(cx, stopped.as_mut(), held).await?;
         }
         let commit =
             stop_commit(cx, stopped.as_mut(), evidence.clone(), heads, &row.session).await?;

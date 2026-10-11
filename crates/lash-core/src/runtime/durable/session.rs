@@ -300,13 +300,14 @@ pub trait TurnDrive: Send {
     /// Write into `tx`, the transaction that consumes cell `id`'s answer,
     /// the cell's handoff (FIG-5887 §6): with `working`, the session's
     /// complete execution state after the cell as the turn's working state,
-    /// and the retirement of the cell's ended root. A drive whose session
-    /// holds no code executor writes nothing.
+    /// and the retirement of the root the cell named when it ended: the one
+    /// that records its end, or its last park when the turn holds the end
+    /// in memory (FIG-5999). A drive whose session holds no code executor
+    /// writes nothing.
     ///
     /// # Errors
     ///
-    /// [`TurnError`] when the state does not capture or the cell's root does
-    /// not read.
+    /// [`TurnError`] when the state does not capture.
     async fn consume_cell(
         &mut self,
         _cx: &ActorContext,
@@ -315,6 +316,14 @@ pub trait TurnDrive: Send {
         _working: bool,
     ) -> Result<(), TurnError> {
         Ok(())
+    }
+
+    /// Whether the end of cell `id`, which answered, is held in memory for
+    /// the commit that consumes its answer (FIG-5999): a successor that
+    /// loses that commit runs the cell to its end again, so what the turn
+    /// emits from the answer waits for the commit.
+    fn answered_cell_end_held(&self, _id: EffectId) -> bool {
+        false
     }
 
     /// Record that the phase whose transaction carried the last

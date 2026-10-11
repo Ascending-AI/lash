@@ -250,6 +250,8 @@ pub(super) fn turn_effect_executor(
         prelude_base_messages: driver.prelude_base_messages.clone(),
         prepared_context: driver.prepared_context.clone(),
         answered_cell_calls: Default::default(),
+        cell_end: driver.cell_end.clone(),
+        answered_cell_end: None,
         host: driver.host.clone(),
         scoped_effect_controller,
         session_id: driver.session_id.clone(),

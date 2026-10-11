@@ -59,7 +59,9 @@ pub enum TurnScript {
     /// A TypeScript cell that calls the `Once` host operation `ext.write`.
     Cell,
     /// [`Self::Cell`], whose operation's first body never returns: the host
-    /// kills the node running it there and restarts it.
+    /// kills the node running it there and restarts it. Its session is
+    /// served with a host plugin's checkpoint callback, so its cell's end is
+    /// recorded on its own (FIG-5999).
     CellKilled,
     /// A `Once` tool with a store-local process start.
     Effects,
@@ -502,9 +504,11 @@ impl SimServices {
     /// runs with, or `None` for a scripted one.
     fn cells(&self, session: &SessionId) -> Result<Option<Arc<dyn TurnServices>>, TurnError> {
         match TurnScript::of(session) {
-            Some(TurnScript::Cell | TurnScript::CellKilled) => Ok(Some(super::cells::services(
-                &super::cells::cell_core(&self.world).map_err(TurnError::Exec)?,
-            ))),
+            Some(script @ (TurnScript::Cell | TurnScript::CellKilled)) => {
+                Ok(Some(super::cells::services(
+                    &super::cells::cell_core_of(&self.world, script).map_err(TurnError::Exec)?,
+                )))
+            }
             Some(TurnScript::Prompt) => Ok(Some(super::cells::services(
                 &super::prompts::prompt_core(&self.world).map_err(TurnError::Exec)?,
             ))),

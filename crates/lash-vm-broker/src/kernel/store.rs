@@ -38,6 +38,17 @@
 //! open and commits once each has settled, so none outlives the checkpoint
 //! that records the end. Losing the worker closes nothing; another node
 //! resumes the run from its rows.
+//!
+//! # The end
+//!
+//! A run whose ledger stands on nothing when it ends has nothing to close.
+//! When its consumer can hold the end, no checkpoint records it
+//! ([`DurableSnapshotStore::held_end`], FIG-5999): the commit that consumes
+//! the run's answer retires the parked root, and the store reclaims the
+//! run's records and admissions with it. Until then the parked root
+//! stands, and the final stretch, which issued no effect, runs again for
+//! whoever resumes from it. Every other run that parked records its end
+//! ([`DurableSnapshotStore::commit_run_end`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -467,6 +478,45 @@ impl DurableSnapshotStore {
             save.with,
         )
         .await
+    }
+
+    /// The parked root of a run whose end its consumer commits (FIG-5999):
+    /// `ledger`, as the run left it, stands on nothing, so nothing is left
+    /// to close, and the commit that consumes the run's answer retires
+    /// this root with every record and admission under it. A successor
+    /// that finds the root resumes from it, is answered the same committed
+    /// outcomes and runs the final stretch again.
+    ///
+    /// `None` when the ledger still names a wait or a released execution.
+    /// Closing an execution is a commit of its own, and a successor that
+    /// resumed from the parked root would read the closing's cancel as the
+    /// execution's own outcome; a sleep still pending could be over by
+    /// then and answer a race its call had won. Such a run closes and
+    /// records its end ([`commit_run_end`](Self::commit_run_end)).
+    ///
+    /// # Errors
+    ///
+    /// [`QuietPointRefusal`]: a store failure, or a run with no root.
+    pub async fn held_end(
+        &self,
+        ledger: &EffectLedger,
+    ) -> Result<Option<HeldRoot>, QuietPointRefusal> {
+        if ledger.pending().next().is_some() || !ledger.released().is_empty() {
+            return Ok(None);
+        }
+        self.revision()
+            .await?
+            .map(Some)
+            .ok_or_else(|| refused("a run that parked holds its root"))
+    }
+
+    /// The root the execution's row holds, if any.
+    ///
+    /// # Errors
+    ///
+    /// [`QuietPointRefusal`]: a store failure.
+    pub async fn root(&self) -> Result<Option<HeldRoot>, QuietPointRefusal> {
+        self.revision().await
     }
 
     #[expect(

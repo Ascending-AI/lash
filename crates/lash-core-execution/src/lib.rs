@@ -755,8 +755,9 @@ pub use runtime::{
     ProcessStartRegistration, ProcessStartTarget, RetiredProcessStatus, TerminalProcessStatus,
 };
 pub use session::{
-    ExecRequest, ExecutionEnvironmentSyncError, RuntimeExecutionContext, SessionError,
-    ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind, tool_dispatch_surface,
+    CellEndHandoff, EndedCell, ExecRequest, ExecutionEnvironmentSyncError, RuntimeExecutionContext,
+    SessionError, ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind,
+    tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

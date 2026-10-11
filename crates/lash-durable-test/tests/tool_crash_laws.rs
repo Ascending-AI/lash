@@ -2082,11 +2082,12 @@ async fn a_member_never_observes_another_members_uncommitted_state(tier: Tier) {
 }
 
 /// A code cell member's plugin-state change, cut at any commit of its cell
-/// (its admission, its outcome, or the quiet point that prunes its records
-/// once it settled), or at a next `model.start` that never landed, which
-/// delivers the ended cell again from its snapshot, is the session's
-/// committed value once the turn resumes: the value of the call's committed
-/// outcome, the one the model was shown (FIG-5268).
+/// (its admission or its outcome), or at the next `model.start`, which
+/// consumes the cell's answer and reclaims its records with its root
+/// (FIG-5999), is the session's committed value once the turn resumes: the
+/// value of the call's committed outcome, the one the model was shown
+/// (FIG-5268). A `model.start` that never landed delivers the cell again
+/// from its last park.
 async fn a_cell_members_state_change_survives_a_cut_after_its_outcome(tier: Tier) {
     prove_at(
         Turn::StateCell,
@@ -2094,15 +2095,8 @@ async fn a_cell_members_state_change_survives_a_cut_after_its_outcome(tier: Tier
         &[
             CommitLabel::CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
-            CommitLabel::CELL_SNAPSHOT,
+            CommitLabel::MODEL_START,
         ],
-    )
-    .await;
-    prove_under(
-        Turn::StateCell,
-        tier,
-        &[CommitLabel::MODEL_START],
-        &[Fault::FailBefore, Fault::Abort],
     )
     .await;
 }

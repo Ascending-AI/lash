@@ -67,7 +67,10 @@ pub enum Case {
     /// A turn's code cell: its snapshot, its `Once` operation and its
     /// resume from the snapshot.
     Cell,
-    /// [`Self::Cell`] with the node killed inside the operation's body.
+    /// [`Self::Cell`] with the node killed inside the operation's body, its
+    /// session served with a host plugin's callback: its cell's end is
+    /// recorded on its own, where [`Self::Cell`]'s commits with the commit
+    /// that consumes the cell's answer (FIG-5999).
     CellKilled,
     /// A process's steps, its pinned key resolved by the host, its bounded
     /// wait on another process and its terminal's cascade.

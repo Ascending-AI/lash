@@ -47,6 +47,48 @@ impl RecordedTurnCancel {
     }
 }
 
+/// How a foreground cell hands its end to the turn that consumes its answer
+/// (FIG-5999). A turn that holds the end commits it with the commit that
+/// consumes the answer: the cell's executor records nothing at the end, and
+/// names the root that commit retires. Every other caller gets the end
+/// recorded over the cell's root before the cell answers.
+#[derive(Clone, Debug, Default)]
+pub struct CellEndHandoff {
+    holds: bool,
+    ended: Arc<std::sync::Mutex<Option<EndedCell>>>,
+}
+
+/// The root an ended cell leaves for the commit that consumes its answer
+/// to retire.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EndedCell {
+    /// The execution the cell's state is filed under, as its executor
+    /// derived it when the cell ran.
+    pub exec: lash_durable::domain::ExecKey,
+    pub root: lash_core_store::checkpoint_graph::NodeId,
+    /// Whether the end is held in memory: the root is the cell's last park,
+    /// and a successor that finds it runs the cell on to its end again.
+    pub held: bool,
+}
+
+impl CellEndHandoff {
+    /// A handoff whose turn holds the end when `holds`.
+    #[must_use]
+    pub fn holding(holds: bool) -> Self {
+        Self {
+            holds,
+            ended: Arc::default(),
+        }
+    }
+
+    /// What the last cell that ended left, taken: none for a cell that
+    /// never parked, or one that did not end.
+    #[must_use]
+    pub fn take(&self) -> Option<EndedCell> {
+        self.ended.lock_recover().take()
+    }
+}
+
 #[derive(Clone)]
 pub struct RuntimeExecutionContext<'run> {
     tool_fault_retry: crate::runtime::PollPacing,
@@ -127,6 +169,8 @@ pub struct RuntimeExecutionContext<'run> {
     /// owns the stack. Its fixed host-reply API must unwind before the
     /// enclosing code-execution effect can abort.
     nested_effect_error: Arc<std::sync::Mutex<Option<crate::RuntimeEffectControllerError>>>,
+    /// How a cell this context runs hands its end to its turn.
+    cell_end: CellEndHandoff,
     /// The once-only settlement incorporation ledger (ADR 0099 §6/§13,
     /// FIG-3411): which recorded settlements this context has applied and
     /// which usage deltas it has already charged. Travels wherever
@@ -450,6 +494,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             process_work: self.process_work.clone(),
             started_process_ids: Arc::clone(&self.started_process_ids),
             nested_effect_error: Arc::clone(&self.nested_effect_error),
+            cell_end: self.cell_end.clone(),
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
             tool_requests: Arc::clone(&self.tool_requests),
             tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
@@ -756,6 +801,21 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub fn with_process_work(mut self, process_work: Option<crate::ProcessWorkWiring>) -> Self {
         self.process_work = process_work;
         self
+    }
+
+    /// Whether the turn that runs this context's cell commits the cell's
+    /// end with the commit that consumes its answer (FIG-5999). A cell
+    /// executor's hook, not host surface.
+    #[doc(hidden)]
+    pub fn holds_cell_end(&self) -> bool {
+        self.cell_end.holds
+    }
+
+    /// The cell ended, and left `ended` for its consumer. A cell executor's
+    /// hook, not host surface.
+    #[doc(hidden)]
+    pub fn cell_ended(&self, ended: EndedCell) {
+        *self.cell_end.ended.lock_recover() = Some(ended);
     }
 
     pub fn record_nested_effect_error(&self, error: crate::RuntimeEffectControllerError) {

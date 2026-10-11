@@ -1055,7 +1055,6 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::MODEL_DONE,
             CommitLabel::CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
-            CommitLabel::CELL_SNAPSHOT,
             CommitLabel::MODEL_START,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
@@ -1084,7 +1083,6 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::MODEL_DONE,
             CommitLabel::CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
-            CommitLabel::CELL_SNAPSHOT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
             CommitLabel::MODEL_START,
@@ -1185,19 +1183,21 @@ async fn a_once_tool_call_killed_after_its_work_resumes_without_replay_on_postgr
     prove(Protocol::Tools, Dialect::Postgres, Some(url)).await;
 }
 
-/// Cold resume: the whole deployment dies right after the cell's end
-/// commits, and a fresh deployment over the same database, with a core and
-/// an activation that hold nothing of the first one, takes the turn over. A
-/// restore loads state and re-runs no code: the turn is restored once, the
-/// cell's end is read from its snapshot without entering its program or
-/// its operation again, and the only writes left are the second model
-/// call's `model.start`, `turn.commit` and the release.
+/// Cold resume: the whole deployment dies right after the commit that
+/// consumes the cell's answer, the second model call's `model.start`, which
+/// commits the cell's end with it (FIG-5999), and a fresh deployment over
+/// the same database, with a core and an activation that hold nothing of
+/// the first one, takes the turn over. A restore loads state and re-runs no
+/// code: the turn is restored once, the cell's program and its operation
+/// are never entered again, and the only writes left are the `model.start`
+/// that sends the pinned model call again as its next attempt,
+/// `turn.commit` and the release.
 async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
     let first = V0::new(Protocol::Code, dialect, postgres_url.clone());
     let clock = SimClock::new();
     let database = first.database(Arc::clone(&clock)).await;
     let script = Script::new();
-    script.cut_on("a", CommitLabel::CELL_SNAPSHOT, 1, Fault::CommitThenAbort);
+    script.cut_on("a", CommitLabel::MODEL_START, 2, Fault::CommitThenAbort);
     let before = SimNodes::new(
         Arc::clone(&database),
         Arc::clone(&clock),
@@ -1211,7 +1211,7 @@ async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
     while before.script().cuts().is_empty() {
         assert!(
             before.step().await.is_some(),
-            "the first deployment stalled before the cell's end committed:\n{}",
+            "the first deployment stalled before the cell's answer was consumed:\n{}",
             before.script().rendered_trace()
         );
     }
@@ -1268,7 +1268,7 @@ async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
         ]
     {
         violations.push(format!(
-            "the cold owner committed {labels:?}, not the second model call's start, the turn's commit and the release"
+            "the cold owner committed {labels:?}, not the second model call's next attempt, the turn's commit and the release"
         ));
     }
     assert!(
@@ -1774,14 +1774,13 @@ async fn a_session_decodes_and_resumes_from_its_1_0_image() {
         .collect();
     if labels
         != [
-            CommitLabel::CELL_SNAPSHOT,
             CommitLabel::MODEL_START,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ]
     {
         violations.push(format!(
-            "the resumed session committed {labels:?}, not the cell's end, the second model call's start, the turn's commit and the release"
+            "the resumed session committed {labels:?}, not the second model call's start, which consumes the cell, the turn's commit and the release"
         ));
     }
     let writes = resumed.world.writes();

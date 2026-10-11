@@ -138,7 +138,10 @@ pub const COVERAGE: [(CommitLabel, Coverage); 47] = [
         CommitLabel::CELL_INJECT,
         Coverage::Cases(&[Case::CellKilled]),
     ),
-    (CommitLabel::CELL_SNAPSHOT, Coverage::Cases(&[Case::Cell])),
+    (
+        CommitLabel::CELL_SNAPSHOT,
+        Coverage::Cases(&[Case::CellKilled]),
+    ),
     (
         CommitLabel::SESSION_CLOSE_BEGIN,
         Coverage::Cases(&[Case::Close]),

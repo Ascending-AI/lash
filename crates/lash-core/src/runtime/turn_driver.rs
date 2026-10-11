@@ -33,6 +33,12 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// code executor's bound keeps them, until the turn's next commit takes
     /// them (FIG-5330).
     pub(super) answered_cell_calls: crate::runtime::durable::session::CellToolCalls,
+    /// How the turn's cells hand their ends over (FIG-5999), shared with
+    /// the effect bodies that run them.
+    pub(super) cell_end: crate::CellEndHandoff,
+    /// What the cell that last answered the machine left for the commit
+    /// that consumes its answer.
+    pub(super) answered_cell_end: Option<(crate::EffectId, crate::EndedCell)>,
     pub(super) host: RuntimeHost,
     pub(super) scoped_effect_controller: ActorContext,
     pub(super) session_id: SessionId,

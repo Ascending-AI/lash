@@ -27,6 +27,14 @@
 //!   runs until it is cancelled. Both calls are admitted executions: every
 //!   body entry is an admitted member's, and the loser settles on its own
 //!   after the race answered.
+//! - **Ends once (FIG-5999):** a cell whose end no commit of its own
+//!   records ends with the commit that consumes its answer. A node killed
+//!   between the two leaves the cell at its last park, and the node that
+//!   takes it over runs its final stretch again, which issued no effect:
+//!   every body has run once, the model was asked twice in total, the
+//!   turn's report holds the cell's calls once, and no execution of the
+//!   cell is left open. A cell that ends with an execution still open
+//!   closes it and records its end first.
 //! - **Await process:** the cell awaits a host process with
 //!   `processes.await`. The call parks on its completion wait, the session
 //!   releases as `waiting` while the process runs, and the cell resumes
@@ -175,6 +183,8 @@ struct ExternalWorld {
     /// Whether the deployment was redeployed: its resolver grants nothing
     /// and its catalog binds [`AMBIENT`] at the granted tool's path.
     redeployed: std::sync::atomic::AtomicBool,
+    /// How many `ext_slow` bodies were told of their call's cancel.
+    cancelled: std::sync::atomic::AtomicUsize,
 }
 
 impl ExternalWorld {
@@ -210,6 +220,9 @@ impl StaticToolExecute for ExtTools {
                     Some(token) => token.cancelled().await,
                     None => std::future::pending().await,
                 }
+                self.world
+                    .cancelled
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 ToolOutcome::err_fmt("ext_slow was cancelled").into()
             }
             HANDLE => {
@@ -579,6 +592,10 @@ struct CellTurn {
     clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
+    /// The run the host's send opened.
+    run: Mutex<Option<lash::TurnId>>,
+    /// Whether the run is held to [`Self::ends_once_laws`].
+    ends_once: bool,
 }
 
 impl CellTurn {
@@ -594,6 +611,8 @@ impl CellTurn {
             clock: Mutex::default(),
             core: Mutex::default(),
             keep: Mutex::default(),
+            run: Mutex::default(),
+            ends_once: false,
         }
     }
 
@@ -683,11 +702,12 @@ impl CellTurn {
             ))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
-        session
+        let handle = session
             .send(lash::TurnInput::text("run the cell"))
             .await
-            .map(drop)
-            .map_err(|error| format!("send the turn's input: {error}"))
+            .map_err(|error| format!("send the turn's input: {error}"))?;
+        *self.run.lock_recover() = handle.id().cloned();
+        Ok(())
     }
 
     /// The model's last request, rendered: what the cell answered it.
@@ -795,6 +815,96 @@ impl CellTurn {
         }
         violations.extend(turn_ended(nodes).await);
         violations
+    }
+}
+
+impl CellTurn {
+    /// The ends-once laws after a run (FIG-5999): every body ran once, the
+    /// model was asked twice in total, the turn's report holds the cell's
+    /// calls once, and the race's loser, the one execution a cell leaves
+    /// open at its end, was cancelled and settled.
+    async fn ends_once_laws(&self, nodes: &SimNodes) -> Vec<String> {
+        let mut violations = Vec::new();
+        let entries = self.world.entries();
+        if entries.len() != 2 || entries.values().any(|entries| entries.len() != 1) {
+            violations.push(format!(
+                "the cell's two bodies did not each run once: {entries:?}"
+            ));
+        }
+        let asked = self.requests.lock_recover().len();
+        if asked != 2 {
+            violations.push(format!("the model was asked {asked} times, not twice"));
+        }
+        match self.reported_calls(nodes).await {
+            Ok(reported) => {
+                let unique: std::collections::BTreeSet<_> = reported.iter().collect();
+                let expected = if self.cell == Cell::Race {
+                    1..=2
+                } else {
+                    2..=2
+                };
+                if unique.len() != reported.len()
+                    || !expected.contains(&reported.len())
+                    || reported.iter().any(|call| !entries.contains_key(call))
+                {
+                    violations.push(format!(
+                        "the turn's report does not hold the cell's calls once: {reported:?}, of the bodies {:?}",
+                        entries.keys().collect::<Vec<_>>()
+                    ));
+                }
+            }
+            Err(error) => violations.push(error),
+        }
+        if self.cell == Cell::Race {
+            let cancelled = self
+                .world
+                .cancelled
+                .load(std::sync::atomic::Ordering::SeqCst);
+            let settled = nodes
+                .script()
+                .trace()
+                .iter()
+                .filter(|write| {
+                    write.point.label == CommitLabel::ROUND_OUTCOME && write.committed()
+                })
+                .count();
+            if cancelled != 1 || settled < 2 {
+                violations.push(format!(
+                    "the cell left its race's loser open: {cancelled} bodies were cancelled, and {settled} outcomes committed"
+                ));
+            }
+        }
+        violations
+    }
+
+    /// The calls the ended turn's report holds of its cell, in order: the
+    /// cell reports of its run's own facts.
+    async fn reported_calls(&self, nodes: &SimNodes) -> Result<Vec<ToolCallId>, String> {
+        use lash_core_execution::runtime::actor::round;
+
+        let run = self
+            .run
+            .lock_recover()
+            .clone()
+            .ok_or("the host's send opened no run")?;
+        let facts = nodes
+            .database()
+            .run_facts(&lash_durable::domain::OwnerKey::Turn(session(), run))
+            .await
+            .map_err(|error| format!("the turn's facts: {error}"))?;
+        let fold = round::fold(
+            &facts,
+            &round::PolicyView::new([]),
+            &round::PinnedWaits::ledger(),
+        )
+        .map_err(|error| format!("the turn's facts do not fold: {error}"))?;
+        let mut calls = Vec::new();
+        for report in fold.reports().values() {
+            let report = round::cell_report(&facts, *report)
+                .map_err(|error| format!("the cell's report: {error}"))?;
+            calls.extend(report.calls.into_iter().map(|record| record.call_id));
+        }
+        Ok(calls)
     }
 }
 
@@ -918,14 +1028,45 @@ impl Scenario for CellTurn {
     }
 
     async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
-        match self.cell {
+        let mut violations = match self.cell {
             Cell::Repeatable => self.repeatable_laws(nodes).await,
             Cell::Race => self.race_laws(nodes, cut).await,
             Cell::Identity | Cell::Sleep | Cell::AwaitProcess | Cell::Deferred => {
                 self.identity_laws(nodes, cut).await
             }
+        };
+        if self.ends_once {
+            violations.extend(self.ends_once_laws(nodes).await);
         }
+        violations
     }
+}
+
+/// Kill the owner of `cell` between the cell's end and the commit that
+/// consumes its answer: at each `model.start`, before it enters the store.
+/// The first is the turn's own call for the cell; the second consumes the
+/// cell's answer.
+async fn ends_once(cell: Cell, dialect: Dialect, postgres_url: Option<String>) {
+    let report = Matrix::new()
+        .labels(&[CommitLabel::MODEL_START])
+        .faults(&[Fault::Abort])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| CellTurn {
+            ends_once: true,
+            ..CellTurn::new(cell, dialect, postgres_url.clone())
+        })
+        .await;
+    eprintln!(
+        "{cell:?} ends once on {dialect:?}: {} cells over {} labels",
+        report.cells.len(),
+        report.labels().len()
+    );
+    report.assert_held();
+    assert!(
+        report.cells.len() >= 2,
+        "{cell:?}: the matrix cut {} model starts, not the one that consumes the cell",
+        report.cells.len()
+    );
 }
 
 /// Cut `cell` at every labelled write under every fault.
@@ -1091,14 +1232,15 @@ async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
              {deadline}: {early:?}"
         ));
     }
-    // The cell woke when B committed its end: at its admitted deadline,
-    // within a claim poll of it. A sleep run again from its recovery would
-    // end `SLEEP_MS` after B took the cell over.
+    // The cell woke when B committed the model call that consumes its
+    // answer, and with it the cell's end (FIG-5999): at its admitted
+    // deadline, within a claim poll of it. A sleep run again from its
+    // recovery would end `SLEEP_MS` after B took the cell over.
     let woke = trace
         .iter()
         .find(|write| {
             &*write.node == "b"
-                && write.point.label == CommitLabel::CELL_SNAPSHOT
+                && write.point.label == CommitLabel::MODEL_START
                 && write.committed()
         })
         .map(|write| write.at_ms);
@@ -1504,6 +1646,16 @@ async fn a_race_loser_in_a_cell_is_admitted_and_settles_on_postgres() {
         return;
     };
     matrix(Cell::Race, Dialect::Postgres, Some(url)).await;
+}
+
+/// A cell cut between its end and its consuming commit ends once
+/// (FIG-5999), on SQLite in memory: a cell whose calls were all awaited,
+/// whose end is held for that commit, and a race, whose loser is closed and
+/// whose end is recorded first.
+#[tokio::test]
+async fn a_cell_cut_between_its_end_and_its_consuming_commit_ends_once_on_sqlite_memory() {
+    ends_once(Cell::Identity, Dialect::SqliteMemory, None).await;
+    ends_once(Cell::Race, Dialect::SqliteMemory, None).await;
 }
 
 /// `processes.await` in a cell parks, the session releases and the cell

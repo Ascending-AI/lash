@@ -61,6 +61,10 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     /// advances. The turn driver is the only caller.
     #[must_use]
     fn with_recorded_turn_cancel(self, lent: CancellationToken) -> Self;
+    /// This context with `handoff` as how its cells hand their ends to the
+    /// turn (FIG-5999). The turn driver is the only caller.
+    #[must_use]
+    fn with_cell_end(self, handoff: super::CellEndHandoff) -> Self;
 
     /// The opener state this context incorporates against and hands groups to.
     #[must_use]
@@ -102,6 +106,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             process_execution: None,
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
+            cell_end: super::CellEndHandoff::default(),
             incorporation_ledger: Arc::default(),
             tool_requests: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
@@ -164,6 +169,11 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             observed: Arc::default(),
             lent: Some(lent),
         };
+        self
+    }
+
+    fn with_cell_end(mut self, handoff: super::CellEndHandoff) -> Self {
+        self.cell_end = handoff;
         self
     }
     fn opener_state(&self) -> OpenerState {

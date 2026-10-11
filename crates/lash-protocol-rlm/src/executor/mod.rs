@@ -746,8 +746,9 @@ async fn run_linked_cell(
     .run(&machines, &ctx.cancellation())
     .await;
 
-    // A run that parked owes its end over its root: recorded once the
-    // session adopted what the cell left, so the end names that state.
+    // A run that parked owes its end over its root: held for the commit
+    // that consumes the cell's answer, or recorded once the session adopted
+    // what the cell left, so the end names that state.
     let owed = match &run {
         Ok(KernelEnd::Ended {
             end,
@@ -755,6 +756,11 @@ async fn run_linked_cell(
         }) => Some((ledger.as_ref().clone(), end.clone())),
         _ => None,
     };
+    // An end an earlier activation recorded stands over the cell's root.
+    let recorded = matches!(
+        &run,
+        Ok(KernelEnd::Ended { end, owed: None }) if !matches!(end, End::Cancelled)
+    );
     let document_id = document_identity.clone();
     // The rest answers the cell from what the run left; the execution's
     // terminal fact follows its answer.
@@ -885,12 +891,30 @@ async fn run_linked_cell(
         }
     };
     let mut response = answer();
-    if let Some((ledger, end)) = owed {
-        let recorded = match document_id {
-            Ok(document) => record_end(state, snapshots, &host, document, ledger, end).await,
-            Err(error) => Err(KernelFailure::Document(error)),
-        };
-        if let Err(failure) = recorded {
+    let ended = match (owed, document_id) {
+        (Some((ledger, end)), Ok(document)) => {
+            end_cell(state, snapshots, &host, document, ledger, end)
+                .await
+                .map(Some)
+        }
+        (Some(_), Err(error)) => Err(KernelFailure::Document(error)),
+        (None, _) if recorded => snapshots
+            .root()
+            .await
+            .map(|root| {
+                root.map(|root| lash_core::EndedCell {
+                    exec: snapshots.exec().clone(),
+                    root: root.root,
+                    held: false,
+                })
+            })
+            .map_err(KernelFailure::Checkpoint),
+        (None, _) => Ok(None),
+    };
+    match ended {
+        Ok(Some(ended)) => ctx.cell_ended(ended),
+        Ok(None) => {}
+        Err(failure) => {
             response = broker_failure(state, &ctx, failure, runs_on, &host.ledgers());
         }
     }
@@ -908,10 +932,43 @@ async fn run_linked_cell(
     response
 }
 
+/// Ends a cell that parked. A turn that holds the end
+/// ([`RuntimeExecutionContext::holds_cell_end`]) is left the cell's parked
+/// root, which the commit that consumes the cell's answer retires with the
+/// session's working state as the cell left it (FIG-5999): nothing commits
+/// here, and a successor that finds the root runs the cell on from its last
+/// park, whose final stretch issued no effect (ADR 0132 §8). A cell that
+/// ends with an execution still open, or whose turn runs a callback of its
+/// own before that commit, records its end ([`record_end`]).
+async fn end_cell(
+    state: &mut CodeModeExecutionState,
+    snapshots: &lash_vm_broker::DurableSnapshotStore,
+    host: &CellHost<'_>,
+    document: lash_kernel_doc::DocumentId,
+    ledger: lash_vm_broker::kernel::EffectLedger,
+    end: End,
+) -> Result<lash_core::EndedCell, KernelFailure> {
+    if host.ctx.holds_cell_end()
+        && let Some(held) = snapshots.held_end(&ledger).await?
+    {
+        return Ok(lash_core::EndedCell {
+            exec: snapshots.exec().clone(),
+            root: held.root,
+            held: true,
+        });
+    }
+    let root = record_end(state, snapshots, host, document, ledger, end).await?;
+    Ok(lash_core::EndedCell {
+        exec: snapshots.exec().clone(),
+        root,
+        held: false,
+    })
+}
+
 /// Commits the end of a cell that parked over its root: the run's terminal,
 /// the session's working state as the cell left it, the host's state and
 /// envelope, in one CellEnd (FIG-5887 §6). The turn's consuming phase
-/// adopts the working state and retires the root.
+/// adopts the working state and retires the root this answers.
 async fn record_end(
     state: &mut CodeModeExecutionState,
     snapshots: &lash_vm_broker::DurableSnapshotStore,
@@ -919,7 +976,7 @@ async fn record_end(
     document: lash_kernel_doc::DocumentId,
     ledger: lash_vm_broker::kernel::EffectLedger,
     end: End,
-) -> Result<(), KernelFailure> {
+) -> Result<lash_core_store::checkpoint_graph::NodeId, KernelFailure> {
     use lash_core_store::execution_state::{ExecutionGraphCapture, ExecutionGraphPurpose};
     let refused =
         |message: String| KernelFailure::Checkpoint(lash_vm_broker::QuietPointRefusal(message));
@@ -942,9 +999,9 @@ async fn record_end(
         )
         .await;
     match saved {
-        Ok(_) => {
+        Ok(saved) => {
             state.acknowledge_execution_state_capture();
-            Ok(())
+            Ok(saved.root)
         }
         Err(refusal) => {
             state.abort_execution_state_capture();

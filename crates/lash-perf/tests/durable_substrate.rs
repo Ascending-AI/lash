@@ -42,8 +42,9 @@ fn records(dir: &Path, kind: &str) -> anyhow::Result<Vec<serde_json::Value>> {
 }
 
 /// Each of the cell's ten awaits commits its park with the operation's
-/// admission and settles one round outcome; the cell's end commits one more
-/// park. The bench reports every park as a block and the batch's counters.
+/// admission and settles one round outcome; the cell's end commits with the
+/// commit that consumes its answer (FIG-5999), so it is no park. The bench
+/// reports every park as a block and the batch's counters.
 #[tokio::test]
 async fn a_cell_settles_every_scripted_await_and_reports_each_park() {
     let dir = tempfile::tempdir().unwrap();
@@ -62,16 +63,14 @@ async fn a_cell_settles_every_scripted_await_and_reports_each_park() {
         .iter()
         .map(|block| block["label"].as_str().unwrap().to_owned())
         .collect();
-    let mut expected = vec!["cell.snapshot+admit".to_owned(); 10];
-    expected.push("cell.snapshot".to_owned());
-    assert_eq!(labels, expected);
+    assert_eq!(labels, vec!["cell.snapshot+admit".to_owned(); 10]);
     let batches = records(dir.path(), "batch").unwrap();
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0]["transactions"]["round.outcome"], 10);
     assert_eq!(batches[0]["transactions"]["cell.snapshot+admit"], 10);
     let summaries = records(dir.path(), "summary").unwrap();
     assert_eq!(summaries.len(), 1);
-    assert_eq!(summaries[0]["blocks"], 11);
+    assert_eq!(summaries[0]["blocks"], 10);
 }
 
 /// A cell session whose worker cannot start parks after its failed passes;

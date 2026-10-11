@@ -3,7 +3,7 @@
 use super::*;
 
 /// Each of these boundaries precedes a consumer of recorded cell state.
-const CELL_BOUNDARIES: [(CommitLabel, &str); 3] = [
+const CELL_BOUNDARIES: [(CommitLabel, &str); 2] = [
     (
         CommitLabel::MODEL_DONE,
         "the VM enters from the recorded model response",
@@ -11,10 +11,6 @@ const CELL_BOUNDARIES: [(CommitLabel, &str); 3] = [
     (
         CommitLabel::ROUND_OUTCOME,
         "the VM consumes only a recorded tool outcome",
-    ),
-    (
-        CommitLabel::CELL_SNAPSHOT,
-        "the turn consumes only a recorded cell end",
     ),
 ];
 const TRACE_BOUNDARIES: [(CommitLabel, &str); 1] = [(

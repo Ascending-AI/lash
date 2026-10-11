@@ -2,8 +2,9 @@
 //! whose model writes a TypeScript cell that calls the `Once` tool
 //! `ext_write`; the cell snapshots with the
 //! operation's admission (`cell.snapshot+admit`), the body runs, its outcome
-//! commits (`round.outcome`), the cell finishes from its snapshot and the
-//! model answers with its result.
+//! commits (`round.outcome`), the cell finishes from its snapshot, its end
+//! commits with the model call that consumes its answer, and the model
+//! answers with its result.
 //!
 //! The killed variant holds the operation's first body forever and the host
 //! kills the node running it, then restarts it: another owner reaps the

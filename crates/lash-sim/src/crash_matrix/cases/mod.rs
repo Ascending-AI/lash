@@ -77,7 +77,7 @@ pub async fn admit_turn(
     let session = script.session(tag);
     let run = run_of(&session);
     if matches!(script, TurnScript::Cell | TurnScript::CellKilled) {
-        let core = super::cells::cell_core(world)?;
+        let core = super::cells::cell_core_of(world, script)?;
         super::cells::send(&core, &session, &run).await?;
     } else if script == TurnScript::Prompt {
         let core = super::prompts::prompt_core(world)?;

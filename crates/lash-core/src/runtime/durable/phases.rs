@@ -382,7 +382,7 @@ pub async fn run_phases(
                             settle_model_calls(&mut tx, &session, &run, Some(pin.call));
                         }
                     }
-                    tool_round::consume_answered_cell(
+                    let held = tool_round::consume_answered_cell(
                         cx,
                         drive.as_mut(),
                         &mut tx,
@@ -429,6 +429,7 @@ pub async fn run_phases(
                     stored.committed(drive.machine());
                     drive.run_changes_committed(&written);
                     drive.phase_committed().await;
+                    tool_round::release_cell_emissions(cx, drive.as_mut(), held).await?;
                     unsettled = true;
                     if !resent {
                         calls = pin.call;
@@ -473,7 +474,7 @@ pub async fn run_phases(
                     if let Some(present) = carry.take() {
                         present.write(&mut tx);
                     }
-                    tool_round::consume_answered_cell(
+                    let held = tool_round::consume_answered_cell(
                         cx,
                         drive.as_mut(),
                         &mut tx,
@@ -504,6 +505,7 @@ pub async fn run_phases(
                     stored.committed(drive.machine());
                     drive.run_changes_committed(&written);
                     drive.phase_committed().await;
+                    tool_round::release_cell_emissions(cx, drive.as_mut(), held).await?;
                 }
                 let cell = drive.exec_cell(cx, id, CodeCell { language, code });
                 match turn_cancel::unless_cancelled(cx, cell).await? {
@@ -515,7 +517,8 @@ pub async fn run_phases(
                         // or not: its working state is the turn's from the
                         // commit that consumes its answer.
                         let calls = drive.answered_cell_calls();
-                        answered_cell = Some(tool_round::AnsweredCell { id, calls });
+                        let held = drive.answered_cell_end_held(id).then(Vec::new);
+                        answered_cell = Some(tool_round::AnsweredCell { id, calls, held });
                     }
                     None => {
                         drive.stop_cell();
@@ -523,7 +526,11 @@ pub async fn run_phases(
                         // the cell never answers.
                         let calls = drive.stopped_cell_calls(cx, id).await?;
                         if !calls.is_empty() {
-                            answered_cell = Some(tool_round::AnsweredCell { id, calls });
+                            answered_cell = Some(tool_round::AnsweredCell {
+                                id,
+                                calls,
+                                held: None,
+                            });
                         }
                         let request = cx.begin().await?.turn_cancel().cloned();
                         let stopped = stopped(drive, &mut carry, &mut answered_cell);
@@ -575,7 +582,7 @@ pub async fn run_phases(
                 if let Some(present) = carry.take() {
                     present.write(&mut tx);
                 }
-                tool_round::consume_answered_cell(
+                let held = tool_round::consume_answered_cell(
                     cx,
                     drive.as_mut(),
                     &mut tx,
@@ -605,6 +612,7 @@ pub async fn run_phases(
                 stored.committed(drive.machine());
                 drive.run_changes_committed(&written);
                 drive.phase_committed().await;
+                tool_round::release_cell_emissions(cx, drive.as_mut(), held).await?;
                 drive
                     .local(cx, Effect::ReportToolCalls { id, completed })
                     .await?;
@@ -623,9 +631,13 @@ pub async fn run_phases(
                     return Ok(PhaseExit::CancelRequested);
                 }
                 // The last cell's calls commit with the turn; its finish
-                // reports them beside the recorded ones.
-                if let Some(cell) = &answered_cell {
+                // reports them beside the recorded ones, and drains the
+                // turn's activity before the commit (FIG-5507): what the
+                // turn held of the cell's emissions goes first.
+                if let Some(cell) = &mut answered_cell {
                     drive.finishing_cell_calls(&cell.calls);
+                    let held = cell.held.take().unwrap_or_default();
+                    tool_round::release_cell_emissions(cx, drive.as_mut(), held).await?;
                 }
                 // The turn commits, and its run answers, the outcome the
                 // model produced.
@@ -738,7 +750,10 @@ pub async fn run_phases(
                 }
                 if boundary.held() && matches!(&local, Effect::Emit(_) | Effect::Log { .. }) {
                     boundary.hold(local);
-                } else {
+                } else if let Some(local) = match &mut answered_cell {
+                    Some(cell) => cell.hold(local),
+                    None => Some(local),
+                } {
                     drive.local(cx, local).await?;
                 }
             }

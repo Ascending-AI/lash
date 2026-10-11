@@ -360,6 +360,8 @@ impl LashRuntime {
             prelude_base_messages,
             prepared_context,
             answered_cell_calls: Default::default(),
+            cell_end: Default::default(),
+            answered_cell_end: None,
             host: self.host.clone(),
             turn_id: run.clone(),
             scoped_effect_controller: controller.clone(),

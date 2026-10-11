@@ -63,7 +63,7 @@ use tokio_util::sync::CancellationToken;
 use super::session::{CellToolCalls, TurnDrive, TurnError, TurnRow, UnfinishedPhase};
 use super::turn_cancel;
 use crate::sansio::PendingToolCall;
-use crate::{ActorContext, EffectId, Response};
+use crate::{ActorContext, Effect, EffectId, Response};
 
 /// How a tool round left the turn.
 #[derive(Debug)]
@@ -237,7 +237,7 @@ pub(super) async fn run(
             if let Some(present) = present.take() {
                 present.write(&mut tx);
             }
-            consume_answered_cell(cx, drive, &mut tx, row, answered_cell, true).await?;
+            let held = consume_answered_cell(cx, drive, &mut tx, row, answered_cell, true).await?;
             let written = super::phases::write_run_changes(&*drive, &mut tx, &session, &row.run);
             let (checkpoint, stored) = checkpoint.staged_in(&mut tx);
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
@@ -286,6 +286,7 @@ pub(super) async fn run(
             stored.committed(drive.machine());
             drive.run_changes_committed(&written);
             drive.phase_committed().await;
+            release_cell_emissions(cx, drive, held).await?;
             // The candidates are selected: their exports are discharged
             // before any body runs, so an owner that takes the round over
             // exports none again.
@@ -431,6 +432,41 @@ pub(super) struct AnsweredCell {
     pub(super) id: EffectId,
     /// Its tool calls, as the code executor's bound keeps them.
     pub(super) calls: CellToolCalls,
+    /// What the turn emitted from the answer of a cell whose end is held
+    /// in memory (FIG-5999), kept for the commit that consumes the answer:
+    /// a successor that loses that commit runs the cell to its end again.
+    /// `None` for a cell whose end is recorded.
+    pub(super) held: Option<Vec<Effect>>,
+}
+
+impl AnsweredCell {
+    /// Keeps `effect` for the commit that consumes the cell's answer, when
+    /// the cell's end is held and `effect` is an emission; else hands it
+    /// back.
+    pub(super) fn hold(&mut self, effect: Effect) -> Option<Effect> {
+        match &mut self.held {
+            Some(held) if matches!(&effect, Effect::Emit(_) | Effect::Log { .. }) => {
+                held.push(effect);
+                None
+            }
+            _ => Some(effect),
+        }
+    }
+}
+
+/// Run what the turn held of an answered cell's emissions
+/// ([`AnsweredCell::held`]): after the commit that consumed the answer, or
+/// before a commit that ends the turn, whose finish drains the turn's
+/// activity first.
+pub(super) async fn release_cell_emissions(
+    cx: &ActorContext,
+    drive: &mut dyn TurnDrive,
+    held: Vec<Effect>,
+) -> Result<(), TurnError> {
+    for effect in held {
+        drive.local(cx, effect).await?;
+    }
+    Ok(())
 }
 
 /// Record the tool calls of the cell `answered` names as the cell's report,
@@ -446,7 +482,7 @@ pub(super) fn report_answered_cell(
     row: &TurnRow,
     answered: &mut Option<AnsweredCell>,
 ) -> Result<(), TurnError> {
-    let Some(AnsweredCell { id, calls }) = answered.take() else {
+    let Some(AnsweredCell { id, calls, .. }) = answered.take() else {
         return Ok(());
     };
     let CellToolCalls { calls, omitted } = calls;
@@ -469,7 +505,9 @@ pub(super) fn report_answered_cell(
 /// with `working`, the session's state after it as the turn's working
 /// state, and the retirement of its ended root. The phase's commit is then
 /// answered with
-/// [`TurnDrive::phase_committed`](super::session::TurnDrive::phase_committed).
+/// [`TurnDrive::phase_committed`](super::session::TurnDrive::phase_committed),
+/// and then with the emissions this answers, which the turn held for it
+/// ([`release_cell_emissions`]).
 pub(super) async fn consume_answered_cell(
     cx: &ActorContext,
     drive: &mut dyn TurnDrive,
@@ -477,12 +515,15 @@ pub(super) async fn consume_answered_cell(
     row: &TurnRow,
     answered: &mut Option<AnsweredCell>,
     working: bool,
-) -> Result<(), TurnError> {
-    let Some(id) = answered.as_ref().map(|cell| cell.id) else {
-        return Ok(());
+) -> Result<Vec<Effect>, TurnError> {
+    let Some(cell) = answered.as_mut() else {
+        return Ok(Vec::new());
     };
+    let id = cell.id;
+    let held = cell.held.take().unwrap_or_default();
     report_answered_cell(tx, row, answered)?;
-    drive.consume_cell(cx, tx, id, working).await
+    drive.consume_cell(cx, tx, id, working).await?;
+    Ok(held)
 }
 
 fn missing_round(run: RunSeq) -> lash_durable::StoreFailure {

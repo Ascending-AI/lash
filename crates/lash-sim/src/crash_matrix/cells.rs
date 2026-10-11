@@ -8,6 +8,13 @@
 //! sees the tool's answer with [`FINAL`]. The body writes its entry to the
 //! world's ledger before anything else; under [`TurnScript::CellKilled`] its
 //! first entry holds forever, and the host kills the node that runs it.
+//!
+//! A [`TurnScript::Cell`] session's turn runs no callback but its
+//! protocol's, so its cell's end commits with the commit that consumes the
+//! cell's answer (FIG-5999). A [`TurnScript::CellKilled`] session is served
+//! with a host plugin's checkpoint callback ([`Watch`]), which may read
+//! what the cell left, so its cell's end is recorded on its own
+//! (`cell.snapshot`) before the cell answers.
 
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::{Arc, Weak};
@@ -49,16 +56,78 @@ pub fn cell_core(world: &Arc<World>) -> Result<lash::LashCore, String> {
     if let Some(core) = world.cell_core().get() {
         return Ok(core.clone());
     }
-    let built = core(world, &world.backend()?, &world.clock()?)?;
+    let built = core(world, &world.backend()?, &world.clock()?, false)?;
     Ok(world.cell_core().get_or_init(|| built).clone())
+}
+
+/// The run's core for `script`'s cell sessions: [`cell_core`], or for
+/// [`TurnScript::CellKilled`] the core whose sessions a host plugin
+/// watches ([`Watch`]), built once over `world`'s backend.
+///
+/// # Errors
+///
+/// The run has no backend yet, or the core does not build.
+pub fn cell_core_of(world: &Arc<World>, script: TurnScript) -> Result<lash::LashCore, String> {
+    if script != TurnScript::CellKilled {
+        return cell_core(world);
+    }
+    if let Some(core) = world.watched_cell_core().get() {
+        return Ok(core.clone());
+    }
+    let built = core(world, &world.backend()?, &world.clock()?, true)?;
+    Ok(world.watched_cell_core().get_or_init(|| built).clone())
+}
+
+/// The host plugin a [`TurnScript::CellKilled`] session is served with: a
+/// checkpoint callback that contributes nothing. It is a callback outside
+/// the session's protocol, so the turn holds no cell end for it.
+const WATCH: &str = "lash-sim-watch";
+
+#[derive(Clone)]
+struct Watch;
+
+impl lash_core::plugin::PluginDefinition for Watch {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(WATCH)
+    }
+}
+
+impl lash_core::plugin::PluginFactory for Watch {
+    fn id(&self) -> &'static str {
+        WATCH
+    }
+
+    fn build(
+        &self,
+        _: &lash_core::plugin::PluginSessionContext,
+    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
+        Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash_core::plugin::SessionPlugin for Watch {
+    fn id(&self) -> &'static str {
+        WATCH
+    }
+
+    fn register(
+        &self,
+        reg: &mut lash_core::plugin::PluginRegistrar,
+    ) -> Result<(), lash_core::PluginError> {
+        reg.turn().checkpoint(
+            lash_core::hook_key!("watch"),
+            Arc::new(|_| Box::pin(async { Ok(lash_core::plugin::TurnContributions::default()) })),
+        )
+    }
 }
 
 fn core(
     world: &Arc<World>,
     backend: &Backend,
     clock: &Arc<SimClock>,
+    watched: bool,
 ) -> Result<lash::LashCore, String> {
-    lash::LashCore::rlm_builder(
+    let builder = lash::LashCore::rlm_builder(
         backend.clone(),
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
@@ -78,12 +147,18 @@ fn core(
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .serve_test_llm_profile(model(), metadata()?)
-    .tools(ext_write(Arc::downgrade(world))?)
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        lash::persistence::LeaseOwnerId::new("lash-sim-deployment"),
-        lash::persistence::LeaseIncarnationId::new("lash-sim-boot"),
-    ))
-    .map_err(|error| format!("build the cell core: {error}"))
+    .tools(ext_write(Arc::downgrade(world))?);
+    let builder = if watched {
+        builder.plugin(Arc::new(Watch))
+    } else {
+        builder
+    };
+    builder
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            lash::persistence::LeaseOwnerId::new("lash-sim-deployment"),
+            lash::persistence::LeaseIncarnationId::new("lash-sim-boot"),
+        ))
+        .map_err(|error| format!("build the cell core: {error}"))
 }
 
 /// The turn services `core`'s sessions run with.
