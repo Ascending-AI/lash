@@ -22,6 +22,33 @@
     },
     {
       "text": "Unknown format code 'd' for object of type 'float'"
+    },
+    {
+      "text": "00042 1. 12_3456 True"
+    },
+    {
+      "text": "42***|   42|04200|000-42|1.e+00|100.%|12_3456|1_0101_0101"
+    },
+    {
+      "text": "ValueError"
+    },
+    {
+      "text": "ValueError"
+    },
+    {
+      "text": "ValueError"
+    },
+    {
+      "text": "ValueError"
+    },
+    {
+      "text": "ValueError"
+    },
+    {
+      "text": "TypeError"
+    },
+    {
+      "text": "TypeError"
     }
   ],
   "trace": []

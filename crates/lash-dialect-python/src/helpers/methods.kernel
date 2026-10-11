@@ -40,6 +40,9 @@ use map.clear
 use set.contains
 use set.copy
 use set.clear
+use py.text.whitespace
+use text.to_code_points
+use text.from_code_points
 use py.repr
 use py.type
 use py.fail
@@ -538,15 +541,20 @@ body {
       set plain = same(separator, null)
     }
     if plain {
-      let spaced = text.replace(self, "\t", " ")
-      set spaced = text.replace(spaced, "\n", " ")
-      set spaced = text.replace(spaced, "\r", " ")
       let out = []
-      for piece in text.split(spaced, " ") {
-        if bool.not(same(piece, "")) {
-          set out[list.len(out)] = piece
+      let word = []
+      for point in text.to_code_points(self) {
+        let whitespace = invoke py.text.whitespace(point)
+        if whitespace {
+          if lt(0, list.len(word)) {
+            set out[list.len(out)] = text.from_code_points(word)
+            set word = []
+          }
+        } else {
+          set word[list.len(word)] = point
         }
       }
+      if lt(0, list.len(word)) { set out[list.len(out)] = text.from_code_points(word) }
       return out
     }
     let needle = invoke py.text_of(separator, "split")

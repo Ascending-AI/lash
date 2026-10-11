@@ -67,6 +67,10 @@ macro_rules! witness {
 
 witness!(
     number_text,
+    unicode_split,
+    negative_round,
+    numeric_text_grammar,
+    repr_escapes,
     cancel_cleanup,
     tasks,
     control,

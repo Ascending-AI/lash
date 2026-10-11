@@ -6,6 +6,7 @@ use lash_kernel_doc::FunctionDefinition;
 /// The helper sources, in the order their definitions depend on one
 /// another.
 const SOURCES: &[&str] = &[
+    include_str!("helpers/unicode.kernel"),
     include_str!("helpers/core.kernel"),
     include_str!("helpers/builtins.kernel"),
     include_str!("helpers/methods.kernel"),

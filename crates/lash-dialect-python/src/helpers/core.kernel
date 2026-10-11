@@ -32,7 +32,6 @@ use is_finite
 use num.to_float
 use num.to_text
 use format.decimal_parts
-use int.to_text
 use num.neg
 use text.repeat
 use text.concat
@@ -43,6 +42,10 @@ use text.find
 use text.split
 use text.join
 use text.replace
+use text.to_code_points
+use text.from_code_points
+use int.to_text
+use py.text.printable
 use text.starts_with
 use list.len
 use list.slice
@@ -148,26 +151,45 @@ body {
   return text.join([sign, mantissa, "e", exponent_sign, exponent_digits], "")
 }
 
-# `repr` of a str: single quotes unless the text holds one and no double
-# quote; backslash, newline, carriage return and tab are escaped.
+# `repr` escapes non-printable scalars, using the smallest of x/u/U,
+# and chooses the quote that needs the fewest escapes.
 function py.text_repr(value: Text) -> Text
 kernel 1
 charge sum(4, size(value), size(result))
 body {
   let quote = "'"
   if le(0, text.find(value, "'", 0)) {
-    if lt(text.find(value, "\"", 0), 0) {
-      set quote = "\""
+    if lt(text.find(value, "\"", 0), 0) { set quote = "\"" }
+  }
+  let parts = [quote]
+  for point in text.to_code_points(value) {
+    let character = text.from_code_points([point])
+    let escaped = character
+    if same(character, "\\") { set escaped = "\\\\" } else {
+      if same(character, quote) { set escaped = text.concat("\\", quote) } else {
+        if same(point, 9) { set escaped = "\\t" } else {
+          if same(point, 10) { set escaped = "\\n" } else {
+            if same(point, 13) { set escaped = "\\r" } else {
+              let printable = invoke py.text.printable(point)
+              if bool.not(printable) {
+                let prefix = "\\x"
+                let width = 2
+                if le(256, point) { set prefix = "\\u"
+                  set width = 4 }
+                if le(65536, point) { set prefix = "\\U"
+                  set width = 8 }
+                let digits = int.to_text(point, 16)
+                set escaped = text.join([prefix, text.repeat("0", sub(width, text.len(digits))), digits], "")
+              }
+            }
+          }
+        }
+      }
     }
+    set parts[list.len(parts)] = escaped
   }
-  let out = text.replace(value, "\\", "\\\\")
-  set out = text.replace(out, "\n", "\\n")
-  set out = text.replace(out, "\r", "\\r")
-  set out = text.replace(out, "\t", "\\t")
-  if same(quote, "'") {
-    set out = text.replace(out, "'", "\\'")
-  }
-  return text.join([quote, out, quote], "")
+  set parts[list.len(parts)] = quote
+  return text.join(parts, "")
 }
 
 function py.repr(value: Any) -> Text

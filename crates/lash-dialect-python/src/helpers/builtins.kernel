@@ -9,6 +9,11 @@ use le
 use bool.not
 use add
 use sub
+use abs
+use mul
+use pow
+use div_floor
+use rem_floor
 use neg
 use trunc
 use round_even
@@ -19,6 +24,14 @@ use num.to_text
 use int.parse
 use float.parse
 use format.fixed
+use text.split
+use text.get
+use text.find
+use text.slice
+use text.starts_with
+use py.text.decimal
+use py.number_text
+use py.number_underscores
 use text.concat
 use text.len
 use text.join
@@ -57,6 +70,54 @@ body {
   return text.join(parts, sep)
 }
 
+# Numeric strings accept Unicode decimal digits, but ASCII letters only.
+function py.number_text(value: Text) -> Text
+kernel 1
+charge sum(8, size(value), size(result))
+body {
+  let points = []
+  for point in text.to_code_points(text.trim_u17_0_0(value)) {
+    if le(128, point) {
+      let digit = invoke py.text.decimal(point)
+      if le(0, digit) { set point = add(48, digit) }
+    }
+    if le(65, point) {
+      if le(point, 90) { set point = add(point, 32) }
+    }
+    set points[list.len(points)] = point
+  }
+  return text.from_code_points(points)
+}
+
+# A separator must sit between two radix digits. The optional single
+# separator immediately after an integer base prefix is consumed earlier.
+function py.number_underscores(digits: Text, base: Int) -> Text
+kernel 1
+charge sum(8, size(digits))
+body {
+  let alphabet = text.slice("0123456789abcdefghijklmnopqrstuvwxyz", 0, base)
+  let previous = false
+  let out = []
+  let index = 0
+  for character in text.split(digits, "") {
+    if same(character, "_") {
+      let next = ""
+      if lt(add(index, 1), text.len(digits)) { set next = text.get(digits, add(index, 1)) }
+      let valid = previous
+      if same(next, "") { set valid = false } else {
+        if lt(text.find(alphabet, next, 0), 0) { set valid = false }
+      }
+      if bool.not(valid) { do invoke py.fail("ValueError", "misplaced numeric separator") }
+      set previous = false
+    } else {
+      set previous = le(0, text.find(alphabet, character, 0))
+      set out[list.len(out)] = character
+    }
+    set index = add(index, 1)
+  }
+  return text.join(out, "")
+}
+
 function py.int(value: Any, base?: Any) -> Int
 kernel 1
 charge sum(6, size(value))
@@ -66,9 +127,51 @@ body {
     if same(base, absent) {
       set base = 10
     }
-    let digits = text.replace(text.trim_u17_0_0(value), "_", "")
+    if same(kind(base), "bool") {
+      if base { set base = 1 } else { set base = 0 }
+    }
+    if bool.not(same(kind(base), "integer")) {
+      do invoke py.fail("TypeError", "base must be an integer")
+    }
+    if bool.not(same(base, 0)) {
+      if lt(base, 2) { do invoke py.fail("ValueError", "int() base must be >= 2 and <= 36, or 0") }
+      if lt(36, base) { do invoke py.fail("ValueError", "int() base must be >= 2 and <= 36, or 0") }
+    }
     try {
-      return int.parse(digits, base)
+      let digits = invoke py.number_text(value)
+      let sign = ""
+      if text.starts_with(digits, "+") { set sign = "+" }
+      if text.starts_with(digits, "-") { set sign = "-" }
+      if bool.not(same(sign, "")) { set digits = text.slice(digits, 1, text.len(digits)) }
+      let radix = base
+      let prefixed = false
+      for pair in [("0x", 16), ("0o", 8), ("0b", 2)] {
+        let matches = bool.not(prefixed)
+        if bool.not(text.starts_with(digits, pair[0])) { set matches = false }
+        if matches {
+          let accepts = same(base, 0)
+          if same(base, pair[1]) { set accepts = true }
+          if accepts {
+            set radix = pair[1]
+            set prefixed = true
+            set digits = text.slice(digits, 2, text.len(digits))
+          }
+        }
+      }
+      if prefixed {
+        if text.starts_with(digits, "_") { set digits = text.slice(digits, 1, text.len(digits)) }
+      }
+      if same(radix, 0) { set radix = 10 }
+      set digits = invoke py.number_underscores(digits, radix)
+      let number = int.parse(text.concat(sign, digits), radix)
+      if same(base, 0) {
+        if bool.not(prefixed) {
+          if text.starts_with(digits, "0") {
+            if bool.not(eq(number, 0)) { do invoke py.fail("ValueError", "leading zero in base zero") }
+          }
+        }
+      }
+      return number
     } catch problem {
       let shown = invoke py.repr(value)
       let hoisted1 = text.join(["invalid literal for int() with base ", num.to_text(base), ": ", shown], "")
@@ -120,7 +223,15 @@ body {
     return 0.0
   }
   if same(k, "text") {
-    let digits = text.lower_u17_0_0(text.replace(text.trim_u17_0_0(value), "_", ""))
+    let digits = ""
+    try {
+      set digits = invoke py.number_text(value)
+      set digits = invoke py.number_underscores(digits, 10)
+    } catch problem {
+      let shown = invoke py.repr(value)
+      let message = text.concat("could not convert string to float: ", shown)
+      do invoke py.fail("ValueError", message)
+    }
     if same(digits, "infinity") {
       set digits = "inf"
     }
@@ -404,8 +515,18 @@ body {
   if bool.not(plain) {
     set plain = same(digits, null)
   }
-  if same(kind(value), "integer") {
-    return value
+  if bool.not(plain) {
+    if same(kind(digits), "bool") {
+      if digits { set digits = 1 } else { set digits = 0 }
+    }
+    if bool.not(same(kind(digits), "integer")) {
+      do invoke py.fail("TypeError", "ndigits must be an integer")
+    }
+  }
+  let integer = same(kind(value), "integer")
+  if integer {
+    if plain { return value }
+    if le(0, digits) { return value }
   }
   if bool.not(eq(value, value)) {
     if plain {
@@ -423,8 +544,36 @@ body {
     return num.to_int(round_even(value))
   }
   if lt(digits, 0) {
-    do invoke py.fail("ValueError", "round() to a negative number of digits is not supported")
+    let places = neg(digits)
+    let magnitude = abs(value)
+    if integer {
+      # Avoid constructing a power larger than the integer needs.
+      if lt(text.len(num.to_text(magnitude)), places) { return 0 }
+    } else {
+      if lt(308, places) { return mul(value, 0.0) }
+    }
+    let scale = pow(10, places)
+    let whole = num.to_int(trunc(magnitude))
+    let quotient = div_floor(whole, scale)
+    let remainder = rem_floor(whole, scale)
+    let twice = mul(remainder, 2)
+    let up = lt(scale, twice)
+    if eq(twice, scale) {
+      set up = bool.not(eq(rem_floor(quotient, 2), 0))
+      # A float's fractional part makes an integer half-way point
+      # strictly above the tie. No division of floats loses that bit.
+      if lt(whole, magnitude) { set up = true }
+    }
+    if up { set quotient = add(quotient, 1) }
+    let rounded = mul(quotient, scale)
+    if lt(value, 0) { set rounded = neg(rounded) }
+    if integer { return rounded }
+    if eq(rounded, 0) { return mul(value, 0.0) }
+    try { return num.to_float(rounded) } catch problem {
+      do invoke py.fail("OverflowError", "rounded value too large to represent")
+    }
   }
+  if lt(323, digits) { return value }
   return float.parse(format.fixed(value, digits))
 }
 

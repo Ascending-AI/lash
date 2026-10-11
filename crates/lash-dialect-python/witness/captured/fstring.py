@@ -10,4 +10,11 @@ async def main(tool, output):
         output(f"{pi:d}")
     except ValueError as error:
         output(str(error))
+    output(f"{42:>05d} {1.0:#.0f} {0x123456:_x} {True:}")
+    output(f"{42:*<05d}|{42: >05d}|{42:^05d}|{-42:>06d}|{1.0:#.0e}|{1.0:#.0%}|{0x123456:_X}|{0b101010101:_b}")
+    for attempt in [lambda: f"{'x':+}", lambda: f"{'x':-}", lambda: f"{'x':#}", lambda: f"{'x':=5}", lambda: f"{'x':,}", lambda: f"{None:5}", lambda: f"{None:0}"]:
+        try:
+            output(attempt())
+        except (ValueError, TypeError) as error:
+            output(type(error).__name__)
     return f"{1234.5:+010.2f}|{-1234.5:010.2f}|{7:5}|{7:<5}|{'x':5}|"

@@ -33,15 +33,15 @@ use py.float_text
 use py.format.group
 use py.format.exponent
 
-# Separators between each three digits of `digits`, from the right.
-function py.format.group(digits: Text, separator: Text) -> Text
+# Separators between radix groups of `digits`, from the right.
+function py.format.group(digits: Text, separator: Text, width: Int) -> Text
 kernel 1
 charge sum(4, size(digits))
 body {
   let grouped = ""
   let rest = digits
-  while lt(3, text.len(rest)) {
-    let cut = sub(text.len(rest), 3)
+  while lt(width, text.len(rest)) {
+    let cut = sub(text.len(rest), width)
     set grouped = text.join([separator, text.slice(rest, cut, text.len(rest)), grouped], "")
     set rest = text.slice(rest, 0, cut)
   }
@@ -182,6 +182,16 @@ body {
             set digits = text.concat(digits, "%")
           }
         }
+        if alternate {
+          if is_finite(number) {
+            if same(places, 0) {
+              let cut = text.find(digits, "e", 0)
+              if lt(cut, 0) { set cut = text.find(digits, "%", 0) }
+              if lt(cut, 0) { set cut = text.len(digits) }
+              set digits = text.join([text.slice(digits, 0, cut), ".", text.slice(digits, cut, text.len(digits))], "")
+            }
+          }
+        }
         if same(form, "E") {
           set digits = text.upper_u17_0_0(digits)
         }
@@ -218,11 +228,25 @@ body {
         set cut = text.len(digits)
       }
       let hoisted4 = text.slice(digits, 0, cut)
-      let whole = invoke py.format.group(hoisted4, grouping)
+      let group_width = 3
+      for radix in ["x", "X", "o", "b"] {
+        if same(form, radix) {
+          if same(grouping, ",") {
+            let message = text.join(["Cannot specify ',' with '", form, "'."], "")
+            do invoke py.fail("ValueError", message)
+          }
+          set group_width = 4
+        }
+      }
+      let whole = invoke py.format.group(hoisted4, grouping, group_width)
       set digits = text.concat(whole, text.slice(digits, cut, text.len(digits)))
     }
   } else {
     if same(k, "text") {
+      if bool.not(same(sign, "")) { do invoke py.fail("ValueError", "Sign not allowed in string format specifier") }
+      if alternate { do invoke py.fail("ValueError", "Alternate form (#) not allowed in string format specifier") }
+      if same(align, "=") { do invoke py.fail("ValueError", "'=' alignment not allowed in string format specifier") }
+      if bool.not(same(grouping, "")) { do invoke py.fail("ValueError", "Grouping not allowed in string format specifier") }
       let textual = same(code, "")
       if bool.not(textual) {
         set textual = same(code, "s")
@@ -236,10 +260,16 @@ body {
         set digits = text.slice(value, 0, precision)
       }
     } else {
+      # Non-text objects only accept the empty specification, which the
+      # lowerer handles directly through py.str.
       let plain = same(code, "")
-      if plain {
-        set plain = same(precision, null)
-      }
+      if bool.not(same(precision, null)) { set plain = false }
+      if bool.not(same(align, "")) { set plain = false }
+      if bool.not(same(sign, "")) { set plain = false }
+      if alternate { set plain = false }
+      if zero { set plain = false }
+      if bool.not(same(width, 0)) { set plain = false }
+      if bool.not(same(grouping, "")) { set plain = false }
       if bool.not(plain) {
         let name = invoke py.type(value)
         let hoisted6 = text.join(["unsupported format string passed to ", name, ".__format__"], "")
@@ -257,7 +287,6 @@ body {
       set side = "<"
     }
     if zero {
-      set filler = "0"
       if numeric {
         set side = "="
       }

@@ -197,3 +197,12 @@ fn decimal_parts_keep_python_float_repr_layout() {
         ]
     );
 }
+
+/// CPython keeps the two independently made NaNs as distinct keys.
+#[test]
+fn nan_dict_keys_share_one_key() {
+    assert_eq!(
+        lines(include_str!("../../witness/cases/nan_keys.py")),
+        ["1 second second"]
+    );
+}

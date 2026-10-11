@@ -233,6 +233,52 @@
    "end": "ok"
   },
   {
+   "name": "nan_keys",
+   "source": "a = float('nan')\nb = float('nan')\nd = {a: 'first', b: 'second'}\nprint(len(d), d[a], d[b])\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "2 first second"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "negative_round",
+   "source": "print(round(1234, -2), round(1250, -2), round(1350, -2), round(1234.5, -2))\nfor value in [1250, 1350, -1250, -1350, 0, 10 ** 30 + 500, 10 ** 30 + 1500]:\n    print(round(value, -3), round(value, 0), round(value, 2), round(value, -100))\nfor value in [1250.0, 1350.0, -1250.0, -1350.0, -0.0, 1e308, 5e-324]:\n    print(round(value, -2), round(value, -308), round(value, -400))\nfor attempt in [lambda: round(1, 1.0), lambda: round(1.0, 'x')]:\n    try:\n        attempt()\n    except TypeError as error:\n        print(type(error).__name__)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "1200 1200 1400 1200.0",
+      "1000 1250 1250 0",
+      "1000 1350 1350 0",
+      "-1000 -1250 -1250 0",
+      "-1000 -1350 -1350 0",
+      "0 0 0 0",
+      "1000000000000000000000000000000 1000000000000000000000000000500 1000000000000000000000000000500 0",
+      "1000000000000000000000000002000 1000000000000000000000000001500 1000000000000000000000000001500 0",
+      "1200.0 0.0 0.0",
+      "1400.0 0.0 0.0",
+      "-1200.0 -0.0 -0.0",
+      "-1400.0 -0.0 -0.0",
+      "-0.0 -0.0 -0.0",
+      "1e+308 1e+308 0.0",
+      "0.0 0.0 0.0",
+      "TypeError",
+      "TypeError"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
    "name": "number_text",
    "source": "big = 2 ** 63\nprint(big, big + 1, big * big, -big - 1)\nprint(2 ** 64 - 1, (2 ** 64) // 3, (2 ** 64) % 1000, 10 ** 30 // 7)\nprint(7 // 2, -7 // 2, 7 // -2, -7 // -2)\nprint(7 % 3, -7 % 3, 7 % -3, -7 % -3)\nprint(7 / 2, -7 / 2, 1 / 3, 10 / 5, 2 ** 53 + 1, (2 ** 53 + 1) / 1)\nprint(7.5 // 2, -7.5 // 2, 7.5 % 2, -7.5 % 2, 2 ** 0.5, 2 ** -1, 10 ** -2)\nprint(divmod(-7, 2), divmod(7.5, 2), abs(-big), int(7.9), int(-7.9), round(2.5), round(3.5), round(-0.5), round(2.675, 2))\nprint(1 == 1.0, 2 ** 53 == 2.0 ** 53, 2 ** 53 + 1 == 2.0 ** 53, 0.1 + 0.2, 1e16, 1.5e-5, 123456789012345678.0, 0.0001, -0.0)\nattempts = [lambda: 1 // 0, lambda: 1 % 0, lambda: 1 / 0, lambda: 1.0 // 0, lambda: 1.0 % 0, lambda: 1.5 / 0, lambda: 0 ** -1, lambda: 2.0 ** 10000]\nfor attempt in attempts:\n    try:\n        attempt()\n    except (ZeroDivisionError, OverflowError) as error:\n        print(type(error).__name__, error)\nprint(int(\"12345678901234567890123\") + 1, float(\"1.5\") * 2, int(\"-42\"), str(2 ** 70), int(\" 7 \"))\n",
    "deliveries": [],
@@ -264,6 +310,55 @@
    "end": "ok"
   },
   {
+   "name": "numeric_text_grammar",
+   "source": "for text, base in [('1__2', 10), ('0xff', 16), ('0xff', 0), ('١٢', 10), ('1_2', 10), ('0x_ff', 0), ('-0B_101', 0), ('0o_77', 8), ('00_0', 0), ('012', 0), ('0_1', 0), ('_12', 10), ('12_', 10), ('0x__f', 16), ('0x', 16), ('0z1', 36), ('１２', 10), ('  -١_٢  ', 10), ('²', 10), ('\\x1c12', 10)]:\n    try:\n        print(int(text, base))\n    except ValueError as error:\n        print(type(error).__name__)\nfor text in ['1__2.0', '1_2.0', '١_٢.٥', '.５', '1_.0', '1._0', '1e_2', '1_e2', '1e+_2', '_1.0', '1.0_', '+Infinity', '-NaN', '  1_2.5e-1_0  ', '\\x1c1.0']:\n    try:\n        print(float(text))\n    except ValueError as error:\n        print(type(error).__name__)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "ValueError",
+      "255",
+      "255",
+      "12",
+      "12",
+      "255",
+      "-5",
+      "63",
+      "0",
+      "ValueError",
+      "ValueError",
+      "ValueError",
+      "ValueError",
+      "ValueError",
+      "ValueError",
+      "1261",
+      "12",
+      "-12",
+      "ValueError",
+      "ValueError",
+      "ValueError",
+      "12.0",
+      "12.5",
+      "0.5",
+      "ValueError",
+      "ValueError",
+      "ValueError",
+      "ValueError",
+      "ValueError",
+      "ValueError",
+      "ValueError",
+      "inf",
+      "nan",
+      "1.25e-09",
+      "ValueError"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
    "name": "order",
    "source": "log = []\ndef note(tag, value):\n    log.append(tag)\n    return value\nx = 1\ndef bump():\n    global x\n    x += 10\n    return x\nprint(x + bump(), bump() + x, x, [x, bump(), x], (x, bump()), {note(\"k\", \"key\"): note(\"v\", x)})\nprint(note(\"a\", 1) + note(\"b\", 2) * note(\"c\", 3), log)\nlog.clear()\nitems = [0, 0, 0]\nitems[note(\"index\", 1)] = note(\"value\", 5)\nprint(items, log)\nlog.clear()\ndef pick(a, b, c):\n    return (a, b, c)\nprint(pick(note(\"1\", x), bump(), note(\"3\", x)), log)\nlog.clear()\nprint(note(\"left\", 0) and note(\"skipped\", 1), note(\"left2\", 0) or note(\"right\", 2), note(\"t\", 1) if note(\"cond\", True) else note(\"e\", 2), log)\nlog.clear()\nd = {}\nd[note(\"key\", \"k\")] = [note(\"first\", 1), note(\"second\", 2)]\nd[\"k\"][note(\"i\", 0)] += note(\"add\", 10)\nprint(d, log)\nlog.clear()\nf = note\nf = [note, bump][note(\"choose\", 0)]\nprint(f(\"called\", \"result\"), log, f\"{note('f1', 1)}{bump()}{note('f2', x)}\", note(\"m\", \"a\").upper() + note(\"n\", \"b\"))\nvalue = [1, 2, 3]\nalias = value\nvalue = value + [note(\"rebind\", 4)]\nalias += [5]\nprint(value, alias, log[-1])\n",
    "deliveries": [],
@@ -280,6 +375,30 @@
       "{'k': [11, 2]} ['first', 'second', 'key', 'i', 'add']",
       "result ['choose', 'called', 'f1', 'f2', 'm', 'n'] 16161 Ab",
       "[1, 2, 3, 4] [1, 2, 3, 5] rebind"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "repr_escapes",
+   "source": "print(repr('a\\x00b\\x1bc\\xa0d'))\nfor text in ['\\\\\\n\\r\\t\\v\\f', \"'\", '\"', \"both'\\\"\", '\\x7f\\x85\\xad', '\\u200b\\u2028\\u2029\\u3000', '\\u0378\\ue000\\uffff', '\\U0001f600\\U000e0001', 'é中']:\n    print(repr(text))\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "'a\\x00b\\x1bc\\xa0d'",
+      "'\\\\\\n\\r\\t\\x0b\\x0c'",
+      "\"'\"",
+      "'\"'",
+      "'both\\'\"'",
+      "'\\x7f\\x85\\xad'",
+      "'\\u200b\\u2028\\u2029\\u3000'",
+      "'\\u0378\\ue000\\uffff'",
+      "'😀\\U000e0001'",
+      "'é中'"
      ]
     }
    ],
@@ -422,6 +541,51 @@
       "watch is cancelled",
       "and so is what it awaited",
       "end of main"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "unicode_split",
+   "source": "print('a b c\\vd\\fe'.split())\nspaces = [9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 133, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288]\nfor point in spaces:\n    text = chr(point) + 'a' + chr(point) + chr(point) + 'b' + chr(point)\n    print(text.split(), text.split(None), text.split(chr(point)))\nprint(''.split(), '   '.split(), 'a\\u200bb'.split())\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "['a', 'b', 'c', 'd', 'e']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "['a', 'b'] ['a', 'b'] ['', 'a', '', 'b', '']",
+      "[] [] ['a\\u200bb']"
      ]
     }
    ],

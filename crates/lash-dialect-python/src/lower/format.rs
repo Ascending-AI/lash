@@ -21,7 +21,7 @@ pub(crate) struct Spec {
     /// `<`, `>`, `=`, `^`, or none.
     pub(crate) align: Option<char>,
     /// `+`, `-` or a space.
-    pub(crate) sign: char,
+    pub(crate) sign: Option<char>,
     pub(crate) alternate: bool,
     pub(crate) zero: bool,
     pub(crate) width: u32,
@@ -54,7 +54,7 @@ pub(crate) fn parse(spec: &str) -> Result<Spec, String> {
     let mut parsed = Spec {
         fill: ' ',
         align: None,
-        sign: '-',
+        sign: None,
         alternate: false,
         zero: false,
         width: 0,
@@ -83,7 +83,7 @@ pub(crate) fn parse(spec: &str) -> Result<Spec, String> {
         .copied()
         .filter(|c| matches!(c, '+' | '-' | ' '))
     {
-        parsed.sign = sign;
+        parsed.sign = Some(sign);
         chars.next();
     }
     if chars.peek() == Some(&'z') {
@@ -95,6 +95,9 @@ pub(crate) fn parse(spec: &str) -> Result<Spec, String> {
     }
     if chars.peek() == Some(&'0') {
         parsed.zero = true;
+        if !second.is_some_and(is_align) {
+            parsed.fill = '0';
+        }
         chars.next();
     }
     parsed.width = digits(&mut chars)?.unwrap_or(0);
@@ -224,6 +227,14 @@ impl Lowerer<'_> {
                 }
             }
         }
+        if written.is_empty() {
+            let helper = if conversion == "r" {
+                "py.repr"
+            } else {
+                "py.str"
+            };
+            return self.invoke(helper, &[value], Ty::Str);
+        }
         let spec = parse(&written).map_err(|problem| self.format_refusal(problem, field))?;
         let text = |value: Option<char>| Operand::text(value.map(String::from).unwrap_or_default());
         let precision = match spec.precision {
@@ -237,7 +248,7 @@ impl Lowerer<'_> {
                 Operand::text(conversion),
                 Operand::text(spec.fill),
                 text(spec.align),
-                Operand::text(spec.sign),
+                text(spec.sign),
                 Operand::literal(Literal::Bool(spec.alternate), Ty::Bool),
                 Operand::literal(Literal::Bool(spec.zero), Ty::Bool),
                 Operand::literal(Literal::Int(i64::from(spec.width).into()), Ty::Int),

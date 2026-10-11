@@ -23,3 +23,4 @@ runs where"; laws in `src/tests/replies.rs`).
 | `unbounded_recursion_ends_the_run` | Recursion past the embedder's call depth bound ends the run with the bound's error. | `RecursionError`, which a program can catch. | A bound is the embedder's and no program catches one (`K-BND-001`). |
 | `nan_in_a_list_is_not_equal_to_itself` | A list that holds NaN is not equal to itself, and `nan in [nan]` is false. | True, by the identity shortcut. | `eq` has no identity shortcut. |
 | `a_float_literal_too_large_does_not_parse` | `float('1e400')` raises `ValueError`. | `inf`. | `float.parse` refuses a literal out of range. |
+| `nan_dict_keys_share_one_key` | Independently made NaNs address one dict key: `{a: 'first', b: 'second'}` has length 1 and either NaN reads `second`. | Distinct NaN objects address distinct keys; the same object retrieves its own entry. | `K-KEY-002` assigns all NaNs one canonical key. The dialect preserves that kernel rule. |
