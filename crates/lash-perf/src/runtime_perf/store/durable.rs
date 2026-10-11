@@ -208,14 +208,6 @@ impl DurableReads for RuntimePerfDurableStore {
         answer
     }
 
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError> {
-        self.inner.park_events(after, limit).await
-    }
-
     async fn prompt_snapshot(
         &self,
         call: &PromptCallKey,

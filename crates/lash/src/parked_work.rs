@@ -1,7 +1,7 @@
 //! The control intents a session's close records, listed for an operator.
 //!
 //! A parked process is its actor's state (ADR 0132 §11): it is recorded in
-//! the substrate's park feed, and an operator redrives it by
+//! the actor row, and an operator redrives it by
 //! `ProcessAdmin::redrive`.
 
 use std::num::NonZeroUsize;

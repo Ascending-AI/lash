@@ -16,9 +16,8 @@ use lash_core_execution::{
     ProcessRegistry, StoreBindingId, StoreSet,
 };
 use lash_durable::domain::{
-    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq, ParkEventWrite,
-    ProcessActorRow, RootOwner, RunFacts, ScopeKey, SessionCloseRow, TurnEnd, TurnRow, WaitId,
-    WaitRow,
+    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
+    SessionCloseRow, TurnEnd, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DurableError,
@@ -107,9 +106,7 @@ impl Encoded {
                 .count(),
             domain_writes: tx.domain().len(),
             parked: tx.domain().iter().find_map(|write| match write {
-                lash_durable::DomainWrite::ParkEvent(ParkEventWrite::Park { reason_json }) => {
-                    Some(reason_json.clone())
-                }
+                lash_durable::DomainWrite::ActorPark { reason_json } => reason_json.clone(),
                 _ => None,
             }),
             ..Self::default()
@@ -521,14 +518,6 @@ impl DurableReads for RecordingStore {
         session: &SessionId,
     ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
         self.inner.session_mailbox(session).await
-    }
-
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError> {
-        self.inner.park_events(after, limit).await
     }
 
     async fn prompt_snapshot(

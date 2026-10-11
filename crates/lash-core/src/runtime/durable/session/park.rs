@@ -1,14 +1,13 @@
 //! Why a session actor parks, and its park (FIG-5230, FIG-5592, FIG-5401):
-//! the typed reason the park feed and the actor's row record, which an
+//! the typed reason the actor's row records, which an
 //! operator reads (`LashSession::park_reason`) before redriving the session.
 
-use lash_durable::domain::ParkEventWrite;
 use lash_durable::{CommitLabel, DomainWrite, DurableError, Release};
 
 use super::{TurnError, TurnRestoreError};
 use crate::ActorContext;
 
-/// Why a session actor parked: the park feed's typed reason. A parked
+/// Why a session actor parked: the actor row's typed reason. A parked
 /// session runs nothing until an operator redrives it or a control wake (a
 /// turn cancel) readies it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -169,7 +168,7 @@ impl SessionParkReason {
         }
     }
 
-    /// The park feed's encoding.
+    /// The actor row's park encoding.
     #[expect(
         clippy::expect_used,
         reason = "a park reason is plain data whose encoding cannot fail"
@@ -180,7 +179,7 @@ impl SessionParkReason {
     }
 }
 
-/// Park the session with `reason`: its park-feed entry and its release as
+/// Park the session with `reason`: its current reason and its release as
 /// `parked`, one commit. Its unread mail stays for the claim that follows a
 /// redrive.
 pub(super) async fn park(
@@ -189,9 +188,9 @@ pub(super) async fn park(
 ) -> Result<(), DurableError> {
     tracing::warn!(actor = %cx.actor(), reason = %reason.encode(), "session parked");
     let mut tx = cx.begin().await?;
-    tx.write(DomainWrite::ParkEvent(ParkEventWrite::Park {
-        reason_json: reason.encode(),
-    }));
+    tx.write(DomainWrite::ActorPark {
+        reason_json: Some(reason.encode()),
+    });
     tx.give_up(Release::Parked);
     cx.commit(tx, CommitLabel::SESSION_RELEASE).await.map(drop)
 }

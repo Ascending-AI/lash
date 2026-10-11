@@ -887,16 +887,6 @@ pub enum StoreError {
     TurnChangeCursorAhead {
         current: crate::store::TurnChangeCursor,
     },
-    /// A turn park feed cursor predates history `compact_turn_park_feed`
-    /// removed. The consumer must perform a full relist before resuming from
-    /// the reported horizon.
-    #[error(
-        "turn park feed cursor is below the compaction horizon {horizon:?}; a full relist is required"
-    )]
-    ParkFeedCursorCompacted {
-        /// The lowest feed position the store still serves.
-        horizon: crate::store::ParkFeedCursor,
-    },
     /// A whole-store migration cannot start while another connection holds
     /// a database. Close the other host before retrying the open.
     #[error(
@@ -1033,8 +1023,7 @@ impl StoreError {
             | Self::ArtifactMissing { .. }
             | Self::ArtifactCarryMissing { .. }
             | Self::TurnChangeCursorPruned { .. }
-            | Self::TurnChangeCursorAhead { .. }
-            | Self::ParkFeedCursorCompacted { .. } => false,
+            | Self::TurnChangeCursorAhead { .. } => false,
         }
     }
 
@@ -1152,8 +1141,7 @@ impl StoreError {
             | Self::ExecutionStateBodiesReleased
             | Self::ArtifactCarryMissing { .. }
             | Self::TurnChangeCursorPruned { .. }
-            | Self::TurnChangeCursorAhead { .. }
-            | Self::ParkFeedCursorCompacted { .. } => Code::StoreRefused,
+            | Self::TurnChangeCursorAhead { .. } => Code::StoreRefused,
         }
     }
 
@@ -1270,7 +1258,7 @@ impl StoreError {
             | Self::ArtifactCarryMissing { .. }
             | Self::TurnChangeCursorPruned { .. }
             | Self::TurnChangeCursorAhead { .. }
-            | Self::ParkFeedCursorCompacted { .. } => false,
+ => false,
         }
     }
 
@@ -1447,7 +1435,6 @@ impl StoreError {
             Self::ArtifactCarryMissing { .. } => "ArtifactCarryMissing",
             Self::TurnChangeCursorPruned { .. } => "TurnChangeCursorPruned",
             Self::TurnChangeCursorAhead { .. } => "TurnChangeCursorAhead",
-            Self::ParkFeedCursorCompacted { .. } => "ParkFeedCursorCompacted",
             Self::MigrationOpenElsewhere { .. } => "MigrationOpenElsewhere",
             Self::StorageFailure { .. } => "StorageFailure",
             Self::Backend(_) => "Backend",

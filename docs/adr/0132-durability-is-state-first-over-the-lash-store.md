@@ -334,7 +334,7 @@ enum EngineAction {
   from registry state. A running or waiting process is cancelled through
   `advance` within its grace (§10).
 - A process whose claims commit nothing parks with `ActivationLoop` at the
-  activation-loop budget, recorded in the park feed; a cancel or an operator's
+  activation-loop budget, recorded on the actor row; a cancel or an operator's
   redrive readies it.
 - A process's terminal transaction resolves every `process_terminal` wait on
   it, revokes its own pending waits and begins the cascade over its

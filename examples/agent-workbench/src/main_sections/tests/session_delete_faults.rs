@@ -231,14 +231,6 @@ impl DurableReads for DeleteDurableStore {
         self.inner.session_mailbox(session).await
     }
 
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError> {
-        self.inner.park_events(after, limit).await
-    }
-
     async fn prompt_snapshot(
         &self,
         call: &lash::durable::domain::PromptCallKey,

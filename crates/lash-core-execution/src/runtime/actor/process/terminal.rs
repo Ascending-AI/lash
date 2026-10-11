@@ -1,12 +1,12 @@
 //! A process's terminal transaction and its parks (ADR 0132 §3, §11).
 
-use lash_durable::domain::{ExecRootWrite, ParkEventWrite, ProcessWrite, ScopeKey};
+use lash_durable::domain::{ExecRootWrite, ProcessWrite, ScopeKey};
 use lash_durable::{ActorTx, DomainWrite, DurableError, StoreFailure, StoreFailureKind};
 
 use crate::runtime::actor::waits;
 use crate::{CancelOrigin, ProcessId, ProcessOutcome};
 
-/// Why a process actor parked: the park feed's typed reason. A parked
+/// Why a process actor parked: the actor row's typed reason. A parked
 /// process runs no engine code until an operator redrives it; a cancel ends
 /// it without running its engine.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -67,7 +67,7 @@ pub enum ProcessParkReason {
 }
 
 impl ProcessParkReason {
-    /// The park feed's encoding.
+    /// The actor row's park encoding.
     #[expect(
         clippy::expect_used,
         reason = "a park reason is plain data whose encoding cannot fail"
@@ -171,9 +171,9 @@ impl ProcessParkReason {
 
 /// Park the committing actor with `reason` on `tx`.
 pub fn record_park(tx: &mut ActorTx, reason: &ProcessParkReason) {
-    tx.write(DomainWrite::ParkEvent(ParkEventWrite::Park {
-        reason_json: reason.encode(),
-    }));
+    tx.write(DomainWrite::ActorPark {
+        reason_json: Some(reason.encode()),
+    });
     tx.give_up(lash_durable::Release::Parked);
 }
 

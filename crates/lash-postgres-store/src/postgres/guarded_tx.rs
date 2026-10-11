@@ -619,7 +619,7 @@ pub(crate) async fn begin_guarded<'c, 'p>(
 
 /// A collection's entry (FIG-5887 §8): [`begin_guarded`] with the graph
 /// gate taken exclusive ahead of the writer fence, so no guarded transaction
-/// (a writer, a hydration, a read pin's fetch) runs beside it.
+/// (a writer or a hydration) runs beside it.
 pub(crate) async fn begin_collecting<'c, 'p>(
     entry: impl Into<GuardedEntry<'c, 'p>>,
     fence: &WriterFence,

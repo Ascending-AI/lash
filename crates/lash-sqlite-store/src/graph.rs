@@ -12,17 +12,11 @@ impl SqliteStore {
     /// Mark-and-sweep the blob table, answering in the maintenance outcome
     /// contract (ADR 0067 §4).
     ///
-    /// Expired read pins are retired first, in a transaction of their own;
-    /// then the whole collection runs in one `BEGIN IMMEDIATE` transaction.
+    /// The whole collection runs in one `BEGIN IMMEDIATE` transaction.
     pub async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {
         let failed = |error: StoreError| {
             lash_core_execution::MaintenanceFailure::failed_before_any_work(error)
         };
-        let now = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
-        self.conn
-            .write(move |tx| crate::durable::retire_expired_read_pins_in(tx, now))
-            .await
-            .map_err(|error| failed(sqlite_error(error)))?;
         self.conn
             .write(move |tx| {
                 Self::gc_unreachable_in_tx(tx).map_err(|err| {

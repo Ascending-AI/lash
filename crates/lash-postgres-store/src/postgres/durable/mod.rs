@@ -42,7 +42,6 @@ use lash_durable::{
     Owner, Reaped, Release, StateRevision, StoreFailure, StoreFailureKind, Woken,
 };
 use lash_store_sql::Dialect;
-use lash_store_sql::durable::park_events::ParkEventStatements;
 use lash_store_sql::durable::processes::{ActorParkStatements, ProcessActorStatements};
 use lash_store_sql::durable::session_mail::SessionMailStatements;
 use lash_store_sql::durable::{ActorStatements, MailStatements, NodeStatements};
@@ -59,9 +58,8 @@ mod admission;
 mod graph;
 pub(crate) use graph::{
     GraphClosure, collect_in as collect_graph_in, graph_closure, install_staged, reachable_from,
-    retire_expired_read_pins_in,
 };
-mod park_events;
+mod park;
 pub(crate) mod processes;
 mod prompts;
 pub(crate) use prompts::release as release_prompt_snapshots;
@@ -255,7 +253,6 @@ struct Sql {
     mail: MailStatements,
     park: ActorParkStatements,
     process: ProcessActorStatements,
-    park_events: ParkEventStatements,
     session_mail: SessionMailStatements,
     postgres: PostgresDurableStatements,
 }
@@ -268,7 +265,6 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
         mail: MailStatements::render(dialect),
         park: ActorParkStatements::render(dialect),
         process: ProcessActorStatements::render(dialect),
-        park_events: ParkEventStatements::render(dialect),
         session_mail: SessionMailStatements::render(dialect),
         postgres: PostgresDurableStatements::render(dialect),
     }
@@ -943,12 +939,13 @@ async fn apply_domain(
         DomainWrite::RunFact(write) => run_records::apply(tx, committing, write).await,
         DomainWrite::ExecRoot(write) => snapshots::apply(tx, committing, write).await,
         DomainWrite::EffectAdmission(write) => graph::apply_admission(tx, committing, write).await,
-        DomainWrite::ReadPin(write) => graph::apply_read_pin(tx, write).await,
         DomainWrite::ReleasePin(write) => graph::apply_release_pin(tx, write).await,
         DomainWrite::Wait(write) => waits::apply(tx, committing, write).await,
         DomainWrite::Process(write) => processes::apply(tx, committing, write).await,
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write).await,
-        DomainWrite::ParkEvent(write) => park_events::apply(tx, committing, write).await,
+        DomainWrite::ActorPark { reason_json } => {
+            park::set(tx, committing.actor.as_str(), reason_json).await
+        }
         DomainWrite::SessionMail(write) => session_mail::apply(tx, committing, write).await,
         DomainWrite::Prompt(write) => prompts::apply(tx, committing, write).await,
     }
@@ -989,7 +986,7 @@ async fn apply_mail_domain(
             )
         }
         MailDomainWrite::Redrive(request) => {
-            let (answer, woken) = park_events::redrive(tx, request, now).await?;
+            let (answer, woken) = park::redrive(tx, request, now).await?;
             (MailAnswer::Redrive(answer), woken.into_iter().collect())
         }
     })

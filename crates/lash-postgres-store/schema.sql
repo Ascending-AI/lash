@@ -941,17 +941,6 @@ CREATE TABLE IF NOT EXISTS lash_session_scope_ends (
     PRIMARY KEY (session_id, scope_key)
 );
 
--- The operator's park feed (L6, FIG-5175): one entry per park of an actor,
--- per redrive and per end of a parked actor.
-CREATE TABLE IF NOT EXISTS lash_park_events (
-    seq BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    actor_key TEXT COLLATE "C" NOT NULL,
-    kind TEXT NOT NULL CONSTRAINT ck_lash_park_events_kind
-        CHECK (kind IN ('parked', 'redriven', 'ended')),
-    reason_json TEXT NOT NULL,
-    at_ms BIGINT NOT NULL
-);
-
 -- Execution roots (I0, FIG-5194; statements: V0, then L7): the root of each
 -- code cell ('c/...') and process ('p/...'), compare-and-set on rev.
 CREATE TABLE IF NOT EXISTS lash_exec_snapshots (
@@ -1143,17 +1132,6 @@ CREATE TABLE IF NOT EXISTS lash_effect_admissions (
 CREATE INDEX IF NOT EXISTS idx_lash_effect_admissions_admission_ref
     ON lash_effect_admissions (admission_ref);
 
--- A streaming reader's pin on one root. Every row roots, expired or not,
--- until its explicit retirement.
-CREATE TABLE IF NOT EXISTS lash_blob_read_pins (
-    pin_id TEXT PRIMARY KEY,
-    lease_owner TEXT NOT NULL,
-    generation BIGINT NOT NULL CONSTRAINT ck_blob_read_pins_generation CHECK (generation >= 1),
-    root_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
-    expires_at_ms BIGINT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_lash_blob_read_pins_root_ref ON lash_blob_read_pins (root_ref);
-
 -- A deliberately installed runnable release manifest.
 CREATE TABLE IF NOT EXISTS lash_graph_release_pins (
     release_key TEXT PRIMARY KEY,
@@ -1176,7 +1154,6 @@ CREATE OR REPLACE VIEW lash_graph_root_catalog AS
         WHERE checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'admission_base', admission_base_checkpoint_ref FROM lash_session_meta
         WHERE admission_base_checkpoint_ref IS NOT NULL
-    UNION ALL SELECT 'read_pin', root_ref FROM lash_blob_read_pins
     UNION ALL SELECT 'artifact', graph_ref FROM lash_lash_vm_artifacts WHERE storage_kind = 1
     UNION ALL SELECT 'release', root_ref FROM lash_graph_release_pins
     UNION ALL SELECT 'terminal_window', terminal_window_checkpoint_ref FROM lash_session_runs

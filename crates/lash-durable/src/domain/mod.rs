@@ -33,7 +33,6 @@ pub mod graph;
 pub mod graph_commit;
 mod keys;
 pub mod namespace_value;
-pub mod park_events;
 pub mod processes;
 pub mod prompts;
 pub mod run_records;
@@ -45,13 +44,12 @@ pub mod waits;
 
 pub use graph::{
     AdmissionMember, EffectAdmissionRow, EffectAdmissionWrite, EffectKey, ExecRootRow,
-    ExecRootWrite, HydratedGraph, HydratedNode, ReadPinWrite, ReleasePinWrite, RootChange,
-    RootOwner, RunFactKind, RunFactRow, RunFactWrite, RunFacts,
+    ExecRootWrite, HydratedGraph, HydratedNode, ReleasePinWrite, RootChange, RootOwner,
+    RunFactKind, RunFactRow, RunFactWrite, RunFacts,
 };
 pub use keys::{CellId, ExecKey, Ordinal, OwnerKey, RunSeq, ScopeKey, StoredKeyError};
 /// The checkpoint graph format the domain's graph rows name.
 pub use lash_core_store::checkpoint_graph;
-pub use park_events::{ParkEventKind, ParkEventRow, ParkEventSeq, ParkEventWrite};
 pub use processes::{
     CancelAnswer, CancelRequest, ProcessActorRow, ProcessStartRows, ProcessWrite, RedriveAnswer,
     RedriveRequest,
@@ -104,8 +102,6 @@ pub enum DomainWrite {
     /// An admitted effect's lookup row: its Admission node, while a live
     /// kernel or a released member needs it.
     EffectAdmission(EffectAdmissionWrite),
-    /// A streaming reader's pin on one root.
-    ReadPin(ReadPinWrite),
     /// A deliberately installed release manifest.
     ReleasePin(ReleasePinWrite),
     /// L5: wait pinning, timeout, scope revocation and process-terminal
@@ -116,8 +112,8 @@ pub enum DomainWrite {
     Process(ProcessWrite),
     /// L6b: the session closing state's steps.
     SessionClose(SessionCloseWrite),
-    /// L6: one entry of the operator's park feed.
-    ParkEvent(ParkEventWrite),
+    /// The committing actor's current park reason; `None` clears it.
+    ActorPark { reason_json: Option<String> },
     /// L3s: the session's admission of its mail.
     SessionMail(SessionMailWrite),
     /// P2 (FIG-5256): a model call's root and its shared text, the
@@ -150,7 +146,7 @@ pub enum MailDomainWrite {
     /// is cancelled.
     RequestOperationCancel(OperationCancelRequest),
     /// L6: redrive a parked actor: clear its park and its failed
-    /// activations, record the redrive on the park feed, and control-wake
+    /// activations and control-wake
     /// it.
     Redrive(RedriveRequest),
 }
@@ -539,13 +535,6 @@ pub trait DurableReads: Send + Sync {
 
     /// L3s: the session's open mail.
     async fn session_mailbox(&self, session: &SessionId) -> Result<SessionMailbox, DurableError>;
-
-    /// L6: up to `limit` park-feed entries after `after`, oldest first.
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError>;
 
     /// P2: `call`'s root, while it is retained: its snapshot, and its
     /// request until the call settles.

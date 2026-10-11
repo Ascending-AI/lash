@@ -120,8 +120,6 @@ DROP TABLE IF EXISTS lash_session_close CASCADE;
 
 DROP TABLE IF EXISTS lash_session_scope_ends CASCADE;
 
-DROP TABLE IF EXISTS lash_park_events CASCADE;
-
 DROP TABLE IF EXISTS lash_exec_snapshots CASCADE;
 
 DROP TABLE IF EXISTS lash_prompt_snapshots CASCADE;
@@ -139,8 +137,6 @@ DROP TABLE IF EXISTS lash_waits CASCADE;
 DROP TABLE IF EXISTS lash_blob_edges CASCADE;
 
 DROP TABLE IF EXISTS lash_effect_admissions CASCADE;
-
-DROP TABLE IF EXISTS lash_blob_read_pins CASCADE;
 
 DROP TABLE IF EXISTS lash_graph_release_pins CASCADE;
 

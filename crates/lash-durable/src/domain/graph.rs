@@ -3,8 +3,7 @@
 //! The format itself (envelopes, kinds, encoding, decoding, refusals) is
 //! `lash_core_store::checkpoint_graph`. This module is what a durable commit
 //! does with it: the closed set of root owners, the graph-reference rows
-//! that own roots, the owner transaction and
-//! the read-pin contract every store implements.
+//! that own roots, the owner transaction, and whole graph hydration.
 //!
 //! # Contracts
 //!
@@ -16,15 +15,14 @@
 //!
 //! Root changes are derived directly from [`DomainWrite::publications`],
 //! and the owning domain adapter writes each column once. A park is never
-//! split across visible commits. Streaming readers use [`GraphStore`]'s
-//! read pins; graph hydration and collection share the graph gate.
+//! split across visible commits. Graph hydration and collection share the
+//! graph gate.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::{
-    BlobEncoding, CommitId, DecodeLimits, EncodedNode, GraphRefusal, NodeId, NodeSource,
-    RootSource, StoredNode,
+    BlobEncoding, CommitId, DecodeLimits, EncodedNode, NodeId, NodeSource, RootSource, StoredNode,
 };
 use lash_sansio::{SessionId, ToolCallId, TurnId};
 
@@ -32,7 +30,7 @@ use super::DomainWrite;
 use super::keys::{ExecKey, Ordinal, OwnerKey, RunSeq};
 use super::snapshots::SnapshotRev;
 use super::turns::{StoredValues, TurnWrite};
-use crate::ids::{DurableInstant, Epoch};
+use crate::ids::Epoch;
 
 /// The PostgreSQL transaction advisory key of the graph gate: the one bigint
 /// `0x4c41534847524150` ("LASHGRAP"). Ordinary graph transactions take it
@@ -58,8 +56,6 @@ pub enum LockStep {
     SessionHistory,
     /// The actor's epoch fence and revision compare-and-set.
     OwnerFence,
-    /// Read-pin row locks, in sorted pin order.
-    ReadPins,
     /// Blob insert and key-share locks, in digest order.
     Blobs,
     /// Edge, root and domain writes.
@@ -68,13 +64,12 @@ pub enum LockStep {
 
 impl LockStep {
     /// Every step, in acquisition order.
-    pub const ORDER: [Self; 8] = [
+    pub const ORDER: [Self; 7] = [
         Self::GraphGate,
         Self::FleetGuard,
         Self::NodeLiveness,
         Self::SessionHistory,
         Self::OwnerFence,
-        Self::ReadPins,
         Self::Blobs,
         Self::Writes,
     ];
@@ -84,10 +79,6 @@ impl LockStep {
 /// [`lash_kernel_doc::EffectIdentity`], the `effect_admissions` key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EffectKey(pub Arc<[u8]>);
-
-/// A read pin's identity.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ReadPinId(pub String);
 
 /// Who owns a root: one row of one [`RootSource`]. Closed: there are no
 /// free-form owners.
@@ -117,8 +108,6 @@ pub enum RootOwner {
     SessionRevision { session: SessionId, revision: u64 },
     /// `session_meta.admission_base_checkpoint_ref`.
     SessionAdmissionBase { session: SessionId },
-    /// `blob_read_pins`.
-    ReadPin(ReadPinId),
     /// SQLite `artifact_refs`; PostgreSQL `lash_lash_vm_artifacts` with
     /// `storage_kind = 1`.
     ArtifactBridge { namespace: String, artifact: String },
@@ -139,7 +128,6 @@ impl RootOwner {
             Self::TurnNamespace { .. } => RootSource::TurnNamespace,
             Self::SessionRevision { .. } => RootSource::SessionRevision,
             Self::SessionAdmissionBase { .. } => RootSource::SessionAdmissionBase,
-            Self::ReadPin(_) => RootSource::ReadPin,
             Self::ArtifactBridge { .. } => RootSource::ArtifactBridge,
             Self::ReleasePin { .. } => RootSource::ReleasePin,
         }
@@ -160,7 +148,7 @@ pub enum RootChange {
     Retire { owner: RootOwner, expected: NodeId },
 }
 
-/// One stored blob a hydration or pinned fetch read.
+/// One stored blob a hydration read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HydratedNode {
     pub encoding: BlobEncoding,
@@ -183,68 +171,6 @@ impl NodeSource for HydratedGraph {
             bytes: &node.bytes,
         })
     }
-}
-
-/// A reader's lease request for a durable read pin.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReadLease {
-    pub lease_owner: String,
-    /// How long the pin lives from the database's clock.
-    pub ttl_ms: u64,
-}
-
-/// A durable pin on one owner's root, for streaming hydration. Each fetch
-/// checks the exact `(pin_id, lease_owner, generation, root)` and expiry
-/// under the pin's row lock.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReadPin {
-    pub pin_id: ReadPinId,
-    pub lease_owner: String,
-    pub generation: u64,
-    pub root: NodeId,
-    pub expires_at: DurableInstant,
-}
-
-/// Nodes one pinned fetch returned, and the pin as it stands after it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PinnedBatch {
-    pub pin: ReadPin,
-    pub nodes: BTreeMap<NodeId, HydratedNode>,
-}
-
-impl NodeSource for PinnedBatch {
-    fn fetch(&self, id: &NodeId) -> Option<StoredNode<'_>> {
-        self.nodes.get(id).map(|node| StoredNode {
-            encoding: node.encoding,
-            bytes: &node.bytes,
-        })
-    }
-}
-
-/// The graph half of a durable store beyond the owner commit and hydration
-/// every [`DurableStore`](crate::DurableStore) answers: streaming read pins.
-/// Every method takes the
-/// graph gate on PostgreSQL; none is sequenced by its caller from smaller
-/// operations.
-#[async_trait::async_trait]
-pub trait GraphStore: Send + Sync {
-    /// Pins `owner`'s current root under the gate and the owner's check.
-    async fn acquire_read_pin(
-        &self,
-        owner: RootOwner,
-        lease: ReadLease,
-    ) -> Result<ReadPin, GraphRefusal>;
-
-    /// Fetches `nodes`, each reachable from the pinned root, in one
-    /// transaction under the pin's lock, optionally renewing it. An expired
-    /// pin is refused before anything is read
-    /// ([`GraphRefusal::ReadPinExpired`]).
-    async fn fetch_pinned(
-        &self,
-        pin: ReadPin,
-        nodes: &[NodeId],
-        renew: Option<ReadLease>,
-    ) -> Result<PinnedBatch, GraphRefusal>;
 }
 
 /// One execution's root row (`exec_snapshots`). Executable identity and
@@ -509,15 +435,6 @@ pub enum EffectAdmissionWrite {
     },
 }
 
-/// A read pin write.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ReadPinWrite {
-    /// Insert a pin on its root.
-    Acquire { pin: ReadPin },
-    /// Retire a pin, expired or released, under its row lock.
-    Retire { pin: ReadPin },
-}
-
 /// A release manifest pin write.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReleasePinWrite {
@@ -648,16 +565,6 @@ impl DomainWrite {
                     StoredValues::Base | StoredValues::Held => None,
                 })
                 .collect(),
-            Self::ReadPin(ReadPinWrite::Acquire { pin }) => one(change(
-                RootOwner::ReadPin(pin.pin_id.clone()),
-                None,
-                Some(pin.root),
-            )),
-            Self::ReadPin(ReadPinWrite::Retire { pin }) => one(change(
-                RootOwner::ReadPin(pin.pin_id.clone()),
-                Some(pin.root),
-                None,
-            )),
             Self::ReleasePin(ReleasePinWrite::Install { release, root }) => one(change(
                 RootOwner::ReleasePin {
                     release: release.clone(),
@@ -678,7 +585,7 @@ impl DomainWrite {
             | Self::Wait(_)
             | Self::Process(_)
             | Self::SessionClose(_)
-            | Self::ParkEvent(_)
+            | Self::ActorPark { .. }
             | Self::SessionMail(_)
             | Self::Prompt(_) => Vec::new(),
         }

@@ -365,9 +365,6 @@ store_error_samples! {
     },
     TurnChangeCursorPruned { .. } => StoreError::TurnChangeCursorPruned { horizon: super::TurnChangeCursor::initial() },
     TurnChangeCursorAhead { .. } => StoreError::TurnChangeCursorAhead { current: super::TurnChangeCursor::initial() },
-    ParkFeedCursorCompacted { .. } => StoreError::ParkFeedCursorCompacted {
-        horizon: super::ParkFeedCursor::initial(),
-    },
     MigrationOpenElsewhere { .. } => StoreError::MigrationOpenElsewhere {
         database: "sampled".to_string(),
         location: std::path::PathBuf::from("sampled"),

@@ -16,8 +16,8 @@ use lash_sansio::{SessionId, ToolCallId, TurnId};
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::graph::{
-    EffectAdmissionWrite, EffectKey, ExecRootWrite, GraphStore, HydratedGraph, ReadLease, ReadPin,
-    ReleasePinWrite, RootOwner, RunFactKind, RunFactWrite,
+    EffectAdmissionWrite, EffectKey, ExecRootWrite, HydratedGraph, ReleasePinWrite, RootOwner,
+    RunFactKind, RunFactWrite,
 };
 use crate::domain::graph_commit::{CollectionLimits, GraphCollection, measure_owner_commit};
 use crate::domain::namespace_value::NamespaceValue;
@@ -76,11 +76,7 @@ pub enum ForeignWrite {
 #[async_trait::async_trait]
 pub trait GraphTier: Send + Sync {
     fn store(&self) -> &dyn DurableStore;
-    fn graph(&self) -> &dyn GraphStore;
-    /// Moves the store's clock forward.
-    fn advance(&self, millis: u64);
     async fn collect(&self, limits: CollectionLimits) -> Result<GraphCollection, GraphRefusal>;
-    async fn release_read_pin(&self, pin: ReadPin) -> Result<(), GraphRefusal>;
     /// A stored blob's bytes and encoding.
     async fn blob(&self, hash: &str) -> Option<(Vec<u8>, u8)>;
     /// A node's stored edges, in digest order.
@@ -627,8 +623,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             ),
             // Sources whose writers are not graph commits: installed nodes
             // first, then their rows written directly.
-            RootSource::ReadPin
-            | RootSource::SessionRevision
+            RootSource::SessionRevision
             | RootSource::RevisionConfig
             | RootSource::SessionAdmissionBase
             | RootSource::ArtifactBridge
@@ -647,24 +642,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         owner_commit(tier, &owner, nodes.clone(), writes)
             .await
             .map_err(|error| refused(source.catalog_name(), error))?;
-        let mut pin = None;
         match source {
-            RootSource::ReadPin => {
-                pin = Some(
-                    tier.graph()
-                        .acquire_read_pin(
-                            RootOwner::ReleasePin {
-                                release: "carrier".into(),
-                            },
-                            ReadLease {
-                                lease_owner: "roots".into(),
-                                ttl_ms: 3_600_000,
-                            },
-                        )
-                        .await
-                        .map_err(|error| refused("a pin", error))?,
-                );
-            }
             RootSource::SessionRevision | RootSource::RevisionConfig => {
                 tier.foreign(ForeignWrite::RevisionRoot {
                     config: matches!(
@@ -708,8 +686,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         }
         if matches!(
             source,
-            RootSource::ReadPin
-                | RootSource::SessionRevision
+            RootSource::SessionRevision
                 | RootSource::RevisionConfig
                 | RootSource::SessionAdmissionBase
                 | RootSource::ArtifactBridge
@@ -741,16 +718,11 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         }
         // Retire this source's owner: its own material goes, the shared
         // leaf stays with the anchor.
-        match (source, retire, pin) {
-            (_, Some(retire), _) => {
+        match (source, retire) {
+            (_, Some(retire)) => {
                 owner_commit(tier, &owner, BTreeMap::new(), vec![retire])
                     .await
                     .map_err(|error| refused("a retirement", error))?;
-            }
-            (RootSource::ReadPin, None, Some(pin)) => {
-                tier.release_read_pin(pin)
-                    .await
-                    .map_err(|error| refused("a pin's release", error))?;
             }
             (RootSource::SessionRevision | RootSource::RevisionConfig, ..) => {
                 tier.foreign(ForeignWrite::RevisionRoot {
@@ -1066,171 +1038,6 @@ pub async fn a_collection_sweeps_only_what_it_proved_unreachable(
     Ok(())
 }
 
-/// PC-READ: a hydration is one complete root, never a newer one; a read pin
-/// keeps its root's closure through replacement and collection, fetches
-/// only what that root reaches, renews by generation, refuses once expired,
-/// and roots until it is retired.
-///
-/// # Errors
-///
-/// The first rule broken.
-pub async fn a_read_is_one_protected_root(tier: &dyn GraphTier) -> LawOutcome {
-    let owner = owned(tier, "graph-read").await?;
-    let exec = &owner.exec("read");
-    let limits = DecodeLimits::within_total(1 << 30);
-    let mut first = staging();
-    let old_root = value(&mut first, &[&big("read-a"), &big("read-b")], &[]);
-    let old_nodes = first.into_nodes();
-    owner_commit(
-        tier,
-        &owner,
-        old_nodes.clone(),
-        vec![put_exec(exec, None, old_root)],
-    )
-    .await
-    .map_err(|error| refused("the first root", error))?;
-    let hydrated = hydrate(tier, RootOwner::Exec(exec.clone()), None, limits)
-        .await
-        .map_err(|error| refused("a hydration", error))?;
-    ensure!(
-        hydrated.root == old_root
-            && hydrated.nodes.len() == old_nodes.len()
-            && old_nodes.iter().all(|(id, node)| hydrated
-                .nodes
-                .get(id)
-                .is_some_and(|read| read.bytes == node.bytes)),
-        "a hydration did not read exactly the root's closure"
-    );
-    let tight = DecodeLimits { nodes: 1, ..limits };
-    let answer = hydrate(tier, RootOwner::Exec(exec.clone()), None, tight).await;
-    ensure!(
-        matches!(answer, Err(GraphRefusal::DecodeLimit { .. })),
-        "a hydration past its limits answered {answer:?}"
-    );
-
-    let lease = ReadLease {
-        lease_owner: "reader".into(),
-        ttl_ms: 10_000,
-    };
-    let pin = tier
-        .graph()
-        .acquire_read_pin(RootOwner::Exec(exec.clone()), lease.clone())
-        .await
-        .map_err(|error| refused("a pin", error))?;
-    ensure!(pin.root == old_root, "the pin is not on the current root");
-
-    let mut second = staging();
-    let new_root = value(&mut second, &[&big("read-c")], &[]);
-    owner_commit(
-        tier,
-        &owner,
-        second.into_nodes(),
-        vec![put_exec(exec, Some((1, old_root)), new_root)],
-    )
-    .await
-    .map_err(|error| refused("the replacement", error))?;
-    tier.collect(CollectionLimits::UNBOUNDED)
-        .await
-        .map_err(|error| refused("a collection", error))?;
-    let answer = hydrate(tier, RootOwner::Exec(exec.clone()), Some(old_root), limits).await;
-    ensure!(
-        answer.as_ref().err() == Some(&GraphRefusal::RevisionConflict),
-        "a hydration expecting a replaced root answered {answer:?}"
-    );
-
-    let wanted: Vec<NodeId> = old_nodes.keys().copied().collect();
-    let fetched = tier
-        .graph()
-        .fetch_pinned(pin.clone(), &wanted, Some(lease.clone()))
-        .await
-        .map_err(|error| refused("a pinned fetch", error))?;
-    ensure!(
-        old_nodes.iter().all(|(id, node)| fetched
-            .nodes
-            .get(id)
-            .is_some_and(|read| read.bytes == node.bytes)),
-        "a pinned fetch did not return the replaced root's exact nodes"
-    );
-    ensure!(
-        fetched.pin.generation == pin.generation + 1,
-        "a renewal did not advance the generation: {:?}",
-        fetched.pin
-    );
-    let answer = tier.graph().fetch_pinned(pin.clone(), &wanted, None).await;
-    ensure!(
-        answer.as_ref().err() == Some(&GraphRefusal::ReadPinMismatch),
-        "a superseded generation fetched: {answer:?}"
-    );
-    let renewed = fetched.pin;
-    let answer = tier
-        .graph()
-        .fetch_pinned(renewed.clone(), &[leaf(&big("read-c"))], None)
-        .await;
-    ensure!(
-        answer.as_ref().err() == Some(&GraphRefusal::ReadPinMismatch),
-        "a pin fetched a node its root does not reach: {answer:?}"
-    );
-
-    tier.advance(10_001);
-    let answer = tier
-        .graph()
-        .fetch_pinned(renewed.clone(), &wanted, None)
-        .await;
-    ensure!(
-        answer.as_ref().err() == Some(&GraphRefusal::ReadPinExpired),
-        "an expired pin fetched: {answer:?}"
-    );
-    // Expiry alone removes no root: the pin's row still holds it.
-    let held = hydrate(
-        tier,
-        RootOwner::ReadPin(renewed.pin_id.clone()),
-        None,
-        limits,
-    )
-    .await
-    .map_err(|error| refused("an expired pin's root", error))?;
-    ensure!(held.root == old_root, "an expired pin lost its root");
-    // A collection retires expired pins first, then sweeps what they held.
-    tier.collect(CollectionLimits::UNBOUNDED)
-        .await
-        .map_err(|error| refused("a collection", error))?;
-    for id in old_nodes.keys() {
-        ensure!(
-            !present(tier, id).await,
-            "a retired pin's root {id} survived its collection"
-        );
-    }
-    ensure!(present(tier, &new_root).await, "the current root was swept");
-
-    owner_commit(
-        tier,
-        &owner,
-        BTreeMap::new(),
-        vec![DomainWrite::ExecRoot(ExecRootWrite::Retire {
-            exec: exec.clone(),
-            expected: new_root,
-        })],
-    )
-    .await
-    .map_err(|error| refused("the retirement", error))?;
-    let answer = hydrate(tier, RootOwner::Exec(exec.clone()), None, limits).await;
-    ensure!(
-        answer.as_ref().err() == Some(&GraphRefusal::RootRetired),
-        "a retired root hydrated: {answer:?}"
-    );
-    let answer = tier
-        .graph()
-        .acquire_read_pin(RootOwner::Exec(exec.clone()), lease)
-        .await;
-    ensure!(
-        answer.as_ref().err() == Some(&GraphRefusal::RootRetired),
-        "a retired root was pinned: {answer:?}"
-    );
-    Ok(())
-}
-
-/// PC-SIZE: an owner's whole graph encoding and reserve fit exactly at
-/// the byte and row limits; one byte or row less publishes nothing.
 ///
 /// # Errors
 ///

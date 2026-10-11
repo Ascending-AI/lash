@@ -20,8 +20,8 @@ use std::sync::{Arc, Mutex};
 
 use lash_core::sync::MutexExt as _;
 use lash_durable::domain::{
-    DomainWrite, ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq,
-    ProcessActorRow, RootOwner, RunFacts, ScopeKey, SessionCloseRow, TurnRow, WaitId, WaitRow,
+    DomainWrite, ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner,
+    RunFacts, ScopeKey, SessionCloseRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DurableError,
@@ -429,14 +429,6 @@ impl DurableReads for HoldingDurableStore {
         session: &SessionId,
     ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
         self.inner.session_mailbox(session).await
-    }
-
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError> {
-        self.inner.park_events(after, limit).await
     }
 
     async fn prompt_snapshot(

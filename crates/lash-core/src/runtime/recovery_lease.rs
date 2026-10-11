@@ -1,8 +1,8 @@
 //! The recovery leader lease, host side (ADR 0109 §1.6–§1.7).
 //!
 //! One deployment per engine authority runs the leader-only recovery duties:
-//! the parks arm, rate-bounded repair scans, drain hand-over, park-feed
-//! compaction and opt-in retention. Every other duty, the due-obligation
+//! the parks arm, rate-bounded repair scans, drain hand-over and opt-in
+//! retention. Every other duty, the due-obligation
 //! claims among them, runs on every deployment of every store. The lease is
 //! load control, never a fence: every duty stays idempotent when two leaders
 //! overlap (ADR 0109 §1.6).

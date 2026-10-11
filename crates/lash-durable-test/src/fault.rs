@@ -12,9 +12,8 @@ use crate::clock::{SimClock, settle};
 use crate::life::NodeLife;
 use crate::script::{Entry, Fault, Shared, Stored, WriteKind};
 use lash_durable::domain::{
-    AdmittedId, ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq,
-    ProcessActorRow, RootOwner, RunFactKind, RunFactWrite, RunFacts, ScopeKey, SessionCloseRow,
-    TurnRow, WaitId, WaitRow,
+    AdmittedId, ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner,
+    RunFactKind, RunFactWrite, RunFacts, ScopeKey, SessionCloseRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DomainWrite, DurableError,
@@ -736,14 +735,6 @@ impl DurableReads for FaultStore {
         self.read(self.inner.session_mailbox(session)).await
     }
 
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError> {
-        self.read(self.inner.park_events(after, limit)).await
-    }
-
     async fn prompt_snapshot(
         &self,
         call: &lash_durable::domain::PromptCallKey,
@@ -758,10 +749,6 @@ impl DurableReads for FaultStore {
         self.read(self.inner.prompt_texts(hashes)).await
     }
 }
-
-#[cfg(test)]
-#[path = "fault_domain_tests.rs"]
-mod domain_tests;
 
 #[cfg(test)]
 mod tests {

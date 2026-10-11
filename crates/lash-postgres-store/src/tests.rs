@@ -1087,16 +1087,14 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("SELECT child_hash FROM lash_blob_edges") => "blob-edges-read",
         q if q.starts_with("SELECT count(*) FROM lash_blob_edges") => "dangling-edges-check",
         q if q.starts_with("DELETE FROM lash_blob_edges") => "edges-sweep",
-        // The graph domain's own statement: the expired read pins' retirement.
-        q if q.starts_with("DELETE") && q.contains("blob_read_pins") => "read-pin-expiry",
         q if q.starts_with("DELETE FROM lash_blobs") => "blob-sweep",
         _ => "unrecognized",
     }
 }
 
 /// The statement map `gc_unreachable` must answer for, whatever the dead
-/// set's size: the revision release and the expired read pins' retirement
-/// in their own guarded transaction (FIG-4731, FIG-5887 §8), then the
+/// set's size: the revision release
+/// in its own guarded transaction (FIG-4731, FIG-5887 §8), then the
 /// collection under the exclusive graph gate: one read per root catalog
 /// source, one body and one edge read per live blob it marks, the dangling
 /// edge check, the edge severs, the single sweep, commit. Each `BEGIN`
@@ -1115,7 +1113,6 @@ fn expected_gc_statements(live: i64) -> std::collections::BTreeMap<&'static str,
         ("writer-fence-lock", 2),
         ("writer-fence", 2),
         ("revision-release", 1),
-        ("read-pin-expiry", 1),
         (
             "root-catalog-read",
             lash_core_store::checkpoint_graph::RootSource::ALL.len() as i64,

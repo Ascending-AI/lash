@@ -2,8 +2,8 @@
 
 use crate::clock::SimClock;
 use lash_durable::domain::{
-    DomainWrite, ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq,
-    ProcessActorRow, RootOwner, RunFacts, ScopeKey, SessionCloseRow, TurnRow, WaitId, WaitRow,
+    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
+    SessionCloseRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DurableError,
@@ -46,13 +46,10 @@ pub(crate) fn actor(id: &str) -> ActorKey {
     ActorKey::session(id).expect("test actor ids are valid")
 }
 
-/// The harness database with two seams in front of it: it records the
-/// domain rows of every standing commit, in commit order, as a domain apply
-/// would, and it can hold one node's registration on the wall clock, as a
-/// slow connection would, while the virtual clock stands still.
+/// The harness database can hold one node's registration on the wall
+/// clock, as a slow connection would, while the virtual clock stands still.
 pub(crate) struct TestDatabase {
     inner: Arc<dyn DurableStore>,
-    pub(crate) applied: Mutex<Vec<DomainWrite>>,
     slow_registration: Option<(NodeId, Duration)>,
 }
 
@@ -60,7 +57,6 @@ impl TestDatabase {
     pub(crate) fn new(inner: Arc<dyn DurableStore>) -> Self {
         Self {
             inner,
-            applied: Mutex::new(Vec::new()),
             slow_registration: None,
         }
     }
@@ -174,14 +170,6 @@ impl DurableReads for TestDatabase {
         self.inner.session_mailbox(session).await
     }
 
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError> {
-        self.inner.park_events(after, limit).await
-    }
-
     async fn prompt_snapshot(
         &self,
         call: &lash_durable::domain::PromptCallKey,
@@ -244,15 +232,8 @@ impl DurableStore for TestDatabase {
         self.inner.begin(actor, epoch).await
     }
 
-    async fn commit(
-        &self,
-        mut tx: ActorTx,
-        label: CommitLabel,
-    ) -> Result<ActorCommit, DurableError> {
-        let domain = tx.take_domain();
-        let committed = self.inner.commit(tx, label).await?;
-        self.applied.lock_recover().extend(domain);
-        Ok(committed)
+    async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
+        self.inner.commit(tx, label).await
     }
 
     async fn commit_mail(

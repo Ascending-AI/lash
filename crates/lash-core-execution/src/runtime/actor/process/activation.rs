@@ -47,8 +47,8 @@ use lash_core_store::tool_run::{
     MaterialRole,
 };
 use lash_durable::domain::{
-    CANCEL_MAIL, ExecRootRow, OwnerKey, ParkEventWrite, ProcessActorRow, ProcessWrite, RunSeq,
-    ScopeKey, WaitState, WaitWrite,
+    CANCEL_MAIL, ExecRootRow, OwnerKey, ProcessActorRow, ProcessWrite, RunSeq, ScopeKey, WaitState,
+    WaitWrite,
 };
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
@@ -830,9 +830,7 @@ impl ProcessActivation {
         let outcome = cancelled(origin, false);
         record_terminal(&mut tx, process, &outcome)?;
         if live.park.take().is_some() {
-            tx.write(DomainWrite::ParkEvent(ParkEventWrite::Ended {
-                reason_json: serde_json::json!({ "cancelled": origin }).to_string(),
-            }));
+            tx.write(DomainWrite::ActorPark { reason_json: None });
         }
         tx.ack_seen();
         self.commit_terminal(owned, tx, process).await?;

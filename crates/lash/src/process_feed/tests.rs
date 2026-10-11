@@ -297,11 +297,9 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
     let reason = lash_core::ProcessParkReason::UnknownEngine {
         kind: "absent-feed-engine".into(),
     };
-    tx.write(crate::durable::DomainWrite::ParkEvent(
-        crate::durable::domain::ParkEventWrite::Park {
-            reason_json: reason.encode(),
-        },
-    ));
+    tx.write(crate::durable::DomainWrite::ActorPark {
+        reason_json: Some(reason.encode()),
+    });
     tx.give_up(crate::durable::Release::Parked);
     durable
         .commit(tx, CommitLabel::PROCESS_ADVANCE)

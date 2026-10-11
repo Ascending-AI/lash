@@ -475,14 +475,6 @@ impl DurableReads for CountingStore {
         self.inner.session_mailbox(session).await
     }
 
-    async fn park_events(
-        &self,
-        after: Option<domain::ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<domain::ParkEventRow>, DurableError> {
-        self.inner.park_events(after, limit).await
-    }
-
     async fn prompt_snapshot(
         &self,
         call: &domain::PromptCallKey,

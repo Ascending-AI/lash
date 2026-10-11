@@ -110,8 +110,13 @@ crate::statements! {
              WHERE actor_key = ?1
              RETURNING state";
 
-        /// Record actor `?1`'s park, `?2`.
-        set_park = "UPDATE actors SET park_json = ?2 WHERE actor_key = ?1";
+        /// Set actor `?1`'s current park to `?2`; clearing a park also
+        /// resets its failed activations, under the caller's actor fence.
+        set_park = "UPDATE actors
+             SET failed_activations = CASE WHEN CAST(?2 AS TEXT) IS NULL AND park_json IS NOT NULL
+                                           THEN 0 ELSE failed_activations END,
+                 park_json = ?2
+             WHERE actor_key = ?1";
 
         /// Clear actor `?1`'s park and failed activations. No row when it
         /// had no park.

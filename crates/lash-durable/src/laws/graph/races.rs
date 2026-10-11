@@ -9,7 +9,7 @@ use lash_core_store::checkpoint_graph::{DecodeLimits, EncodedNode, GraphRefusal,
 use super::{
     GraphTier, big, hydrate, leaf, owned, owner_commit, present, put_exec, refused, staging, value,
 };
-use crate::domain::graph::{ExecRootWrite, ReadLease, ReleasePinWrite, RootOwner};
+use crate::domain::graph::{ExecRootWrite, ReleasePinWrite, RootOwner};
 use crate::domain::graph_commit::CollectionLimits;
 use crate::laws::{LawBroken, LawOutcome, ensure};
 use crate::{ActorKey, DomainWrite, DurableError};
@@ -177,98 +177,6 @@ pub async fn the_graph_gate_orders_collection_against_every_guarded_transaction(
 
 /// Rounds a race law runs.
 const RACE_ROUNDS: u64 = 16;
-
-/// PC-READ under a race: hydrations and pinned fetches racing root
-/// replacement and collection each read one whole root, never a node a
-/// collection swept from under them.
-///
-/// # Errors
-///
-/// The first rule broken.
-pub async fn a_read_racing_replacement_and_collection_reads_one_whole_root(
-    tier: &dyn GraphTier,
-) -> LawOutcome {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    let owner = owned(tier, "graph-read-race").await?;
-    let exec = owner.exec("race");
-    let limits = DecodeLimits::within_total(1 << 30);
-    let graph = |round: u64| {
-        let mut nodes = staging();
-        let unique = big(&format!("read-race-{round}"));
-        let root = value(&mut nodes, &[&big("read-race-shared"), &unique], &[]);
-        (nodes.into_nodes(), root)
-    };
-    let (nodes, first) = graph(0);
-    owner_commit(tier, &owner, nodes, vec![put_exec(&exec, None, first)])
-        .await
-        .map_err(|error| refused("the first root", error))?;
-    let done = AtomicBool::new(false);
-    let writer = async {
-        let rounds = async {
-            let mut current = first;
-            for round in 1..=RACE_ROUNDS {
-                let (nodes, root) = graph(round);
-                owner_commit(
-                    tier,
-                    &owner,
-                    nodes,
-                    vec![put_exec(&exec, Some((round, current)), root)],
-                )
-                .await
-                .map_err(|error| refused("a racing replacement", error))?;
-                current = root;
-                tier.collect(CollectionLimits::UNBOUNDED)
-                    .await
-                    .map_err(|error| refused("a racing collection", error))?;
-            }
-            Ok::<_, LawBroken>(())
-        }
-        .await;
-        done.store(true, Ordering::SeqCst);
-        rounds
-    };
-    let reader = async {
-        let mut reads = 0_u64;
-        while !done.load(Ordering::SeqCst) || reads == 0 {
-            let hydrated = hydrate(tier, RootOwner::Exec(exec.clone()), None, limits)
-                .await
-                .map_err(|error| refused("a racing hydration", error))?;
-            ensure!(
-                hydrated.nodes.len() == 3,
-                "a racing hydration read {} nodes of a three-node root",
-                hydrated.nodes.len()
-            );
-            let pin = tier
-                .graph()
-                .acquire_read_pin(
-                    RootOwner::Exec(exec.clone()),
-                    ReadLease {
-                        lease_owner: "racer".into(),
-                        ttl_ms: 3_600_000,
-                    },
-                )
-                .await
-                .map_err(|error| refused("a racing pin", error))?;
-            let pinned = hydrate(tier, RootOwner::ReadPin(pin.pin_id.clone()), None, limits)
-                .await
-                .map_err(|error| refused("a racing pinned hydration", error))?;
-            let wanted: Vec<NodeId> = pinned.nodes.keys().copied().collect();
-            tier.graph()
-                .fetch_pinned(pin.clone(), &wanted, None)
-                .await
-                .map_err(|error| refused("a racing pinned fetch", error))?;
-            tier.release_read_pin(pin)
-                .await
-                .map_err(|error| refused("a racing pin's release", error))?;
-            reads += 1;
-            tokio::task::yield_now().await;
-        }
-        Ok::<_, LawBroken>(())
-    };
-    let (written, read) = tokio::join!(writer, reader);
-    written?;
-    read
-}
 
 /// PC-GC under a race: collections racing commits each prove their marks
 /// and never sweep a node a commit installed or relied on; afterwards only

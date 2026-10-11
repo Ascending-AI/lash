@@ -110,14 +110,6 @@ table lash_blob_edges
   primary-key (parent_hash, child_hash)
   foreign-key (child_hash) references lash_blobs (hash) on delete restrict
   foreign-key (parent_hash) references lash_blobs (hash) on delete cascade
-table lash_blob_read_pins
-  column expires_at_ms bigint not-null
-  column generation bigint not-null
-  column lease_owner text not-null
-  column pin_id text not-null
-  column root_ref text not-null
-  primary-key (pin_id)
-  foreign-key (root_ref) references lash_blobs (hash) on delete restrict
 table lash_blobs
   column content bytea not-null
   column encoding smallint not-null
@@ -229,13 +221,6 @@ table lash_parent_end_plans
   column parent_kind text not-null
   column parent_payload text not-null
   primary-key (parent_kind, parent_id)
-table lash_park_events
-  column actor_key text not-null
-  column at_ms bigint not-null
-  column kind text not-null
-  column reason_json text not-null
-  column seq bigint not-null identity-always
-  primary-key (seq)
 table lash_pending_turn_inputs
   column admitted_by text nullable
   column admitted_run text nullable

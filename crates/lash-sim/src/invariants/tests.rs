@@ -175,7 +175,6 @@ fn the_clean_history_keeps_every_invariant_and_gives_each_facts() {
             || *invariant == "an-existing-start-is-answered-only-to-its-originator"
             || *invariant == "host-admission"
             || *invariant == "transcript-order"
-            || *invariant == "redrive-resumes"
         {
             // The pending-tool turn stores no artifact, parks nothing and
             // makes no host start or sequential host sends; each red fixture

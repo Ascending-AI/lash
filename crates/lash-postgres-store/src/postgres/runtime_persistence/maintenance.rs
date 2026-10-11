@@ -82,21 +82,17 @@ impl PostgresStore {
     async fn gc_unreachable_blobs(&self) -> Result<GcReport, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         // A host collection is what ends `until_gc`'s hold: release every
-        // revision no head, pin or retention window keeps, and retire every
-        // expired read pin, in an ordinary guarded transaction of its own
+        // revision no head, pin or retention window keeps, in an ordinary
+        // guarded transaction of its own
         // (FIG-5887 §8). A crash between it and the collection leaves
         // released roots whose bytes the next collection sweeps.
         {
             let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
             crate::revisions::release_unretained_tx(&mut tx, true, None).await?;
-            let now = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
-            crate::durable::retire_expired_read_pins_in(&mut tx, now)
-                .await
-                .map_err(store_sqlx_error)?;
             tx.commit().await.map_err(store_sqlx_error)?;
         }
         // The collection takes the graph gate exclusive ahead of the writer
-        // fence: every writer, hydration and pin fetch holds it shared, so
+        // fence: every writer and hydration holds it shared, so
         // the root enumeration, the mark and the sweep are one atomic step
         // against all of them.
         let mut tx = begin_collecting(&mut *connection, &self.fence).await?;

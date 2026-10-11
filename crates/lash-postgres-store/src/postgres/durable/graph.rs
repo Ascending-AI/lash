@@ -1,5 +1,5 @@
 //! The checkpoint graph on PostgreSQL: owner graph installation, hydration
-//! and read pins, and the reachability collector (FIG-5887 §5, §8; lane G,
+//! and the reachability collector (FIG-5887 §5, §8; lane G,
 //! FIG-5890). The DDL is in `schema.sql`.
 //!
 //! # The gate
@@ -7,12 +7,11 @@
 //! Every guarded transaction takes the graph gate shared as its first lock,
 //! in the `BEGIN` prelude ahead of the writer fence
 //! ([`crate::guarded_tx`]); a collection takes it exclusive
-//! ([`crate::guarded_tx::begin_collecting`]). So a commit, a hydration and a
-//! pin's fetch each run whole beside other shared holders and never beside
-//! a collection: a root a reader selected cannot be swept until it ends.
+//! ([`crate::guarded_tx::begin_collecting`]). So a commit and a hydration
+//! each run whole beside other shared holders and never beside a collection: a root a reader selected cannot be swept until it ends.
 //! Inside the gate a commit takes the owner's epoch fence, then the write
 //! authority of each session whose history it locks, in session order, then
-//! its read pins' rows in pin order, then the external nodes' key-share
+//! the external nodes' key-share
 //! locks in digest order, then installs blobs in digest order, then edges
 //! and root rows. The owner fence precedes the history locks, as in every
 //! existing session writer (`lock_session_writes`: actor row, then
@@ -22,8 +21,7 @@
 //! A hydration selects the owner's root once and reads every descendant in
 //! the same transaction: READ COMMITTED is enough because nodes are
 //! immutable and the gate keeps the collector out, not because its snapshot
-//! is stable. A pin's fetch locks its pin row `FOR UPDATE` before checking
-//! it, so its renewal, release and expiry serialize with the fetch.
+//! is stable.
 //!
 //! # Roots
 //!
@@ -45,13 +43,12 @@ use lash_core_store::checkpoint_graph::{
 };
 use lash_durable::domain::DomainRefusal;
 use lash_durable::domain::graph::{
-    EffectAdmissionWrite, GraphStore, HydratedGraph, HydratedNode, PinnedBatch, ReadLease, ReadPin,
-    ReadPinId, ReadPinWrite, ReleasePinWrite, RootOwner,
+    EffectAdmissionWrite, HydratedGraph, HydratedNode, ReleasePinWrite, RootOwner,
 };
 use lash_durable::domain::graph_commit::{
     CheckedGraph, CollectionLimits, EDGE_ROW_LOGICAL_BYTES, GraphCollection, blob_row_logical_bytes,
 };
-use lash_durable::{CommitLabel, DurableError, DurableInstant, StoreFailure, StoreFailureKind};
+use lash_durable::{CommitLabel, DurableError, StoreFailure, StoreFailureKind};
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::graph::GraphStatements;
 use lash_store_sql::durable::run_records::RunRecordStatements;
@@ -71,10 +68,6 @@ lash_store_sql::statements! {
         /// is the artifact row's `graph_ref`, set only for storage kind 1.
         artifact_root = "SELECT graph_ref FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2 AND storage_kind = 1";
-
-        /// Read pin `?1`'s row, locked for the rest of the fetch.
-        pin_row = "SELECT lease_owner, generation, root_ref, expires_at_ms
-             FROM blob_read_pins WHERE pin_id = ?1 FOR UPDATE";
 
         /// The encoding of every stored blob among the nodes `?1` a commit
         /// names and the nodes it supplies (`?2`, raw digests: never one it
@@ -184,9 +177,6 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
     }
 });
 
-/// A read pin's acquisition, fetch, renewal or retirement.
-const GRAPH_READ_PIN: CommitLabel = CommitLabel::new("graph.read_pin");
-
 /// A hydration or a graph row read: a guarded transaction that writes
 /// nothing, for the gate it holds.
 pub(super) const GRAPH_READ: CommitLabel = CommitLabel::new("graph.read");
@@ -246,11 +236,6 @@ fn encoding_of(stored: i16) -> Answer<BlobEncoding> {
         1 => Ok(BlobEncoding::Graph),
         other => Err(corrupt("blob encoding", &other.to_string())),
     }
-}
-
-/// A lease's time to live as a span of the store's clock.
-fn ttl(lease: &ReadLease) -> i64 {
-    i64::try_from(lease.ttl_ms).unwrap_or(i64::MAX)
 }
 
 /// One stored blob: its bytes and encoding.
@@ -370,13 +355,6 @@ async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<Node
                 tx,
                 crate::observed_sql::query(SQL.graph.admission_base_root.sql())
                     .bind(session.as_str()),
-            )
-            .await?
-        }
-        RootOwner::ReadPin(pin) => {
-            one_text(
-                tx,
-                crate::observed_sql::query(SQL.graph.pin_root.sql()).bind(pin.0.as_str()),
             )
             .await?
         }
@@ -638,25 +616,6 @@ pub(super) async fn hydrate_in(
     Ok(HydratedGraph { owner, root, nodes })
 }
 
-/// Whether every node in `wanted` is reachable from `root` along stored
-/// edges, which a commit installs exactly as each node's child table.
-async fn reachable(tx: &mut PgConnection, root: &NodeId, wanted: &[NodeId]) -> Answer<bool> {
-    let mut missing: BTreeSet<String> = wanted.iter().map(NodeId::to_hex).collect();
-    let mut seen = BTreeSet::new();
-    let mut stack = vec![root.to_hex()];
-    while let Some(hash) = stack.pop() {
-        if missing.is_empty() {
-            break;
-        }
-        if !seen.insert(hash.clone()) {
-            continue;
-        }
-        missing.remove(&hash);
-        stack.extend(stored_edges(tx, &hash).await?);
-    }
-    Ok(missing.is_empty())
-}
-
 /// Whether `query`, a conditional write that returns its row, matched one.
 async fn matched(tx: &mut PgConnection, query: crate::observed_sql::Query<'_>) -> Answer<bool> {
     Ok(query
@@ -727,23 +686,6 @@ pub(super) async fn apply_admission(
         Ok(())
     } else {
         Err(graph_refused(GraphRefusal::RevisionConflict))
-    }
-}
-
-/// Applies a read pin write.
-pub(super) async fn apply_read_pin(
-    tx: &mut PgConnection,
-    write: &ReadPinWrite,
-) -> Result<(), DurableError> {
-    match write {
-        ReadPinWrite::Acquire { pin } => insert_pin(tx, pin).await.map_err(graph_refused),
-        ReadPinWrite::Retire { pin } => {
-            if retire_pin(tx, pin).await.map_err(graph_refused)? {
-                Ok(())
-            } else {
-                Err(graph_refused(GraphRefusal::ReadPinMismatch))
-            }
-        }
     }
 }
 
@@ -967,109 +909,6 @@ pub(crate) async fn reachable_from(
     Ok(reached.into_iter().collect())
 }
 
-async fn insert_pin(tx: &mut PgConnection, pin: &ReadPin) -> Answer<()> {
-    crate::observed_sql::query(SQL.graph.pin_insert.sql())
-        .bind(pin.pin_id.0.as_str())
-        .bind(pin.lease_owner.as_str())
-        .bind(number::<i64>(pin.generation)?)
-        .bind(pin.root.to_hex())
-        .bind(pin.expires_at.0)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)?;
-    Ok(())
-}
-
-async fn retire_pin(tx: &mut PgConnection, pin: &ReadPin) -> Answer<bool> {
-    matched(
-        tx,
-        crate::observed_sql::query(SQL.graph.pin_retire.sql())
-            .bind(pin.pin_id.0.as_str())
-            .bind(pin.lease_owner.as_str())
-            .bind(number::<i64>(pin.generation)?)
-            .bind(pin.root.to_hex()),
-    )
-    .await
-}
-
-/// Reads read pin `pin`'s row, locked, and checks it is exactly `pin` and
-/// unexpired at `now`.
-async fn check_pin(tx: &mut PgConnection, pin: &ReadPin, now: DurableInstant) -> Answer<()> {
-    let row: Option<(String, i64, String, i64)> =
-        crate::observed_sql::query_as(SQL.postgres.pin_row.sql())
-            .bind(pin.pin_id.0.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(db)?;
-    let Some((lease_owner, generation, root, expires_at)) = row else {
-        return Err(GraphRefusal::ReadPinMismatch);
-    };
-    if lease_owner != pin.lease_owner
-        || number::<u64>(generation)? != pin.generation
-        || root != pin.root.to_hex()
-    {
-        return Err(GraphRefusal::ReadPinMismatch);
-    }
-    if expires_at < now.0 {
-        return Err(GraphRefusal::ReadPinExpired);
-    }
-    Ok(())
-}
-
-async fn fetch_pinned_in(
-    tx: &mut PgConnection,
-    pin: ReadPin,
-    nodes: &[NodeId],
-    renew: Option<ReadLease>,
-    now: DurableInstant,
-) -> Answer<PinnedBatch> {
-    check_pin(tx, &pin, now).await?;
-    if !reachable(tx, &pin.root, nodes).await? {
-        return Err(GraphRefusal::ReadPinMismatch);
-    }
-    let mut fetched = BTreeMap::new();
-    let limits = DecodeLimits::within_total(u64::MAX);
-    for id in nodes {
-        let Some((bytes, encoding)) = stored_blob(tx, &id.to_hex()).await? else {
-            return Err(GraphRefusal::MissingNode(*id));
-        };
-        if encoding == BlobEncoding::Graph {
-            check_envelope(&bytes, *id, &limits)?;
-        }
-        fetched.insert(
-            *id,
-            HydratedNode {
-                encoding,
-                bytes: bytes.into(),
-            },
-        );
-    }
-    let pin = match renew {
-        None => pin,
-        Some(lease) => {
-            if lease.lease_owner != pin.lease_owner {
-                return Err(GraphRefusal::ReadPinMismatch);
-            }
-            let expires_at = now.after_millis(ttl(&lease));
-            let generation: i64 = crate::observed_sql::query_scalar(SQL.graph.pin_renew.sql())
-                .bind(pin.pin_id.0.as_str())
-                .bind(expires_at.0)
-                .fetch_one(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(db)?;
-            ReadPin {
-                generation: number::<u64>(generation)?,
-                expires_at,
-                ..pin
-            }
-        }
-    };
-    Ok(PinnedBatch {
-        pin,
-        nodes: fetched,
-    })
-}
-
 /// Marks every blob reachable from the complete root catalog and sweeps the
 /// rest, in the caller's collecting transaction (the graph gate held
 /// exclusive).
@@ -1156,21 +995,6 @@ async fn sweep(tx: &mut PgConnection, sql: &str, marks: &[String]) -> Answer<u64
         .rows_affected())
 }
 
-/// Retires every read pin expired at `now`, in the caller's guarded
-/// transaction: answers how many.
-pub(crate) async fn retire_expired_read_pins_in(
-    tx: &mut PgConnection,
-    now: i64,
-) -> Result<u64, sqlx::Error> {
-    Ok(
-        crate::observed_sql::query(SQL.graph.pins_retire_expired.sql())
-            .bind(now)
-            .execute(crate::observed_sql::executor(&mut *tx))
-            .await?
-            .rows_affected(),
-    )
-}
-
 impl PostgresDurableStore {
     /// End a graph transaction as its body settled it: a refusal rolls it
     /// back.
@@ -1251,50 +1075,7 @@ impl PostgresDurableStore {
         .await
     }
 
-    /// Releases `pin` before its expiry. Refused when it is not exactly
-    /// the stored pin.
-    ///
-    /// # Errors
-    ///
-    /// [`GraphRefusal::ReadPinMismatch`], or a store failure.
-    pub async fn release_read_pin(&self, pin: ReadPin) -> Result<(), GraphRefusal> {
-        let label = GRAPH_READ_PIN;
-        self.within(label.capacity(), async {
-            let (mut tx, _) = self.open(label).await?;
-            let outcome = match retire_pin(&mut tx, &pin).await {
-                Ok(true) => Ok(Settled::Commit(())),
-                Ok(false) => Err(GraphRefusal::ReadPinMismatch),
-                Err(refusal) => Err(refusal),
-            };
-            Ok(Self::settle_graph(tx, outcome).await)
-        })
-        .await
-        .map_err(from_durable)?
-    }
-
-    /// Retires every read pin expired now, in an ordinary guarded
-    /// transaction of its own: expiry alone never removes a root. Answers
-    /// how many it retired.
-    ///
-    /// # Errors
-    ///
-    /// A store failure.
-    pub async fn retire_expired_read_pins(&self) -> Result<u64, GraphRefusal> {
-        let label = GRAPH_READ_PIN;
-        self.within(label.capacity(), async {
-            let (mut tx, now) = self.open(label).await?;
-            let outcome = retire_expired_read_pins_in(&mut tx, now.0)
-                .await
-                .map(Settled::Commit)
-                .map_err(db);
-            Ok(Self::settle_graph(tx, outcome).await)
-        })
-        .await
-        .map_err(from_durable)?
-    }
-
-    /// Collects every blob no root reaches, within `limits`, after retiring
-    /// expired read pins in a transaction of their own. The collection
+    /// Collects every blob no root reaches, within `limits`. The collection
     /// takes the graph gate exclusive; nothing is swept unless every source
     /// enumerated completely and every reached node checked.
     ///
@@ -1307,64 +1088,13 @@ impl PostgresDurableStore {
         &self,
         limits: CollectionLimits,
     ) -> Result<GraphCollection, GraphRefusal> {
-        self.retire_expired_read_pins().await?;
-        let capacity = GRAPH_READ_PIN.capacity();
+        let capacity = GRAPH_READ.capacity();
         self.within(capacity, async {
             let route = self.route(capacity);
             let mut tx = begin_collecting(route.pool, &self.fence)
                 .await
                 .map_err(super::store_failure)?;
             let outcome = collect_in(&mut tx, limits).await.map(Settled::Commit);
-            Ok(Self::settle_graph(tx, outcome).await)
-        })
-        .await
-        .map_err(from_durable)?
-    }
-}
-
-#[async_trait::async_trait]
-impl GraphStore for PostgresDurableStore {
-    async fn acquire_read_pin(
-        &self,
-        owner: RootOwner,
-        lease: ReadLease,
-    ) -> Result<ReadPin, GraphRefusal> {
-        let label = GRAPH_READ_PIN;
-        self.within(label.capacity(), async {
-            let (mut tx, now) = self.open(label).await?;
-            let outcome = async {
-                let Some(root) = root_of(&mut tx, &owner).await? else {
-                    return Err(GraphRefusal::RootRetired);
-                };
-                let pin = ReadPin {
-                    pin_id: ReadPinId(uuid::Uuid::new_v4().to_string()),
-                    expires_at: now.after_millis(ttl(&lease)),
-                    lease_owner: lease.lease_owner,
-                    generation: 1,
-                    root,
-                };
-                insert_pin(&mut tx, &pin).await?;
-                Ok(Settled::Commit(pin))
-            }
-            .await;
-            Ok(Self::settle_graph(tx, outcome).await)
-        })
-        .await
-        .map_err(from_durable)?
-    }
-
-    async fn fetch_pinned(
-        &self,
-        pin: ReadPin,
-        nodes: &[NodeId],
-        renew: Option<ReadLease>,
-    ) -> Result<PinnedBatch, GraphRefusal> {
-        let label = GRAPH_READ_PIN;
-        self.within(label.capacity(), async {
-            let (mut tx, now) = self.open(label).await?;
-            let outcome = fetch_pinned_in(&mut tx, pin, nodes, renew, now)
-                .await
-                .map(Settled::Commit);
             Ok(Self::settle_graph(tx, outcome).await)
         })
         .await

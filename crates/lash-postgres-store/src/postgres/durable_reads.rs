@@ -1,11 +1,10 @@
 //! The PostgreSQL durable domain read port.
 use super::{
-    PostgresDurableStore, park_events, processes, prompts, session_close, session_mail, snapshots,
-    turns, waits,
+    PostgresDurableStore, processes, prompts, session_close, session_mail, snapshots, turns, waits,
 };
 use lash_durable::domain::{
-    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow,
-    RootOwner, RunFacts, ScopeKey, SessionCloseRow, TurnRow, WaitId, WaitRow,
+    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
+    SessionCloseRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{ActorKey, CommitCapacity, DurableError, DurableReads};
 
@@ -156,17 +155,6 @@ impl DurableReads for PostgresDurableStore {
     ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
         self.within(CommitCapacity::Work, async {
             session_mail::read(&mut *self.reader().await?, session).await
-        })
-        .await
-    }
-
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            park_events::read(&mut *self.reader().await?, after, limit).await
         })
         .await
     }

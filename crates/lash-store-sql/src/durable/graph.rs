@@ -3,7 +3,7 @@
 //!
 //! The graph tables are the content-addressed node store's edges
 //! (`blob_edges`), the graph-reference rows a commit owns roots through
-//! (`effect_admissions`, `blob_read_pins`, `graph_release_pins`; the graph
+//! (`effect_admissions`, `graph_release_pins`; the graph
 //! columns of `exec_snapshots`, `run_records`, `turn_phases` and
 //! `turn_namespaces` are their own domains' statements), and
 //! the root catalog view (`graph_root_catalog`) that names every root of
@@ -21,9 +21,6 @@ pub const EDGES_TABLE: &str = "blob_edges";
 /// `effect_admissions`: an execution's admitted effect, by effect identity,
 /// to its Admission node.
 pub const ADMISSIONS_TABLE: &str = "effect_admissions";
-
-/// `blob_read_pins`: a streaming reader's durable pin on one root.
-pub const READ_PINS_TABLE: &str = "blob_read_pins";
 
 /// `graph_release_pins`: an installed runnable release manifest.
 pub const RELEASE_PINS_TABLE: &str = "graph_release_pins";
@@ -108,30 +105,6 @@ crate::statements! {
         /// Retire release `?1`'s pin on `?2`. No row when it is not `?2`.
         release_retire = "DELETE FROM graph_release_pins WHERE release_key = ?1 AND root_ref = ?2
              RETURNING release_key";
-
-        /// Insert read pin `?1` of `?2`, generation `?3`, on `?4`, expiring at
-        /// `?5`.
-        pin_insert = "INSERT INTO blob_read_pins
-                 (pin_id, lease_owner, generation, root_ref, expires_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5)";
-
-        /// Read pin `?1`'s root.
-        pin_root = "SELECT root_ref FROM blob_read_pins WHERE pin_id = ?1";
-
-        /// Renew read pin `?1` to the next generation, expiring at `?2`.
-        pin_renew = "UPDATE blob_read_pins
-             SET generation = generation + 1, expires_at_ms = ?2
-             WHERE pin_id = ?1
-             RETURNING generation";
-
-        /// Retire read pin `?1` held by `?2` at generation `?3` on `?4`. No
-        /// row when it is not exactly that pin.
-        pin_retire = "DELETE FROM blob_read_pins
-             WHERE pin_id = ?1 AND lease_owner = ?2 AND generation = ?3 AND root_ref = ?4
-             RETURNING pin_id";
-
-        /// Retire every read pin that expired before `?1`.
-        pins_retire_expired = "DELETE FROM blob_read_pins WHERE expires_at_ms < ?1";
 
         /// Every root of source `?1`, as the catalog names it.
         catalog_source = "SELECT root_ref FROM graph_root_catalog WHERE source = ?1";

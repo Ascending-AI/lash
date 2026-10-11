@@ -13,8 +13,8 @@ use lash_core_store::checkpoint_graph::{
 
 use super::DomainWrite;
 use super::graph::{
-    AdmissionMember, EffectAdmissionWrite, ExecRootWrite, ReadPin, ReadPinWrite, ReleasePinWrite,
-    RootChange, RootOwner, RunFactWrite,
+    AdmissionMember, EffectAdmissionWrite, ExecRootWrite, ReleasePinWrite, RootChange, RootOwner,
+    RunFactWrite,
 };
 
 fn encode_node(out: &mut TokenWriter, node: Option<&NodeId>) {
@@ -58,15 +58,6 @@ fn encode_member(out: &mut TokenWriter, member: Option<&AdmissionMember>) {
             out.unsigned(member.member);
         }
     }
-}
-
-fn encode_pin(out: &mut TokenWriter, pin: &ReadPin) {
-    out.seq(5);
-    out.text(&pin.pin_id.0);
-    out.text(&pin.lease_owner);
-    out.unsigned(pin.generation);
-    out.bytes(&pin.root.0);
-    out.signed(pin.expires_at.0);
 }
 
 /// Each graph-reference write, tagged by its table and operation.
@@ -152,14 +143,6 @@ fn encode_graph_write(out: &mut TokenWriter, write: &DomainWrite) -> Result<(), 
             out.bytes(&effect.0);
             out.bytes(&expected.0);
         }
-        DomainWrite::ReadPin(ReadPinWrite::Acquire { pin }) => {
-            out.sum(6, 1);
-            encode_pin(out, pin);
-        }
-        DomainWrite::ReadPin(ReadPinWrite::Retire { pin }) => {
-            out.sum(7, 1);
-            encode_pin(out, pin);
-        }
         DomainWrite::ReleasePin(ReleasePinWrite::Install { release, root }) => {
             out.sum(8, 2);
             out.text(release);
@@ -231,10 +214,6 @@ pub fn encode_owner(out: &mut TokenWriter, owner: &RootOwner) {
         RootOwner::SessionAdmissionBase { session } => {
             out.sum(7, 1);
             out.text(session.as_str());
-        }
-        RootOwner::ReadPin(pin) => {
-            out.sum(8, 1);
-            out.text(&pin.0);
         }
         RootOwner::ArtifactBridge {
             namespace,

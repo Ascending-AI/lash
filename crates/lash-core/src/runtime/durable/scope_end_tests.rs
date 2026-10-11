@@ -20,9 +20,8 @@ use std::time::{Duration, Instant};
 use lash_core_execution::runtime::actor::process::{self, ProcessActivation};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_durable::domain::{
-    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow,
-    RootOwner, RunFacts, ScopeKey, SessionCloseRow, SessionCloseStep, TurnEnd, TurnRow, WaitId,
-    WaitRow,
+    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
+    SessionCloseRow, SessionCloseStep, TurnEnd, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorState, ActorTx, Claimed, CommitLabel, DurableError,
@@ -184,14 +183,6 @@ impl DurableReads for CutStore {
         session: &SessionId,
     ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
         self.inner.session_mailbox(session).await
-    }
-
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError> {
-        self.inner.park_events(after, limit).await
     }
 
     async fn prompt_snapshot(

@@ -11,7 +11,7 @@ mod recovery;
 pub use crate::store::{
     ControlIntentId, ControlIntentKind, RunTerminal, RunTerminalCause, RunTerminalKind,
 };
-pub use crate::store::{ParkId, RunTerminalWrite, SessionHeadRef, TurnCommitId};
+pub use crate::store::{RunTerminalWrite, SessionHeadRef, TurnCommitId};
 pub use commands::{GatedObservationSink, NullObservationSink, ObservationCursor, ObservationSink};
 pub use context::{ObservedEvent, ReplayKey, ShiftObservation, activity_projection};
 pub use contracts::UpgradePolicy;

@@ -6,7 +6,6 @@ use std::sync::Arc;
 use lash_core_execution::testing::TestClock;
 use lash_core_store::checkpoint_graph::{GraphRefusal, NodeId};
 use lash_durable::DurableStore;
-use lash_durable::domain::graph::{GraphStore, ReadPin};
 use lash_durable::domain::graph_commit::{CollectionLimits, GraphCollection};
 use lash_durable::laws::graph::{self as laws, ForeignWrite, GraphTier};
 
@@ -16,7 +15,6 @@ struct Tier {
     _root: Option<tempfile::TempDir>,
     _set: SqliteStoreSet,
     store: SqliteDurableStore,
-    clock: Arc<TestClock>,
 }
 
 async fn tier(file: bool) -> Tier {
@@ -42,7 +40,6 @@ async fn tier(file: bool) -> Tier {
         _root: root,
         _set: set,
         store,
-        clock,
     }
 }
 
@@ -77,20 +74,8 @@ impl GraphTier for Tier {
         &self.store
     }
 
-    fn graph(&self) -> &dyn GraphStore {
-        &self.store
-    }
-
-    fn advance(&self, millis: u64) {
-        self.clock.advance(millis);
-    }
-
     async fn collect(&self, limits: CollectionLimits) -> Result<GraphCollection, GraphRefusal> {
         self.store.collect_graph(limits).await
-    }
-
-    async fn release_read_pin(&self, pin: ReadPin) -> Result<(), GraphRefusal> {
-        self.store.release_read_pin(pin).await
     }
 
     async fn blob(&self, hash: &str) -> Option<(Vec<u8>, u8)> {
@@ -268,9 +253,7 @@ law!(a_refused_owner_graph_commit_writes_nothing);
 law!(an_owner_refuses_a_second_outcome_for_one_call);
 law!(every_root_source_retains_its_graph_and_shared_leaves_outlive_one_owner);
 law!(a_collection_sweeps_only_what_it_proved_unreachable);
-law!(a_read_is_one_protected_root);
 law!(an_owner_commit_is_admitted_on_its_whole_encoding);
-law!(a_read_racing_replacement_and_collection_reads_one_whole_root);
 law!(a_collection_racing_commits_sweeps_nothing_they_rely_on);
 law!(a_reference_racing_its_roots_retirement_installs_whole_or_refuses);
 

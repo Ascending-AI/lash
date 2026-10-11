@@ -552,12 +552,6 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "sqlite": "session_meta.admission_base_checkpoint_ref"
     },
     {
-      "number": 8,
-      "postgres": "lash_blob_read_pins.root_ref",
-      "source": "read_pin",
-      "sqlite": "blob_read_pins.root_ref"
-    },
-    {
       "number": 9,
       "postgres": "lash_lash_vm_artifacts.graph_ref where storage_kind = 1",
       "source": "artifact",

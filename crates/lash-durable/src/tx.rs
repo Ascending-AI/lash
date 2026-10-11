@@ -47,8 +47,8 @@ pub enum Release {
         /// The earliest durable deadline the actor waits on.
         next_due: Option<DurableInstant>,
     },
-    /// Set aside for an operator with the park the same commit recorded
-    /// ([`ParkEventWrite::Park`](crate::domain::ParkEventWrite::Park)):
+    /// Set aside for an operator with the current reason recorded on the
+    /// actor row ([`DomainWrite::ActorPark`]):
     /// only a control wake readies it. A pending cancel mail readies it at
     /// once instead.
     Parked,

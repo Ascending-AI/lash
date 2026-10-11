@@ -25,7 +25,6 @@
 //! | [`frame_lineage`] | `graph_nodes` and `session_head` |
 //! | [`host_admission`] | typed host send outcomes, raw input rows and committed input/answer markers |
 //! | [`transcript_order`] | sequential Known host sends and their committed user-message positions |
-//! | [`redrive_resumes`] | the host's redrives, the intent acknowledgements and run resumes the deployment's store and engine answered ([`Fact::IntentAck`], [`Fact::Resume`]), and the turn park feed ([`ParkEventRow`]) |
 //!
 //! Store rows are read raw, through the SQLite store's test-only
 //! `read_rows_for_testing` (`lash-sqlite-store`, `testing` feature), the
@@ -64,7 +63,6 @@ checkers! {
     frame_lineage => FrameLineage,
     host_admission => HostAdmission,
     transcript_order => TranscriptOrder,
-    redrive_resumes => RedriveResumes,
 }
 pub mod quarantine;
 mod snapshot;
@@ -79,7 +77,6 @@ use lash_core::sync::MutexExt as _;
 use serde::Serialize;
 
 pub(crate) use obligations_settled::RELAY_ONLY as RELAY_ONLY_OBLIGATIONS;
-pub use redrive_resumes::ParkEventRow;
 pub use snapshot::{
     ArtifactRow, CleanupRow, GraphNodeRow, InputRow, ObligationRow, RunRow, StoreSnapshot,
     TranscriptCall, TranscriptSession, TranscriptToolOutput,
@@ -110,10 +107,6 @@ pub struct History {
     pub relay_ran: bool,
     /// The store clock's epoch milliseconds when the stores were read.
     pub now_ms: Option<u64>,
-    /// The deployment's turn park feed, in commit order, as the run's end
-    /// read it.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub park_events: Vec<ParkEventRow>,
 }
 
 impl History {
@@ -126,7 +119,6 @@ impl History {
             stores: Vec::new(),
             relay_ran: false,
             now_ms: None,
-            park_events: Vec::new(),
         }
     }
 
@@ -725,37 +717,36 @@ pub fn render(history: &History, violation: &Violation) -> String {
         .into_iter()
         .filter_map(|at| history.records.get(at))
         .collect::<Vec<_>>();
-    let excerpt: Vec<&Record> = if matches!(
-        violation.invariant,
-        "host-admission" | "transcript-order" | "redrive-resumes"
-    ) && let Some(session) = &violation.session
-    {
-        history
-            .records
-            .iter()
-            .filter(|record| {
-                record.fact.session() == Some(session.as_str())
-                    || matches!(record.fact, Fact::Fault { .. })
-            })
-            .collect()
-    } else if named.is_empty() {
-        match &violation.session {
-            Some(session) => {
-                let mut tail = history
-                    .records
-                    .iter()
-                    .rev()
-                    .filter(|record| record.fact.session() == Some(session.as_str()))
-                    .take(EXCERPT_RECORDS)
-                    .collect::<Vec<_>>();
-                tail.reverse();
-                tail
+    let excerpt: Vec<&Record> =
+        if matches!(violation.invariant, "host-admission" | "transcript-order")
+            && let Some(session) = &violation.session
+        {
+            history
+                .records
+                .iter()
+                .filter(|record| {
+                    record.fact.session() == Some(session.as_str())
+                        || matches!(record.fact, Fact::Fault { .. })
+                })
+                .collect()
+        } else if named.is_empty() {
+            match &violation.session {
+                Some(session) => {
+                    let mut tail = history
+                        .records
+                        .iter()
+                        .rev()
+                        .filter(|record| record.fact.session() == Some(session.as_str()))
+                        .take(EXCERPT_RECORDS)
+                        .collect::<Vec<_>>();
+                    tail.reverse();
+                    tail
+                }
+                None => Vec::new(),
             }
-            None => Vec::new(),
-        }
-    } else {
-        named
-    };
+        } else {
+            named
+        };
     if !excerpt.is_empty() {
         out.push_str("  trace excerpt:\n");
         for record in excerpt {

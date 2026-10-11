@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use lash_durable::domain::{ParkEventKind, ParkEventRow, WaitPurpose};
+use lash_durable::domain::WaitPurpose;
 use lash_durable::runner::{Runner, RunnerConfig, Stopped};
 use lash_durable::{ActorKey, ActorState, DurableError, NoProbe, NodeId, NodeSpec};
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
@@ -857,35 +857,12 @@ async fn crash_claims(backend: &Backend, process: &ProcessId, count: u32) -> Law
     )))
 }
 
-/// The park-feed entries of `process`'s actor, oldest first.
-async fn park_feed(backend: &Backend, process: &ProcessId) -> Result<Vec<ParkEventRow>, LawBroken> {
-    let key = actor(process)?;
-    Ok(backend
-        .durable()
-        .park_events(None, 1_000)
-        .await?
-        .into_iter()
-        .filter(|row| row.actor == key)
-        .collect())
-}
-
-fn reason(row: &ParkEventRow) -> String {
-    serde_json::from_str::<Value>(&row.reason_json)
-        .ok()
-        .and_then(|value| {
-            find(&value, "reason")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .unwrap_or_default()
-}
-
 // --- the laws ---------------------------------------------------------------
 
 /// C1 (FIG-5160), parked: P's `Until` child A is parked with
 /// `ActivationLoop`, and A has an `Until` child B. Cancelling P ends A
 /// `Cancelled` with zero `advance` calls, and B receives `ParentEnded` and
-/// ends. A cancel alone ends a park: the feed records A's park and its end.
+/// ends.
 ///
 /// # Errors
 ///
@@ -939,14 +916,6 @@ pub async fn c1_a_parked_child_ends_engine_free_and_its_child_receives_parent_en
     ensure!(
         cancellation(&b_end).is_some_and(|(origin, _)| origin == "parent_ended"),
         "B did not end cancelled by its parent: {b_end}"
-    );
-    let feed = park_feed(&backend, &a).await?;
-    ensure!(
-        feed.iter()
-            .map(|row| row.kind)
-            .eq([ParkEventKind::Parked, ParkEventKind::Ended])
-            && reason(&feed[0]) == "activation_loop",
-        "A's park feed is not its activation-loop park and its end: {feed:?}"
     );
     Ok(())
 }
@@ -1346,8 +1315,6 @@ pub async fn engine_free_end_runs_no_engine_code(backend: &Backend) -> LawOutcom
             cancellation(&end) == Some(("operator_requested".to_owned(), false)),
             "the {name} process did not end cancelled: {end}"
         );
-        let feed = park_feed(&newer, process).await?;
-        ensure!(feed.is_empty(), "the {name} process was parked: {feed:?}");
     }
     Ok(())
 }
@@ -1377,11 +1344,6 @@ pub async fn p1_a_crash_loop_parks_at_its_budget_and_progress_resets_the_count(
         advances(&looping_tag).is_empty(),
         "a process at its activation-loop budget ran its engine: {:?}",
         advances(&looping_tag)
-    );
-    let feed = park_feed(&backend, &looping).await?;
-    ensure!(
-        feed.len() == 1 && reason(&feed[0]) == "activation_loop",
-        "the looping process's park feed is not one activation-loop park: {feed:?}"
     );
     ensure!(
         backend.redrive_process(&looping, "process-laws").await?,
@@ -1416,10 +1378,6 @@ pub async fn p1_a_crash_loop_parks_at_its_budget_and_progress_resets_the_count(
     })
     .await?;
     serving.stop().await;
-    ensure!(
-        park_feed(&backend, &progressing).await?.is_empty(),
-        "a process whose crashes were interrupted by progress parked"
-    );
     Ok(())
 }
 

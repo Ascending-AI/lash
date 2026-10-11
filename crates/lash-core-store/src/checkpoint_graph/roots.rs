@@ -34,9 +34,6 @@ pub enum RootSource {
     /// `session_meta.admission_base_checkpoint_ref`: the base pinned for
     /// admission, fork and creation ownership included.
     SessionAdmissionBase = 7,
-    /// `blob_read_pins.root_ref`: every extant pin row, expired or not,
-    /// until its explicit retirement.
-    ReadPin = 8,
     /// SQLite `artifact_refs.blob_ref`; PostgreSQL
     /// `lash_lash_vm_artifacts.graph_ref` where `storage_kind = 1`.
     ArtifactBridge = 9,
@@ -62,7 +59,7 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 13] = [
         Self::Exec,
         Self::RunFact,
         Self::EffectAdmission,
@@ -71,7 +68,6 @@ impl RootSource {
         Self::TurnNamespace,
         Self::SessionRevision,
         Self::SessionAdmissionBase,
-        Self::ReadPin,
         Self::ArtifactBridge,
         Self::ReleasePin,
         Self::RunTerminalWindow,
@@ -91,7 +87,6 @@ impl RootSource {
             Self::TurnNamespace => "namespace",
             Self::SessionRevision => "revision",
             Self::SessionAdmissionBase => "admission_base",
-            Self::ReadPin => "read_pin",
             Self::ArtifactBridge => "artifact",
             Self::ReleasePin => "release",
             Self::RunTerminalWindow => "terminal_window",
@@ -137,7 +132,6 @@ impl RootSource {
             Self::SessionAdmissionBase => {
                 RootField::of("lash_session_meta", "admission_base_checkpoint_ref", None)
             }
-            Self::ReadPin => RootField::of("lash_blob_read_pins", "root_ref", None),
             Self::ArtifactBridge => RootField::of(
                 "lash_lash_vm_artifacts",
                 "graph_ref",
@@ -162,7 +156,6 @@ impl RootSource {
             Self::TurnNamespace => ("turn_namespaces", "graph_root_ref", None),
             Self::SessionRevision => ("session_revisions", "checkpoint_ref", None),
             Self::SessionAdmissionBase => ("session_meta", "admission_base_checkpoint_ref", None),
-            Self::ReadPin => ("blob_read_pins", "root_ref", None),
             Self::ArtifactBridge => ("artifact_refs", "blob_ref", None),
             Self::ReleasePin => ("graph_release_pins", "root_ref", None),
             Self::RunTerminalWindow => ("session_runs", "terminal_window_checkpoint_ref", None),

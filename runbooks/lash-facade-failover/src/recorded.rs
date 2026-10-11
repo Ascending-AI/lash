@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash::durable::domain::{
-    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow,
-    RootOwner, RunFacts, ScopeKey, SessionCloseRow, TurnEnd, TurnRow, WaitId, WaitRow,
+    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
+    SessionCloseRow, TurnEnd, TurnRow, WaitId, WaitRow,
 };
 use lash::durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, BootLiveness, Claimed, CommitLabel,
@@ -351,14 +351,6 @@ impl DurableReads for RecordedStore {
         session: &SessionId,
     ) -> Result<lash::durable::domain::SessionMailbox, DurableError> {
         self.inner.session_mailbox(session).await
-    }
-
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError> {
-        self.inner.park_events(after, limit).await
     }
 
     async fn prompt_snapshot(

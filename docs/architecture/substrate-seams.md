@@ -122,7 +122,6 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 | `lash_exec_snapshots` (CAS on `rev`; no `exported_descriptors` column) | **I0** | V0, then L7 (L6 writes `p/<pid>` through S7) |
 | `lash_waits` (with `created_epoch`) | L5 | L5 |
 | process actor columns, engine-state pointer, `cancel_requested_at_ms`, cascade cursor | L6 | L6 |
-| `lash_park_events` | L6 | L6 |
 | `session_close` (a closing session's last step, then its tombstone), `session_scope_ends` (a session's turn scopes whose cascade is still marking) | L6b | L6b |
 | `prompt_snapshots` (one root per admitted model call, keyed `(session_id, owner, call)` by its owner-scoped identity, holding its snapshot and, until the call settles, its request: template, response context and pinned deadline), `prompt_texts` (section text and body chunks by content address), `prompt_snapshot_texts` (each root part's edges to its texts); settling a turn's call (`PromptWrite::Settle`, FIG-5946) drops its request and the text only it held, ending a turn keeps the snapshots, `PromptWrite::Release` and session deletion (FIG-5272) remove roots and reclaim unshared text | P2 (FIG-5256) | P2 (FIG-5256); the record is written at `model.start` by FIG-5255, and at `completion.start` for an owned call by FIG-5259 |
 | format columns (`nodes.formats_json`, `nodes.draining`, `actors.formats`), fleet format | L1, L11 (`draining`) | L11 |

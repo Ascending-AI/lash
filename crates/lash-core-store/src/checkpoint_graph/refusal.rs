@@ -91,10 +91,6 @@ pub enum GraphRefusal {
     /// A publication does not match the domain record it names.
     #[error("the commit's root changes are not the projection of its writes")]
     PublicationMismatch,
-    #[error("the read pin expired")]
-    ReadPinExpired,
-    #[error("the read pin is not the one named")]
-    ReadPinMismatch,
     #[error("the presentation's renderer is not available")]
     RendererUnavailable,
     #[error("the reconstructed presentation is not the recorded one")]

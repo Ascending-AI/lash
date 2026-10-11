@@ -27,8 +27,8 @@ use lash_core_execution::Clock;
 use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal};
 use lash_durable::domain::graph_commit::{check_graph, measure_owner_commit};
 use lash_durable::domain::{
-    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow,
-    RootOwner, RunFacts, ScopeKey, SessionCloseRow, TurnRow, WaitId, WaitRow,
+    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
+    SessionCloseRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause, Claimed,
@@ -37,7 +37,6 @@ use lash_durable::{
     MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor, Owner, Reaped, Release,
     StateRevision, StoreFailure, StoreFailureKind, Woken,
 };
-use lash_store_sql::durable::park_events::ParkEventStatements;
 use lash_store_sql::durable::processes::{ActorParkStatements, ProcessActorStatements};
 use lash_store_sql::durable::session_mail::SessionMailStatements;
 use lash_store_sql::durable::{ActorStatements, MailStatements, NodeStatements};
@@ -47,7 +46,7 @@ use crate::conn::{FencedTx, SqliteConnection, TxOutcome, cached_execute};
 use crate::liveness_locks::{LivenessLocks, Probed};
 
 mod graph;
-mod park_events;
+mod park;
 pub(crate) mod processes;
 mod prompts;
 mod run_records;
@@ -70,10 +69,9 @@ pub(crate) use node_wakes::TABLES as NODE_WAKES_TABLES;
 pub(crate) use graph::TABLES as GRAPH_TABLES;
 pub(crate) use graph::{
     GraphClosure, collect_in as collect_graph_in, graph_closure, install_staged, reachable_from,
-    reclaim_candidates, retire_expired_read_pins_in,
+    reclaim_candidates,
 };
 pub(crate) use lash_durable::domain::graph_commit::CollectionLimits;
-pub(crate) use park_events::TABLES as PARK_EVENTS_TABLES;
 pub(crate) use prompts::TABLES as PROMPT_SNAPSHOTS_TABLES;
 pub(crate) use prompts::release as release_prompt_snapshots;
 pub(crate) use run_records::TABLES as RUN_RECORDS_TABLES;
@@ -264,7 +262,6 @@ struct Sql {
     mail: MailStatements,
     park: ActorParkStatements,
     process: ProcessActorStatements,
-    park_events: ParkEventStatements,
     session_mail: SessionMailStatements,
     sqlite: SqliteDurableStatements,
 }
@@ -277,7 +274,6 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
         mail: MailStatements::render(dialect),
         park: ActorParkStatements::render(dialect),
         process: ProcessActorStatements::render(dialect),
-        park_events: ParkEventStatements::render(dialect),
         session_mail: SessionMailStatements::render(dialect),
         sqlite: SqliteDurableStatements::render(dialect),
     }
@@ -835,12 +831,13 @@ fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWr
         DomainWrite::RunFact(write) => run_records::apply(tx, committing, write),
         DomainWrite::ExecRoot(write) => snapshots::apply(tx, committing, write),
         DomainWrite::EffectAdmission(write) => graph::apply_admission(tx, committing, write),
-        DomainWrite::ReadPin(write) => graph::apply_read_pin(tx, write),
         DomainWrite::ReleasePin(write) => graph::apply_release_pin(tx, write),
         DomainWrite::Wait(write) => waits::apply(tx, committing, write),
         DomainWrite::Process(write) => processes::apply(tx, committing, write),
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write),
-        DomainWrite::ParkEvent(write) => park_events::apply(tx, committing, write),
+        DomainWrite::ActorPark { reason_json } => {
+            park::set(tx, committing.actor.as_str(), reason_json)
+        }
         DomainWrite::SessionMail(write) => session_mail::apply(tx, committing, write),
         DomainWrite::Prompt(write) => prompts::apply(tx, committing, write),
     }
@@ -880,7 +877,7 @@ fn apply_mail_domain(
                 )
             })
         }
-        MailDomainWrite::Redrive(request) => park_events::redrive(tx, request, now)?
+        MailDomainWrite::Redrive(request) => park::redrive(tx, request, now)?
             .map(|(answer, woken)| (MailAnswer::Redrive(answer), woken.into_iter().collect())),
     })
 }
@@ -1536,15 +1533,6 @@ impl DurableReads for SqliteDurableStore {
     ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
         let session = session.clone();
         self.read(move |tx| session_mail::read(tx, &session)).await
-    }
-
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError> {
-        self.read(move |tx| park_events::read(tx, after, limit))
-            .await
     }
 
     async fn prompt_snapshot(

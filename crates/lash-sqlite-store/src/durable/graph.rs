@@ -1,5 +1,5 @@
 //! The checkpoint graph on SQLite: the `graph` domain's DDL, the
-//! owner graph installation, hydration and read pins, and the reachability
+//! owner graph installation, hydration, and the reachability
 //! collector (FIG-5887 §5, §7, §8; lane G, FIG-5890).
 //!
 //! # One transaction, one lock
@@ -9,7 +9,7 @@
 //! first, then the owner's epoch fence, then the commit in the order of
 //! [`lash_durable::domain::graph`]'s contracts. SQLite has one writer, so
 //! the lock order PostgreSQL spells with its graph gate is the database
-//! lock here: a writer, a pin's fetch and the collector never interleave.
+//! lock here: a writer and the collector never interleave.
 //!
 //! A hydration is one read transaction that selects the owner's root first,
 //! fixing its snapshot, and reads every descendant on it, so a writer that
@@ -35,8 +35,7 @@ use lash_core_store::checkpoint_graph::{
 };
 use lash_durable::domain::DomainRefusal;
 use lash_durable::domain::graph::{
-    EffectAdmissionWrite, GraphStore, HydratedGraph, HydratedNode, PinnedBatch, ReadLease, ReadPin,
-    ReadPinId, ReadPinWrite, ReleasePinWrite, RootOwner,
+    EffectAdmissionWrite, HydratedGraph, HydratedNode, ReleasePinWrite, RootOwner,
 };
 use lash_durable::domain::graph_commit::{
     CheckedGraph, CollectionLimits, EDGE_ROW_LOGICAL_BYTES, GraphCollection, blob_row_logical_bytes,
@@ -82,17 +81,6 @@ CREATE TABLE IF NOT EXISTS effect_admissions (
 CREATE INDEX IF NOT EXISTS idx_effect_admissions_admission_ref
     ON effect_admissions (admission_ref);
 
--- A streaming reader's pin on one root. Every row roots, expired or not,
--- until its explicit retirement.
-CREATE TABLE IF NOT EXISTS blob_read_pins (
-    pin_id TEXT PRIMARY KEY,
-    lease_owner TEXT NOT NULL,
-    generation INTEGER NOT NULL CONSTRAINT ck_blob_read_pins_generation CHECK (generation >= 1),
-    root_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
-    expires_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_blob_read_pins_root_ref ON blob_read_pins (root_ref);
-
 -- A deliberately installed runnable release manifest.
 CREATE TABLE IF NOT EXISTS graph_release_pins (
     release_key TEXT PRIMARY KEY,
@@ -114,7 +102,6 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
         WHERE checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'admission_base', admission_base_checkpoint_ref FROM session_meta
         WHERE admission_base_checkpoint_ref IS NOT NULL
-    UNION ALL SELECT 'read_pin', root_ref FROM blob_read_pins
     UNION ALL SELECT 'artifact', blob_ref FROM artifact_refs
     UNION ALL SELECT 'release', root_ref FROM graph_release_pins
     UNION ALL SELECT 'terminal_window', terminal_window_checkpoint_ref FROM session_runs
@@ -126,16 +113,12 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
 
 lash_store_sql::statements! {
     /// Graph statements only SQLite issues: the artifact bridge's pointer
-    /// table, the unlocked pin read (the write lock holds it), and the
+    /// table and the
     /// sweep's `json_each` binding of the mark set.
     pub(crate) struct GraphSqliteStatements @ "durable_graph_sqlite" {
         /// Artifact `?2` of namespace `?1`'s blob: SQLite's bridge is its
         /// pointer table.
         artifact_root = "SELECT blob_ref FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2";
-
-        /// Read pin `?1`'s row.
-        pin_row = "SELECT lease_owner, generation, root_ref, expires_at_ms
-             FROM blob_read_pins WHERE pin_id = ?1";
 
         /// How many edges lead from a marked parent in JSON `?1` to an
         /// unmarked child: none after a complete closure.
@@ -184,16 +167,8 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
     }
 });
 
-/// A read pin's acquisition, fetch, renewal or retirement.
-const GRAPH_READ_PIN: CommitLabel = CommitLabel::new("graph.read_pin");
-
 /// A reachability collection.
 const GRAPH_COLLECT: CommitLabel = CommitLabel::new("graph.collect");
-
-/// A lease's time to live as a span of the store's clock.
-fn ttl(lease: &ReadLease) -> i64 {
-    i64::try_from(lease.ttl_ms).unwrap_or(i64::MAX)
-}
 
 /// A statement's answer inside a graph transaction: a value, or a typed
 /// refusal that rolls the transaction back.
@@ -329,7 +304,6 @@ fn root_of(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<NodeId>> {
         RootOwner::SessionAdmissionBase { session } => {
             one(tx, SQL.graph.admission_base_root.sql(), [session.as_str()])?
         }
-        RootOwner::ReadPin(pin) => one(tx, SQL.graph.pin_root.sql(), [pin.0.as_str()])?,
         RootOwner::ArtifactBridge {
             namespace,
             artifact,
@@ -607,25 +581,6 @@ pub(crate) fn reclaim_candidates(
     }
 }
 
-/// Whether every node in `wanted` is reachable from `root` along stored
-/// edges, which a commit installs exactly as each node's child table.
-fn reachable(tx: &Connection, root: &NodeId, wanted: &[NodeId]) -> rusqlite::Result<bool> {
-    let mut missing: BTreeSet<String> = wanted.iter().map(NodeId::to_hex).collect();
-    let mut seen = BTreeSet::new();
-    let mut stack = vec![root.to_hex()];
-    while let Some(hash) = stack.pop() {
-        if missing.is_empty() {
-            break;
-        }
-        if !seen.insert(hash.clone()) {
-            continue;
-        }
-        missing.remove(&hash);
-        stack.extend(stored_edges(tx, &hash)?);
-    }
-    Ok(missing.is_empty())
-}
-
 fn graph_refused<T>(refusal: GraphRefusal) -> Answer<T> {
     Ok(Err(DurableError::Graph(refusal)))
 }
@@ -708,31 +663,6 @@ pub(super) fn admission_roots_under(
     tx.prepare_cached(SQL.graph.admission_roots_under.sql())?
         .query_map([prefix], |row| row.get(0))?
         .collect()
-}
-
-/// Applies a read pin write.
-pub(super) fn apply_read_pin(tx: &Connection, write: &ReadPinWrite) -> Answer<()> {
-    match write {
-        ReadPinWrite::Acquire { pin } => {
-            cached_execute(
-                tx,
-                SQL.graph.pin_insert.sql(),
-                rusqlite::params![
-                    pin.pin_id.0,
-                    pin.lease_owner,
-                    integer::<i64>(pin.generation)?,
-                    pin.root.to_hex(),
-                    pin.expires_at.0
-                ],
-            )?;
-        }
-        ReadPinWrite::Retire { pin } => {
-            if !retire_pin(tx, pin)? {
-                return graph_refused(GraphRefusal::ReadPinMismatch);
-            }
-        }
-    }
-    Ok(Ok(()))
 }
 
 /// Applies a release pin write.
@@ -902,111 +832,6 @@ fn digest_array<'a>(ids: impl IntoIterator<Item = &'a NodeId>) -> String {
     array
 }
 
-fn retire_pin(tx: &Connection, pin: &ReadPin) -> rusqlite::Result<bool> {
-    Ok(tx
-        .prepare_cached(SQL.graph.pin_retire.sql())?
-        .query_row(
-            rusqlite::params![
-                pin.pin_id.0,
-                pin.lease_owner,
-                integer::<i64>(pin.generation)?,
-                pin.root.to_hex()
-            ],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some())
-}
-
-/// Reads read pin `pin`'s row under the write lock and checks it is exactly
-/// `pin` and unexpired at `now`.
-fn check_pin(tx: &Connection, pin: &ReadPin, now: DurableInstant) -> GraphAnswer<()> {
-    let row = tx
-        .prepare_cached(SQL.sqlite.pin_row.sql())?
-        .query_row([pin.pin_id.0.as_str()], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })
-        .optional()?;
-    let Some((lease_owner, generation, root, expires_at)) = row else {
-        return Ok(Err(GraphRefusal::ReadPinMismatch));
-    };
-    if lease_owner != pin.lease_owner
-        || integer::<u64>(generation)? != pin.generation
-        || root != pin.root.to_hex()
-    {
-        return Ok(Err(GraphRefusal::ReadPinMismatch));
-    }
-    if expires_at < now.0 {
-        return Ok(Err(GraphRefusal::ReadPinExpired));
-    }
-    Ok(Ok(()))
-}
-
-fn fetch_pinned_in(
-    tx: &Connection,
-    pin: ReadPin,
-    nodes: &[NodeId],
-    renew: Option<ReadLease>,
-    now: DurableInstant,
-) -> GraphAnswer<PinnedBatch> {
-    if let Err(refusal) = check_pin(tx, &pin, now)? {
-        return Ok(Err(refusal));
-    }
-    if !reachable(tx, &pin.root, nodes)? {
-        return Ok(Err(GraphRefusal::ReadPinMismatch));
-    }
-    let mut fetched = BTreeMap::new();
-    let limits = DecodeLimits::within_total(u64::MAX);
-    for id in nodes {
-        let Some((bytes, encoding)) = (match stored_blob(tx, &id.to_hex())? {
-            Ok(found) => found,
-            Err(refusal) => return Ok(Err(refusal)),
-        }) else {
-            return Ok(Err(GraphRefusal::MissingNode(*id)));
-        };
-        if encoding == BlobEncoding::Graph
-            && let Err(refusal) = check_envelope(&bytes, *id, &limits)
-        {
-            return Ok(Err(refusal));
-        }
-        fetched.insert(
-            *id,
-            HydratedNode {
-                encoding,
-                bytes: bytes.into(),
-            },
-        );
-    }
-    let pin = match renew {
-        None => pin,
-        Some(lease) => {
-            if lease.lease_owner != pin.lease_owner {
-                return Ok(Err(GraphRefusal::ReadPinMismatch));
-            }
-            let expires_at = now.after_millis(ttl(&lease));
-            let generation: i64 = tx
-                .prepare_cached(SQL.graph.pin_renew.sql())?
-                .query_row(rusqlite::params![pin.pin_id.0, expires_at.0], |row| {
-                    row.get(0)
-                })?;
-            ReadPin {
-                generation: integer::<u64>(generation)?,
-                expires_at,
-                ..pin
-            }
-        }
-    };
-    Ok(Ok(PinnedBatch {
-        pin,
-        nodes: fetched,
-    }))
-}
-
 /// Marks every blob reachable from the complete root catalog and sweeps the
 /// rest, in the caller's write transaction.
 pub(crate) fn collect_in(
@@ -1093,11 +918,6 @@ pub(crate) fn collect_in(
     Ok(Ok(report))
 }
 
-/// Retires every read pin expired at `now`, in the caller's transaction.
-pub(crate) fn retire_expired_read_pins_in(tx: &Connection, now: i64) -> rusqlite::Result<usize> {
-    cached_execute(tx, SQL.graph.pins_retire_expired.sql(), [now])
-}
-
 fn backend(error: DurableError) -> GraphRefusal {
     from_durable(error)
 }
@@ -1131,39 +951,7 @@ impl SqliteDurableStore {
         .map_err(backend)?
     }
 
-    /// Releases `pin` before its expiry. Refused when it is not exactly
-    /// the stored pin.
-    ///
-    /// # Errors
-    ///
-    /// [`GraphRefusal::ReadPinMismatch`], or a store failure.
-    pub async fn release_read_pin(&self, pin: ReadPin) -> Result<(), GraphRefusal> {
-        self.graph_write(GRAPH_READ_PIN, move |tx, _| {
-            Ok(if retire_pin(tx, &pin)? {
-                TxOutcome::Commit(Ok(()))
-            } else {
-                TxOutcome::Rollback(Err(GraphRefusal::ReadPinMismatch))
-            })
-        })
-        .await
-    }
-
-    /// Retires every read pin expired now, in an ordinary transaction of its
-    /// own: expiry alone never removes a root. Answers how many it retired.
-    ///
-    /// # Errors
-    ///
-    /// A store failure.
-    pub async fn retire_expired_read_pins(&self) -> Result<u64, GraphRefusal> {
-        self.graph_write(GRAPH_READ_PIN, move |tx, now| {
-            let retired = retire_expired_read_pins_in(tx, now.0)?;
-            Ok(TxOutcome::Commit(Ok(retired as u64)))
-        })
-        .await
-    }
-
-    /// Collects every blob no root reaches, within `limits`, after retiring
-    /// expired read pins in a transaction of their own. Nothing is swept
+    /// Collects every blob no root reaches, within `limits`. Nothing is swept
     /// unless every source enumerated completely and every reached node
     /// checked.
     ///
@@ -1176,64 +964,9 @@ impl SqliteDurableStore {
         &self,
         limits: CollectionLimits,
     ) -> Result<GraphCollection, GraphRefusal> {
-        self.retire_expired_read_pins().await?;
         self.graph_write(GRAPH_COLLECT, move |tx, _| {
             Ok(match collect_in(tx, limits)? {
                 Ok(report) => TxOutcome::Commit(Ok(report)),
-                Err(refusal) => TxOutcome::Rollback(Err(refusal)),
-            })
-        })
-        .await
-    }
-}
-
-#[async_trait::async_trait]
-impl GraphStore for SqliteDurableStore {
-    async fn acquire_read_pin(
-        &self,
-        owner: RootOwner,
-        lease: ReadLease,
-    ) -> Result<ReadPin, GraphRefusal> {
-        self.graph_write(GRAPH_READ_PIN, move |tx, now| {
-            let root = match root_of(tx, &owner)? {
-                Ok(Some(root)) => root,
-                Ok(None) => return Ok(TxOutcome::Rollback(Err(GraphRefusal::RootRetired))),
-                Err(refusal) => return Ok(TxOutcome::Rollback(Err(refusal))),
-            };
-            let expires_at = now.after_millis(ttl(&lease));
-            let pin = ReadPin {
-                pin_id: ReadPinId(uuid::Uuid::new_v4().to_string()),
-                lease_owner: lease.lease_owner,
-                generation: 1,
-                root,
-                expires_at,
-            };
-            cached_execute(
-                tx,
-                SQL.graph.pin_insert.sql(),
-                rusqlite::params![
-                    pin.pin_id.0,
-                    pin.lease_owner,
-                    1_i64,
-                    root.to_hex(),
-                    pin.expires_at.0
-                ],
-            )?;
-            Ok(TxOutcome::Commit(Ok(pin)))
-        })
-        .await
-    }
-
-    async fn fetch_pinned(
-        &self,
-        pin: ReadPin,
-        nodes: &[NodeId],
-        renew: Option<ReadLease>,
-    ) -> Result<PinnedBatch, GraphRefusal> {
-        let nodes = nodes.to_vec();
-        self.graph_write(GRAPH_READ_PIN, move |tx, now| {
-            Ok(match fetch_pinned_in(tx, pin, &nodes, renew, now)? {
-                Ok(batch) => TxOutcome::Commit(Ok(batch)),
                 Err(refusal) => TxOutcome::Rollback(Err(refusal)),
             })
         })
