@@ -2,7 +2,8 @@
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::{
-    DomainRefusal, ModelCallId, PromptCallKey, PromptText, PromptWrite, TurnWrite,
+    DomainRefusal, ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite,
+    TurnWrite,
 };
 use crate::{DomainWrite, DurableError, DurableStore, Epoch};
 use lash_core_store::store::{
@@ -57,8 +58,10 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
     let record = |run: &TurnId, names: &[&str]| {
         DomainWrite::Prompt(PromptWrite::Record {
             call: call(run),
-            snapshot: format!("snapshot of {run}"),
-            texts: names.iter().map(|name| text(name)).collect(),
+            snapshot: Some(format!("snapshot of {run}")),
+            request: format!("request of {run}"),
+            snapshot_texts: names.iter().map(|name| text(name)).collect(),
+            request_texts: Vec::new(),
         })
     };
     let admit = |run: &TurnId| {
@@ -130,7 +133,8 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
         .await?
         .ok_or_else(|| LawBroken("ending the turn pruned its prompt root".into()))?;
     ensure!(
-        root.snapshot == format!("snapshot of {first}") && root.texts == hashes(&["a", "b"]),
+        root.snapshot == Some(format!("snapshot of {first}"))
+            && root.snapshot_texts == hashes(&["a", "b"]),
         "the root reads back as {root:?}"
     );
     ensure!(
@@ -245,10 +249,22 @@ pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
             return Err(LawBroken(format!("{} was not claimed", call.session)));
         };
         let mut tx = store.begin(&owned.actor, owned.epoch).await?;
+        let texts = names.iter().map(|name| text(name)).collect::<Vec<_>>();
+        // The owned call is open: its root holds its request alone.
+        let (snapshot, snapshot_texts, request_texts) = match call.call {
+            ModelCallId::Owned { .. } => (None, Vec::new(), texts),
+            ModelCallId::Turn { .. } => (
+                Some(format!("snapshot of {}", call.call)),
+                texts,
+                Vec::new(),
+            ),
+        };
         tx.write(DomainWrite::Prompt(PromptWrite::Record {
             call: call.clone(),
-            snapshot: format!("snapshot of {}", call.call),
-            texts: names.iter().map(|name| text(name)).collect(),
+            snapshot,
+            request: format!("request of {}", call.call),
+            snapshot_texts,
+            request_texts,
         }));
         store.commit(tx, LABEL).await?;
     }
@@ -268,7 +284,7 @@ pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
         .await?
         .ok_or_else(|| LawBroken("deleting one session released another's root".into()))?;
     ensure!(
-        root.texts == hashes(&["kept", "shared"]),
+        root.snapshot_texts == hashes(&["kept", "shared"]),
         "the live root reads back as {root:?}"
     );
     let stored = store
@@ -277,6 +293,158 @@ pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
     ensure!(
         stored == [text("shared"), text("kept")],
         "after the delete the stored texts are {stored:?}"
+    );
+    Ok(())
+}
+
+/// Settling a turn's calls releases each one's request and keeps its
+/// snapshot (FIG-5946). The commit that admits the next call settles the
+/// open one but keeps the new call's request, so a text both requests hold
+/// survives; the commit that leaves the model phase settles them all. A
+/// settled request's edges go, and with them every text no other edge
+/// names: a text the snapshot or another turn's call also references stays.
+/// A root that held only its request goes with it, and a later record whose
+/// text was reclaimed stores that text again.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn settling_a_turns_calls_releases_their_requests_and_keeps_their_snapshots(
+    store: &dyn DurableStore,
+) -> LawOutcome {
+    let id = SessionId::try_from("settled-session".to_owned())
+        .map_err(|_| LawBroken("a constant session id".into()))?;
+    let turn = |name: &str| {
+        TurnId::try_from(name.to_owned()).map_err(|_| LawBroken(format!("turn id {name}")))
+    };
+    let (run, other) = (turn("settled-turn")?, turn("other-turn")?);
+    let actor = session(id.as_str())?;
+    create(store, std::slice::from_ref(&actor)).await?;
+    let actor = &actor;
+    let owner = node(store, "prompt-owner").await?;
+    let claimed = store.claim(&owner, 1).await?;
+    ensure!(claimed.len() == 1, "the session was not claimed");
+    let epoch = claimed[0].epoch;
+    let call = |run: &TurnId, ordinal: u32| PromptCallKey {
+        session: id.clone(),
+        call: ModelCallId::Turn {
+            run: run.clone(),
+            ordinal,
+        },
+    };
+    let names = |names: &[&str]| names.iter().map(|name| text(name)).collect::<Vec<_>>();
+    let record = |key: PromptCallKey, snapshot: &[&str], request: &[&str]| {
+        DomainWrite::Prompt(PromptWrite::Record {
+            snapshot: (!snapshot.is_empty()).then(|| format!("snapshot of {}", key.call)),
+            request: format!("request of {}", key.call),
+            snapshot_texts: names(snapshot),
+            request_texts: names(request),
+            call: key,
+        })
+    };
+    let settle = |open: Option<u32>| {
+        DomainWrite::Prompt(PromptWrite::Settle {
+            session: id.clone(),
+            run: run.clone(),
+            open,
+        })
+    };
+    let commit = |writes: Vec<DomainWrite>| async move {
+        let mut tx = store.begin(actor, epoch).await?;
+        for write in writes {
+            tx.write(write);
+        }
+        store.commit(tx, LABEL).await
+    };
+    let stored = |names: &[&str]| {
+        let wanted = hashes(names);
+        async move {
+            let found = store.prompt_texts(&wanted).await?;
+            Ok::<_, DurableError>(found.into_iter().map(|text| text.hash).collect::<Vec<_>>())
+        }
+    };
+    let root = |key: PromptCallKey| async move {
+        store
+            .prompt_snapshot(&key)
+            .await?
+            .ok_or_else(|| LawBroken(format!("{} lost its root", key.call)))
+    };
+    let all = ["s", "dual", "body1", "shared", "elsewhere", "body2"];
+
+    // `model.start` of call 1, and another turn's open call.
+    commit(vec![
+        record(
+            call(&run, 1),
+            &["s", "dual"],
+            &["body1", "shared", "dual", "elsewhere"],
+        ),
+        record(call(&other, 1), &[], &["elsewhere"]),
+    ])
+    .await?;
+    // `model.start` of call 2 settles call 1, the one still open.
+    commit(vec![
+        record(call(&run, 2), &["s"], &["shared", "body2"]),
+        settle(Some(2)),
+    ])
+    .await?;
+    let first = root(call(&run, 1)).await?;
+    ensure!(
+        first
+            == PromptSnapshotRow {
+                call: call(&run, 1),
+                snapshot: Some(format!("snapshot of {}", call(&run, 1).call)),
+                request: None,
+                snapshot_texts: hashes(&["dual", "s"]),
+                request_texts: Vec::new(),
+                written_epoch: first.written_epoch,
+            },
+        "the settled call's root reads back as {first:?}"
+    );
+    let second = root(call(&run, 2)).await?;
+    ensure!(
+        second.request.is_some() && second.request_texts == hashes(&["body2", "shared"]),
+        "settling call 1 released the request of call 2, the call its commit admits: {second:?}"
+    );
+    ensure!(
+        stored(&all).await? == hashes(&["s", "dual", "shared", "elsewhere", "body2"]),
+        "after call 1 settled the store holds {:?}",
+        stored(&all).await?
+    );
+
+    // `model.done` settles every call of the turn.
+    commit(vec![settle(None)]).await?;
+    let second = root(call(&run, 2)).await?;
+    ensure!(
+        second.request.is_none()
+            && second.request_texts.is_empty()
+            && second.snapshot_texts == hashes(&["s"]),
+        "the settled call 2 reads back as {second:?}"
+    );
+    ensure!(
+        stored(&all).await? == hashes(&["s", "dual", "elsewhere"]),
+        "after the turn settled the store holds {:?}",
+        stored(&all).await?
+    );
+    ensure!(
+        root(call(&other, 1)).await?.request.is_some(),
+        "settling one turn released another turn's request"
+    );
+
+    // A call with no sections, over a text the turn's settlement reclaimed.
+    commit(vec![record(call(&run, 3), &[], &["body1"])]).await?;
+    let texts = store.prompt_texts(&hashes(&["body1"])).await?;
+    ensure!(
+        texts == [text("body1")],
+        "a reclaimed text recorded again reads back as {texts:?}"
+    );
+    commit(vec![settle(None)]).await?;
+    ensure!(
+        store.prompt_snapshot(&call(&run, 3)).await?.is_none(),
+        "a root that held only its request survived its settlement"
+    );
+    ensure!(
+        stored(&["body1"]).await?.is_empty(),
+        "the settled bare root's text survived"
     );
     Ok(())
 }

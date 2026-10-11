@@ -962,19 +962,24 @@ CREATE TABLE IF NOT EXISTS lash_exec_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_lash_exec_snapshots_root_ref ON lash_exec_snapshots (root_ref);
 
--- Prompt snapshots (P2, FIG-5256; ADR 0133 §5, §6): one audit root per
--- admitted model call, keyed by its owner (`turn:<run>` or `owned:<scope>`)
--- and its call there (FIG-5259), holding its prompt snapshot and exact
--- provider body; section text and body chunks stored once by content
--- address, and an edge from each root to every text it references. Ending a turn leaves its roots; only
--- an explicit release removes them, and a text goes with its last edge.
+-- Prompt snapshots (P2, FIG-5256; ADR 0133 §5, §6): one root per admitted
+-- model call, keyed by its owner (`turn:<run>` or `owned:<scope>`) and its
+-- call there (FIG-5259), holding its prompt snapshot and, until the call
+-- settles, its request: the exact provider body (FIG-5946). Section text and
+-- body chunks are stored once by content address, with an edge from each
+-- root part to every text it references. Settling a call drops its request
+-- and the request's edges; only an explicit release removes a root, and a
+-- text goes with its last edge.
 CREATE TABLE IF NOT EXISTS lash_prompt_snapshots (
     session_id TEXT NOT NULL,
     owner TEXT NOT NULL,
     call TEXT NOT NULL,
-    snapshot TEXT NOT NULL,
+    snapshot TEXT,
+    request TEXT,
     written_epoch BIGINT NOT NULL,
-    PRIMARY KEY (session_id, owner, call)
+    PRIMARY KEY (session_id, owner, call),
+    CONSTRAINT ck_lash_prompt_snapshots_held
+        CHECK (snapshot IS NOT NULL OR request IS NOT NULL)
 );
 
 CREATE TABLE IF NOT EXISTS lash_prompt_texts (
@@ -986,8 +991,10 @@ CREATE TABLE IF NOT EXISTS lash_prompt_snapshot_texts (
     session_id TEXT NOT NULL,
     owner TEXT NOT NULL,
     call TEXT NOT NULL,
+    part TEXT NOT NULL CONSTRAINT ck_lash_prompt_snapshot_texts_part
+        CHECK (part IN ('snapshot', 'request')),
     hash TEXT NOT NULL REFERENCES lash_prompt_texts(hash),
-    PRIMARY KEY (session_id, owner, call, hash),
+    PRIMARY KEY (session_id, owner, call, part, hash),
     FOREIGN KEY (session_id, owner, call)
         REFERENCES lash_prompt_snapshots(session_id, owner, call)
 );

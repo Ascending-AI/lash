@@ -149,7 +149,40 @@ async fn witness_core_over(
     stores: Arc<lash_sqlite_store::SqliteStoreSet>,
     installed: bool,
 ) -> lash::LashCore {
-    let builder = lash::LashCore::standard_builder(lash_conformance::backend_over(stores))
+    let model = lash_core::testing::TestProvider::builder()
+        .kind("prompt-witness")
+        .complete(|_| async { Ok(answer("done")) })
+        .build()
+        .into_handle();
+    witness_core_with(
+        registered,
+        lash_conformance::backend_over(stores),
+        installed,
+        model,
+        None,
+    )
+    .await
+}
+
+/// A final answer of `text`.
+fn answer(text: &str) -> lash_core::llm::types::LlmResponse {
+    lash_core::llm::types::LlmResponse {
+        parts: vec![lash_core::llm::types::LlmOutputPart::Text {
+            text: text.to_string(),
+            response_meta: None,
+        }],
+        ..Default::default()
+    }
+}
+
+async fn witness_core_with(
+    registered: Arc<AtomicBool>,
+    backend: lash::Backend,
+    installed: bool,
+    model: lash_core::facade_support::ProviderHandle,
+    tools: Option<Arc<dyn lash_core::ToolProvider>>,
+) -> lash::LashCore {
+    let builder = lash::LashCore::standard_builder(backend)
         .llm_profiles(Arc::new(
             lash::LlmProfileRegistry::new()
                 .register(
@@ -160,19 +193,7 @@ async fn witness_core_over(
                             .context_window_tokens(4_096)
                             .build()
                             .expect("valid model"),
-                        lash_core::testing::TestProvider::builder()
-                            .kind("prompt-witness")
-                            .complete(|_| async {
-                                Ok(lash_core::llm::types::LlmResponse {
-                                    parts: vec![lash_core::llm::types::LlmOutputPart::Text {
-                                        text: "done".to_string(),
-                                        response_meta: None,
-                                    }],
-                                    ..Default::default()
-                                })
-                            })
-                            .build()
-                            .into_handle(),
+                        model,
                     ),
                 )
                 .expect("register the test model"),
@@ -187,6 +208,10 @@ async fn witness_core_over(
         builder.plugin(Arc::new(Witness { registered }))
     } else {
         builder
+    };
+    let builder = match tools {
+        Some(tools) => builder.tools(tools),
+        None => builder,
     };
     builder
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -605,6 +630,195 @@ async fn a_removed_plugins_plan_override_is_recorded_and_the_turn_succeeds() {
             .sections
             .iter()
             .all(|section| section.section.owner != PLUGIN)
+    );
+    core.shutdown().await.expect("shutdown");
+}
+
+/// Model call `call` of `run` in the retention law's session.
+fn retention_call(run: &lash::TurnId, call: u32) -> lash::prompt::PromptCallKey {
+    lash::prompt::PromptCallKey {
+        session: lash::SessionId::from("prompt-retention-session"),
+        call: lash::prompt::ModelCallId::Turn {
+            run: run.clone(),
+            ordinal: call,
+        },
+    }
+}
+
+/// Every text `call`'s root references, while it is admitted.
+async fn root_texts(
+    backend: &lash::Backend,
+    call: &lash::prompt::PromptCallKey,
+) -> std::collections::BTreeSet<String> {
+    let row = lash_core::durable_port::DurableReads::prompt_snapshot(&**backend.durable(), call)
+        .await
+        .expect("read the root")
+        .expect("the call is admitted");
+    row.snapshot_texts
+        .into_iter()
+        .chain(row.request_texts)
+        .collect()
+}
+
+/// What the retention law saw while its calls were sent.
+#[derive(Default)]
+struct WhileSent {
+    /// Every text the first call's root referenced while it was open.
+    first: std::collections::BTreeSet<String>,
+    /// Its snapshot, as the store read it back then.
+    first_snapshot: Option<lash::prompt::LoadedPromptSnapshot>,
+    /// Every text the second call's root referenced while it was open.
+    second: std::collections::BTreeSet<String>,
+    /// The texts only the first call referenced that the store still held
+    /// while the second was sent, after the first call's `model.done`.
+    held: Vec<String>,
+}
+
+/// RETENTION and AUDIT (FIG-5946): an admitted call's exact provider body
+/// lives only until the call settles. Once `model.done` settles the first
+/// call (a tool call), the store holds no text only the settled request
+/// referenced, and once the turn ends it holds no text but its calls'
+/// section texts; each call's snapshot reads back through the facade, after
+/// the turn, as it read while the call was open.
+#[tokio::test]
+async fn a_settled_calls_request_body_is_released_and_its_snapshot_kept() {
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("open a memory store set");
+    let backend = lash_conformance::backend_over(Arc::new(stores));
+    let run = lash::TurnId::parse("prompt-retention-call").expect("run id");
+    let seen = Arc::new(std::sync::Mutex::new(WhileSent::default()));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let model = {
+        let (seen, calls, backend, run) = (
+            Arc::clone(&seen),
+            Arc::clone(&calls),
+            backend.clone(),
+            run.clone(),
+        );
+        lash_core::testing::TestProvider::builder()
+            .kind("prompt-witness")
+            .complete(move |_| {
+                let call = calls.fetch_add(1, Ordering::SeqCst);
+                let (seen, backend, run) = (Arc::clone(&seen), backend.clone(), run.clone());
+                async move {
+                    let reads = &**backend.durable();
+                    if call == 0 {
+                        let first = retention_call(&run, 1);
+                        let texts = root_texts(&backend, &first).await;
+                        let snapshot =
+                            lash_core::plugin::prompt::load_prompt_snapshot(reads, &first)
+                                .await
+                                .expect("the open call's snapshot loads");
+                        let mut seen = seen.lock().expect("seen");
+                        seen.first = texts;
+                        seen.first_snapshot = snapshot;
+                        return Ok(lash_core::llm::types::LlmResponse {
+                            parts: vec![lash_core::llm::types::LlmOutputPart::ToolCall {
+                                call_id: "echo-1".to_owned(),
+                                tool_name: "echo_tool".to_owned(),
+                                input_json: serde_json::json!({"value": "x"}).to_string(),
+                                replay: None,
+                            }],
+                            ..Default::default()
+                        });
+                    }
+                    let second = root_texts(&backend, &retention_call(&run, 2)).await;
+                    let only_first: Vec<String> = {
+                        let seen = seen.lock().expect("seen");
+                        seen.first.difference(&second).cloned().collect()
+                    };
+                    let held =
+                        lash_core::durable_port::DurableReads::prompt_texts(reads, &only_first)
+                            .await
+                            .expect("read the texts")
+                            .into_iter()
+                            .map(|text| text.hash)
+                            .collect();
+                    let mut seen = seen.lock().expect("seen");
+                    seen.second = second;
+                    seen.held = held;
+                    Ok(answer("done"))
+                }
+            })
+            .build()
+            .into_handle()
+    };
+    let core = witness_core_with(
+        Arc::new(AtomicBool::new(false)),
+        backend.clone(),
+        true,
+        model,
+        Some(Arc::new(lash_core::testing::runtime_helpers::EchoTool)),
+    )
+    .await;
+    let session = crate::created_session(&core, MODEL, "prompt-retention-session")
+        .await
+        .open()
+        .await
+        .expect("the session opens");
+    let turn = session
+        .send(lash::TurnInput::text("call the tool, then answer"))
+        .id(run.clone())
+        .output()
+        .await
+        .expect("the turn answers");
+    assert!(turn.is_success(), "{turn:?}");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "a tool round between two calls"
+    );
+
+    let prompt = session.admin().prompt();
+    let first = prompt
+        .snapshot(&run, 1)
+        .await
+        .expect("the settled call's snapshot reads")
+        .expect("the settled call keeps its snapshot");
+    let second = prompt
+        .snapshot(&run, 2)
+        .await
+        .expect("the last call's snapshot reads")
+        .expect("the last call keeps its snapshot");
+    let sections = |loaded: &lash::prompt::LoadedPromptSnapshot| {
+        loaded
+            .texts
+            .keys()
+            .map(|hash| hash.as_str().to_owned())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let seen = std::mem::take(&mut *seen.lock().expect("seen"));
+    assert_eq!(
+        seen.first_snapshot.as_ref(),
+        Some(&first),
+        "the settled call's snapshot reads back as it read while the call was open"
+    );
+    let first_sections = sections(&first);
+    let held: Vec<_> = seen
+        .held
+        .iter()
+        .filter(|hash| !first_sections.contains(*hash))
+        .collect();
+    assert!(
+        held.is_empty(),
+        "after model.done the store held {} texts only the settled request referenced",
+        held.len()
+    );
+    let mut kept = first_sections;
+    kept.extend(sections(&second));
+    let referenced: Vec<String> = seen.first.union(&seen.second).cloned().collect();
+    let unkept: Vec<_> =
+        lash_core::durable_port::DurableReads::prompt_texts(&**backend.durable(), &referenced)
+            .await
+            .expect("read the texts")
+            .into_iter()
+            .filter(|text| !kept.contains(&text.hash))
+            .collect();
+    assert!(
+        unkept.is_empty(),
+        "after the turn ended the store held {} request texts",
+        unkept.len()
     );
     core.shutdown().await.expect("shutdown");
 }

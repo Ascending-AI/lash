@@ -10,14 +10,16 @@
 //! render that outlasts the plan's budget composes nothing, and no earlier
 //! text stands in. A late render's result is dropped.
 //!
-//! A call's admission ([`admission_record`]) records its [`ComposedPrompt`],
-//! its request template and its response context as one root whose texts and literal chunks are
-//! stored by content address, so a section that did not change between
-//! calls, or a literal prefix two calls share, is stored once. The template's
-//! attachment slots record refs, never a delivered value (ADR 0135 §6).
-//! [`load_admitted_call`] reads an admitted call back, every text verified
-//! against its address, without calling any renderer, wrapper or provider
-//! builder.
+//! A call's admission ([`admission_record`]) records its [`ComposedPrompt`]'s
+//! snapshot and its request (template and response context) as the two parts
+//! of one root, whose texts and literal chunks are stored by content address,
+//! so a section that did not change between calls, or a literal prefix two
+//! open calls share, is stored once. The template's attachment slots record
+//! refs, never a delivered value (ADR 0135 §6). The request lives until the
+//! call settles, the snapshot until its explicit release (FIG-5946).
+//! [`load_admitted_call`] reads an open call's request back and
+//! [`load_prompt_snapshot`] a call's snapshot, every text verified against
+//! its address, without calling any renderer, wrapper or provider builder.
 
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
@@ -38,7 +40,7 @@ use super::{
     ResolvedPromptComposition,
 };
 use crate::prompt_sections::{
-    AdmittedModelCall, ChunkedRequestTemplate, ProviderBodyError, RecordedResponseContext,
+    AdmittedRequest, ChunkedRequestTemplate, ProviderBodyError, RecordedResponseContext,
 };
 use crate::store::BlobRef;
 
@@ -204,13 +206,14 @@ pub struct ComposedPrompt {
 }
 
 /// The owner-commit write that admits `call` (ADR 0133 §6): one root holding
-/// its record, an [`AdmittedModelCall`] of `prompt`'s snapshot (none when the
-/// session registers no sections), the request `template`, the scope and
-/// contract of `response` (what every send of the call reads its response
-/// under; its senders are live and not recorded) and, for a call no turn row
-/// pins, its `deadline`, over every section text, literal chunk and the
+/// `prompt`'s snapshot (none when the session registers no sections) over
+/// its section texts, and an [`AdmittedRequest`] of the request `template`,
+/// the scope and contract of `response` (what every send of the call reads
+/// its response under; its senders are live and not recorded) and, for a
+/// call no turn row pins, its `deadline`, over every literal chunk and the
 /// contract stored by content. It belongs in the commit that admits the
-/// call, once per new call: a second record of one call is refused.
+/// call, once per new call: a second record of one call is refused. The
+/// request goes when the call settles; the snapshot stays (FIG-5946).
 ///
 /// # Errors
 ///
@@ -222,8 +225,7 @@ pub fn admission_record(
     response: &ResponseContext,
     deadline: Option<DurableInstant>,
 ) -> Result<DomainWrite, serde_json::Error> {
-    let (recorded_body, chunks) = ChunkedRequestTemplate::chunk(template);
-    let mut texts: BTreeMap<BlobRef, String> = chunks.into_iter().collect();
+    let (recorded_body, mut request_texts) = ChunkedRequestTemplate::chunk(template);
     let (recorded_response, contract) = RecordedResponseContext::chunk(
         LlmRequestScope {
             // The attempt is each send's own.
@@ -232,32 +234,30 @@ pub fn admission_record(
         },
         &serde_json::to_string(response.contract.as_ref())?,
     );
-    texts.extend(contract);
-    if let Some(prompt) = prompt {
-        texts.extend(
-            prompt
-                .texts
-                .iter()
-                .map(|(hash, text)| (hash.clone(), text.clone())),
-        );
-    }
-    let record = AdmittedModelCall {
+    request_texts.extend(contract);
+    let request = AdmittedRequest {
         version: PromptSnapshotVersion,
-        prompt: prompt.map(|prompt| prompt.snapshot.clone()),
         body: recorded_body,
         response: recorded_response,
         deadline_ms: deadline.map(|deadline| deadline.0),
     };
-    Ok(DomainWrite::Prompt(PromptWrite::Record {
-        call,
-        snapshot: serde_json::to_string(&record)?,
-        texts: texts
+    let stored = |texts: BTreeMap<BlobRef, String>| {
+        texts
             .into_iter()
             .map(|(hash, text)| PromptText {
                 hash: hash.as_str().to_owned(),
                 text,
             })
-            .collect(),
+            .collect()
+    };
+    Ok(DomainWrite::Prompt(PromptWrite::Record {
+        call,
+        snapshot: prompt
+            .map(|prompt| serde_json::to_string(&prompt.snapshot))
+            .transpose()?,
+        request: serde_json::to_string(&request)?,
+        snapshot_texts: prompt.map_or_else(Vec::new, |prompt| stored(prompt.texts.clone())),
+        request_texts: stored(request_texts.into_iter().collect()),
     }))
 }
 
@@ -391,7 +391,8 @@ impl ResolvedPromptComposition {
     }
 }
 
-/// Why an admitted call could not be read back as it was admitted.
+/// Why an admitted call's request or snapshot could not be read back as it
+/// was admitted.
 #[derive(Debug, thiserror::Error)]
 pub enum AdmittedCallLoadError {
     #[error("admitted call read: {0}")]
@@ -426,13 +427,11 @@ impl LoadedPromptSnapshot {
     }
 }
 
-/// An admitted call, read back: its prompt snapshot, the request template
-/// every send of it fills and sends, the scope and contract every send
-/// reads its response under, and an owned call's pinned deadline.
+/// An open admitted call's request, read back: the request template every
+/// send of it fills and sends, the scope and contract every send reads its
+/// response under, and an owned call's pinned deadline.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoadedAdmittedCall {
-    /// `None` when the session registered no sections.
-    pub prompt: Option<LoadedPromptSnapshot>,
     pub template: Arc<RecordedRequestTemplate>,
     pub scope: LlmRequestScope,
     pub contract: Arc<ResponseContract>,
@@ -447,16 +446,17 @@ impl LoadedAdmittedCall {
     }
 }
 
-/// Read `call`'s admission back from `reads`: its record, every section text
-/// and literal chunk it references, each verified against its content
-/// address, and the template assembled byte for byte. No renderer, wrapper or provider
-/// builder runs. `None` when the call has no retained root.
+/// Read `call`'s request back from `reads`: its record, every literal chunk
+/// and contract chunk it references, each verified against its content
+/// address, and the template assembled byte for byte. No renderer, wrapper
+/// or provider builder runs. `None` when the call has no retained root or
+/// has settled, which released its request.
 ///
 /// # Errors
 ///
 /// [`AdmittedCallLoadError`] when the store fails, the record does not
-/// decode, a text is missing or does not match its address, the template
-/// does not assemble as recorded, or the response contract does not decode.
+/// decode, a text does not match its address, the template does not
+/// assemble as recorded, or the response contract does not decode.
 pub async fn load_admitted_call(
     reads: &dyn DurableReads,
     call: &PromptCallKey,
@@ -464,14 +464,11 @@ pub async fn load_admitted_call(
     let Some(row) = reads.prompt_snapshot(call).await? else {
         return Ok(None);
     };
-    let admitted: AdmittedModelCall = serde_json::from_str(&row.snapshot)?;
-    let mut texts = BTreeMap::new();
-    for stored in reads.prompt_texts(&row.texts).await? {
-        if PromptTextRef::of(&stored.text).blob.as_str() != stored.hash {
-            return Err(AdmittedCallLoadError::TextMismatch { hash: stored.hash });
-        }
-        texts.insert(BlobRef(stored.hash), stored.text);
-    }
+    let Some(request) = row.request else {
+        return Ok(None);
+    };
+    let admitted: AdmittedRequest = serde_json::from_str(&request)?;
+    let texts = verified_texts(reads, &row.request_texts).await?;
     let template = Arc::new(
         admitted
             .body
@@ -481,37 +478,65 @@ pub async fn load_admitted_call(
         .response
         .assemble(|blob| texts.get(blob).map(String::as_str))?;
     let contract: Arc<ResponseContract> = Arc::new(serde_json::from_str(&contract)?);
-    let prompt = match admitted.prompt {
-        Some(snapshot) => {
-            let referenced = snapshot.sections.iter().flat_map(|section| {
-                std::iter::once(&section.base)
-                    .chain(section.wraps.iter().map(|wrap| &wrap.output))
-                    .chain(std::iter::once(&section.value))
-            });
-            // The snapshot's own texts: the template's chunks share the root.
-            let mut prompt_texts = BTreeMap::new();
-            for recorded in referenced {
-                if let RecordedSectionText::Text { text } = recorded {
-                    let Some(stored) = texts.get(&text.blob) else {
-                        return Err(AdmittedCallLoadError::MissingText {
-                            hash: text.blob.as_str().to_owned(),
-                        });
-                    };
-                    prompt_texts.insert(text.blob.clone(), stored.clone());
-                }
-            }
-            Some(LoadedPromptSnapshot {
-                snapshot,
-                texts: prompt_texts,
-            })
-        }
-        None => None,
-    };
     Ok(Some(LoadedAdmittedCall {
-        prompt,
         template,
         scope: admitted.response.scope,
         contract,
         deadline: admitted.deadline_ms.map(DurableInstant),
     }))
+}
+
+/// Read `call`'s prompt snapshot back from `reads` with every text it
+/// references, each verified against its content address. No renderer or
+/// wrapper runs. It outlives the call's settlement. `None` when the call
+/// has no retained root or composed no sections.
+///
+/// # Errors
+///
+/// [`AdmittedCallLoadError`] when the store fails, the snapshot does not
+/// decode, or a text is missing or does not match its address.
+pub async fn load_prompt_snapshot(
+    reads: &dyn DurableReads,
+    call: &PromptCallKey,
+) -> Result<Option<LoadedPromptSnapshot>, AdmittedCallLoadError> {
+    let Some(row) = reads.prompt_snapshot(call).await? else {
+        return Ok(None);
+    };
+    let Some(snapshot) = row.snapshot else {
+        return Ok(None);
+    };
+    let snapshot: PromptSnapshot = serde_json::from_str(&snapshot)?;
+    let stored = verified_texts(reads, &row.snapshot_texts).await?;
+    let referenced = snapshot.sections.iter().flat_map(|section| {
+        std::iter::once(&section.base)
+            .chain(section.wraps.iter().map(|wrap| &wrap.output))
+            .chain(std::iter::once(&section.value))
+    });
+    let mut texts = BTreeMap::new();
+    for recorded in referenced {
+        if let RecordedSectionText::Text { text } = recorded {
+            let Some(found) = stored.get(&text.blob) else {
+                return Err(AdmittedCallLoadError::MissingText {
+                    hash: text.blob.as_str().to_owned(),
+                });
+            };
+            texts.insert(text.blob.clone(), found.clone());
+        }
+    }
+    Ok(Some(LoadedPromptSnapshot { snapshot, texts }))
+}
+
+/// The stored texts among `hashes`, each verified against its address.
+async fn verified_texts(
+    reads: &dyn DurableReads,
+    hashes: &[String],
+) -> Result<BTreeMap<BlobRef, String>, AdmittedCallLoadError> {
+    let mut texts = BTreeMap::new();
+    for stored in reads.prompt_texts(hashes).await? {
+        if PromptTextRef::of(&stored.text).blob.as_str() != stored.hash {
+            return Err(AdmittedCallLoadError::TextMismatch { hash: stored.hash });
+        }
+        texts.insert(BlobRef(stored.hash), stored.text);
+    }
+    Ok(texts)
 }

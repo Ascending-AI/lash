@@ -73,10 +73,10 @@ pub(super) async fn mark_until_children(
 }
 
 /// End `run`'s scope on `tx`, the transaction that ended the turn
-/// (`turn.commit` or `turn.cancel`): revoke the turn's waits, mark the
-/// first batch of its `Until` children for cancel and close the scope. When
-/// a child is left unmarked the scope is recorded as ending, for
-/// [`continue_scope_ends`].
+/// (`turn.commit` or `turn.cancel`): settle its model calls, revoke the
+/// turn's waits, mark the first batch of its `Until` children for cancel
+/// and close the scope. When a child is left unmarked the scope is recorded
+/// as ending, for [`continue_scope_ends`].
 ///
 /// A run named by a process id is that `SessionTurn` process's child turn
 /// (FIG-5208): its end resolves the process's child-session wait, which
@@ -92,6 +92,8 @@ pub async fn end_turn_scope(
     run: &TurnId,
 ) -> Result<(), DurableError> {
     let scope = ScopeKey::Turn(session.clone(), run.clone());
+    // No call of an ended turn is sent again.
+    super::phases::settle_model_calls(tx, session, run, None);
     mark_until_children(cx, tx, &scope).await?;
     waits::revoke_scope(tx, &scope);
     if let Ok(process) = crate::ProcessId::parse(run.as_str()) {

@@ -123,6 +123,10 @@ pub(super) struct ModelDone<'a> {
     /// turn has yet to commit: a held control call's round follows its
     /// siblings' (FIG-5781).
     pub(super) present: &'a mut Option<lash_core_execution::runtime::actor::round::PresentRecord>,
+    /// Whether the call that asked for the round is unsettled: the
+    /// `model.done` that admits the round settles it, and clears this
+    /// (FIG-5946).
+    pub(super) unsettled: &'a mut bool,
 }
 
 /// Run the tool round of effect `id` over `calls` to its members' outcomes,
@@ -145,6 +149,7 @@ pub(super) async fn run(
         iteration,
         answered_cell,
         present,
+        unsettled,
     } = done;
     let session = row.session.clone();
     let owner = OwnerKey::Turn(session.clone(), row.run.clone());
@@ -231,6 +236,9 @@ pub(super) async fn run(
                 phase: UnfinishedPhase::Tools { run, checkpoint },
                 iteration,
             }));
+            if *unsettled {
+                super::phases::settle_model_calls(&mut tx, &session, &row.run, None);
+            }
             let admitted: AdmittedRound = round::admit_round(
                 &mut tx,
                 &lash_core_execution::runtime::actor::waits::execution_wait_scope(cx, &owner)?,
@@ -264,6 +272,7 @@ pub(super) async fn run(
                 super::session::settle_trace_admission(candidate, &committed);
             }
             committed?;
+            *unsettled = false;
             drive.run_changes_committed(&written);
             drive.phase_committed().await;
             // The candidates are selected: their exports are discharged

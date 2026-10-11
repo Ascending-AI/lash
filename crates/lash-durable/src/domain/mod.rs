@@ -119,8 +119,9 @@ pub enum DomainWrite {
     ParkEvent(ParkEventWrite),
     /// L3s: the session's admission of its mail.
     SessionMail(SessionMailWrite),
-    /// P2 (FIG-5256): a model call's prompt snapshot root and its shared
-    /// text, and the explicit retention that releases them.
+    /// P2 (FIG-5256): a model call's root and its shared text, the
+    /// settlement that releases its request, and the explicit retention
+    /// that releases the rest.
     Prompt(PromptWrite),
 }
 
@@ -544,7 +545,8 @@ pub trait DurableReads: Send + Sync {
         limit: usize,
     ) -> Result<Vec<ParkEventRow>, DurableError>;
 
-    /// P2: `call`'s prompt snapshot, while its root is retained.
+    /// P2: `call`'s root, while it is retained: its snapshot, and its
+    /// request until the call settles.
     async fn prompt_snapshot(
         &self,
         call: &PromptCallKey,

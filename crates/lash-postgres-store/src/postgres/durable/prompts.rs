@@ -12,12 +12,15 @@
 //! that reclaims a text a concurrent record found stored fails that record's
 //! edge, and a release whose reclaim waits behind a record's edge then fails
 //! its own delete. So a record takes each text's advisory lock shared before
-//! it stores the text, and a release takes it exclusive before it reclaims,
-//! both in text order. Records never wait for each other; a reclaim waits
-//! for every open record of its texts and, in a statement after the lock,
-//! sees their edges, while a record behind a reclaim stores the text again.
-//! The lock lives in memory, not in the hot shared text rows, which is why
-//! it is preferred over locking those rows.
+//! it looks for the text, and a release (or a settlement) takes it exclusive
+//! before it reclaims, both in text order. Records never wait for each
+//! other; a reclaim waits for every open record of its texts and, in a
+//! statement after the lock, sees their edges, while a record behind a
+//! reclaim finds the text gone in a statement after its lock and binds its
+//! body again. Under the lock a record binds the bodies of only the texts
+//! it does not find (FIG-5946): what it finds stays until it commits. The
+//! lock lives in memory, not in the hot shared text rows, which is why it is
+//! preferred over locking those rows.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -28,7 +31,7 @@ use lash_durable::domain::{
 use lash_durable::{DurableError, Epoch};
 use lash_sansio::{SessionId, TurnId};
 use lash_store_sql::Dialect;
-use lash_store_sql::durable::prompts::PromptStatements;
+use lash_store_sql::durable::prompts::{PromptStatements, REQUEST_PART, SNAPSHOT_PART};
 use sqlx::PgConnection;
 
 use super::{Committing, get, sqlx_failure};
@@ -42,17 +45,44 @@ lash_store_sql::statements! {
     /// PostgreSQL issues: `unnest` is how it binds a call's texts as one
     /// list.
     struct PostgresPromptStatements @ "durable_prompt_postgres" {
+        /// Every content address in `?1` already stored.
+        held_texts = "SELECT hash FROM prompt_texts WHERE hash = ANY(?1::TEXT[])";
+
         /// Store each text `?2[i]` at content address `?1[i]`, skipping every
-        /// address already stored: the address names the bytes, so a
-        /// conflict is the same text.
+        /// address a concurrent record stored first: the address names the
+        /// bytes, so a conflict is the same text.
         insert_texts = "INSERT INTO prompt_texts (hash, text)
              SELECT hash, text FROM unnest(?1::TEXT[], ?2::TEXT[]) AS batch(hash, text)
              ON CONFLICT (hash) DO NOTHING";
 
-        /// Root every text in `?4` under call `?3` of owner `?2` in session
-        /// `?1`.
-        insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, owner, call, hash)
-             SELECT ?1, ?2, ?3, hash FROM unnest(?4::TEXT[]) AS batch(hash)";
+        /// Root text `?5[i]` under part `?4[i]` of call `?3` of owner `?2`
+        /// in session `?1`, for every `i`.
+        insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, owner, call, part, hash)
+             SELECT ?1, ?2, ?3, part, hash
+               FROM unnest(?4::TEXT[], ?5::TEXT[]) AS batch(part, hash)";
+
+        /// Settle every call of owner `?2` in session `?1` but call `?3`
+        /// (none when `?3` is null): release its request edges, its root
+        /// when the request was all it held, and otherwise its request,
+        /// returning each distinct text a released edge named. The two root
+        /// writes touch disjoint rows, and a bare root's request edges go in
+        /// the same statement, before its foreign key is checked.
+        settle = "WITH released AS (
+                 DELETE FROM prompt_snapshot_texts
+                  WHERE session_id = ?1 AND owner = ?2 AND part = 'request'
+                    AND (?3::TEXT IS NULL OR call <> ?3::TEXT)
+                 RETURNING hash
+             ), bare AS (
+                 DELETE FROM prompt_snapshots
+                  WHERE session_id = ?1 AND owner = ?2 AND snapshot IS NULL
+                    AND (?3::TEXT IS NULL OR call <> ?3::TEXT)
+             ), kept AS (
+                 UPDATE prompt_snapshots SET request = NULL
+                  WHERE session_id = ?1 AND owner = ?2
+                    AND snapshot IS NOT NULL AND request IS NOT NULL
+                    AND (?3::TEXT IS NULL OR call <> ?3::TEXT)
+             )
+             SELECT DISTINCT hash FROM released";
 
         /// Reclaim every text in `?1` no root references any more.
         reclaim_texts = "DELETE FROM prompt_texts AS stored
@@ -93,13 +123,16 @@ pub(super) async fn apply(
         PromptWrite::Record {
             call,
             snapshot,
-            texts,
+            request,
+            snapshot_texts,
+            request_texts,
         } => {
             let recorded = crate::observed_sql::query(SQL.insert_snapshot.sql())
                 .bind(call.session.as_str())
                 .bind(call.call.owner_column())
                 .bind(call.call.call_column())
-                .bind(snapshot)
+                .bind(snapshot.as_deref())
+                .bind(request)
                 .bind(commit.epoch.0)
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
@@ -111,7 +144,7 @@ pub(super) async fn apply(
             }
             // The first text under each address stands for it.
             let mut distinct = BTreeMap::new();
-            for text in texts {
+            for text in snapshot_texts.iter().chain(request_texts) {
                 distinct
                     .entry(text.hash.as_str())
                     .or_insert(text.text.as_str());
@@ -120,7 +153,6 @@ pub(super) async fn apply(
                 return Ok(());
             }
             let hashes: Vec<&str> = distinct.keys().copied().collect();
-            let bodies: Vec<&str> = distinct.values().copied().collect();
             crate::observed_sql::query(
                 connection_sql().lock_xact_shared_by_text_batch_seeded.sql(),
             )
@@ -129,26 +161,79 @@ pub(super) async fn apply(
             .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
-            crate::observed_sql::query(POSTGRES_SQL.insert_texts.sql())
-                .bind(&hashes)
-                .bind(&bodies)
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
+            // A statement after the lock: a text it finds stays until this
+            // transaction commits, so only the others' bodies are sent.
+            let held: BTreeSet<String> =
+                crate::observed_sql::query_scalar(POSTGRES_SQL.held_texts.sql())
+                    .bind(&hashes)
+                    .fetch_all(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?
+                    .into_iter()
+                    .collect();
+            let (unheld, bodies): (Vec<&str>, Vec<&str>) = distinct
+                .iter()
+                .filter(|(hash, _)| !held.contains(**hash))
+                .map(|(hash, text)| (*hash, *text))
+                .unzip();
+            if !unheld.is_empty() {
+                crate::observed_sql::query(POSTGRES_SQL.insert_texts.sql())
+                    .bind(&unheld)
+                    .bind(&bodies)
+                    .execute(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+            }
+            let (parts, edges): (Vec<&str>, Vec<&str>) =
+                edges(snapshot_texts, request_texts).into_iter().unzip();
             crate::observed_sql::query(POSTGRES_SQL.insert_edges.sql())
                 .bind(call.session.as_str())
                 .bind(call.call.owner_column())
                 .bind(call.call.call_column())
-                .bind(&hashes)
+                .bind(&parts)
+                .bind(&edges)
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
         }
+        PromptWrite::Settle { session, run, open } => {
+            settle(tx, session, run, *open).await.map_err(sqlx_failure)
+        }
         PromptWrite::Release { session, run } => release(tx, session, run.as_ref())
             .await
             .map_err(sqlx_failure),
     }
+}
+
+/// Each distinct `(part, hash)` edge of a root over `snapshot_texts` and
+/// `request_texts`.
+fn edges<'a>(
+    snapshot_texts: &'a [PromptText],
+    request_texts: &'a [PromptText],
+) -> BTreeSet<(&'static str, &'a str)> {
+    let part =
+        |part, texts: &'a [PromptText]| texts.iter().map(move |text| (part, text.hash.as_str()));
+    part(SNAPSHOT_PART, snapshot_texts)
+        .chain(part(REQUEST_PART, request_texts))
+        .collect()
+}
+
+/// Release the request of every call of turn `run` in `session` but `open`,
+/// and reclaim every text no remaining edge references.
+async fn settle(
+    tx: &mut PgConnection,
+    session: &SessionId,
+    run: &TurnId,
+    open: Option<u32>,
+) -> Result<(), sqlx::Error> {
+    let released: Vec<String> = crate::observed_sql::query_scalar(POSTGRES_SQL.settle.sql())
+        .bind(session.as_str())
+        .bind(ModelCallId::turn_owner(run))
+        .bind(open.map(|call| call.to_string()))
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await?;
+    reclaim(tx, released).await
 }
 
 /// Release every snapshot root of `session`, or of its turn `run` alone, and
@@ -188,6 +273,11 @@ pub(crate) async fn release(
             hashes
         }
     };
+    reclaim(tx, released).await
+}
+
+/// Reclaim every text among `released` no remaining edge references.
+async fn reclaim(tx: &mut PgConnection, released: Vec<String>) -> Result<(), sqlx::Error> {
     let released: Vec<String> = released
         .into_iter()
         .collect::<BTreeSet<_>>()
@@ -224,18 +314,24 @@ pub(super) async fn snapshot(
     else {
         return Ok(None);
     };
-    let texts: Vec<String> = crate::observed_sql::query_scalar(SQL.read_edges.sql())
+    let edges: Vec<(String, String)> = crate::observed_sql::query_as(SQL.read_edges.sql())
         .bind(call.session.as_str())
         .bind(call.call.owner_column())
         .bind(call.call.call_column())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
+    let (request_texts, snapshot_texts): (Vec<_>, Vec<_>) = edges
+        .into_iter()
+        .partition(|(part, _)| part == REQUEST_PART);
+    let hashes = |edges: Vec<(String, String)>| edges.into_iter().map(|(_, hash)| hash).collect();
     Ok(Some(PromptSnapshotRow {
         call: call.clone(),
         snapshot: get(&row, 0)?,
-        texts,
-        written_epoch: Epoch(get(&row, 1)?),
+        request: get(&row, 1)?,
+        snapshot_texts: hashes(snapshot_texts),
+        request_texts: hashes(request_texts),
+        written_epoch: Epoch(get(&row, 2)?),
     }))
 }
 

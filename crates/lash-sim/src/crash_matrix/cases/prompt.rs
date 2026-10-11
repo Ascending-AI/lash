@@ -262,11 +262,8 @@ impl Workload for PromptCase {
                 },
             };
             let loaded =
-                match lash_core::plugin::prompt::load_admitted_call(reads.as_ref(), &key).await {
-                    Ok(Some(lash_core::plugin::prompt::LoadedAdmittedCall {
-                        prompt: Some(loaded),
-                        ..
-                    })) => loaded,
+                match lash_core::plugin::prompt::load_prompt_snapshot(reads.as_ref(), &key).await {
+                    Ok(Some(loaded)) => loaded,
                     other => {
                         violations.push(format!("prompt snapshot: call {call} loaded {other:?}"));
                         continue;

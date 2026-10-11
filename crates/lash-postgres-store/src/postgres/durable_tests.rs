@@ -76,6 +76,12 @@ law!(
     |store, _advance| { laws::prompt_snapshot_roots_survive_phase_pruning_until_released(store) }
 );
 law!(
+    settling_a_turns_calls_releases_their_requests_and_keeps_their_snapshots,
+    |store, _advance| {
+        laws::settling_a_turns_calls_releases_their_requests_and_keeps_their_snapshots(store)
+    }
+);
+law!(
     a_node_claims_only_actors_whose_formats_it_decodes,
     |store, _advance| { laws::a_node_claims_only_actors_whose_formats_it_decodes(store) }
 );

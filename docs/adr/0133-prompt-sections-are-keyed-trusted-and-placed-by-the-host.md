@@ -26,6 +26,9 @@ before-turn decisions (§6). Request templates with live attachment slots
 (§6, WIRE-SLOTS) are on main under ADR 0135: admission records literals,
 attachment refs, acceptance and codecs, and the response contract. Each
 attempt fills slots afresh; resolved delivery values are never admitted.
+Amended by FIG-5946 (§5): a call's request lives only until the call
+settles, its snapshot until the explicit retention, and a record binds only
+the text bodies the store does not hold.
 
 ## Context
 
@@ -207,16 +210,33 @@ carries nothing.
 The snapshot is stored as an audit root, one per admitted call
 (`PromptWrite::Record`, tables `prompt_snapshots`, `prompt_texts` and
 `prompt_snapshot_texts` in both dialects' baseline). Each text is stored once
-by content address, however many calls share it. A call records once; a
-second record is refused (`DomainRefusal::PromptCallRecorded`). Ending a turn,
-which prunes its phase rows, leaves its roots. Only the explicit retention,
-`PromptWrite::Release` for a turn or a whole session, removes roots, and a
-text goes with the last root that names it. Deleting a session is that
-retention: the delete releases every root of the session in its own
-transaction (FIG-5272). On PostgreSQL a record and a release that share a
-text serialize on that text's advisory lock, shared for the record and
-exclusive for the release, so neither fails the text's foreign key and no
-recorded call loses its text.
+by content address, however many calls share it, and a record binds the
+bodies of only the texts the store does not already hold: it looks for them
+under the same text locks a release takes, so a text it finds cannot be
+reclaimed before it commits, and a text reclaimed before it looked is stored
+again from the body the record carries. A call records once; a second record
+is refused (`DomainRefusal::PromptCallRecorded`).
+
+The root has two parts with two lifetimes (FIG-5946). Its request (§6: the
+template, the response context and an owned call's deadline) is read only to
+send the call, and a call is sent only between its admission and its
+settlement. So the commit that settles a turn's calls releases their
+requests (`PromptWrite::Settle`): the commit that leaves the turn's model
+phase (`model.done`, `turn.commit`, `turn.cancel`, a refusal or a close's
+cancel), and the `model.start` that admits a call while the previous one is
+still unsettled, which keeps the new call's request. Settling a request
+removes its edges and every text no other edge names, under the same sorted
+text locks a release takes; a root that held only its request goes with it.
+The snapshot part, the audit record the host reads through
+`SessionPromptAdmin::snapshot`, outlives its call and its turn. Only the
+explicit retention, `PromptWrite::Release` for a turn or a whole session,
+removes roots, and a text goes with the last edge that names it. Deleting a
+session is that retention: the delete releases every root of the session in
+its own transaction (FIG-5272). On PostgreSQL a record, a settlement and a
+release that share a text serialize on that text's advisory lock, shared for
+the record and exclusive for the others, so none fails the text's foreign key
+and no recorded call loses its text. An owned call's (§8) request stays until
+its session's release.
 
 A root is keyed by the call's owner-scoped identity (`ModelCallId`): a turn's
 call is its run and ordinal, and an owned call (§8) is its owner's execution
@@ -225,11 +245,13 @@ the call's request template (§6): its literal text in content-addressed
 chunks of at most 32 KiB beside its section texts, each literal chunked on
 its own, and its attachment slots in order; the call's response context
 (§6): its scope, and its response contract stored by content beside the
-texts; and an owned call's pinned deadline: one `AdmittedModelCall` record. A slot records its ref, position,
-acceptance and codec, never a delivered value. `load_admitted_call` reads a
-root back with every text and chunk verified against its address, assembles
-the template byte for byte, decodes the response contract, and calls no
-renderer or provider builder.
+texts; and an owned call's pinned deadline: one `AdmittedRequest` record,
+the root's request part. A slot records its ref, position, acceptance and
+codec, never a delivered value. `load_admitted_call` reads an unsettled
+call's request back with every chunk verified against its address,
+assembles the template byte for byte, decodes the response contract, and
+calls no renderer or provider builder; `load_prompt_snapshot` reads the
+snapshot back with its section texts, before and after the call settles.
 
 ### 6. When composition runs
 

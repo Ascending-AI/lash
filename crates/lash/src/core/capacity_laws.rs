@@ -278,18 +278,48 @@ async fn facade_observation_publisher_yields_at_the_host_batch() {
 #[tokio::test]
 async fn facade_fetch_horizon_is_recorded_for_cold_resends() {
     use crate::tests::CreatedSession;
-    let core = crate::tests::explicit_ephemeral_facets(LashCore::standard_builder(
-        crate::tests::sqlite_memory_store_backend().await,
-    ))
-    .delivery_fetch_horizon(crate::attachments::DeliveryFetchHorizon { millis: 17 })
-    .serve_test_llm_profile(
+    let backend = crate::tests::sqlite_memory_store_backend().await;
+    let turn = crate::TurnId::parse("fetch-turn").unwrap();
+    // The call's request, read while the call is open: its settlement
+    // releases it.
+    let admitted = Arc::new(std::sync::Mutex::new(None));
+    let provider = {
+        let (backend, turn, admitted) = (backend.clone(), turn.clone(), Arc::clone(&admitted));
         crate::testing::TestProvider::builder()
+            .complete(move |_| {
+                let (backend, turn, admitted) =
+                    (backend.clone(), turn.clone(), Arc::clone(&admitted));
+                async move {
+                    let row = backend
+                        .durable()
+                        .prompt_snapshot(&crate::prompt::PromptCallKey {
+                            session: crate::SessionId::from("fetch-horizon"),
+                            call: crate::prompt::ModelCallId::Turn {
+                                run: turn,
+                                ordinal: 1,
+                            },
+                        })
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    *admitted.lock().unwrap() = row.request;
+                    Ok(lash_core::llm::types::LlmResponse {
+                        parts: vec![lash_core::llm::types::LlmOutputPart::Text {
+                            text: "done".to_owned(),
+                            response_meta: None,
+                        }],
+                        ..Default::default()
+                    })
+                }
+            })
             .build()
-            .into_handle(),
-        crate::tests::mock_llm_profile_spec(),
-    )
-    .build(crate::testing::runtime_lease_owner())
-    .unwrap();
+            .into_handle()
+    };
+    let core = crate::tests::explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .delivery_fetch_horizon(crate::attachments::DeliveryFetchHorizon { millis: 17 })
+        .serve_test_llm_profile(provider, crate::tests::mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .unwrap();
     let session = core
         .session("fetch-horizon".into())
         .created()
@@ -297,34 +327,25 @@ async fn facade_fetch_horizon_is_recorded_for_cold_resends() {
         .open()
         .await
         .unwrap();
-    let turn = crate::TurnId::parse("fetch-turn").unwrap();
     session
         .send(crate::TurnInput::text("hello"))
-        .id(turn.clone())
+        .id(turn)
         .output()
         .await
         .unwrap();
-    let row = core
-        .backend()
-        .durable()
-        .prompt_snapshot(&crate::prompt::PromptCallKey {
-            session: crate::SessionId::from("fetch-horizon"),
-            call: crate::prompt::ModelCallId::Turn {
-                run: turn,
-                ordinal: 1,
-            },
-        })
-        .await
+    let request = admitted
+        .lock()
         .unwrap()
-        .unwrap();
-    let mut stored: serde_json::Value = serde_json::from_str(&row.snapshot).unwrap();
+        .take()
+        .expect("the open call holds its request");
+    let mut stored: serde_json::Value = serde_json::from_str(&request).unwrap();
     assert_eq!(stored["body"]["fetch_horizon"]["millis"], 17);
     stored["body"]
         .as_object_mut()
         .unwrap()
         .remove("fetch_horizon");
     assert!(
-        serde_json::from_value::<lash_core::prompt_sections::AdmittedModelCall>(stored).is_err(),
+        serde_json::from_value::<lash_core::prompt_sections::AdmittedRequest>(stored).is_err(),
         "cold admission never invents missing slack"
     );
     core.shutdown().await.unwrap();

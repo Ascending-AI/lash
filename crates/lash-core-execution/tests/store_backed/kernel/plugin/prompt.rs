@@ -1,7 +1,8 @@
 //! SNAPSHOT (FIG-5256): an admitted call's prompt snapshot reads back from
 //! the store with every base, wrapper and final text byte for byte, and no
 //! renderer or wrapper runs to produce it. Unchanged text is shared across
-//! calls.
+//! calls. AUDIT (FIG-5946): the snapshot reads back the same once the call
+//! settled, which released its request.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use crate::plugin::prompt::{
     OfferedTools, ProjectedHistoryStats, PromptCall, PromptCatalog, PromptInput, PromptModel,
     PromptPlacement, PromptPlan, PromptPurpose, PromptRenderError, PromptSectionId,
     PromptSectionKey, PromptSectionSpec, PromptTextRef, PromptWrapKey, PromptWrapSpec,
-    PromptWrapTarget, SectionText, admission_record, load_admitted_call,
+    PromptWrapTarget, SectionText, admission_record, load_admitted_call, load_prompt_snapshot,
 };
 use crate::testing::prompt::{ComposedPrompt, PromptCut, PromptCutParts, compose, namespace};
 use crate::{PromptRegistration, SessionId};
@@ -281,7 +282,10 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
             }
         );
         assert_eq!(admitted.contract, recorded.contract);
-        let loaded = admitted.prompt.expect("the admitted call has a snapshot");
+        let loaded = load_prompt_snapshot(&reader, &call_key(call))
+            .await
+            .expect("the snapshot loads")
+            .expect("the admitted call has a snapshot");
         assert_eq!(loaded.snapshot, prompt.snapshot);
         assert_eq!(loaded.texts, prompt.texts);
         let finals = |placement| {
@@ -325,7 +329,7 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
             .expect("read the root")
             .expect("the root is retained");
         assert!(
-            row.texts.contains(&shared),
+            row.snapshot_texts.contains(&shared),
             "call {call} roots the unchanged text"
         );
     }
@@ -337,4 +341,59 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
         1,
         "the unchanged text is stored once"
     );
+
+    // The turn settles both calls: their requests go, their snapshots stay.
+    let before = [
+        load_prompt_snapshot(&reader, &call_key(1))
+            .await
+            .expect("load"),
+        load_prompt_snapshot(&reader, &call_key(2))
+            .await
+            .expect("load"),
+    ];
+    let request_texts = lash_durable::DurableReads::prompt_snapshot(&reader, &call_key(1))
+        .await
+        .expect("read the root")
+        .expect("the root is retained")
+        .request_texts;
+    let mut tx = lash_durable::DurableStore::begin(&durable, &actor, claimed[0].epoch)
+        .await
+        .expect("begin the settlement");
+    tx.write(lash_durable::DomainWrite::Prompt(
+        lash_durable::domain::PromptWrite::Settle {
+            session: SessionId::from(SESSION),
+            run: lash_sansio::TurnId::from("prompt-turn"),
+            open: None,
+        },
+    ));
+    lash_durable::DurableStore::commit(&durable, tx, CommitLabel::new("model.done"))
+        .await
+        .expect("settle both calls");
+    for call in [1, 2] {
+        assert!(
+            load_admitted_call(&reader, &call_key(call))
+                .await
+                .expect("the settled call reads")
+                .is_none(),
+            "call {call}'s request is released with its settlement"
+        );
+        assert_eq!(
+            load_prompt_snapshot(&reader, &call_key(call))
+                .await
+                .expect("the snapshot loads"),
+            before[call as usize - 1],
+            "call {call}'s snapshot reads back the same once it settled"
+        );
+    }
+    let sections: std::collections::BTreeSet<String> = composed
+        .iter()
+        .flat_map(|prompt| prompt.texts.keys().map(|hash| hash.as_str().to_owned()))
+        .collect();
+    let left: Vec<_> = lash_durable::DurableReads::prompt_texts(&reader, &request_texts)
+        .await
+        .expect("read the request texts")
+        .into_iter()
+        .filter(|text| !sections.contains(&text.hash))
+        .collect();
+    assert!(left.is_empty(), "a settled request's chunks stay: {left:?}");
 }

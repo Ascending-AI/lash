@@ -1271,7 +1271,7 @@ mod composer;
 pub use composer::{
     AdmittedCallLoadError, ComposedPrompt, LoadedAdmittedCall, LoadedPromptSnapshot,
     PROMPT_SECTION_SEPARATOR, PromptRenderPool, PromptRenderPoolConfig, admission_record,
-    load_admitted_call,
+    load_admitted_call, load_prompt_snapshot,
 };
 
 #[cfg(test)]

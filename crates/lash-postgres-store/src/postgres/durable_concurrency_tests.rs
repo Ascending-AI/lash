@@ -479,9 +479,11 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
     };
     let record = |call: PromptCallKey, hashes: &[&str]| {
         DomainWrite::Prompt(PromptWrite::Record {
-            snapshot: format!("snapshot of call {}", call.call),
+            snapshot: Some(format!("snapshot of call {}", call.call)),
+            request: format!("request of call {}", call.call),
             call,
-            texts: hashes.iter().map(|hash| text(hash)).collect(),
+            snapshot_texts: hashes.iter().map(|hash| text(hash)).collect(),
+            request_texts: Vec::new(),
         })
     };
     let release = |session: &str, run: &str| {
@@ -564,7 +566,7 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
             .await
             .expect("read the recorded root");
         assert!(
-            kept.is_some_and(|root| root.texts == [shared]),
+            kept.is_some_and(|root| root.snapshot_texts == [shared]),
             "round {round}: the recorded call lost its root"
         );
         assert_eq!(

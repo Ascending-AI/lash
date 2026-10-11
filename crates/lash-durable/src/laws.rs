@@ -52,6 +52,7 @@ pub use model_calls::a_turn_counts_the_model_calls_it_admitted;
 pub use prompts::{
     deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text,
     prompt_snapshot_roots_survive_phase_pruning_until_released,
+    settling_a_turns_calls_releases_their_requests_and_keeps_their_snapshots,
 };
 pub use session_close::a_session_close_moves_one_step_at_a_time;
 pub use turn_namespaces::a_runs_namespace_write_modes_keep_only_current_values_and_end_with_it;

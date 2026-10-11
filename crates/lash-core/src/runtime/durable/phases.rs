@@ -37,7 +37,9 @@
 use lash_durable::CommitLabel;
 use lash_durable::DomainWrite;
 use lash_durable::DurableError;
-use lash_durable::domain::{ModelCallId, PromptCallKey, RunSeq, SessionMailWrite, TurnWrite};
+use lash_durable::domain::{
+    ModelCallId, PromptCallKey, PromptWrite, RunSeq, SessionMailWrite, TurnWrite,
+};
 
 use super::head::HeadCache;
 use super::phase_root::StagedPhase;
@@ -187,6 +189,10 @@ pub async fn run_phases(
     // How many model calls the turn admitted: a new call takes the next
     // ordinal, a resend keeps its own.
     let mut calls = row.model_calls;
+    // Whether the last admitted call is unsettled, its request still held:
+    // the call a model phase pins. The commit that leaves the model phase,
+    // or admits the next call, settles it (FIG-5946).
+    let mut unsettled = row.phase.model().is_some();
     let mut outcome = None;
     // A settled round's presentation, committed with the turn's next commit.
     let mut carry: Option<lash_core_execution::runtime::actor::round::PresentRecord> = None;
@@ -323,6 +329,11 @@ pub async fn run_phases(
                     }
                     if let Some(record) = admission {
                         tx.write(record);
+                        // After the record, so a text both calls hold is
+                        // never reclaimed between them.
+                        if unsettled {
+                            settle_model_calls(&mut tx, &session, &run, Some(pin.call));
+                        }
                     }
                     tool_round::consume_answered_cell(
                         cx,
@@ -350,6 +361,7 @@ pub async fn run_phases(
                     cx.commit(tx, label).await?;
                     drive.run_changes_committed(&written);
                     drive.phase_committed().await;
+                    unsettled = true;
                     if !resent {
                         calls = pin.call;
                     }
@@ -407,6 +419,9 @@ pub async fn run_phases(
                         },
                         iteration: iteration(drive.machine()),
                     }));
+                    if std::mem::take(&mut unsettled) {
+                        settle_model_calls(&mut tx, &session, &run, None);
+                    }
                     cx.commit(tx, CommitLabel::MODEL_DONE).await?;
                     drive.run_changes_committed(&written);
                     drive.phase_committed().await;
@@ -446,6 +461,7 @@ pub async fn run_phases(
                     iteration: current,
                     answered_cell: &mut answered_cell,
                     present: &mut carry,
+                    unsettled: &mut unsettled,
                 };
                 match tool_round::run(cx, drive.as_mut(), &row, id, calls, done).await? {
                     RoundExit::Answered(present) => carry = present,
@@ -500,6 +516,9 @@ pub async fn run_phases(
                     },
                     iteration: iteration(drive.machine()),
                 }));
+                if std::mem::take(&mut unsettled) {
+                    settle_model_calls(&mut tx, &session, &run, None);
+                }
                 cx.commit(tx, CommitLabel::MODEL_DONE).await?;
                 drive.run_changes_committed(&written);
                 drive.phase_committed().await;
@@ -705,6 +724,23 @@ pub(super) async fn refuse(
     cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
     turn_trace::ended(tracing, row, traced);
     Ok(())
+}
+
+/// Settle `run`'s model calls on `tx` (FIG-5946): release the request of
+/// each but `open`, the call `tx` admits. Their snapshots stay. It belongs
+/// in every commit that leaves the turn's model phase, and in the one that
+/// admits a call after an unsettled one: no settled call is sent again.
+pub(super) fn settle_model_calls(
+    tx: &mut lash_durable::ActorTx,
+    session: &SessionId,
+    run: &TurnId,
+    open: Option<u32>,
+) {
+    tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+        session: session.clone(),
+        run: run.clone(),
+        open,
+    }));
 }
 
 /// Model call `call` of `run`, as its admission is keyed.

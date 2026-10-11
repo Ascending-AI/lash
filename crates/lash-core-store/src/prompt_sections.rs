@@ -11,9 +11,10 @@
 //! placements and wrapper chains one model call composed under. A
 //! [`PromptSnapshot`] records every section's base text, each wrapper's
 //! output and the final text, as content-addressed references. An
-//! [`AdmittedModelCall`] records a call's snapshot with its request template
-//! (FIG-5259, FIG-5445). The records are version 1. None is ever read back to
-//! recompose a request.
+//! [`AdmittedRequest`] records the request template a call sends and what
+//! reading its response needs (FIG-5259, FIG-5445), beside the call's
+//! snapshot until the call settles (FIG-5946). The records are version 1.
+//! None is ever read back to recompose a request.
 
 use std::num::NonZeroU32;
 
@@ -719,19 +720,17 @@ impl RecordedResponseContext {
     }
 }
 
-/// What one admitted model call commits (ADR 0133 §6), version 1: its
-/// prompt snapshot, its request template, what reading its response needs
-/// and, for a call no turn row pins, its deadline. A resend reads it back
-/// and sends the template with its slots filled afresh, reading the
-/// response under the recorded context; nothing recomposes or lowers the
-/// call again.
+/// What one admitted model call sends (ADR 0133 §6), version 1: its request
+/// template, what reading its response needs and, for a call no turn row
+/// pins, its deadline. A resend reads it back and sends the template with
+/// its slots filled afresh, reading the response under the recorded
+/// context; nothing recomposes or lowers the call again. It lives until the
+/// call settles (FIG-5946); the call's [`PromptSnapshot`] is recorded beside
+/// it and outlives it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AdmittedModelCall {
+pub struct AdmittedRequest {
     pub version: PromptSnapshotVersion,
-    /// The call's prompt; `None` when the session registers no sections.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<PromptSnapshot>,
     pub body: ChunkedRequestTemplate,
     pub response: RecordedResponseContext,
     /// The model-total deadline, in milliseconds on the store's clock, that

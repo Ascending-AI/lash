@@ -1,12 +1,15 @@
 //! Admitted model calls (P2, FIG-5256; P5, FIG-5259; ADR 0133 §5, §6): each
-//! admitted call's record, an audit root holding its prompt snapshot and its
-//! exact provider body, and the text it references (section texts and body
-//! chunks), stored once by content and shared across calls.
+//! admitted call's root, holding its prompt snapshot (the audit record) and
+//! its request (the exact provider body, its response context and an owned
+//! call's deadline), and the text both reference (section texts, body and
+//! contract chunks), stored once by content and shared across calls.
 //!
-//! A snapshot root outlives the turn that wrote it: ending the turn, which
-//! prunes its phase rows, leaves the root and its text in place. Only
-//! [`PromptWrite::Release`], the explicit retention, removes roots, and a
-//! text goes with the last root that references it.
+//! The two parts live apart (FIG-5946). The request is read only to send the
+//! call, so the commit that settles the call releases it
+//! ([`PromptWrite::Settle`]): its edges go, and so does every text no other
+//! edge names. The snapshot outlives the turn: only [`PromptWrite::Release`],
+//! the explicit retention, removes it, and a text goes with the last edge
+//! that references it.
 
 use lash_sansio::{SessionId, TurnId};
 
@@ -79,7 +82,8 @@ impl std::fmt::Display for ModelCallId {
     }
 }
 
-/// One section text, under the content address its owner computed.
+/// One stored text (a section text, or a chunk of a body or contract),
+/// under the content address its owner computed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptText {
     /// The text's content address.
@@ -88,15 +92,21 @@ pub struct PromptText {
     pub text: String,
 }
 
-/// One call's recorded snapshot.
+/// One call's root, as its admission recorded it, while it is retained.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptSnapshotRow {
     /// The call.
     pub call: PromptCallKey,
-    /// The snapshot, encoded by its owner.
-    pub snapshot: String,
+    /// The prompt snapshot, encoded by its owner; `None` when the call
+    /// composed no sections.
+    pub snapshot: Option<String>,
+    /// The request, encoded by its owner; `None` once the call settled.
+    pub request: Option<String>,
     /// The content address of every text the snapshot references, sorted.
-    pub texts: Vec<String>,
+    pub snapshot_texts: Vec<String>,
+    /// The content address of every text the request references, sorted;
+    /// empty once the call settled.
+    pub request_texts: Vec<String>,
     /// The epoch of the commit that recorded it.
     pub written_epoch: Epoch,
 }
@@ -104,21 +114,42 @@ pub struct PromptSnapshotRow {
 /// A prompt write inside an owner commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PromptWrite {
-    /// Record `call`'s snapshot as a root over `texts`. A text already
-    /// stored is shared, not written again. Refused with
+    /// Record `call`'s root: its `snapshot` over `snapshot_texts` and its
+    /// `request` over `request_texts`. Each text carries its body, and the
+    /// store binds only the bodies it does not already hold: a text already
+    /// stored is shared, not written or sent again. Refused with
     /// [`DomainRefusal::PromptCallRecorded`](super::DomainRefusal::PromptCallRecorded)
-    /// when the call already has a snapshot: a call composes once.
+    /// when the call already has a root: a call composes once.
     Record {
         /// The call.
         call: PromptCallKey,
-        /// The snapshot, encoded by its owner.
-        snapshot: String,
+        /// The prompt snapshot, encoded by its owner; `None` when the call
+        /// composed no sections.
+        snapshot: Option<String>,
+        /// The request, encoded by its owner.
+        request: String,
         /// Every distinct text the snapshot references.
-        texts: Vec<PromptText>,
+        snapshot_texts: Vec<PromptText>,
+        /// Every distinct text the request references.
+        request_texts: Vec<PromptText>,
     },
-    /// The explicit retention: release every snapshot root of `session`,
-    /// or of its turn `run` alone (the calls [`ModelCallId::Turn`] names),
-    /// and every text no remaining root references.
+    /// The settlement of turn `run`'s calls (FIG-5946): release the request
+    /// of each of them but `open`, the call this commit admits, with every
+    /// text no remaining edge references. A settled call's snapshot stays,
+    /// and a root with no snapshot goes with its request. It belongs in
+    /// every commit that leaves the turn's model phase, and in the one that
+    /// admits a new call: no call is resent after either.
+    Settle {
+        /// The session.
+        session: SessionId,
+        /// The turn.
+        run: TurnId,
+        /// The call this commit admits, whose request stays.
+        open: Option<u32>,
+    },
+    /// The explicit retention: release every root of `session`, or of its
+    /// turn `run` alone (the calls [`ModelCallId::Turn`] names), and every
+    /// text no remaining root references.
     Release {
         /// The session.
         session: SessionId,

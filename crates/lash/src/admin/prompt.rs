@@ -16,8 +16,10 @@ pub struct SessionPromptAdmin {
 
 impl SessionPromptAdmin {
     /// Read the retained snapshot of model call `call` in turn `run` from
-    /// this session. Call ordinals start at one. This runs no renderer or
-    /// wrapper and returns `None` when the snapshot is absent or released.
+    /// this session. Call ordinals start at one. The snapshot outlives the
+    /// call's settlement, which releases only its exact provider body. This
+    /// runs no renderer or wrapper and returns `None` when the snapshot is
+    /// absent or released.
     pub async fn snapshot(
         &self,
         run: &crate::TurnId,
@@ -31,12 +33,11 @@ impl SessionPromptAdmin {
                 ordinal: call,
             },
         };
-        lash_core::plugin::prompt::load_admitted_call(
+        lash_core::plugin::prompt::load_prompt_snapshot(
             context.parts.effect_host.backend().durable().as_ref(),
             &key,
         )
         .await
-        .map(|admitted| admitted.and_then(|admitted| admitted.prompt))
         .map_err(EmbedError::PromptSnapshotLoad)
     }
 
