@@ -48,20 +48,26 @@ fn held() -> Result<&'static Held, GraphRefusal> {
                 reason: error.to_string(),
             }
         })?;
-        let mut staging = super::graph::staging();
-        let mut manifests = BTreeMap::new();
-        for release in &releases {
-            let manifest =
-                lash_vm_runtime::stage_held_release(release.ordinal, |kind, logical| {
-                    super::graph::stage_node(&mut staging, kind, logical)
-                })?
-                .ok_or(GraphRefusal::ReleaseMismatch)?;
-            manifests.insert(release.ordinal, manifest);
-        }
+        let graph = lash_vm_broker::kernel::state::release_manifests().map_err(|error| {
+            GraphRefusal::InvalidBody {
+                kind: NodeKind::RELEASE_MANIFEST.0,
+                reason: error.to_string(),
+            }
+        })?;
+        let manifests = graph
+            .nodes
+            .keys()
+            .filter_map(|id| {
+                graph
+                    .manifests
+                    .get(&id.child_ref())
+                    .map(|manifest| (manifest.ordinal, id.child_ref()))
+            })
+            .collect();
         Ok(Held {
             releases,
             manifests,
-            nodes: staging.into_nodes(),
+            nodes: graph.nodes,
         })
     })
     .as_ref()

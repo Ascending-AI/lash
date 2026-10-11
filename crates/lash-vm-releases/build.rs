@@ -37,6 +37,13 @@ mod releases;
 #[path = "src/sealed.rs"]
 mod sealed;
 
+#[expect(
+    dead_code,
+    reason = "the build stages manifests; restore admission belongs to the runtime"
+)]
+#[path = "src/manifest.rs"]
+mod manifest;
+
 use lash_kernel_dialect::NamedLibrary;
 use lash_kernel_doc::FunctionRegistry;
 
@@ -74,7 +81,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::to_vec(&index)?,
     )?;
     std::fs::write(out.join("held_releases.json"), serde_json::to_vec(&held)?)?;
+    write_checkpoint_catalog(&out, &held)?;
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src");
+    Ok(())
+}
+
+/// Encode the immutable build catalog once, rather than in every worker.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a build script writes its OUT_DIR artifacts"
+)]
+fn write_checkpoint_catalog(
+    out: &std::path::Path,
+    held: &releases::HeldReleases,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use lash_core_store::checkpoint_graph::{
+        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody,
+    };
+    use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenWriter};
+
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let mut manifests = TokenWriter::new();
+    manifests.seq(held.retained.len() as u64);
+    for release in &held.retained {
+        let (manifest, reference) = manifest::stage_release(release, &mut |kind, logical| {
+            staging
+                .encode(NodeKind(kind), TypedBody::logical(logical))
+                .map(|id| id.child_ref())
+        })?;
+        manifests.seq(2);
+        manifests.child(reference);
+        manifest.encode(&mut manifests);
+    }
+    std::fs::write(out.join("checkpoint_manifests.bin"), manifests.into_bytes())?;
+    let mut nodes = TokenWriter::new();
+    nodes.seq(staging.nodes().len() as u64);
+    for (id, node) in staging.nodes() {
+        nodes.seq(2);
+        nodes.child(id.child_ref());
+        nodes.bytes(&node.bytes);
+    }
+    std::fs::write(out.join("checkpoint_nodes.bin"), nodes.into_bytes())?;
     Ok(())
 }

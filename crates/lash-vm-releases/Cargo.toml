@@ -26,6 +26,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [build-dependencies]
+lash-core-store = { workspace = true }
+thiserror = { workspace = true }
 blake3 = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-dialect = { workspace = true }

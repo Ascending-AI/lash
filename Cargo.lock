@@ -2747,6 +2747,7 @@ dependencies = [
  "lash-ext-date-ecma",
  "lash-ext-regex-ecma",
  "lash-ext-url-whatwg",
+ "lash-internal-core-store",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",

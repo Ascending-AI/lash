@@ -167,6 +167,14 @@ impl Service {
         if let Some(pool) = slot.as_ref() {
             return Ok(pool.clone());
         }
+        // The ready pool includes the build's immutable checkpoint catalog.
+        // Independent cells share these nodes instead of staging the library
+        // on their first park or session capture.
+        lash_vm_broker::kernel::state::release_manifests().map_err(|error| {
+            PoolError::breach(lash_vm_protocol::ProtocolBreach::Machine {
+                detail: lash_vm_protocol::Detail::new(error),
+            })
+        })?;
         let pool = WorkerPool::new(self.config.as_ref().clone())?;
         *slot = Some(pool.clone());
         Ok(pool)

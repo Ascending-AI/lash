@@ -20,7 +20,7 @@ use std::sync::Arc;
 use lash_core_store::checkpoint_graph::bodies::OwnerBinding;
 use lash_core_store::checkpoint_graph::{
     DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphDecoder, GraphRefusal,
-    GraphStaging, NodeId, NodeKind, NodeSource, StoredNode, TypedBody, check_envelope,
+    GraphStaging, NodeId, NodeKind, NodeSource, StoredNode, check_envelope,
 };
 use lash_kernel_doc::graph_tokens::{ChildRef, decode_body};
 use lash_kernel_doc::{Datum, EffectIdentity, FrozenDatum, FunctionId, FunctionRegistry};
@@ -57,9 +57,13 @@ fn staging(bound: u64) -> GraphStaging {
     GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(bound)))
 }
 
+#[cfg(test)]
 fn stage(staging: &mut GraphStaging, kind: u32, logical: &[u8]) -> Result<ChildRef, GraphRefusal> {
     staging
-        .encode(NodeKind(kind), TypedBody::logical(logical))
+        .encode(
+            NodeKind(kind),
+            lash_core_store::checkpoint_graph::TypedBody::logical(logical),
+        )
         .map(|id| id.child_ref())
 }
 
@@ -105,20 +109,44 @@ impl ReleaseGraph {
 }
 
 /// The helper releases this build holds, staged. Staging is deterministic:
-/// a parent and a worker of one build name every manifest alike.
+/// a parent and a worker of one build name every manifest alike. The build's
+/// immutable nodes are staged once per process and shared by every cell.
 ///
 /// # Errors
 ///
 /// A refusal of the graph, or the build's own releases not decoding.
 pub fn release_manifests() -> Result<ReleaseGraph, GraphStateFailure> {
-    let held = lash_vm_releases::held_releases().map_err(GraphStateFailure::Unwritable)?;
-    let mut staging = staging(u64::MAX);
+    static RELEASES: std::sync::OnceLock<Result<ReleaseGraph, GraphStateFailure>> =
+        std::sync::OnceLock::new();
+    RELEASES.get_or_init(read_release_manifests).clone()
+}
+
+fn read_release_manifests() -> Result<ReleaseGraph, GraphStateFailure> {
+    use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenReader};
+    let build_error = |error: lash_kernel_doc::graph_tokens::TokenError| {
+        GraphStateFailure::Unwritable(error.to_string())
+    };
     let manifests =
-        HeldManifests::stage(&held, |kind, logical| stage(&mut staging, kind, logical))?;
-    Ok(ReleaseGraph {
-        manifests,
-        nodes: staging.into_nodes(),
-    })
+        HeldManifests::from_staged(lash_vm_releases::CHECKPOINT_MANIFESTS).map_err(build_error)?;
+    let mut input = TokenReader::new(lash_vm_releases::CHECKPOINT_NODES);
+    let count = input.seq().map_err(build_error)?;
+    let mut nodes = BTreeMap::new();
+    for _ in 0..count {
+        input.expect_struct(2).map_err(build_error)?;
+        let id = NodeId(ChildRef::decode(&mut input).map_err(build_error)?.0);
+        let bytes = input.bytes().map_err(build_error)?;
+        check_envelope(bytes, id, &DecodeLimits::within_total(u64::MAX))?;
+        nodes.insert(
+            id,
+            EncodedNode {
+                id,
+                bytes: Arc::from(bytes),
+            },
+        );
+    }
+    input.finish().map_err(build_error)?;
+    lash_core_store::checkpoint_graph::node::register_immutable_catalog(&nodes)?;
+    Ok(ReleaseGraph { manifests, nodes })
 }
 
 /// A run's state as graph nodes: a root (a KernelWhole at a park, a
@@ -656,4 +684,40 @@ pub fn read_end_in(
         TerminalError::Frozen(refusal) => GraphStateFailure::Graph(refusal),
         other => malformed(other).into(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    /// FIG-5894: immutable build release nodes are shared by independent
+    /// cells, rather than encoding the entire helper catalog for each cell.
+    #[test]
+    fn independent_cells_share_the_builds_staged_release_nodes() {
+        let first = release_manifests().expect("the build's release graph");
+        let second = release_manifests().expect("the same build's release graph");
+        assert!(!first.nodes.is_empty());
+        assert_eq!(first.manifests.current(), second.manifests.current());
+        for (id, node) in &first.nodes {
+            assert!(
+                Arc::ptr_eq(&node.bytes, &second.nodes[id].bytes),
+                "independent cells restaged release node {id:?}"
+            );
+        }
+    }
+
+    /// Build-time preparation retains exactly the checkpoint nodes and
+    /// release identity the runtime encoder produces.
+    #[test]
+    fn the_builds_checkpoint_catalog_is_the_canonical_release_graph() {
+        let held = lash_vm_releases::held_releases().expect("the build's releases");
+        let mut staging = staging(u64::MAX);
+        let manifests =
+            HeldManifests::stage(&held, |kind, logical| stage(&mut staging, kind, logical))
+                .expect("canonical release graph");
+        let built = release_manifests().expect("the build's staged catalog");
+        assert_eq!(built.manifests, manifests);
+        assert_eq!(built.nodes, staging.into_nodes());
+    }
 }

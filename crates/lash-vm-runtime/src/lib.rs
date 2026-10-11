@@ -43,9 +43,7 @@ pub use lash_vm_library::{
 pub use lash_vm_library::{LibraryError, standard_functions};
 /// A helper release as checkpoint graph nodes: the exact manifest a run or a
 /// saved function pins (FIG-5887 §3).
-pub use lash_vm_releases::{
-    HeldManifests, ManifestFunction, ReleaseManifest, ReleaseRefusal, stage_held_release,
-};
+pub use lash_vm_releases::{HeldManifests, ManifestFunction, ReleaseManifest, ReleaseRefusal};
 pub use projection::{ProjectionCatalog, ProjectionProvider, ProjectionRefusal};
 
 /// The machine a worker hosts, as the broker drives it, and the run's

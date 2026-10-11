@@ -944,6 +944,7 @@ PACKAGE_DEPS = {
     "lash-internal-vm-releases": {
         "build": {
             "blake3": "//third-party/rust:p0032",
+            "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
@@ -953,7 +954,8 @@ PACKAGE_DEPS = {
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0320",
+            "thiserror": "//third-party/rust:p0373"
         },
         "dev": {},
         "normal": {

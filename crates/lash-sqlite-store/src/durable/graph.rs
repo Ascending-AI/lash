@@ -429,10 +429,12 @@ fn walk_within(
         if nodes.contains_key(&id) {
             continue;
         }
+        let cached = crate::conn::catalog::get(tx, id)?;
         // A reader of the graph alone records an opaque blob as opaque and
         // reads nothing of it.
         if let Some(skipped) = skipped.as_deref_mut()
             && id != root
+            && cached.is_none()
         {
             match stored_encoding(tx, &id)? {
                 Ok(Some(BlobEncoding::Opaque)) => {
@@ -443,11 +445,17 @@ fn walk_within(
                 Err(refusal) => return Ok(Err(refusal)),
             }
         }
-        let Some((bytes, encoding)) = (match stored_blob(tx, &id.to_hex())? {
-            Ok(found) => found,
-            Err(refusal) => return Ok(Err(refusal)),
-        }) else {
-            return Ok(Err(GraphRefusal::MissingNode(id)));
+        let (bytes, encoding) = match cached {
+            Some(node) => (node.bytes, BlobEncoding::Graph),
+            None => {
+                let Some((bytes, encoding)) = (match stored_blob(tx, &id.to_hex())? {
+                    Ok(found) => found,
+                    Err(refusal) => return Ok(Err(refusal)),
+                }) else {
+                    return Ok(Err(GraphRefusal::MissingNode(id)));
+                };
+                (std::sync::Arc::<[u8]>::from(bytes), encoding)
+            }
         };
         let count = nodes.len() as u64 + 1;
         total = total.saturating_add(bytes.len() as u64);
@@ -467,17 +475,14 @@ fn walk_within(
         }
         if encoding == BlobEncoding::Graph {
             match check_envelope(&bytes, id, limits) {
-                Ok(envelope) => stack.extend(envelope.children.iter()),
+                Ok(envelope) => {
+                    stack.extend(envelope.children.iter());
+                    crate::conn::catalog::remember(tx, id, &bytes)?;
+                }
                 Err(refusal) => return Ok(Err(refusal)),
             }
         }
-        nodes.insert(
-            id,
-            HydratedNode {
-                encoding,
-                bytes: bytes.into(),
-            },
-        );
+        nodes.insert(id, HydratedNode { encoding, bytes });
     }
     Ok(Ok(nodes))
 }
@@ -746,12 +751,16 @@ pub(super) fn install(
     // bytes bound as they are. An unchanged graph costs the same statements
     // at any size. A writer holds the database, so what is not stored now
     // is inserted.
-    let staged: BTreeMap<String, &lash_durable::domain::graph_commit::CheckedNode> = graph
-        .nodes
-        .iter()
-        .map(|node| (node.id.to_hex(), node))
-        .collect();
+    let mut staged = BTreeMap::new();
     let mut present = BTreeSet::new();
+    for node in &graph.nodes {
+        if crate::conn::catalog::get(tx, node.id)?.is_some_and(|stored| stored.bytes == node.bytes)
+        {
+            present.insert(node.id.to_hex());
+        } else {
+            staged.insert(node.id.to_hex(), node);
+        }
+    }
     {
         let mut statement = tx.prepare_cached(SQL.sqlite.stored_nodes.sql())?;
         let mut rows = statement.query([json_array(&staged.keys().collect::<Vec<_>>())])?;

@@ -21,7 +21,7 @@ mod releases;
 pub use declared::{RETAINED_HELPER_RELEASES, RETIRING_HELPER_RELEASES};
 pub use manifest::{
     HELPER_DEFINITION_KIND, HeldManifests, ManifestFunction, RELEASE_MANIFEST_KIND,
-    ReleaseManifest, ReleaseRefusal, stage_held_release, stage_release,
+    ReleaseManifest, ReleaseRefusal, stage_release,
 };
 pub use releases::{HeldReleases, HelperRelease, HelperReleaseIndex, ReleasedFunction};
 
@@ -48,6 +48,16 @@ pub const HELPER_RELEASE_INDEX: &[u8] =
 
 /// Every helper release the build holds, as it resolved them (`build.rs`).
 const HELD: &str = include_str!(concat!(env!("OUT_DIR"), "/held_releases.json"));
+
+/// Canonical checkpoint nodes of the build's immutable helper releases,
+/// encoded by the build as a sequence of `(digest, envelope bytes)`.
+pub const CHECKPOINT_NODES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/checkpoint_nodes.bin"));
+
+/// Exact release manifests and root refs, in retained-release order,
+/// encoded by the build beside [`CHECKPOINT_NODES`].
+pub const CHECKPOINT_MANIFESTS: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/checkpoint_manifests.bin"));
 
 /// The helper releases the build holds: the ones it retains, oldest first,
 /// the last being the release the tree builds, and the ones it retires.

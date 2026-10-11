@@ -103,6 +103,11 @@ impl<'embedding> Server<'embedding> {
         bootstrap: Bootstrap,
         embedding: &'embedding Embedding,
     ) -> Result<Self, PoolError> {
+        // A ready worker can publish and restore checkpoints without first
+        // staging its immutable helper catalog during a guest turn.
+        embedding
+            .release_manifests()
+            .map_err(|error| machine_breach(error.to_string()))?;
         let tuning = bootstrap.tuning;
         let mut server = Self {
             embedding,

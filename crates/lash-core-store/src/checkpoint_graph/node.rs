@@ -1,8 +1,9 @@
 //! The node envelope, its digest, and the generic check every reader and the
 //! collector runs (FIG-5887 §2).
 
+use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use lash_kernel_doc::graph_tokens::{
     CanonicalFault, ChildRef, RefForm, TokenEvent, TokenReader, get_varint, put_varint,
@@ -51,9 +52,11 @@ impl NodeId {
     /// The lowercase hex SQL key.
     #[must_use]
     pub fn to_hex(&self) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
         let mut text = String::with_capacity(64);
         for byte in self.0 {
-            text.push_str(&format!("{byte:02x}"));
+            text.push(char::from(HEX[usize::from(byte >> 4)]));
+            text.push(char::from(HEX[usize::from(byte & 0x0f)]));
         }
         text
     }
@@ -271,10 +274,91 @@ pub fn check_envelope<'a>(
             limit: limits.node_bytes,
         });
     }
+    if let Some(envelope) = IMMUTABLE_CATALOG
+        .get()
+        .and_then(|catalog| catalog.get(expected, bytes))
+    {
+        return Ok(envelope);
+    }
     if NodeId::of_envelope(bytes) != expected {
         return Err(GraphRefusal::HashMismatch(expected));
     }
     parse_envelope(bytes, Some(expected))
+}
+
+/// Verified framing for one finite, immutable build catalog. Runtime data
+/// never enters this table, so it cannot grow with turns or stored values.
+struct ImmutableCatalog(BTreeMap<NodeId, VerifiedEnvelope>);
+
+struct VerifiedEnvelope {
+    bytes: Arc<[u8]>,
+    kind: NodeKind,
+    children_start: usize,
+    children_len: usize,
+    body_start: usize,
+}
+
+impl ImmutableCatalog {
+    fn check(nodes: &BTreeMap<NodeId, EncodedNode>) -> Result<Self, GraphRefusal> {
+        let mut checked = BTreeMap::new();
+        for (id, node) in nodes {
+            let envelope = check_envelope(&node.bytes, *id, &DecodeLimits::within_total(u64::MAX))?;
+            checked.insert(
+                *id,
+                VerifiedEnvelope {
+                    bytes: Arc::clone(&node.bytes),
+                    kind: envelope.kind,
+                    children_start: envelope.children.0.as_ptr().addr()
+                        - node.bytes.as_ptr().addr(),
+                    children_len: envelope.children.len() * 32,
+                    body_start: node.bytes.len() - envelope.body.len(),
+                },
+            );
+        }
+        Ok(Self(checked))
+    }
+
+    fn get<'a>(&self, id: NodeId, bytes: &'a [u8]) -> Option<NodeEnvelope<'a>> {
+        let checked = self.0.get(&id)?;
+        if bytes != &*checked.bytes {
+            return None;
+        }
+        let table = &bytes[checked.children_start..checked.children_start + checked.children_len];
+        Some(NodeEnvelope {
+            kind: checked.kind,
+            children: ChildTable(table.as_chunks::<32>().0),
+            body: &bytes[checked.body_start..],
+        })
+    }
+}
+
+static IMMUTABLE_CATALOG: OnceLock<ImmutableCatalog> = OnceLock::new();
+
+/// Retains verified framing for the process's immutable build catalog.
+/// Every node is checked before installation; only byte-identical future
+/// reads reuse it. Exact byte equality proves the already-checked hash and
+/// framing; caller size limits still run on every checked read.
+///
+/// # Errors
+///
+/// Any refusal of [`check_envelope`].
+pub fn register_immutable_catalog(
+    nodes: &BTreeMap<NodeId, EncodedNode>,
+) -> Result<(), GraphRefusal> {
+    let checked = ImmutableCatalog::check(nodes)?;
+    let _ = IMMUTABLE_CATALOG.set(checked);
+    Ok(())
+}
+
+/// Shares an exact, verified member of the finite build catalog.
+/// Store caches use this to retain only immutable release data.
+#[must_use]
+pub fn immutable_catalog_node(id: NodeId, bytes: &[u8]) -> Option<EncodedNode> {
+    let checked = IMMUTABLE_CATALOG.get()?.0.get(&id)?;
+    (bytes == &*checked.bytes).then(|| EncodedNode {
+        id,
+        bytes: Arc::clone(&checked.bytes),
+    })
 }
 
 /// Parses an envelope without hashing it: magic, minimal varints, a
@@ -290,6 +374,13 @@ pub fn parse_envelope(
     bytes: &[u8],
     node: Option<NodeId>,
 ) -> Result<NodeEnvelope<'_>, GraphRefusal> {
+    if let Some(id) = node
+        && let Some(envelope) = IMMUTABLE_CATALOG
+            .get()
+            .and_then(|catalog| catalog.get(id, bytes))
+    {
+        return Ok(envelope);
+    }
     let refuse = |error| GraphRefusal::from_token(error, node, None);
     if bytes.len() < MAGIC.len() {
         return Err(if MAGIC.starts_with(bytes) {
@@ -369,4 +460,63 @@ fn check_slots(body: &[u8], children: usize, node: Option<NodeId>) -> Result<(),
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::*;
+
+    /// FIG-5894: memoized build envelopes cannot certify changed bytes under
+    /// an old digest or conceal an out-of-range child slot under a new one.
+    #[test]
+    fn a_catalog_only_reuses_byte_identical_verified_envelopes() {
+        let child = NodeId([1; 32]);
+        let bytes: Arc<[u8]> =
+            write_envelope(NodeKind::FROZEN_VALUE, &[child.0], &[0x0b, 0]).into();
+        let id = NodeId::of_envelope(&bytes);
+        let node = EncodedNode {
+            id,
+            bytes: bytes.clone(),
+        };
+        register_immutable_catalog(&BTreeMap::from([(id, node)])).unwrap();
+        let catalog = IMMUTABLE_CATALOG.get().unwrap();
+        let copied = bytes.to_vec();
+        let limits = DecodeLimits::within_total(u64::MAX);
+        let envelope = check_envelope(&copied, id, &limits).expect("identical copied bytes");
+        assert_eq!(envelope.children.iter().collect::<Vec<_>>(), vec![child]);
+        assert_eq!(envelope.body, &[0x0b, 0]);
+        assert_eq!(
+            check_envelope(
+                &copied,
+                id,
+                &DecodeLimits {
+                    node_bytes: 4,
+                    ..limits
+                }
+            )
+            .unwrap_err(),
+            GraphRefusal::DecodeLimit {
+                dimension: lash_kernel_doc::graph_tokens::DecodeDimension::NodeBytes,
+                actual: copied.len() as u64,
+                limit: 4,
+            }
+        );
+
+        let mut changed = copied;
+        *changed.last_mut().unwrap() = 1;
+        assert!(catalog.get(id, &changed).is_none());
+        assert_eq!(
+            check_envelope(&changed, id, &limits).unwrap_err(),
+            GraphRefusal::HashMismatch(id)
+        );
+        let changed_id = NodeId::of_envelope(&changed);
+        assert!(catalog.get(changed_id, &changed).is_none());
+        assert_eq!(
+            check_envelope(&changed, changed_id, &limits).unwrap_err(),
+            GraphRefusal::NonCanonical {
+                node: Some(changed_id),
+                reason: CanonicalFault::ChildSlotOutOfRange(1)
+            }
+        );
+    }
 }

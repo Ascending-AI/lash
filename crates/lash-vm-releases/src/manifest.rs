@@ -151,29 +151,6 @@ pub fn stage_release<E>(
     Ok((manifest, reference))
 }
 
-/// Stages the release the build holds under `ordinal` and returns its
-/// manifest's reference; `None` when the build holds no such release.
-///
-/// # Errors
-///
-/// The first error `stage` returns.
-///
-/// # Panics
-///
-/// When the build's own releases do not decode: a defect of the build.
-pub fn stage_held_release<E>(
-    ordinal: u32,
-    mut stage: impl FnMut(u32, &[u8]) -> Result<ChildRef, E>,
-) -> Result<Option<ChildRef>, E> {
-    #[expect(clippy::expect_used, reason = "the build's own data decodes")]
-    let held = crate::held_releases().expect("the build's helper releases decode");
-    held.retained
-        .iter()
-        .find(|release| release.ordinal == ordinal)
-        .map(|release| stage_release(release, &mut stage).map(|(_, reference)| reference))
-        .transpose()
-}
-
 /// Why a parked run's pinned release does not resume here.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ReleaseRefusal {
@@ -199,6 +176,26 @@ pub struct HeldManifests {
 }
 
 impl HeldManifests {
+    /// The manifests already staged by the build, with their exact node refs.
+    ///
+    /// # Errors
+    ///
+    /// A malformed build artifact.
+    pub fn from_staged(bytes: &[u8]) -> Result<Self, TokenError> {
+        let mut input = TokenReader::new(bytes);
+        let count = input.seq()?;
+        let mut manifests = Self::default();
+        for _ in 0..count {
+            input.expect_struct(2)?;
+            let reference = ChildRef::decode(&mut input)?;
+            let manifest = ReleaseManifest::decode(&mut input)?;
+            manifests.by_reference.insert(reference, manifest);
+            manifests.current = Some(reference);
+        }
+        input.finish()?;
+        Ok(manifests)
+    }
+
     /// Stages every retained release of `held`.
     ///
     /// # Errors
