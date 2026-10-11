@@ -45,7 +45,7 @@ impl GoogleOAuthProvider {
     /// both policies can be configured before use.
     pub fn new(tokens: Arc<dyn TokenSource>) -> Self {
         Self {
-            tokens: Arc::new(TokenGate::new(tokens, Self::PROVIDER_KIND)),
+            tokens: Arc::new(TokenGate::new(tokens, crate::GOOGLE_OAUTH_PROVIDER_KIND)),
             attachment_credential_scope: None,
             endpoint: CODE_ASSIST_ENDPOINT.to_string(),
             api_version: CODE_ASSIST_API_VERSION.to_string(),
@@ -128,7 +128,11 @@ impl GoogleOAuthProvider {
     }
 
     pub(crate) fn route_identity_for_model(&self, model: &str) -> ProviderRouteIdentity {
-        ProviderRouteIdentity::for_endpoint(Self::PROVIDER_KIND, &self.endpoint_base_url(), model)
+        ProviderRouteIdentity::for_endpoint(
+            crate::GOOGLE_OAUTH_PROVIDER_KIND,
+            &self.endpoint_base_url(),
+            model,
+        )
     }
 
     pub fn into_components(self) -> ProviderComponents {

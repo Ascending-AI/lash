@@ -454,3 +454,19 @@ fn committed_turns_page_supports_serde() {
 fn settled_outcome_status_is_public(outcome: &lash::TurnOutcome) -> lash::TurnStatus {
     lash::TurnStatus::of_outcome(outcome)
 }
+
+#[cfg(feature = "openai")]
+fn attachment_provider_kinds_are_nameable() {
+    let _acceptor = lash::provider::AttachmentAcceptor {
+        provider: lash::openai::OPENAI_COMPATIBLE_PROVIDER_KIND.into(),
+        rules: Vec::new(),
+    };
+    let _ = (
+        lash::openai::OPENAI_PROVIDER_KIND,
+        lash::openai::CODEX_PROVIDER_KIND,
+    );
+    #[cfg(feature = "anthropic")]
+    let _ = lash::anthropic::ANTHROPIC_PROVIDER_KIND;
+    #[cfg(feature = "google")]
+    let _ = lash::google::GOOGLE_OAUTH_PROVIDER_KIND;
+}

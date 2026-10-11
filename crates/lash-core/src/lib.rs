@@ -445,9 +445,10 @@ pub mod sansio {
 }
 
 pub use attachments::{
-    AttachmentGcFence, AttachmentPolicy, AttachmentReadPolicy, AttachmentReclamationPolicy,
-    AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
-    AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
+    AttachmentBlobPage, AttachmentGcFence, AttachmentPolicy, AttachmentReadPolicy,
+    AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore, AttachmentStoreError,
+    AttachmentStoreFailureClass, AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment,
+    StoredBlobRef,
 };
 pub use lash_core_execution::turn_stop_from_tool_control;
 pub use lash_sansio::llm::attachment_delivery::ProviderFileScope;

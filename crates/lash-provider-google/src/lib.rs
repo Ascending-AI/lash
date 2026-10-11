@@ -1306,3 +1306,5 @@ pub(crate) use attachment_capability_fixture::attachment_test_acceptance;
 
 // Vocabulary named by provider configuration.
 pub use lash_llm_transport::TokenPolicy;
+
+pub use provider::GOOGLE_OAUTH_PROVIDER_KIND;

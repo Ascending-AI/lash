@@ -123,6 +123,10 @@ const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
 /// stores.
 const ATTACHMENT_STORE_EXCLUSIONS: &[(&str, &str)] = &[
     (
+        "list_page",
+        "blob-byte store, compared by attachment_blob_store_differential_agrees",
+    ),
+    (
         "put",
         "blob-byte store, not a session-row store; compared by \
          attachment_blob_store_differential_agrees",

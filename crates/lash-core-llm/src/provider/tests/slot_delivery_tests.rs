@@ -311,3 +311,333 @@ async fn pending_invalidation_is_cut_at_model_total_and_seals_the_rejection() {
         }))
     );
 }
+
+fn inline_reference(bytes: &[u8]) -> lash_sansio::AttachmentRef {
+    lash_sansio::AttachmentRef {
+        id: lash_sansio::attachment::content_id(bytes),
+        media_type: lash_sansio::MediaType::parse("image/png").unwrap(),
+        byte_len: bytes.len() as u64,
+        label: None,
+        type_metadata: None,
+    }
+}
+
+#[tokio::test]
+async fn inline_deliveries_refuse_content_length_acceptance_and_budget_mismatches() {
+    use crate::provider::{AttachmentReadPolicy, InlineDeliveries};
+    let reference = inline_reference(b"abc");
+    let policy = AttachmentReadPolicy {
+        max_blob_bytes: 3,
+        max_request_bytes: 10000,
+    };
+    let slot = AttachmentSlot {
+        reference: reference.clone(),
+        accepts: ProviderAccepts {
+            bytes: true,
+            ..ProviderAccepts::NONE
+        },
+        ..slot_template().slots().next().unwrap().clone()
+    };
+    let ctx = DeliveryContext {
+        valid_through_ms: 100,
+        live_file_scope: None,
+    };
+    assert!(matches!(
+        InlineDeliveries::from_bytes([(reference.clone(), b"xyz".to_vec())], policy),
+        Err(AttachmentDeliveryError::ContentMismatch { .. })
+    ));
+    let mut bad_length = reference.clone();
+    bad_length.byte_len = 4;
+    assert!(matches!(
+        InlineDeliveries::from_bytes([(bad_length.clone(), b"abc".to_vec())], policy),
+        Err(AttachmentDeliveryError::ContentMismatch { .. })
+    ));
+    let inline = InlineDeliveries::from_bytes(
+        [
+            (reference.clone(), b"abc".to_vec()),
+            (reference.clone(), b"abc".to_vec()),
+        ],
+        policy,
+    )
+    .unwrap();
+    let delivered = inline.deliver(&[&slot, &slot], &ctx).await.unwrap();
+    assert!(Arc::ptr_eq(&delivered[0], &delivered[1]));
+    inline.invalidate(&reference, &delivered[0]).await.unwrap();
+    assert!(Arc::ptr_eq(
+        &delivered[0],
+        &inline.deliver(&[&slot], &ctx).await.unwrap()[0]
+    ));
+    let contradictory = AttachmentSlot {
+        reference: bad_length,
+        ..slot.clone()
+    };
+    assert!(matches!(
+        inline.deliver(&[&slot, &contradictory], &ctx).await,
+        Err(AttachmentDeliveryError::ContentMismatch { .. })
+    ));
+    let missing = AttachmentSlot {
+        reference: inline_reference(b"absent"),
+        ..slot.clone()
+    };
+    assert!(matches!(
+        inline.deliver(&[&missing], &ctx).await,
+        Err(AttachmentDeliveryError::Missing { .. })
+    ));
+    let url_only = AttachmentSlot {
+        accepts: ProviderAccepts {
+            url: true,
+            ..ProviderAccepts::NONE
+        },
+        ..slot.clone()
+    };
+    assert!(matches!(
+        inline.deliver(&[&url_only], &ctx).await,
+        Err(AttachmentDeliveryError::Unsupported { .. })
+    ));
+    let mut overallocated = Vec::with_capacity(100);
+    overallocated.extend_from_slice(b"abc");
+    let inline =
+        InlineDeliveries::from_bytes([(reference.clone(), overallocated)], policy).unwrap();
+    assert!(matches!(
+        inline.deliver(&[&slot], &ctx).await,
+        Err(AttachmentDeliveryError::LimitExceeded { max_bytes: 3 })
+    ));
+    // Envelope = 1024 + 24 * MIME bytes; encoding = 16 * ceil(3/3)
+    // per occurrence; retained capacity is charged once per content id.
+    let envelope = 1024 + 24 * reference.media_type.as_str().len() as u64;
+    let tight = AttachmentReadPolicy {
+        max_blob_bytes: 3,
+        max_request_bytes: 2 * (envelope + 16) + 3,
+    };
+    let inline =
+        InlineDeliveries::from_bytes([(reference.clone(), b"abc".to_vec())], tight).unwrap();
+    inline.deliver(&[&slot, &slot], &ctx).await.unwrap();
+    let short = InlineDeliveries::from_bytes(
+        [(reference, b"abc".to_vec())],
+        AttachmentReadPolicy {
+            max_request_bytes: tight.max_request_bytes - 1,
+            ..tight
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        short.deliver(&[&slot, &slot], &ctx).await,
+        Err(AttachmentDeliveryError::LimitExceeded { .. })
+    ));
+}
+
+#[tokio::test]
+async fn canonical_call_recovers_the_admitted_slots_without_a_second_backend_read() {
+    use crate::provider::{AttachmentReadPolicy, canonical_call};
+    use lash_sansio::llm::attachment_delivery::{DeliveryForms, ProviderFileScope};
+    use lash_sansio::llm::types::RequestSegment;
+    let reference = inline_reference(b"abc");
+    let scope = ProviderFileScope {
+        provider: "slots".into(),
+        endpoint: "endpoint".into(),
+        credential_scope: "account".into(),
+    };
+    let ctx = DeliveryContext {
+        valid_through_ms: 107,
+        live_file_scope: Some(scope.clone()),
+    };
+    let mut request = empty_request();
+    request.messages.push(LlmMessage::new(
+        LlmRole::User,
+        [
+            reference.clone(),
+            reference.clone(),
+            inline_reference(b"url"),
+            inline_reference(b"file"),
+        ]
+        .into_iter()
+        .map(|reference| LlmContentBlock::Attachment {
+            reference: Box::new(reference),
+        })
+        .collect(),
+    ));
+    request.attachment_acceptance = Arc::new(crate::provider::AttachmentCapabilitySnapshot {
+        revision: "admitted".into(),
+        acceptors: vec![crate::provider::AttachmentAcceptor {
+            provider: "slots".into(),
+            rules: vec![crate::provider::AttachmentAcceptanceRule {
+                positions: vec![AttachmentPosition::Message],
+                media_types: vec!["image/png".into()],
+                media_families: vec![],
+                forms: DeliveryForms {
+                    bytes: true,
+                    url: true,
+                    provider_file: true,
+                },
+            }],
+        }],
+    });
+    let template = RecordedRequestTemplate::of_request(slot_route(), &request).unwrap();
+    let mut segments = template.segments().to_vec();
+    for segment in &mut segments {
+        if let RequestSegment::Attachment { slot } = segment {
+            slot.accepts.provider_file = Some(scope.clone());
+        }
+    }
+    let template = Arc::new(
+        RecordedRequestTemplate::from_segments(slot_route(), false, None, segments.clone())
+            .unwrap(),
+    );
+    let live_values = [
+        Delivery::Bytes(b"abc".to_vec()),
+        Delivery::Bytes(b"abc".to_vec()),
+        Delivery::Url {
+            url: DeliverySecret::new("https://blob.example?secret=live".into()),
+            valid_until_ms: Some(107),
+        },
+        Delivery::ProviderFile {
+            scope: scope.clone(),
+            id: DeliverySecret::new("file-secret".into()),
+            valid_until_ms: None,
+            uploaded: false,
+        },
+    ];
+    let values = template
+        .slots()
+        .zip(&live_values)
+        .map(|(slot, value)| crate::provider::attachment_wire::canonical_slot(slot, value).unwrap())
+        .collect();
+    let body = LiveRequestBody::fill(template.clone(), values).unwrap();
+    let (decoded, deliveries) = canonical_call(
+        &body,
+        ResponseContext::of_request(&request),
+        &ctx,
+        AttachmentReadPolicy::STANDARD,
+    )
+    .unwrap();
+    assert_eq!(decoded.messages, request.messages);
+    assert_eq!(decoded.attachment_acceptance, request.attachment_acceptance);
+    let slots: Vec<_> = template.slots().collect();
+    let values = deliveries.deliver(&slots, &ctx).await.unwrap();
+    assert!(Arc::ptr_eq(&values[0], &values[1]));
+    assert!(matches!(values[0].as_ref(), Delivery::Bytes(bytes) if bytes == b"abc"));
+    assert_eq!(
+        values[2].secret().unwrap().expose(),
+        "https://blob.example?secret=live"
+    );
+    assert!(
+        matches!(values[3].as_ref(), Delivery::ProviderFile { scope: delivered, valid_until_ms: None, .. } if delivered == &scope)
+    );
+    assert!(matches!(
+        values[2].as_ref(),
+        Delivery::Url {
+            valid_until_ms: Some(107),
+            ..
+        }
+    ));
+    assert!(!format!("{deliveries:?} {body:?}").contains("file-secret"));
+    assert!(
+        deliveries
+            .deliver(
+                &slots,
+                &DeliveryContext {
+                    valid_through_ms: 108,
+                    ..ctx.clone()
+                }
+            )
+            .await
+            .is_err()
+    );
+    let mut changed = slots[0].clone();
+    changed.reference.label = Some("another reference".into());
+    assert!(
+        deliveries
+            .deliver(&[&changed, slots[1], slots[2], slots[3]], &ctx)
+            .await
+            .is_err()
+    );
+    let mut narrowed = slots[0].clone();
+    narrowed.accepts.url = false;
+    deliveries
+        .deliver(&[&narrowed, slots[1], slots[2], slots[3]], &ctx)
+        .await
+        .unwrap();
+    narrowed.accepts.bytes = false;
+    assert!(
+        deliveries
+            .deliver(&[&narrowed, slots[1], slots[2], slots[3]], &ctx)
+            .await
+            .is_err()
+    );
+    let contradictory = LiveRequestBody::fill(
+        template.clone(),
+        template
+            .slots()
+            .enumerate()
+            .map(|(index, slot)| {
+                crate::provider::attachment_wire::canonical_slot(
+                    slot,
+                    &live_values[if index == 1 { 2 } else { index }],
+                )
+                .unwrap()
+            })
+            .collect(),
+    )
+    .unwrap();
+    assert!(
+        canonical_call(
+            &contradictory,
+            ResponseContext::of_request(&request),
+            &ctx,
+            AttachmentReadPolicy::STANDARD
+        )
+        .is_err()
+    );
+    for foreign in [true, false] {
+        let mut invalid_segments = segments.clone();
+        if foreign {
+            for segment in &mut invalid_segments {
+                if let RequestSegment::Attachment { slot } = segment {
+                    slot.codec.name = "host.foreign".into();
+                }
+            }
+        }
+        let invalid_template = Arc::new(
+            RecordedRequestTemplate::from_segments(slot_route(), false, None, invalid_segments)
+                .unwrap(),
+        );
+        let invalid_values = invalid_template
+            .slots()
+            .map(|_| {
+                lash_sansio::llm::types::TransientJson::new(
+                    &serde_json::json!({"url": "secret", "extra": true}),
+                    &live_values[2],
+                )
+            })
+            .collect();
+        let invalid = LiveRequestBody::fill(invalid_template, invalid_values).unwrap();
+        let error = canonical_call(
+            &invalid,
+            ResponseContext::of_request(&request),
+            &ctx,
+            AttachmentReadPolicy::STANDARD,
+        )
+        .unwrap_err();
+        assert!(!format!("{error:?}").contains("secret"));
+    }
+    let noncanonical = LiveRequestBody::fill(
+        Arc::new(slot_template()),
+        vec![
+            crate::provider::attachment_wire::canonical_slot(
+                slot_template().slots().next().unwrap(),
+                &live_values[2],
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+    assert!(
+        canonical_call(
+            &noncanonical,
+            ResponseContext::of_request(&request),
+            &ctx,
+            AttachmentReadPolicy::STANDARD
+        )
+        .is_err()
+    );
+}

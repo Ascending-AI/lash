@@ -20,8 +20,9 @@ use std::sync::{Arc, LazyLock};
 use lash_core_execution::attachments::content_id;
 use lash_core_execution::attachments::{ContentMismatchDetail, validate_attachment_bytes};
 use lash_core_execution::{
-    AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
-    AttachmentStoreFailureClass, AttachmentStorePersistence, StoredAttachment, StoredBlobRef,
+    AttachmentBlobPage, AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore,
+    AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
+    StoredAttachment, StoredBlobRef,
 };
 use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryLimits, ProviderAccepts};
 use rusqlite::{OptionalExtension, params};
@@ -57,6 +58,10 @@ lash_store_sql::statements! {
 
         /// Every blob's identity and freshness, for the GC's listing.
         select_all_refs = "SELECT attachment_id, stored_at_ms FROM attachment_blobs";
+
+        /// Exclusive content cursor, with bounded result allocation.
+        select_page_refs = "SELECT attachment_id, stored_at_ms FROM attachment_blobs
+             WHERE attachment_id > ?1 ORDER BY attachment_id LIMIT ?2";
 
         /// Drop the bytes held under `?1`. Deleting an absent id is a no-op.
         delete_by_id = "DELETE FROM attachment_blobs WHERE attachment_id = ?1";
@@ -303,6 +308,32 @@ impl AttachmentStore for SqliteAttachmentStore {
         rows.into_iter()
             .map(|(attachment_id, stored_at_ms)| stored_blob_ref(attachment_id, stored_at_ms))
             .collect()
+    }
+
+    async fn list_page(
+        &self,
+        after: Option<&AttachmentId>,
+        limit: std::num::NonZeroU32,
+    ) -> Result<AttachmentBlobPage, AttachmentStoreError> {
+        let after = after.map_or_else(String::new, |id| id.as_str().to_owned());
+        let rows = self
+            .conn
+            .call(move |connection| {
+                let mut statement =
+                    connection.prepare_cached(attachment_blob_sql().select_page_refs.sql())?;
+                statement
+                    .query_map(params![after, i64::from(limit.get())], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+            .map_err(|error| backend_error("list page", error))?;
+        let blobs = rows
+            .into_iter()
+            .map(|(id, at)| stored_blob_ref(id, at))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(AttachmentBlobPage::from_ordered(blobs, limit))
     }
 
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {

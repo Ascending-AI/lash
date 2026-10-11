@@ -890,6 +890,8 @@ impl AttachmentCapabilitySnapshot {
             .collect()
     }
 }
+/// `provider` names the serving `Provider::kind`, an open string vocabulary,
+/// rather than a host endpoint label. Shipped providers export their kind constants.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AttachmentAcceptor {

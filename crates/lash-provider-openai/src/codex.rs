@@ -8,6 +8,9 @@
 //! `streaming` for driving a response over either transport, and `failure` for
 //! Codex error classification.
 
+/// The kind reported by this shipped provider, for attachment acceptors.
+pub const CODEX_PROVIDER_KIND: &str = "codex";
+
 mod continuation;
 mod failure;
 mod session;
@@ -100,7 +103,7 @@ impl CodexProvider {
         Self {
             attachment_credential_scope: None,
             diagnostic_limits: crate::RequestDiagnosticLimits::standard(),
-            tokens: Arc::new(TokenGate::new(tokens, "codex")),
+            tokens: Arc::new(TokenGate::new(tokens, CODEX_PROVIDER_KIND)),
             options: ProviderOptions {
                 reliability: Self::reliability(),
                 ..ProviderOptions::default()

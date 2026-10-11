@@ -364,9 +364,11 @@ PACKAGE_DEPS = {
     "lash-internal-core-store": {
         "build": {},
         "dev": {
+            "lash_core": "//crates/lash-core:lash-core",
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_core_llm": "//crates/lash-core-llm:lash-core-llm",
             "lash_render": "//crates/lash-render:lash-render",
+            "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "tokio": "//third-party/rust:p0379"
         },
         "normal": {

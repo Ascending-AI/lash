@@ -51,8 +51,11 @@ pub use options::{
     RouteBoundAboveBudget, ThinkingSummaryWire, resolve_generation_policy,
 };
 pub use rate_limit::{ProviderRateLimitPermit, ProviderRateLimiter};
-pub use slot_delivery::{AttachmentDeliveryError, NoSlotDeliveries, SlotDeliveries};
+pub use slot_delivery::{
+    AttachmentDeliveryError, AttachmentReadPolicy, CanonicalDeliveries, InlineDeliveries,
+    NoSlotDeliveries, SlotDeliveries,
+};
 pub use traits::{
     DefaultProviderFailureClassifier, GenerationRetryGuarantee, LiveCallHorizon, Provider,
-    ProviderFailureClassifier, canonical_request, is_context_overflow_text,
+    ProviderFailureClassifier, canonical_call, canonical_request, is_context_overflow_text,
 };

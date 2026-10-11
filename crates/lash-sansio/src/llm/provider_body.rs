@@ -1,6 +1,8 @@
 //! Recorded JSON literals and attachment slots; deliveries exist only while sending.
 
-use super::attachment_delivery::{AttachmentPosition, Delivery, DeliveryForms, ProviderAccepts};
+use super::attachment_delivery::{
+    AttachmentPosition, Delivery, DeliveryForms, ProviderAccepts, ProviderFileScope,
+};
 use super::types::{GenerationReceipt, LlmContentBlock, LlmRequest, ProviderRouteIdentity};
 use crate::AttachmentRef;
 use serde::{Deserialize, Serialize};
@@ -687,13 +689,40 @@ impl RequestTemplateBuilder {
 pub struct TransientJson {
     value: String,
     forms: DeliveryForms,
+    valid_until_ms: Option<u64>,
+    provider_file_scope: Option<ProviderFileScope>,
 }
 impl TransientJson {
     pub fn new(value: &serde_json::Value, delivery: &Delivery) -> Self {
         Self {
             value: value.to_string(),
             forms: delivery.forms(),
+            valid_until_ms: match delivery {
+                Delivery::Bytes(_) => None,
+                Delivery::Url { valid_until_ms, .. }
+                | Delivery::ProviderFile { valid_until_ms, .. } => *valid_until_ms,
+            },
+            provider_file_scope: match delivery {
+                Delivery::ProviderFile { scope, .. } => Some(scope.clone()),
+                _ => None,
+            },
         }
+    }
+    /// The live encoded value, for the owning codec. May contain secrets;
+    /// never record or trace it. Debug remains redacted.
+    pub fn wire_value(&self) -> &str {
+        &self.value
+    }
+    pub fn forms(&self) -> DeliveryForms {
+        self.forms
+    }
+    /// The expiry the delivered value actually declared, retained only live.
+    pub fn valid_until_ms(&self) -> Option<u64> {
+        self.valid_until_ms
+    }
+    /// The actual file namespace, rather than an inferred endpoint label.
+    pub fn provider_file_scope(&self) -> Option<&ProviderFileScope> {
+        self.provider_file_scope.as_ref()
     }
 }
 impl std::fmt::Debug for TransientJson {
@@ -723,6 +752,12 @@ impl LiveRequestBody {
     pub fn template(&self) -> &RecordedRequestTemplate {
         &self.template
     }
+    /// Each admitted slot with its live encoded value and delivery metadata.
+    /// Values may contain secrets; they have no serialized representation.
+    pub fn encoded_slots(&self) -> impl Iterator<Item = (&AttachmentSlot, &TransientJson)> {
+        self.template.slots().zip(&self.values)
+    }
+
     /// See [`RecordedRequestTemplate::canonical_request`].
     ///
     /// # Errors

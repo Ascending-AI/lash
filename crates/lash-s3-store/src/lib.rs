@@ -10,14 +10,16 @@ pub use object_store;
 use futures_util::TryStreamExt;
 use lash_core::attachments::{ContentMismatchDetail, validate_attachment_bytes};
 use lash_core::{
-    AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
-    AttachmentStoreFailureClass, AttachmentStorePersistence, StoredAttachment, StoredBlobRef,
+    AttachmentBlobPage, AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore,
+    AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
+    StoredAttachment, StoredBlobRef,
 };
 use lash_sansio::Redacted;
 use lash_sansio::llm::attachment_delivery::{
     Delivery, DeliveryLimits, DeliverySecret, ProviderAccepts,
 };
 use object_store::aws::AmazonS3Builder;
+use object_store::list::{PaginatedListOptions, PaginatedListStore};
 use object_store::path::Path;
 use object_store::signer::{Method, Signer};
 use object_store::{ObjectStore, ObjectStoreExt};
@@ -114,6 +116,7 @@ impl S3AttachmentStoreBuilder {
 #[derive(Clone)]
 pub struct S3AttachmentStore {
     store: Arc<dyn ObjectStore>,
+    pages: Option<Arc<dyn PaginatedListStore>>,
     signer: Option<Arc<dyn Signer>>,
     prefix: Option<String>,
 }
@@ -144,16 +147,26 @@ impl S3AttachmentStore {
         let signer = config
             .presigned_url_delivery
             .then(|| store.clone() as Arc<dyn Signer>);
+        // General-purpose S3 lists are ordered by key and support StartAfter.
+        // Directory buckets do neither, so retain the bounded selection there.
+        let pages = (!config.bucket.ends_with("--x-s3"))
+            .then(|| store.clone() as Arc<dyn PaginatedListStore>);
         Ok(Self {
             store,
+            pages,
             signer,
             prefix,
         })
     }
 
+    /// Bind an arbitrary object store. Its unordered listing is streamed with
+    /// bounded adapter memory to select each content page, but may visit the
+    /// remaining namespace. Configured general-purpose S3 instead uses bounded
+    /// backend requests through ListObjectsV2.
     pub fn from_object_store(store: Arc<dyn ObjectStore>, prefix: Option<String>) -> Self {
         Self {
             store,
+            pages: None,
             signer: None,
             prefix: normalize_prefix(prefix.as_deref()),
         }
@@ -167,9 +180,17 @@ impl S3AttachmentStore {
     ) -> Self {
         Self {
             store,
+            pages: None,
             signer: Some(signer),
             prefix: normalize_prefix(prefix.as_deref()),
         }
+    }
+
+    /// The object key in this store's configured namespace. Prefix normalization
+    /// and path validation are the same as `put`; this grants no authorization
+    /// and performs no signing.
+    pub fn object_key(&self, id: &AttachmentId) -> Result<String, AttachmentStoreError> {
+        Ok(self.content_path(id)?.to_string())
     }
 
     /// Flat, content-addressed key for a blob: `<prefix>/blake3/<first2>/<hash>`.
@@ -379,6 +400,92 @@ impl AttachmentStore for S3AttachmentStore {
         }
     }
 
+    async fn list_page(
+        &self,
+        after: Option<&AttachmentId>,
+        limit: std::num::NonZeroU32,
+    ) -> Result<AttachmentBlobPage, AttachmentStoreError> {
+        let prefix = self.content_prefix()?;
+        let offset = after.map(|id| self.content_path(id)).transpose()?;
+        if let Some(pages) = &self.pages {
+            // Ask the backend for only this page, including a one-object probe.
+            let max_keys = (limit.get() as usize).min(1000);
+            let page = pages
+                .list_paginated(
+                    Some(&format!("{prefix}/")),
+                    PaginatedListOptions {
+                        offset: offset.as_ref().map(ToString::to_string),
+                        max_keys: Some(max_keys),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|err| backend_error("list", err))?;
+            if page.result.objects.len() > max_keys {
+                return Err(AttachmentStoreError::Contract(
+                    "object store exceeded the requested blob page".into(),
+                ));
+            }
+            let mut blobs = page
+                .result
+                .objects
+                .into_iter()
+                .map(blob_ref)
+                .collect::<Result<Vec<_>, _>>()?;
+            blobs.sort_by(|a, b| a.id.cmp(&b.id));
+            let mut previous = after;
+            for blob in &blobs {
+                if previous.is_some_and(|previous| &blob.id <= previous) {
+                    return Err(AttachmentStoreError::Contract(
+                        "object store returned a nonexclusive blob page".into(),
+                    ));
+                }
+                previous = Some(&blob.id);
+            }
+            let next = if page.page_token.is_some() {
+                Some(
+                    blobs
+                        .last()
+                        .ok_or_else(|| {
+                            AttachmentStoreError::Contract(
+                                "object store returned an empty truncated blob page".into(),
+                            )
+                        })?
+                        .id
+                        .clone(),
+                )
+            } else {
+                None
+            };
+            return Ok(AttachmentBlobPage { blobs, next });
+        }
+        let mut stream = match &offset {
+            Some(offset) => self.store.list_with_offset(Some(&prefix), offset),
+            None => self.store.list(Some(&prefix)),
+        };
+        // ObjectStore does not promise ordering. Keep only the smallest `limit`
+        // ids in memory while streaming metadata; never collect the namespace.
+        let mut selected = std::collections::BTreeMap::new();
+        while let Some(meta) = stream
+            .try_next()
+            .await
+            .map_err(|err| backend_error("list", err))?
+        {
+            let blob = blob_ref(meta)?;
+            if after.is_some_and(|after| &blob.id <= after) {
+                continue;
+            }
+            selected.insert(blob.id.clone(), blob);
+            if selected.len() > limit.get() as usize {
+                selected.pop_last();
+            }
+        }
+        Ok(AttachmentBlobPage::from_ordered(
+            selected.into_values().collect(),
+            limit,
+        ))
+    }
+
     async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
         let prefix = self.content_prefix()?;
         let metas: Vec<object_store::ObjectMeta> = self
@@ -387,29 +494,24 @@ impl AttachmentStore for S3AttachmentStore {
             .try_collect()
             .await
             .map_err(|err| backend_error("list", err))?;
-        metas
-            .into_iter()
-            .map(|meta| {
-                let segment = meta.location.parts().next_back().ok_or_else(|| {
-                    AttachmentStoreError::Contract(
-                        "stored attachment key has no final path component".into(),
-                    )
-                })?;
-                let id = AttachmentId::parse(segment.as_ref()).map_err(|err| {
-                    AttachmentStoreError::Contract(format!(
-                        "stored attachment key `{}` is not a valid id: {err}",
-                        segment.as_ref()
-                    ))
-                })?;
-                let last_modified_epoch_ms =
-                    u64::try_from(meta.last_modified.timestamp_millis()).ok();
-                Ok(StoredBlobRef {
-                    id,
-                    last_modified_epoch_ms,
-                })
-            })
-            .collect()
+        metas.into_iter().map(blob_ref).collect()
     }
+}
+
+fn blob_ref(meta: object_store::ObjectMeta) -> Result<StoredBlobRef, AttachmentStoreError> {
+    let segment = meta.location.parts().next_back().ok_or_else(|| {
+        AttachmentStoreError::Contract("stored attachment key has no final path component".into())
+    })?;
+    let id = AttachmentId::parse(segment.as_ref()).map_err(|err| {
+        AttachmentStoreError::Contract(format!(
+            "stored attachment key `{}` is not a valid id: {err}",
+            segment.as_ref()
+        ))
+    })?;
+    Ok(StoredBlobRef {
+        id,
+        last_modified_epoch_ms: u64::try_from(meta.last_modified.timestamp_millis()).ok(),
+    })
 }
 
 async fn put_at_path(
@@ -569,6 +671,154 @@ mod tests {
     use super::*;
     use lash_conformance::ReopenableAttachmentStore;
     use object_store::aws::AmazonS3ConfigKey;
+
+    #[tokio::test]
+    async fn public_object_key_names_the_object_written_by_the_store() {
+        for prefix in [None, Some("/nested/attachments/".into())] {
+            let raw = Arc::new(object_store::memory::InMemory::new());
+            let store = S3AttachmentStore::from_object_store(raw.clone(), prefix);
+            let bytes = b"content address".to_vec();
+            let reference = store
+                .put(
+                    bytes.clone(),
+                    AttachmentCreateMeta::new(
+                        lash_core::MediaType::parse("image/png").unwrap(),
+                        None,
+                        None,
+                    ),
+                )
+                .await
+                .unwrap();
+            let key = store.object_key(&reference.id).unwrap();
+            assert_eq!(
+                raw.get(&Path::parse(key).unwrap())
+                    .await
+                    .unwrap()
+                    .bytes()
+                    .await
+                    .unwrap()
+                    .as_ref(),
+                bytes.as_slice()
+            );
+            assert_eq!(lash_core::attachments::content_id(&bytes), reference.id);
+        }
+        let store = S3AttachmentStore::from_object_store(
+            Arc::new(object_store::memory::InMemory::new()),
+            Some("bad//prefix".into()),
+        );
+        assert!(
+            store
+                .object_key(&lash_core::attachments::content_id(b"content"))
+                .is_err()
+        );
+    }
+
+    struct BoundedListDouble {
+        raw: Arc<object_store::memory::InMemory>,
+        requests: std::sync::Mutex<Vec<usize>>,
+    }
+    #[async_trait::async_trait]
+    impl PaginatedListStore for BoundedListDouble {
+        async fn list_paginated(
+            &self,
+            prefix: Option<&str>,
+            opts: PaginatedListOptions,
+        ) -> object_store::Result<object_store::list::PaginatedListResult> {
+            use futures_util::StreamExt;
+            let limit = opts.max_keys.unwrap();
+            self.requests.lock().unwrap().push(limit);
+            assert!(
+                opts.page_token.is_none(),
+                "each call uses its exclusive content cursor"
+            );
+            let prefix = prefix.map(Path::from);
+            let offset = opts.offset.map(Path::from);
+            // This double's BTreeMap-backed InMemory lists in key order.
+            let stream = match &offset {
+                Some(offset) => self.raw.list_with_offset(prefix.as_ref(), offset),
+                None => self.raw.list(prefix.as_ref()),
+            };
+            let objects: Vec<_> = stream.take(limit).try_collect().await?;
+            let page_token = (objects.len() == limit).then(|| "more".to_owned());
+            Ok(object_store::list::PaginatedListResult {
+                result: object_store::ListResult {
+                    objects,
+                    common_prefixes: vec![],
+                    extensions: Default::default(),
+                },
+                page_token,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn blob_listing_respects_limit_and_exclusive_content_cursor() {
+        let raw = Arc::new(object_store::memory::InMemory::new());
+        let bounded = Arc::new(BoundedListDouble {
+            raw: raw.clone(),
+            requests: std::sync::Mutex::new(vec![]),
+        });
+        let mut store = S3AttachmentStore::from_object_store(raw.clone(), Some("nested".into()));
+        store.pages = Some(bounded.clone());
+        let other = S3AttachmentStore::from_object_store(raw, Some("neighbor".into()));
+        let meta = || {
+            AttachmentCreateMeta::new(
+                lash_core::MediaType::parse("image/png").unwrap(),
+                None,
+                None,
+            )
+        };
+        let mut expected = Vec::new();
+        for bytes in [b"a", b"b", b"c", b"d", b"e"] {
+            expected.push(store.put(bytes.to_vec(), meta()).await.unwrap().id);
+        }
+        other.put(b"foreign".to_vec(), meta()).await.unwrap();
+        expected.sort();
+        for limit in [1, 2, 3] {
+            let mut after = None;
+            let mut visited = Vec::new();
+            loop {
+                let page = store
+                    .list_page(after.as_ref(), std::num::NonZeroU32::new(limit).unwrap())
+                    .await
+                    .unwrap();
+                assert!(page.blobs.len() <= limit as usize);
+                assert!(
+                    page.blobs
+                        .iter()
+                        .all(|blob| after.as_ref().is_none_or(|after| &blob.id > after))
+                );
+                visited.extend(page.blobs.into_iter().map(|blob| blob.id));
+                match page.next {
+                    Some(next) => after = Some(next),
+                    None => break,
+                }
+            }
+            assert_eq!(visited, expected);
+        }
+        assert_eq!(
+            *bounded.requests.lock().unwrap(),
+            [vec![1; 6], vec![2; 3], vec![3; 2]].concat()
+        );
+        let paginated = store
+            .list_page(None, std::num::NonZeroU32::new(3).unwrap())
+            .await
+            .unwrap();
+        store.pages = None;
+        let generic = store
+            .list_page(None, std::num::NonZeroU32::new(3).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(generic, paginated);
+        // Cursors are content identities, not offsets: deleting the cursor
+        // object cannot shift the next page past an existing blob.
+        store.delete(&expected[1]).await.unwrap();
+        let page = store
+            .list_page(Some(&expected[1]), std::num::NonZeroU32::MIN)
+            .await
+            .unwrap();
+        assert_eq!(page.blobs[0].id, expected[2]);
+    }
 
     #[tokio::test]
     async fn s3_attachment_delivery_read_budgets() {

@@ -1,5 +1,11 @@
 use crate::support::*;
 
+/// The kind reported by this shipped provider, for attachment acceptors.
+pub const OPENAI_COMPATIBLE_PROVIDER_KIND: &str = "openai-compatible";
+
+/// The kind reported by this shipped provider, for attachment acceptors.
+pub const OPENAI_PROVIDER_KIND: &str = "openai";
+
 impl OpenAiCompatibleProvider {
     /// A provider that sends the fixed `api_key`.
     pub fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
@@ -10,7 +16,7 @@ impl OpenAiCompatibleProvider {
     /// Uses [`ProviderOptions::standard`] and [`lash_llm_transport::TokenPolicy::standard`];
     /// both policies can be configured before use.
     pub fn with_token_source(tokens: Arc<dyn TokenSource>, base_url: impl Into<String>) -> Self {
-        Self::with_gate(tokens, "openai-compatible", base_url)
+        Self::with_gate(tokens, OPENAI_COMPATIBLE_PROVIDER_KIND, base_url)
     }
 
     /// `kind` names the provider to the token source, as `Provider::kind` does.
@@ -107,8 +113,12 @@ impl OpenAiProvider {
             ..OpenAiCompat::default()
         };
         Self {
-            inner: OpenAiCompatibleProvider::with_gate(tokens, "openai", OPENAI_BASE_URL)
-                .with_compat(compat),
+            inner: OpenAiCompatibleProvider::with_gate(
+                tokens,
+                OPENAI_PROVIDER_KIND,
+                OPENAI_BASE_URL,
+            )
+            .with_compat(compat),
         }
     }
 
@@ -181,7 +191,7 @@ impl OpenAiProvider {
 #[async_trait]
 impl Provider for OpenAiCompatibleProvider {
     fn kind(&self) -> &'static str {
-        "openai-compatible"
+        OPENAI_COMPATIBLE_PROVIDER_KIND
     }
 
     fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
@@ -270,7 +280,7 @@ impl Provider for OpenAiCompatibleProvider {
 #[async_trait]
 impl Provider for OpenAiProvider {
     fn kind(&self) -> &'static str {
-        "openai"
+        OPENAI_PROVIDER_KIND
     }
 
     fn route_identity(&self, model: &str) -> ProviderRouteIdentity {

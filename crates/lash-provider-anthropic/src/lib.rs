@@ -1359,3 +1359,5 @@ pub(crate) use attachment_capability_fixture::attachment_test_acceptance;
 
 // Vocabulary named by provider configuration.
 pub use lash_llm_transport::TokenPolicy;
+
+pub use provider::ANTHROPIC_PROVIDER_KIND;

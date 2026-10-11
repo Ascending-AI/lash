@@ -416,9 +416,10 @@ pub mod sansio {
 }
 
 pub use attachments::{
-    AttachmentGcFence, AttachmentPolicy, AttachmentReadPolicy, AttachmentReclamationPolicy,
-    AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
-    AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
+    AttachmentBlobPage, AttachmentGcFence, AttachmentPolicy, AttachmentReadPolicy,
+    AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore, AttachmentStoreError,
+    AttachmentStoreFailureClass, AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment,
+    StoredBlobRef,
 };
 pub use lash_sansio::llm::attachment_delivery::ProviderFileScope;
 pub use lash_sansio::llm::types::{

@@ -696,15 +696,15 @@ pub mod persistence {
     };
     /// Attachment ownership, retention and reclamation contracts.
     pub use lash_core::{
-        AdoptedAttachmentCondemnation, AttachmentCondemnation, AttachmentCondemnationAdoption,
-        AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
-        AttachmentCondemnationRecord, AttachmentCondemnationSettlement, AttachmentContentMismatch,
-        AttachmentDeleteArming, AttachmentDeleteStallReason, AttachmentPolicy,
-        AttachmentReadPolicy, AttachmentReclamationPolicy, AttachmentRetentionFailure,
-        AttachmentRetentionStoreFailure, AttachmentRootSet, AttachmentSettlementOutcome,
-        AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
-        AttachmentStorePersistence, AttachmentSweepGeneration, AttachmentWriteFence,
-        AttachmentWritePermit, AttachmentWriteToken, EmptyRootSetPolicy,
+        AdoptedAttachmentCondemnation, AttachmentBlobPage, AttachmentCondemnation,
+        AttachmentCondemnationAdoption, AttachmentCondemnationPhase,
+        AttachmentCondemnationProvenance, AttachmentCondemnationRecord,
+        AttachmentCondemnationSettlement, AttachmentContentMismatch, AttachmentDeleteArming,
+        AttachmentDeleteStallReason, AttachmentPolicy, AttachmentReadPolicy,
+        AttachmentReclamationPolicy, AttachmentRetentionFailure, AttachmentRetentionStoreFailure,
+        AttachmentRootSet, AttachmentSettlementOutcome, AttachmentStore, AttachmentStoreError,
+        AttachmentStoreFailureClass, AttachmentStorePersistence, AttachmentSweepGeneration,
+        AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, EmptyRootSetPolicy,
         MAX_ATTACHMENT_DELETE_ATTEMPTS, ProcessExecutionEnvStore, StoredAttachment, StoredBlobRef,
         TurnPreludeStore, attachments::AttachmentReclamationFailure,
         facade_support::AttachmentGcFence, facade_support::AttachmentReclamationReport,
@@ -1478,12 +1478,13 @@ pub mod provider {
     pub use lash_llm_transport::{ExtraHeaders, TokenPolicy};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::llm::transport::HttpFailureContext;
+    pub use lash_core::provider::{
+        AttachmentDeliveryError, AttachmentReadPolicy, CanonicalDeliveries, InlineDeliveries,
+        LiveCallHorizon, NoSlotDeliveries, SlotDeliveries,
+    };
     /// Read the request a canonical body says, for an in-process model that
     /// decides from what a call asks.
-    pub use lash_core::provider::canonical_request;
-    pub use lash_core::provider::{
-        AttachmentDeliveryError, LiveCallHorizon, NoSlotDeliveries, SlotDeliveries,
-    };
+    pub use lash_core::provider::{canonical_call, canonical_request};
     /// The admitted request template and the transient body filled for one attempt
     /// (ADR 0133 §6). Only literals, refs, acceptance and codecs are recorded.
     pub use lash_sansio::llm::types::{

@@ -9,10 +9,13 @@ use crate::policy::{
 use crate::stream::StreamState;
 use crate::support::*;
 
+/// The kind reported by this shipped provider, for attachment acceptors.
+pub const ANTHROPIC_PROVIDER_KIND: &str = "anthropic";
+
 #[async_trait]
 impl Provider for AnthropicProvider {
     fn kind(&self) -> &'static str {
-        "anthropic"
+        ANTHROPIC_PROVIDER_KIND
     }
 
     fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
@@ -201,7 +204,7 @@ impl AnthropicProvider {
         let redacted = admitted.redacted();
         emit_provider_request_trace(
             provider_trace.as_ref(),
-            "anthropic",
+            ANTHROPIC_PROVIDER_KIND,
             "messages",
             redacted.as_bytes(),
         );
@@ -333,7 +336,7 @@ impl AnthropicProvider {
             "Anthropic request timed out",
             &mut response_metadata,
             |raw| {
-                emit_provider_trace(provider_trace.as_ref(), "anthropic", raw);
+                emit_provider_trace(provider_trace.as_ref(), ANTHROPIC_PROVIDER_KIND, raw);
                 Self::process_sse_event(raw, &mut state, stream_events.as_ref(), expose_thinking)
             },
         )

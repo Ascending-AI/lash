@@ -52,6 +52,9 @@ impl LiveCallHorizon {
 /// replacement, reset, or any other recovery needed before reusing it.
 #[async_trait]
 pub trait Provider: Send + Sync + std::fmt::Debug {
+    /// The open provider-kind vocabulary used by attachment acceptors.
+    /// Hosts match this value, rather than an endpoint label. Shipped providers
+    /// export constants for the exact kinds they report.
     fn kind(&self) -> &'static str;
 
     /// Identity of the exact configured LLM Provider route serving `model`.
@@ -113,7 +116,8 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     /// stream and trace senders. An implementation that must decide from
     /// what the call asks decodes the body; an in-process model that lowers
     /// canonically reads it back with
-    /// [`LiveRequestBody::canonical_request`].
+    /// [`canonical_request`], or [`canonical_call`] when forwarding its
+    /// transient deliveries through another canonical provider.
     async fn send(
         &mut self,
         body: &LiveRequestBody,
@@ -221,6 +225,23 @@ pub fn canonical_request(
     request.stream_events = context.stream_events;
     request.provider_trace = context.provider_trace;
     Ok(request)
+}
+
+/// Decode the admitted canonical request and its three transient delivery
+/// forms together, for a provider decorator forwarding the same call. The
+/// delivery context states the forwarding hop's required horizon
+/// and live file scope; the read policy bounds retained bytes and encoding.
+/// No backend read or persistence occurs. A foreign codec, malformed value,
+/// mismatching content or unaccepted delivery refuses before forwarding.
+pub fn canonical_call(
+    body: &LiveRequestBody,
+    context: ResponseContext,
+    delivery_context: &lash_sansio::llm::attachment_delivery::DeliveryContext,
+    policy: super::AttachmentReadPolicy,
+) -> Result<(LlmRequest, super::CanonicalDeliveries), LlmTransportError> {
+    let request = canonical_request(body, context)?;
+    let deliveries = super::attachment_wire::canonical_deliveries(body, delivery_context, policy)?;
+    Ok((request, deliveries))
 }
 
 pub trait ProviderFailureClassifier: Send + Sync + std::fmt::Debug {

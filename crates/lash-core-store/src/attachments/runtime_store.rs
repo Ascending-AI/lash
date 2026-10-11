@@ -130,22 +130,7 @@ pub enum AttachmentHolder {
     Ephemeral,
     Runtime(crate::runtime_owner::RuntimeOwner),
 }
-/// Read limits, independent of put admission and retained-history policy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AttachmentReadPolicy {
-    pub max_blob_bytes: u64,
-    /// Unique retained buffer capacity plus provider encoding allowance per occurrence.
-    /// This bounds attachment payload work, not the allocator or the full prompt.
-    pub max_request_bytes: u64,
-}
-impl AttachmentReadPolicy {
-    /// The read budgets [`AttachmentPolicy::standard`] states: 32 MiB per
-    /// blob and 128 MiB per request. No measurement backs either value.
-    pub const STANDARD: Self = Self {
-        max_blob_bytes: 32 * 1024 * 1024,
-        max_request_bytes: 128 * 1024 * 1024,
-    };
-}
+pub use lash_core_llm::provider::AttachmentReadPolicy;
 
 /// What a host keeps of attachments and retained output, and how much of it
 /// one put or read may move. These are the host's decisions: lash has no

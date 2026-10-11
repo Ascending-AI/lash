@@ -45,8 +45,6 @@ impl GoogleOAuthProvider {
         })
     }
 
-    pub(crate) const PROVIDER_KIND: &'static str = "google_oauth";
-
     fn valid_text_signature(meta: &ResponseTextMeta) -> Option<String> {
         let signature = meta.provider_payload.as_deref()?.trim();
         if signature.is_empty() {
@@ -407,8 +405,11 @@ impl GoogleOAuthProvider {
     pub(crate) fn resolve_generation(
         req: &LlmRequest,
     ) -> Result<(ResolvedGenerationPolicy, Option<Value>), LlmTransportError> {
-        let policy =
-            resolve_generation_policy(req, Self::PROVIDER_KIND, &Self::generation_wire(req))?;
+        let policy = resolve_generation_policy(
+            req,
+            crate::GOOGLE_OAUTH_PROVIDER_KIND,
+            &Self::generation_wire(req),
+        )?;
         let thinking_config = Self::thinking_config(
             req.model.metadata().capability.google_dialect,
             policy.reasoning.as_ref(),

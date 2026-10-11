@@ -20,7 +20,7 @@ pub mod testing;
 #[cfg(test)]
 mod tests;
 
-pub use codex::{CodexProvider, WebSocketCachePolicy};
+pub use codex::{CODEX_PROVIDER_KIND, CodexProvider, WebSocketCachePolicy};
 pub use common::{OPENAI_BASE_URL, OPENROUTER_BASE_URL};
 pub use config::{
     OpenAiCompat, OpenAiCompatMaxTokensField, OpenAiCompatibleProvider, OpenAiProvider,
@@ -37,3 +37,5 @@ pub use lash_llm_transport::{ExtraHeaders, TokenPolicy};
 mod attachment_capability_fixture;
 #[cfg(test)]
 pub(crate) use attachment_capability_fixture::attachment_test_acceptance;
+
+pub use provider::{OPENAI_COMPATIBLE_PROVIDER_KIND, OPENAI_PROVIDER_KIND};

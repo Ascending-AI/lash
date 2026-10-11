@@ -255,7 +255,7 @@ impl CodexProvider {
         let request_body = admitted.redacted();
         emit_provider_request_trace(
             provider_trace.as_ref(),
-            "codex",
+            super::CODEX_PROVIDER_KIND,
             "responses",
             request_body.as_bytes(),
         );
@@ -394,7 +394,7 @@ impl CodexProvider {
                     ..Default::default()
                 }));
             }
-            emit_provider_trace(provider_trace.as_ref(), "codex", &raw);
+            emit_provider_trace(provider_trace.as_ref(), super::CODEX_PROVIDER_KIND, &raw);
             events_seen = true;
             let prev_usage = state.usage.clone();
             let mut emitted_parts = Vec::new();
@@ -530,7 +530,7 @@ impl CodexProvider {
             if let Some(reason) = fallback_reason {
                 emit_provider_trace(
                     call.provider_trace.as_ref(),
-                    "codex",
+                    super::CODEX_PROVIDER_KIND,
                     &json!({
                         "type": "lash.codex.websocket_fallback_skip",
                         "transport": format!("{:?}", self.transport),
@@ -583,7 +583,7 @@ impl CodexProvider {
         let body_bytes = admitted.wire().into_bytes();
         emit_provider_request_trace(
             provider_trace.as_ref(),
-            "codex",
+            super::CODEX_PROVIDER_KIND,
             "responses",
             admitted.redacted().as_bytes(),
         );
@@ -713,7 +713,7 @@ impl CodexProvider {
             .await
             .map_err(|err| Self::non_sse_body_read_error(status, content_type.as_deref(), err))?;
             response_metadata.capture_body_text(&text);
-            emit_provider_trace(provider_trace.as_ref(), "codex", &text);
+            emit_provider_trace(provider_trace.as_ref(), super::CODEX_PROVIDER_KIND, &text);
             if Self::looks_like_sse_payload(&text) {
                 let mut state = shared::ResponsesStreamState {
                     diagnostic_limits: self.diagnostic_limits,
@@ -910,7 +910,7 @@ impl CodexProvider {
             "Codex request timed out",
             &mut response_metadata,
             |raw| {
-                emit_provider_trace(provider_trace.as_ref(), "codex", raw);
+                emit_provider_trace(provider_trace.as_ref(), super::CODEX_PROVIDER_KIND, raw);
                 let prev_usage = state.usage.clone();
                 let mut emitted_parts = Vec::new();
                 shared::process_sse_event(PROVIDER, raw, &mut state, Some(&mut emitted_parts))?;
@@ -1064,7 +1064,7 @@ impl CodexProvider {
             "request_bytes": diagnostics.request_bytes,
         })
         .to_string();
-        emit_provider_trace(provider_trace, "codex", &raw);
+        emit_provider_trace(provider_trace, super::CODEX_PROVIDER_KIND, &raw);
     }
 
     fn looks_like_sse_payload(payload: &str) -> bool {
@@ -1122,7 +1122,7 @@ fn stamped_codex_failure(
 #[async_trait]
 impl Provider for CodexProvider {
     fn kind(&self) -> &'static str {
-        "codex"
+        super::CODEX_PROVIDER_KIND
     }
 
     fn route_identity(&self, model: &str) -> ProviderRouteIdentity {

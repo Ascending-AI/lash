@@ -587,6 +587,26 @@ async fn attachment_blob_store_differential_agrees() {
                 s3.delete(&id).await.unwrap();
             }
         }
+        let mut page_ids = Vec::new();
+        for store in [memory.as_ref(), file.as_ref(), &s3 as &dyn AttachmentStore] {
+            let mut ids = Vec::new();
+            let mut after = None;
+            loop {
+                let page = store
+                    .list_page(after.as_ref(), std::num::NonZeroU32::MIN)
+                    .await
+                    .unwrap();
+                assert!(page.blobs.len() <= 1);
+                ids.extend(page.blobs.into_iter().map(|blob| blob.id));
+                match page.next {
+                    Some(next) => after = Some(next),
+                    None => break,
+                }
+            }
+            page_ids.push(ids);
+        }
+        assert_eq!(page_ids[0], page_ids[1]);
+        assert_eq!(page_ids[1], page_ids[2]);
         let memory_rows = raw_sqlite_blobs(&sqlite_memory_stores.database_uri());
         let file_rows = raw_sqlite_blobs(&sqlite_file_stores.database_uri());
         let s3_rows = s3.raw_blobs_for_testing().await.unwrap();

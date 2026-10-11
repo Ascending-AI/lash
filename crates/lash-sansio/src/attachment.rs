@@ -317,6 +317,24 @@ impl AttachmentRef {
     }
 }
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_ATTACHMENT_DOMAIN_VERSION, content_id))
+const LASH_ATTACHMENT_DOMAIN_VERSION: &str = "lash-attachment/v2";
+
+#[expect(
+    clippy::expect_used,
+    reason = "a BLAKE3 hex digest is 64 lowercase hex characters, which satisfies every attachment-id rule"
+)]
+pub fn content_id(bytes: &[u8]) -> AttachmentId {
+    // A BLAKE3 hex digest is 64 lowercase hex characters — statically within
+    // every attachment-id rule, so this cannot fail.
+    AttachmentId::parse(crate::core_support::blake3_domain_hash_hex(
+        LASH_ATTACHMENT_DOMAIN_VERSION,
+        bytes,
+    ))
+    .expect("BLAKE3 hex digest is a valid attachment id")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

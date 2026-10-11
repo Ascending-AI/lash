@@ -2224,10 +2224,12 @@ name = "lash-internal-core-store"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "lash-internal-core",
  "lash-internal-core-ids",
  "lash-internal-core-llm",
  "lash-internal-render",
  "lash-internal-sansio",
+ "lash-internal-sqlite-store",
  "lash-internal-trace",
  "lash-internal-vm-protocol",
  "lash-kernel-doc",

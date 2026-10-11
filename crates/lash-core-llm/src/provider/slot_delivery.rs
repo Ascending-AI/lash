@@ -243,3 +243,239 @@ pub(super) async fn invalidate_rejected(
         }
     }
 }
+
+/// Read limits, independent of put admission and retained-history policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttachmentReadPolicy {
+    pub max_blob_bytes: u64,
+    /// Unique retained buffer capacity plus provider encoding allowance per occurrence.
+    /// This bounds attachment payload work, not the allocator or the full prompt.
+    pub max_request_bytes: u64,
+}
+impl AttachmentReadPolicy {
+    /// The read budgets the standard attachment policy states: 32 MiB per
+    /// blob and 128 MiB per request. No measurement backs either value.
+    pub const STANDARD: Self = Self {
+        max_blob_bytes: 32 * 1024 * 1024,
+        max_request_bytes: 128 * 1024 * 1024,
+    };
+}
+
+/// Immutable bytes for calls outside persistence. Construction checks every
+/// content address and length, retaining one buffer per content id. Each
+/// delivery reserves the same envelope and inline encoding costs as the host
+/// store under the explicitly supplied read policy; context supplies the live
+/// scope and validity horizon, and carries no byte budget.
+#[derive(Clone, Debug)]
+pub struct InlineDeliveries {
+    bytes: std::collections::BTreeMap<AttachmentId, Arc<Delivery>>,
+    policy: AttachmentReadPolicy,
+}
+impl InlineDeliveries {
+    pub fn from_bytes(
+        values: impl IntoIterator<Item = (AttachmentRef, Vec<u8>)>,
+        policy: AttachmentReadPolicy,
+    ) -> Result<Self, AttachmentDeliveryError> {
+        let mut bytes = std::collections::BTreeMap::new();
+        for (reference, value) in values {
+            check_bytes(&reference, &value)?;
+            bytes
+                .entry(reference.id)
+                .or_insert_with(|| Arc::new(Delivery::Bytes(value)));
+        }
+        Ok(Self { bytes, policy })
+    }
+}
+#[async_trait::async_trait]
+impl SlotDeliveries for InlineDeliveries {
+    async fn deliver(
+        &self,
+        slots: &[&AttachmentSlot],
+        ctx: &DeliveryContext,
+    ) -> Result<Vec<Arc<Delivery>>, AttachmentDeliveryError> {
+        let values = slots
+            .iter()
+            .map(|slot| {
+                self.bytes.get(&slot.reference.id).cloned().ok_or_else(|| {
+                    AttachmentDeliveryError::Missing {
+                        id: slot.reference.id.clone(),
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        validate_deliveries(slots, &values, ctx, self.policy)?;
+        Ok(values)
+    }
+    async fn invalidate(
+        &self,
+        _: &AttachmentRef,
+        _: &Delivery,
+    ) -> Result<(), AttachmentDeliveryError> {
+        Ok(())
+    }
+}
+
+pub(super) fn check_bytes(
+    reference: &AttachmentRef,
+    bytes: &[u8],
+) -> Result<(), AttachmentDeliveryError> {
+    if bytes.len() as u64 != reference.byte_len
+        || lash_sansio::attachment::content_id(bytes) != reference.id
+    {
+        return Err(AttachmentDeliveryError::ContentMismatch {
+            id: reference.id.clone(),
+        });
+    }
+    Ok(())
+}
+
+pub(super) fn validate_deliveries(
+    slots: &[&AttachmentSlot],
+    values: &[Arc<Delivery>],
+    ctx: &DeliveryContext,
+    policy: AttachmentReadPolicy,
+) -> Result<(), AttachmentDeliveryError> {
+    let refuse = || AttachmentDeliveryError::LimitExceeded {
+        max_bytes: policy.max_request_bytes,
+    };
+    let mut remaining = policy.max_request_bytes;
+    let mut seen = std::collections::HashSet::new();
+    // Reserve every occurrence's envelope before inspecting payloads.
+    for slot in slots {
+        let metadata = (slot.reference.media_type.as_str().len() as u64)
+            .checked_add(
+                slot.reference
+                    .label
+                    .as_ref()
+                    .map_or(0, |label| label.len() as u64),
+            )
+            .ok_or_else(refuse)?;
+        let overhead = metadata
+            .checked_mul(24)
+            .and_then(|n| n.checked_add(1024))
+            .ok_or_else(refuse)?;
+        remaining = remaining.checked_sub(overhead).ok_or_else(refuse)?;
+    }
+    for (slot, value) in slots.iter().zip(values) {
+        let reference = &slot.reference;
+        if !slot
+            .accepts
+            .narrowed_to_live_scope(ctx.live_file_scope.as_ref())
+            .allows(value)
+        {
+            return Err(AttachmentDeliveryError::Unsupported {
+                id: reference.id.clone(),
+            });
+        }
+        let unique = seen.insert(Arc::as_ptr(value));
+        let cost = match value.as_ref() {
+            Delivery::Bytes(bytes) => {
+                check_bytes(reference, bytes)?;
+                if bytes.capacity() as u64 > policy.max_blob_bytes {
+                    return Err(AttachmentDeliveryError::LimitExceeded {
+                        max_bytes: policy.max_blob_bytes,
+                    });
+                }
+                reference
+                    .byte_len
+                    .checked_add(2)
+                    .and_then(|n| n.checked_div(3))
+                    .and_then(|n| n.checked_mul(16))
+                    .and_then(|n| n.checked_add(if unique { bytes.capacity() as u64 } else { 0 }))
+                    .ok_or_else(refuse)?
+            }
+            Delivery::Url {
+                url,
+                valid_until_ms,
+            } => {
+                check_horizon(reference, *valid_until_ms, ctx)?;
+                (url.len() as u64).checked_mul(24).ok_or_else(refuse)?
+            }
+            Delivery::ProviderFile {
+                id,
+                valid_until_ms,
+                uploaded,
+                ..
+            } => {
+                check_horizon(reference, *valid_until_ms, ctx)?;
+                let scratch = if unique && *uploaded {
+                    reference.byte_len
+                } else {
+                    0
+                };
+                if scratch > policy.max_blob_bytes {
+                    return Err(AttachmentDeliveryError::LimitExceeded {
+                        max_bytes: policy.max_blob_bytes,
+                    });
+                }
+                (id.len() as u64)
+                    .checked_mul(24)
+                    .and_then(|n| n.checked_add(scratch))
+                    .ok_or_else(refuse)?
+            }
+        };
+        remaining = remaining.checked_sub(cost).ok_or_else(refuse)?;
+    }
+    Ok(())
+}
+fn check_horizon(
+    reference: &AttachmentRef,
+    expiry: Option<u64>,
+    ctx: &DeliveryContext,
+) -> Result<(), AttachmentDeliveryError> {
+    if expiry.is_some_and(|expiry| expiry < ctx.valid_through_ms) {
+        Err(AttachmentDeliveryError::Refused {
+            id: reference.id.clone(),
+        })
+    } else {
+        Ok(())
+    }
+}
+
+/// Deliveries recovered from one canonical attempt. They serve only the
+/// admitted references and positions, checking both the admitted acceptance
+/// and the forwarding slot's effective acceptance. They preserve each
+/// delivered value's expiry and file scope. Secrets have no serialized representation.
+#[derive(Clone, Debug)]
+pub struct CanonicalDeliveries {
+    pub(super) slots: Vec<AttachmentSlot>,
+    pub(super) values: Vec<Arc<Delivery>>,
+    pub(super) policy: AttachmentReadPolicy,
+}
+#[async_trait::async_trait]
+impl SlotDeliveries for CanonicalDeliveries {
+    async fn deliver(
+        &self,
+        slots: &[&AttachmentSlot],
+        ctx: &DeliveryContext,
+    ) -> Result<Vec<Arc<Delivery>>, AttachmentDeliveryError> {
+        if slots.len() != self.slots.len() {
+            return Err(AttachmentDeliveryError::Unavailable {
+                retryable: false,
+                message: "canonical slot count differs".into(),
+            });
+        }
+        for ((slot, admitted), delivery) in slots.iter().zip(&self.slots).zip(&self.values) {
+            if slot.reference != admitted.reference
+                || slot.position != admitted.position
+                || !admitted
+                    .accepts
+                    .narrowed_to_live_scope(ctx.live_file_scope.as_ref())
+                    .allows(delivery)
+            {
+                return Err(AttachmentDeliveryError::Refused {
+                    id: slot.reference.id.clone(),
+                });
+            }
+        }
+        validate_deliveries(slots, &self.values, ctx, self.policy)?;
+        Ok(self.values.clone())
+    }
+    async fn invalidate(
+        &self,
+        _: &AttachmentRef,
+        _: &Delivery,
+    ) -> Result<(), AttachmentDeliveryError> {
+        Ok(())
+    }
+}

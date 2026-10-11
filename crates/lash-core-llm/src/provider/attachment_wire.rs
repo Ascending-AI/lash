@@ -137,3 +137,117 @@ pub fn canonical_slot(
     };
     Ok(TransientJson::new(&value, delivery))
 }
+
+/// Recover the canonical codec's transient values from the supplied wire,
+/// without asking an attachment backend again. Errors never contain live values.
+pub(super) fn canonical_deliveries(
+    body: &LiveRequestBody,
+    context: &lash_sansio::llm::attachment_delivery::DeliveryContext,
+    policy: super::AttachmentReadPolicy,
+) -> Result<super::CanonicalDeliveries, LlmTransportError> {
+    use base64::Engine;
+    use lash_sansio::llm::attachment_delivery::DeliverySecret;
+    use std::sync::Arc;
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Encoded {
+        Bytes(Bytes),
+        Url(Url),
+        File(File),
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Bytes {
+        bytes_base64: String,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Url {
+        url: String,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct File {
+        provider_file: String,
+    }
+    let malformed = || template_error("malformed canonical attachment delivery");
+    let mut slots = Vec::new();
+    let mut values: Vec<Arc<Delivery>> = Vec::new();
+    let mut encodings: Vec<String> = Vec::new();
+    for (slot, encoded_value) in body.encoded_slots() {
+        check_codec(slot, "lash.canonical")?;
+        let spelling = encoded_value.wire_value();
+        let encoded: Encoded = serde_json::from_str(spelling).map_err(|_| malformed())?;
+        let value = match encoded {
+            Encoded::Bytes(bytes) => Delivery::Bytes(
+                base64::engine::general_purpose::STANDARD
+                    .decode(bytes.bytes_base64)
+                    .map_err(|_| malformed())?,
+            ),
+            Encoded::Url(url) => Delivery::Url {
+                url: DeliverySecret::new(url.url),
+                valid_until_ms: encoded_value.valid_until_ms(),
+            },
+            Encoded::File(file) => Delivery::ProviderFile {
+                scope: encoded_value
+                    .provider_file_scope()
+                    .cloned()
+                    .ok_or_else(malformed)?,
+                id: DeliverySecret::new(file.provider_file),
+                valid_until_ms: encoded_value.valid_until_ms(),
+                // This forwarding hop did no upload and read no scratch bytes.
+                uploaded: false,
+            },
+        };
+        if encoded_value.forms() != value.forms() {
+            return Err(malformed());
+        }
+        // The SlotDeliveries grouping rule also applies to the decoded
+        // body: a repeated group cannot contradict its value or validity.
+        let accepts = slot
+            .accepts
+            .narrowed_to_live_scope(context.live_file_scope.as_ref());
+        let shared = slots.iter().position(|prior: &AttachmentSlot| {
+            prior.reference.id == slot.reference.id
+                && prior.reference.media_type == slot.reference.media_type
+                && prior
+                    .accepts
+                    .narrowed_to_live_scope(context.live_file_scope.as_ref())
+                    == accepts
+        });
+        if let Some(index) = shared {
+            if slots[index].reference.byte_len != slot.reference.byte_len {
+                return Err(super::AttachmentDeliveryError::ContentMismatch {
+                    id: slot.reference.id.clone(),
+                }
+                .into_transport_error());
+            }
+            let expiry = match values[index].as_ref() {
+                Delivery::Bytes(_) => None,
+                Delivery::Url { valid_until_ms, .. }
+                | Delivery::ProviderFile { valid_until_ms, .. } => *valid_until_ms,
+            };
+            let scope = match values[index].as_ref() {
+                Delivery::ProviderFile { scope, .. } => Some(scope),
+                _ => None,
+            };
+            if encodings[index] != spelling
+                || expiry != encoded_value.valid_until_ms()
+                || scope != encoded_value.provider_file_scope()
+            {
+                return Err(malformed());
+            }
+        }
+        values.push(shared.map_or_else(|| Arc::new(value), |index| values[index].clone()));
+        slots.push(slot.clone());
+        encodings.push(spelling.to_owned());
+    }
+    let refs: Vec<_> = slots.iter().collect();
+    super::slot_delivery::validate_deliveries(&refs, &values, context, policy)
+        .map_err(super::AttachmentDeliveryError::into_transport_error)?;
+    Ok(super::CanonicalDeliveries {
+        slots,
+        values,
+        policy,
+    })
+}

@@ -3,6 +3,10 @@
 //! admitted body, the request/stream executor, and project-id resolution.
 
 use crate::support::*;
+
+/// The kind reported by this shipped provider, for attachment acceptors.
+pub const GOOGLE_OAUTH_PROVIDER_KIND: &str = "google_oauth";
+
 use std::sync::Arc;
 
 /// How to read one response, fixed by the request before any I/O: whether
@@ -532,7 +536,7 @@ impl GoogleOAuthProvider {
 #[async_trait]
 impl Provider for GoogleOAuthProvider {
     fn kind(&self) -> &'static str {
-        "google_oauth"
+        GOOGLE_OAUTH_PROVIDER_KIND
     }
 
     fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
