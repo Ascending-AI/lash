@@ -271,8 +271,11 @@ pub(super) enum Refusal {
     Occupied,
     Collision,
     Command(lash_core_execution::BatchId),
-    Input(lash_core_execution::InputId),
-    Batch(lash_core_execution::BatchId),
+    /// An ingress settlement always names the run that planned it.
+    Ingress {
+        run: lash_core_execution::TurnId,
+        row: lash_core_execution::store::IngressRowId,
+    },
     SessionEnded,
     Attachment(lash_core_execution::AttachmentId),
 }
@@ -965,7 +968,10 @@ fn settle_ingress(
         for input in &completion.input_ids {
             program.push(
                 settle_input(input, completed),
-                Refusal::Input(input.clone()),
+                Refusal::Ingress {
+                    run: ingress.run.clone(),
+                    row: IngressRowId::Input(input.clone()),
+                },
             );
         }
     }
@@ -973,7 +979,10 @@ fn settle_ingress(
         for batch in &completion.batch_ids {
             program.push(
                 settle_batch(batch, IngressTerminalCause::Delivered),
-                Refusal::Batch(batch.clone()),
+                Refusal::Ingress {
+                    run: ingress.run.clone(),
+                    row: IngressRowId::Batch(batch.clone()),
+                },
             );
         }
     }
@@ -996,9 +1005,9 @@ fn settle_ingress(
                 settle_batch(batch, IngressTerminalCause::Cancelled)
             }
         };
-        let refusal = match &released.row {
-            IngressRowId::Input(input) => Refusal::Input(input.clone()),
-            IngressRowId::Batch(batch) => Refusal::Batch(batch.clone()),
+        let refusal = Refusal::Ingress {
+            run: ingress.run.clone(),
+            row: released.row.clone(),
         };
         program.push(step, refusal);
     }
@@ -1327,33 +1336,8 @@ pub(super) async fn classify(
         Refusal::Command(batch) => {
             crate::runtime_persistence::command_refusal_tx(tx, session, batch).await
         }
-        Refusal::Input(input) => {
-            let run = commit
-                .ingress
-                .as_ref()
-                .map(|ingress| ingress.run.clone())
-                .unwrap_or_else(|| lash_core_execution::TurnId::from(""));
-            crate::runtime_persistence::ingress_refusal_tx(
-                tx,
-                session,
-                &run,
-                &lash_core_execution::store::IngressRowId::Input(input.clone()),
-            )
-            .await
-        }
-        Refusal::Batch(batch) => {
-            let run = commit
-                .ingress
-                .as_ref()
-                .map(|ingress| ingress.run.clone())
-                .unwrap_or_else(|| lash_core_execution::TurnId::from(""));
-            crate::runtime_persistence::ingress_refusal_tx(
-                tx,
-                session,
-                &run,
-                &lash_core_execution::store::IngressRowId::Batch(batch.clone()),
-            )
-            .await
+        Refusal::Ingress { run, row } => {
+            crate::runtime_persistence::ingress_refusal_tx(tx, session, run, row).await
         }
         Refusal::SessionEnded => StoreError::ArtifactReferrerEnded {
             referrer: lash_core_execution::ArtifactReferrer::Session(session.clone()),
