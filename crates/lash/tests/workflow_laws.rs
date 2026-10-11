@@ -564,6 +564,59 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
     );
 }
 
+/// Wait for a new durable timer park, reading only after process-feed events.
+/// The injected store clock holds the timer until the host observed its park.
+async fn timer_park_after(
+    core: &lash::LashCore,
+    process: &lash_core::ProcessId,
+    after: u64,
+) -> u64 {
+    let mut trace = Vec::new();
+    let parked = async {
+        let observable = core.processes().observe(process);
+        let snapshot = observable
+            .snapshot()
+            .await
+            .expect("the process snapshot reads");
+        let mut feed = observable.subscribe_and_recover(snapshot.cursor);
+        loop {
+            let observed = core
+                .processes()
+                .get(process)
+                .await
+                .expect("the process reads")
+                .expect("the process is retained");
+            trace.push(format!("{observed:?}"));
+            for wait in observed.lifecycle.waits() {
+                if let lash_core::WaitKind::Sleep { until_ms } = wait.kind {
+                    let until = u64::try_from(until_ms).expect("a nonnegative timer instant");
+                    if until > after {
+                        return until;
+                    }
+                }
+            }
+            assert!(
+                observed.lifecycle.terminal().is_none(),
+                "the process ends before the expected timer park: {observed:?}"
+            );
+            let event = feed
+                .next()
+                .await
+                .expect("the process feed remains open")
+                .expect("the process feed reads");
+            trace.push(format!("{event:?}"));
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(120), parked)
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "timer park hang guard expired for {process}; trace:\n{}",
+                trace.join("\n")
+            )
+        })
+}
+
 /// A process parked inside its inner loop outlives its node (kernel spec
 /// §9). The node that started it stops while the run stands on a `sleep`
 /// in the first turn of the nested loop; a second node over the same
@@ -572,11 +625,13 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
 #[tokio::test]
 async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes() {
     let files = tempfile::tempdir().expect("a SQLite store directory");
+    let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
     let open = || async {
         Arc::new(
-            lash_sqlite_store::SqliteStoreSet::open(
+            lash_sqlite_store::SqliteStoreSet::open_with_clock(
                 files.path().join("lash.db"),
                 lash_sqlite_store::SqliteSynchronous::Normal,
+                clock.clone(),
             )
             .await
             .expect("open the SQLite file stores"),
@@ -586,9 +641,7 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
     let artifacts = first.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment();
-    let document =
-        lash::workflow::document::parse_document(&GUARDED.replace("sleep 5", "sleep 1500"))
-            .expect("the document parses");
+    let document = lash::workflow::document::parse_document(GUARDED).expect("the document parses");
     let publication = published(
         artifacts
             .publish_workflow(
@@ -618,31 +671,16 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
     )
     .await;
 
-    // The run parks on its first `sleep`: the process waits on a timer.
-    let parked = async {
-        loop {
-            let observed = first
-                .processes()
-                .get(&process)
-                .await
-                .expect("the process reads")
-                .expect("the process is retained");
-            if matches!(
-                observed.lifecycle,
-                lash_core::ProcessLifecycleState::Waiting { .. }
-            ) {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    };
-    tokio::time::timeout(std::time::Duration::from_secs(60), parked)
-        .await
-        .expect("the process parks");
+    // FIG-5976: even a delayed observer cannot miss this park: durable time
+    // stands still until the first node stopped with its saved inner loop.
+    let first_due = timer_park_after(&first, &process, 0).await;
     first.shutdown().await.expect("the first node stops");
     drop(first);
 
+    clock.set(first_due);
     let second = core_over(open().await, "second").await;
+    let second_due = timer_park_after(&second, &process, first_due).await;
+    clock.set(second_due);
     assert_eq!(
         finished(&second, &process).await,
         serde_json::json!("operator")

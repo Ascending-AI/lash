@@ -476,93 +476,117 @@ mod sweep {
     const ID: &str = "store-fault-sweep";
     const WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 
-    // Bound silence between durable milestones, not a whole sequence of
-    // admissions, answers and fault recovery. The probe only reads evidence;
-    // polling itself is not progress and cannot keep a stuck cell alive.
-    async fn wait_for_progress<T>(
+    const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(120);
+
+    // Admission and output futures wake on their actual results. Scheduler
+    // silence says nothing about a cell's progress; only an outer hang guard
+    // bounds the fixture, with its durable milestones and store trace attached.
+    async fn wait_for_answer<T>(
         work: impl std::future::Future<Output = T>,
-        mut progress: impl FnMut() -> usize,
+        describe: impl FnOnce() -> String,
     ) -> std::result::Result<T, String> {
-        let mut seen = progress();
-        let mut deadline = tokio::time::Instant::now() + WITHIN;
-        let mut probe = tokio::time::interval(std::time::Duration::from_millis(10));
-        probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut work = std::pin::pin!(work);
-        loop {
-            tokio::select! {
-                biased;
-                answer = &mut work => return Ok(answer),
-                () = tokio::time::sleep_until(deadline) => {
-                    let current = progress();
-                    if current == seen {
-                        return Err(format!("no progress within {WITHIN:?}"));
-                    }
-                    seen = current;
-                    deadline = tokio::time::Instant::now() + WITHIN;
-                }
-                _ = probe.tick() => {
-                    let current = progress();
-                    if current != seen {
-                        seen = current;
-                        deadline = tokio::time::Instant::now() + WITHIN;
-                    }
-                }
-            }
-        }
+        tokio::time::timeout(HANG_GUARD, work).await.map_err(|_| {
+            format!(
+                "cell stalled: hang guard expired after {HANG_GUARD:?}; {}",
+                describe()
+            )
+        })
     }
 
-    // The finitely armed transient replies and their first recovered return
-    // are progress. Subsequent background reads of the same operation are not.
-    fn fault_progress(script: &Script, start: usize, cell: Option<Cell>) -> usize {
-        let Some(cell) = cell else { return 0 };
-        let trace = script.trace();
-        let mut failed = 0;
-        let mut recovered = false;
-        for call in &trace[start..] {
-            if call.op != cell.op {
-                continue;
-            }
-            match call.outcome {
-                lash_core::testing::Outcome::Failed(lash_core::testing::FaultKind::Transient) => {
-                    failed += 1;
-                }
-                lash_core::testing::Outcome::Returned if failed > 0 => recovered = true,
-                _ => {}
-            }
-        }
-        failed + usize::from(recovered)
+    fn answer_evidence(completed: &AtomicUsize, script: &Script, start: usize) -> String {
+        let trace = script.trace()[start..]
+            .iter()
+            .map(Call::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "completed={}; trace:\n{trace}",
+            completed.load(Ordering::SeqCst)
+        )
     }
 
-    /// FIG-5941: each admission/answer gets the unchanged liveness budget,
-    /// and a sequence that stops making progress still fails within it.
+    /// FIG-5941 (e1b733969c): a sequence of progressing answers outlives the
+    /// old whole-sequence deadline; background reads cannot conceal a stall.
+    /// FIG-5976: silence between those answers does not prove a stall either.
     #[tokio::test(start_paused = true)]
-    async fn a_fault_sweep_bounds_stalled_progress_instead_of_total_elapsed_time() {
+    async fn a_fault_sweep_waits_for_an_answer_after_scheduler_silence() {
+        let script = Script::new();
+        let store = script.wrap("progress-law", Arc::new(()));
         let completed = AtomicUsize::new(0);
         let work = async {
             for _ in 0..3 {
-                tokio::time::sleep(WITHIN - std::time::Duration::from_secs(1)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(9)).await;
+                store
+                    .call(StoreOp::load_session_head_meta, async {
+                        Ok::<_, StoreError>(())
+                    })
+                    .await
+                    .expect("a completed answer");
                 completed.fetch_add(1, Ordering::SeqCst);
             }
-        };
-        wait_for_progress(work, || completed.load(Ordering::SeqCst))
-            .await
-            .expect("each admission/answer progressed within the same 10 s bound");
-        let start = tokio::time::Instant::now();
-        let stuck = async {
-            tokio::time::sleep(WITHIN - std::time::Duration::from_secs(1)).await;
-            completed.fetch_add(1, Ordering::SeqCst);
-            std::future::pending::<()>().await;
-        };
-        assert!(
-            wait_for_progress(stuck, || completed.load(Ordering::SeqCst))
+            tokio::time::sleep(std::time::Duration::from_secs(11)).await;
+            store
+                .call(StoreOp::load_session_head_meta, async {
+                    Ok::<_, StoreError>(())
+                })
                 .await
-                .is_err(),
-            "a stalled step must fail even after earlier progress"
-        );
+                .expect("the delayed answer");
+            completed.fetch_add(1, Ordering::SeqCst);
+            "answered"
+        };
         assert_eq!(
-            start.elapsed(),
-            std::time::Duration::from_secs(9) + WITHIN,
-            "a stall gets exactly the unchanged budget after the last progress"
+            wait_for_answer(work, || answer_evidence(&completed, &script, 0))
+                .await
+                .expect("progressing answers and scheduler silence survive the wait"),
+            "answered"
+        );
+
+        // The sixth store call never returns, after five completed answers.
+        // Use the sweep's real fault injector and diagnostic formatter. Noisy
+        // background reads keep waking the fixture without completing answers.
+        script
+            .on(StoreOp::load_session_head_meta)
+            .nth(6)
+            .before()
+            .crash();
+        let started = tokio::time::Instant::now();
+        let stuck = async {
+            tokio::time::sleep(std::time::Duration::from_secs(9)).await;
+            store
+                .call(StoreOp::load_session_head_meta, async {
+                    Ok::<_, StoreError>(())
+                })
+                .await
+                .expect("the last completed answer");
+            completed.fetch_add(1, Ordering::SeqCst);
+            let background = async {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    store
+                        .call(StoreOp::lookup_session, async { Ok::<_, StoreError>(()) })
+                        .await
+                        .expect("background reads keep answering");
+                }
+            };
+            let _ = tokio::join!(
+                store.call(StoreOp::load_session_head_meta, async {
+                    Ok::<_, StoreError>(())
+                }),
+                background
+            );
+        };
+        let error = wait_for_answer(stuck, || answer_evidence(&completed, &script, 0))
+            .await
+            .expect_err("a stalled cell reaches the diagnostic guard despite background reads");
+        assert!(error.contains("completed=5; trace:"), "{error}");
+        assert!(
+            error.contains("load_session_head_meta#6 before crash"),
+            "{error}"
+        );
+        assert_eq!(started.elapsed(), HANG_GUARD);
+        println!(
+            "stalled cell detected after {:?}: {error}",
+            started.elapsed()
         );
     }
 
@@ -985,8 +1009,11 @@ mod sweep {
             }
             Ok::<_, EmbedError>(Answer::Success(output))
         });
-        let answer = match wait_for_progress(work, || {
-            completed.load(Ordering::SeqCst) + fault_progress(&script, start, cell)
+        let answer = match wait_for_answer(work, || {
+            format!(
+                "{storage:?}/{scenario:?} cell={cell:?}; {}",
+                answer_evidence(&completed, &script, start)
+            )
         })
         .await
         {
