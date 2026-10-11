@@ -806,7 +806,12 @@ mod tests {
             .await;
             paths
                 .iter()
-                .map(|path| ((*path).to_string(), crate::Resolution::NotAvailable))
+                .map(|path| {
+                    (
+                        (*path).to_string(),
+                        crate::Resolution::NotAvailable { note: None },
+                    )
+                })
                 .collect()
         }
     }

@@ -8,12 +8,12 @@
 //!
 //! A cell is lowered against the effects its host offers
 //! ([`lash_vm_runtime::HostBoundary`]), so resolution runs before lowering:
-//! `gather → journal → offer`. The call paths the cell's source writes that
-//! no catalog tool answers are decided in one journaled step, keyed by the
-//! cell's effect, and each granted tool is then offered as a kernel effect
-//! under its binding's call path, with the signature its schemas state. A
-//! redriven cell reuses its journaled decision without calling the resolver
-//! again. The flat Tool Catalog is never mutated: a grant is the cell's.
+//! `gather → decide → offer`. The call paths the cell's source writes that
+//! no catalog tool answers are decided before lowering. Grants and unavailable
+//! notes are recorded with the cell's first durable save or park. A redrive
+//! after that save reuses those decisions without calling the resolver;
+//! before the first save, read-only discovery may run again. The flat Tool
+//! Catalog is never mutated: a grant is the cell's.
 
 /// version_surface = "coexist"
 /// version_guard(items(DEFERRED_TOOL_RESOLUTION_PREFIX_VERSION, journal_deferred_outcomes))
@@ -67,9 +67,73 @@ impl ToolGrant {
 pub enum Resolution {
     /// The call path resolved to a host-authorized tool.
     Resolved(Box<ToolGrant>),
-    /// No tool is available for the call path: the cell's source names
-    /// something the session does not offer.
-    NotAvailable,
+    /// No tool is available for the call path.
+    NotAvailable {
+        /// Optional host-trusted explanation or suggestion shown to the model.
+        /// Lash bounds the recorded note to [`Self::MAX_NOTE_BYTES`] UTF-8
+        /// bytes, including a truncation marker, without refusing the answer.
+        note: Option<String>,
+    },
+}
+
+impl Resolution {
+    /// Maximum recorded host-note length in UTF-8 bytes, including the marker.
+    pub const MAX_NOTE_BYTES: usize = 512;
+
+    /// An unavailable path with a host-trusted explanation or suggestion.
+    pub fn not_available_with(note: impl Into<String>) -> Self {
+        Self::NotAvailable {
+            note: Some(bounded_note(note.into())),
+        }
+    }
+
+    fn bounded(self) -> Self {
+        match self {
+            Self::NotAvailable { note: Some(note) } => Self::not_available_with(note),
+            other => other,
+        }
+    }
+}
+
+fn bounded_note(mut note: String) -> String {
+    const MARKER: &str = " [truncated]";
+    if note.len() > Resolution::MAX_NOTE_BYTES {
+        let mut end = Resolution::MAX_NOTE_BYTES - MARKER.len();
+        while !note.is_char_boundary(end) {
+            end -= 1;
+        }
+        note.truncate(end);
+        note.push_str(MARKER);
+    }
+    note
+}
+
+/// Signatures for unavailable paths with notes let a cell reach the host's
+/// refusal at the call, in either dialect. They grant no tool authority.
+pub(crate) fn offer_unavailable_notes(
+    outcomes: &BTreeMap<String, Resolution>,
+    effects: &mut BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature>,
+) -> BTreeMap<String, String> {
+    let mut notes = BTreeMap::new();
+    for (path, outcome) in outcomes {
+        if let Resolution::NotAvailable { note: Some(note) } = outcome
+            && let Ok(name) = lash_kernel_doc::EffectName::new(path.as_str())
+        {
+            effects.insert(
+                name,
+                lash_kernel_doc::Signature {
+                    params: vec![lash_kernel_doc::Param {
+                        name: lash_kernel_doc::Name::new("input"),
+                        ty: lash_kernel_doc::Type::Any,
+                        optional: true,
+                    }],
+                    result: lash_kernel_doc::Type::Any,
+                },
+            );
+            notes.insert(path.clone(), note.clone());
+        }
+    }
+    notes
 }
 
 /// Who one deferred resolution resolves for: the execution whose cell is
@@ -104,11 +168,17 @@ impl<'a> DeferredResolveContext<'a> {
 #[async_trait]
 pub trait DeferredToolResolver: Send + Sync {
     /// Resolve a deterministic batch of call paths (e.g. `web.fetch`) for
-    /// the execution `cx` names. The batch holds every dotted path the
+    /// the execution `cx` names. The batch holds every dotted TypeScript path or Python name the
     /// cell's source calls that no catalog tool answers, so it may hold
     /// paths that are no tool at all: a path omitted from the returned map
     /// is recorded as [`Resolution::NotAvailable`], and entries for paths
     /// outside the batch are ignored.
+    ///
+    /// Use a host note to explain a transient outage, missing permission,
+    /// revocation or a suggested next action. Notes are trusted host text;
+    /// Lash truncates them to [`Resolution::MAX_NOTE_BYTES`] UTF-8 bytes.
+    /// Lash does not retry an unavailable answer. After the cell's first durable save, a redrive reuses the
+    /// recorded decision and note; the next cell resolves again.
     ///
     /// This is read-only discovery: it must not install routes or perform
     /// externally visible work. A precommit retry may call it again. Route
@@ -220,12 +290,13 @@ impl DeferredResolutionError {
 /// ship no deferral.
 pub type SharedDeferredToolResolver = Arc<dyn DeferredToolResolver>;
 
-/// Every dotted path the source calls: `a.b.c(` as `a.b.c`. A scan of the
+/// Every call path the source writes: dotted in TypeScript, also bare
+/// in Python (whose tools use names such as `web_fetch`). A scan of the
 /// text, not a parse: it over-approximates (a method call on a value is a
 /// path too), which costs the resolver a path it answers `NotAvailable`
 /// for, and it never misses a call the dialect could lower to an effect,
-/// because an effect is called by its dotted name.
-pub(crate) fn called_paths(source: &str) -> BTreeSet<String> {
+/// because an effect is called by its dialect's call path.
+pub(crate) fn called_paths(source: &str, dialect: &str) -> BTreeSet<String> {
     let mut paths = BTreeSet::new();
     let bytes = source.as_bytes();
     let ident_start = |byte: u8| byte == b'_' || byte.is_ascii_alphabetic();
@@ -256,17 +327,16 @@ pub(crate) fn called_paths(source: &str) -> BTreeSet<String> {
         while after < bytes.len() && bytes[after].is_ascii_whitespace() {
             after += 1;
         }
-        if segments > 1 && bytes.get(after) == Some(&b'(') {
+        if (segments > 1 || dialect == "python") && bytes.get(after) == Some(&b'(') {
             paths.insert(source[start..end].to_owned());
         }
     }
     paths
 }
 
-/// `gather → journal`: decides, in one journaled step keyed by the cell's
-/// effect, every path of `candidates` (the call paths the source writes
-/// that the catalog does not answer). A redrive is served the recorded
-/// outcomes and never calls the resolver.
+/// Prepares each candidate's decision under the cell's effect. The cell's
+/// first durable save records grants and notes in its envelope; a redrive
+/// from that save skips discovery. A precommit redrive may resolve again.
 #[expect(
     clippy::result_large_err,
     reason = "the error carries the typed runtime error a nested effect records"
@@ -301,7 +371,10 @@ pub(crate) async fn journal_deferred_outcomes(
                 for path in paths {
                     outcomes.insert(
                         path.to_string(),
-                        resolved.remove(path).unwrap_or(Resolution::NotAvailable),
+                        resolved
+                            .remove(path)
+                            .unwrap_or(Resolution::NotAvailable { note: None })
+                            .bounded(),
                     );
                 }
             }
@@ -388,6 +461,7 @@ mod tests {
     fn the_gather_step_finds_dotted_calls() {
         let paths = called_paths(
             "const page = await web.fetch({url});\nprint(page.title);\nawait a.b.c (1); xs.map(f); web_fetch(1); q.r",
+            "typescript",
         );
         assert_eq!(
             paths.into_iter().collect::<Vec<_>>(),

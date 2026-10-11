@@ -168,7 +168,7 @@ impl DeferredToolResolver for WorkbenchDeferredToolResolver {
             .map(|path| {
                 let resolution = match self.store.load(path) {
                     Ok(Some(grant)) => DeferredToolResolution::Resolved(Box::new(grant)),
-                    Ok(None) => DeferredToolResolution::NotAvailable,
+                    Ok(None) => DeferredToolResolution::NotAvailable { note: None },
                     Err(err) => {
                         // The resolver seam has no error channel; surface the
                         // store failure to the operator before reporting the
@@ -177,7 +177,7 @@ impl DeferredToolResolver for WorkbenchDeferredToolResolver {
                             "warning: deferred grant store read failed for `{path}` \
                              ({err}); resolving as not available"
                         );
-                        DeferredToolResolution::NotAvailable
+                        DeferredToolResolution::NotAvailable { note: None }
                     }
                 };
                 ((*path).to_string(), resolution)
@@ -797,11 +797,11 @@ mod tests {
         let outcomes = resolve(&tools.resolver, &["text.sha256", "unknown.path"]).await;
         assert!(matches!(
             outcomes.get("text.sha256"),
-            Some(DeferredToolResolution::NotAvailable)
+            Some(DeferredToolResolution::NotAvailable { note: None })
         ));
         assert!(matches!(
             outcomes.get("unknown.path"),
-            Some(DeferredToolResolution::NotAvailable)
+            Some(DeferredToolResolution::NotAvailable { note: None })
         ));
         assert_eq!(
             outcomes.keys().cloned().collect::<Vec<_>>(),

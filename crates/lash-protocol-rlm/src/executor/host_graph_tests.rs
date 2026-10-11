@@ -274,6 +274,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         .into_iter()
         .collect(),
         grants: std::collections::BTreeMap::new(),
+        unavailable_notes: [("web.fetch".into(), "permission was revoked".into())].into(),
         projected: ["x".to_owned()].into_iter().collect(),
     };
     let mut staging = staging();
@@ -304,6 +305,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     assert_eq!(loaded.document, envelope.document);
     assert_eq!(loaded.annotations, envelope.annotations);
     assert_eq!(loaded.effects, envelope.effects);
+    assert_eq!(loaded.unavailable_notes, envelope.unavailable_notes);
     assert_eq!(loaded.projected, envelope.projected);
     assert_eq!(
         HostState::load(&mut decoder, end.host)

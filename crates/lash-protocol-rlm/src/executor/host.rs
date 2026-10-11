@@ -260,6 +260,12 @@ impl CellHost<'_> {
         request: &EffectRequest,
         call: lash_core::ToolCallId,
     ) -> Result<(ToolInvocation, FrozenRequest), ErrorDatum> {
+        if let Some(note) = self.envelope.unavailable_notes.get(request.effect.as_str()) {
+            return Err(refused(
+                UNKNOWN_EFFECT,
+                format!("this session cannot offer `{}`: {note}", request.effect),
+            ));
+        }
         let effect = self.boundary.effect(&request.effect).ok_or_else(|| {
             refused(
                 UNKNOWN_EFFECT,

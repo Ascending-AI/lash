@@ -329,7 +329,7 @@ impl lash::tools::DeferredToolResolver for GrantingResolver {
                             .with_source_id(lash::tools::PLUGIN_TOOL_SOURCE_ID),
                     ))
                 } else {
-                    lash::tools::DeferredToolResolution::NotAvailable
+                    lash::tools::DeferredToolResolution::NotAvailable { note: None }
                 };
                 ((*path).to_owned(), resolution)
             })

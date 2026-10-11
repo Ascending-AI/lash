@@ -326,14 +326,13 @@ async fn link_cell(
             .map_err(|error| surface(error.to_string()))?;
     }
 
-    // gather → journal → offer: the call paths the source writes that no
-    // catalog tool answers are decided durably before the cell is lowered,
-    // and each granted tool is offered as an effect.
-    let grants = match &services.deferred_tool_resolver {
+    // gather → decide → offer: the first park records grants and notes
+    // with the lowered cell. Discovery may repeat before that save.
+    let outcomes = match &services.deferred_tool_resolver {
         Some(_) if ctx.parent_invocation().is_some() => {
             let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve");
             let offered = boundary.signatures();
-            let candidates = crate::deferred::called_paths(code)
+            let candidates = crate::deferred::called_paths(code, state.dialect())
                 .into_iter()
                 .filter(|path| {
                     !lash_kernel_doc::EffectName::new(path.as_str())
@@ -344,16 +343,20 @@ async fn link_cell(
                 BTreeMap::new()
             } else {
                 let resolver = services.deferred_tool_resolver.as_ref();
-                let outcomes =
-                    crate::deferred::journal_deferred_outcomes(candidates, resolver, ctx)
-                        .await
-                        .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?;
-                crate::deferred::offer_deferred_grants(&mut boundary, &outcomes, resolver, ctx)
+                crate::deferred::journal_deferred_outcomes(candidates, resolver, ctx)
+                    .await
                     .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?
             }
         }
         _ => BTreeMap::new(),
     };
+    let grants = crate::deferred::offer_deferred_grants(
+        &mut boundary,
+        &outcomes,
+        services.deferred_tool_resolver.as_ref(),
+        ctx,
+    )
+    .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?;
 
     let session = state.bindings();
     let mut names = session.names();
@@ -367,13 +370,15 @@ async fn link_cell(
             .map_err(|error| Refused::Helpers(Box::new(error)))?,
         None => lash_vm_runtime::KERNEL_HELPER_RELEASE,
     };
+    let mut effects = boundary.signatures();
+    let unavailable_notes = crate::deferred::offer_unavailable_notes(&outcomes, &mut effects);
     // The worker that lowers the cell starts its run (FIG-5921).
     let lowered = services
         .workers
         .request_for_run(Request::Lower {
             dialect: state.dialect().to_owned(),
             source: code.to_owned(),
-            effects: boundary.signatures(),
+            effects,
             tool_roots,
             controls: boundary.controls(),
             bindings: names,
@@ -432,6 +437,7 @@ async fn link_cell(
         function_values,
         effects: CellEnvelope::record_effects(&boundary),
         grants,
+        unavailable_notes,
         projected: projected.keys().cloned().collect(),
     };
     let document = envelope

@@ -303,7 +303,7 @@ impl crate::DeferredToolResolver for GrantsWebFetch {
                         .with_source_id(lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID),
                     ))
                 } else {
-                    crate::Resolution::NotAvailable
+                    crate::Resolution::NotAvailable { note: None }
                 };
                 ((*path).to_string(), resolution)
             })
@@ -580,6 +580,136 @@ async fn a_deferred_tool_granted_to_a_cell_is_callable_after_a_restart() {
         1,
         "the grant is the cell's record; the resumed cell does not resolve it again"
     );
+}
+
+/// FIG-6011: an unavailable path's host note reaches the model in either
+/// dialect, and a redrive uses the recorded note without rediscovery.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unavailable_deferred_tool_note_is_visible_and_reused_on_redrive() {
+    struct Unavailable {
+        asked: AtomicUsize,
+    }
+
+    const NOTE: &str = "MCP server unreachable; reconnect before calling web.fetch";
+
+    #[async_trait::async_trait]
+    impl crate::DeferredToolResolver for Unavailable {
+        async fn resolve(
+            &self,
+            _cx: &crate::DeferredResolveContext<'_>,
+            paths: &[&str],
+        ) -> std::collections::BTreeMap<String, crate::Resolution> {
+            let attempt = self.asked.fetch_add(1, Ordering::SeqCst);
+            std::collections::BTreeMap::from([(
+                if paths.contains(&"web_fetch") {
+                    "web_fetch"
+                } else {
+                    "web.fetch"
+                }
+                .into(),
+                serde_json::from_value(serde_json::json!({
+                    "kind": "not_available",
+                    "note": if attempt == 0 {
+                        format!("{NOTE}; {}", "é🦀".repeat(150))
+                    } else {
+                        "a different discovery answer".to_owned()
+                    },
+                }))
+                .expect("a host's unavailable resolution"),
+            )])
+        }
+    }
+
+    for dialect in [CellDialect::typescript(), CellDialect::python()] {
+        let mut host = open_host().await;
+        let tools = Arc::new(CellTools::default());
+        let resolver = Arc::new(Unavailable {
+            asked: AtomicUsize::new(0),
+        });
+        let services = cell_services(
+            &dialect,
+            if dialect.name() == CellDialect::python().name() {
+                python_workers()
+            } else {
+                lash_vm_client::service::Service::default()
+            },
+            Some(resolver.clone()),
+        );
+        let code = if dialect.name() == CellDialect::python().name() {
+            "try:\n    await echo_say({'text': 'held'})\nexcept Exception:\n    pass\nawait web_fetch({})"
+        } else {
+            "try { await echo.say({ text: 'held' }); } catch (error) {}\nawait web.fetch({});"
+        };
+        tools.hold.store(true, Ordering::SeqCst);
+        {
+            let mut state = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
+            let running = run_cell(
+                &mut state,
+                cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+                &services,
+                code,
+            );
+            tokio::select! {
+                response = running => panic!("the cell ended before its held call: {:?}", response.error()),
+                () = tools.held_started.notified() => {}
+            }
+        }
+        assert_eq!(resolver.asked.load(Ordering::SeqCst), 1);
+        host.kill_and_resume().await;
+        tools.hold.store(false, Ordering::SeqCst);
+        let first = run_cell(
+            &mut CodeModeExecutionState::new(dialect.name(), dialect.numbers()),
+            cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+            &services,
+            code,
+        )
+        .await;
+        let failure = first.error().expect("the tool is unavailable");
+        assert!(failure.message.contains(NOTE), "{failure:?}");
+        let tail = failure
+            .message
+            .split_once(": MCP server unreachable")
+            .expect("the unavailable error contains the host note")
+            .1;
+        let note = format!("MCP server unreachable{tail}");
+        assert!(note.len() <= crate::Resolution::MAX_NOTE_BYTES);
+        assert!(note.ends_with(" [truncated]"), "{note}");
+        let constructed =
+            crate::Resolution::not_available_with(format!("{NOTE}; {}", "é🦀".repeat(150)));
+        assert_eq!(serde_json::to_value(constructed).unwrap()["note"], note);
+        let rendered = crate::feedback::render(failure, "cell");
+        assert!(rendered.contains(NOTE), "{rendered}");
+
+        host.kill_and_resume().await;
+        let redriven = run_cell(
+            &mut CodeModeExecutionState::new(dialect.name(), dialect.numbers()),
+            cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+            &services,
+            code,
+        )
+        .await;
+        assert_eq!(redriven.error(), first.error());
+        assert_eq!(resolver.asked.load(Ordering::SeqCst), 1);
+
+        let next = run_cell(
+            &mut CodeModeExecutionState::new(dialect.name(), dialect.numbers()),
+            cell_context(&host, SESSION, TURN, "exec-code:1", tools),
+            &services,
+            if dialect.name() == CellDialect::python().name() {
+                "await web_fetch({})"
+            } else {
+                "await web.fetch({})"
+            },
+        )
+        .await;
+        assert!(
+            next.error()
+                .unwrap()
+                .message
+                .contains("a different discovery answer")
+        );
+        assert_eq!(resolver.asked.load(Ordering::SeqCst), 2);
+    }
 }
 
 /// FIG-5766: a cell's response says what its committed transition did to

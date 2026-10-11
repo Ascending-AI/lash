@@ -57,6 +57,8 @@ pub struct CellEnvelope {
     pub effects: BTreeMap<EffectName, RecordedEffect>,
     /// The grants the cell's deferred resolutions recorded.
     pub grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
+    /// Recorded host explanations for unavailable call paths; no authority.
+    pub unavailable_notes: BTreeMap<String, String>,
     /// The read-only host bindings the cell started with: they are the
     /// host's, and are not the session's when the cell ends.
     pub projected: BTreeSet<String>,
@@ -356,17 +358,19 @@ fn graph_invalid(kind: NodeKind, reason: impl std::fmt::Display) -> GraphRefusal
 
 /// Kind 12: the effects a cell was lowered against, each with its tool,
 /// signature and declared controls; the grants its deferred resolutions
-/// recorded; and its projected binding names. All sorted.
+/// recorded, including unavailable notes; and its projected binding names. All sorted.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectTable {
     pub effects: BTreeMap<EffectName, RecordedEffect>,
     pub grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
+    /// Recorded host explanations for unavailable call paths; no authority.
+    pub unavailable_notes: BTreeMap<String, String>,
     pub projected: BTreeSet<String>,
 }
 
 impl TokenCodec for EffectTable {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
+        out.seq(4);
         out.map(self.effects.len() as u64);
         for (name, effect) in &self.effects {
             name.encode(out);
@@ -380,6 +384,7 @@ impl TokenCodec for EffectTable {
             out.text(tool.as_str());
             encode_tree(grant, out);
         }
+        encode_tree(&self.unavailable_notes, out);
         out.seq(self.projected.len() as u64);
         for name in &self.projected {
             out.text(name);
@@ -392,7 +397,7 @@ impl TokenCodec for EffectTable {
                 lash_core_store::checkpoint_graph::CanonicalFault::UnsortedOrDuplicateKey,
             )
         };
-        input.expect_struct(3)?;
+        input.expect_struct(4)?;
         let mut effects = BTreeMap::new();
         for _ in 0..input.map()? {
             let name = EffectName::decode(input)?;
@@ -422,6 +427,7 @@ impl TokenCodec for EffectTable {
             }
             grants.insert(tool, grant);
         }
+        let unavailable_notes = decode_tree(input)?;
         let mut projected = BTreeSet::new();
         for _ in 0..input.seq()? {
             let name = input.text()?.to_owned();
@@ -433,6 +439,7 @@ impl TokenCodec for EffectTable {
         Ok(Self {
             effects,
             grants,
+            unavailable_notes,
             projected,
         })
     }
@@ -513,6 +520,7 @@ impl CellEnvelope {
                 &EffectTable {
                     effects: self.effects.clone(),
                     grants: self.grants.clone(),
+                    unavailable_notes: self.unavailable_notes.clone(),
                     projected: self.projected.clone(),
                 },
             )?,
@@ -557,6 +565,7 @@ impl CellEnvelope {
             function_values: body.function_values,
             effects: table.effects,
             grants: table.grants,
+            unavailable_notes: table.unavailable_notes,
             projected: table.projected,
         };
         Ok((envelope, body.release))
