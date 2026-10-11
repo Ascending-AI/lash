@@ -54937,7 +54937,7 @@
           "clippy_label": "//crates/lash-durable-test:tool_crash_laws__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:tool_crash_laws__test",
-          "shard_count": 4,
+          "shard_count": 8,
           "tags": [
             "hermetic-postgres"
           ]
