@@ -17,8 +17,9 @@ impl ControlIntentStore for PostgresStore {
     ) -> Result<Option<ControlIntent>, StoreError> {
         lash_core_execution::store::validate_session_id(session_id)?;
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
-        let intent = begin_session_close_tx(&mut tx, session_id, at_ms).await?;
+        let (intent, woken) = begin_session_close_tx(&mut tx, session_id, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
+        self.woke(woken.as_ref());
         Ok(intent)
     }
 

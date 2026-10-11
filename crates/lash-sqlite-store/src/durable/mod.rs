@@ -715,16 +715,18 @@ pub(crate) fn wake_session_within(
     Ok(wake_within(tx, &actor, control, now)?.map(|(woken, _)| woken))
 }
 
-/// [`wake_session_within`] for a session store transaction at `at_ms`. An
-/// absent or deleted session, and one whose actor already ended (its close
-/// finished), wakes nobody and creates nothing; that is no refusal of the
-/// producer's write, which refuses such a session itself.
+/// [`wake_session_within`] for a session store transaction at `at_ms`,
+/// answering the actor it woke for the caller to hand to the store set's
+/// wake sink once the transaction commits. An absent or deleted session,
+/// and one whose actor already ended (its close finished), wakes nobody and
+/// creates nothing; that is no refusal of the producer's write, which
+/// refuses such a session itself.
 pub(crate) fn wake_session_tx(
     tx: &Connection,
     session: &lash_sansio::SessionId,
     control: bool,
     at_ms: u64,
-) -> Result<(), lash_core_execution::StoreError> {
+) -> Result<Option<Woken>, lash_core_execution::StoreError> {
     let (meta, deleted): (i64, i64) = tx
         .prepare_cached(SQL.session_mail.standing.sql())
         .and_then(|mut statement| {
@@ -732,11 +734,12 @@ pub(crate) fn wake_session_tx(
         })
         .map_err(crate::sqlite_error)?;
     if meta == 0 || deleted > 0 {
-        return Ok(());
+        return Ok(None);
     }
     let now = DurableInstant(integer::<i64>(at_ms).map_err(crate::sqlite_error)?);
     match wake_session_within(tx, session, control, now).map_err(crate::sqlite_error)? {
-        Ok(_) | Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_))) => Ok(()),
+        Ok(woken) => Ok(Some(woken)),
+        Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_))) => Ok(None),
         Err(error) => Err(lash_core_execution::StoreError::Backend(format!(
             "session {session} was not woken: {error}"
         ))),

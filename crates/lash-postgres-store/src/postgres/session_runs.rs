@@ -296,7 +296,9 @@ async fn release_run_rows_conn(
         .execute(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?;
-    // What the run let go of is the session's to admit again.
+    // What the run let go of is the session's to admit again. A run ends in
+    // its own session's commit, whose owner reads its mail next, or in its
+    // close, which wakes the session itself: no hint follows.
     crate::durable::wake_session_tx(conn, session_id, false, at_ms).await?;
     let ended = run_turns_conn(conn, session_id, run).await?;
     let open_rows =
@@ -816,17 +818,18 @@ pub(crate) async fn insert_intent_conn(
 /// takes, so no input is accepted into a session once its close committed.
 /// The close names the runs it releases: every run without terminal
 /// evidence, each ended `Cancelled` by `SessionDeleted`. It wakes the
-/// session actor, whose close steps act on the intent.
+/// session actor, whose close steps act on the intent, and answers the
+/// actor it woke for the wake sink once the transaction commits.
 ///
 /// [`ControlIntentStore::begin_session_close`]: lash_core_execution::store::ControlIntentStore::begin_session_close
 pub(crate) async fn begin_session_close_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     at_ms: u64,
-) -> Result<Option<ControlIntent>, StoreError> {
+) -> Result<(Option<ControlIntent>, Option<lash_durable::Woken>), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
     if let Some(intent) = close_session_intent_conn(tx, session_id).await? {
-        return Ok(Some(intent));
+        return Ok((Some(intent), None));
     }
     let meta: Option<Option<i64>> = crate::observed_sql::query_scalar(
         crate::session_sql::session_sql()
@@ -839,7 +842,7 @@ pub(crate) async fn begin_session_close_tx(
     .await
     .map_err(store_sqlx_error)?;
     if meta.is_none() {
-        return Ok(None);
+        return Ok((None, None));
     }
     let sql = session_runs_sql();
     let mut runs = std::collections::BTreeSet::new();
@@ -885,8 +888,8 @@ pub(crate) async fn begin_session_close_tx(
     if closed != 1 {
         return Err(StoreError::Contended);
     }
-    crate::durable::wake_session_tx(tx, session_id, false, at_ms).await?;
-    Ok(Some(intent))
+    let woken = crate::durable::wake_session_tx(tx, session_id, false, at_ms).await?;
+    Ok((Some(intent), woken))
 }
 
 /// Forget what session `session_id`'s runs hold, in its deletion's

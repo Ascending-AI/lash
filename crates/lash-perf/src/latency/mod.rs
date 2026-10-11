@@ -379,6 +379,17 @@ fn print_summary(report: &runner::LatencyReport) {
                 worker.write_transactions
             );
         }
+        if let Some(wakes) = &case.session_wakes {
+            println!(
+                "  session wakes: claims hint={} poll={}; work after hint={} poll={}; idle after hint={} poll={}",
+                wakes.claims_on_hint,
+                wakes.claims_on_poll,
+                wakes.work_on_hint,
+                wakes.work_on_poll,
+                wakes.idle_on_hint,
+                wakes.idle_on_poll,
+            );
+        }
     }
     println!();
     if report.verdict.pass {

@@ -142,6 +142,7 @@ impl LayeredBackend {
             binding: inner_stores.binding_identity().clone(),
             attachment_referrers: inner_stores.attachment_referrers(),
             durable: None,
+            wakes: None,
             inner: inner_stores,
             clock: self.clock,
             session_store_factory: self.session_store_factory,
@@ -178,6 +179,7 @@ impl LayeredStores {
             obligation_ledgers: None,
             artifact_cleanup: inner.artifact_cleanup(),
             durable: None,
+            wakes: None,
             inner,
         })
     }
@@ -194,6 +196,15 @@ impl LayeredStores {
     /// Stamp and sleep on `clock` in place of the inner store set's clock.
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.0.clock = clock;
+        self
+    }
+
+    /// Attach a node serving over these stores to a sink no producer
+    /// commit hands anything, in place of the inner store set's: every
+    /// wake its stores' producers commit is lost to it, as a dropped wake
+    /// would be.
+    pub fn lose_wakes(mut self) -> Self {
+        self.0.wakes = Some(lash_durable::runner::WakeSink::default());
         self
     }
 
@@ -279,6 +290,8 @@ struct LayeredStoreSet {
     inner: Arc<dyn StoreSet>,
     /// The durable store in place of the inner store set's, when layered.
     durable: Option<Arc<dyn lash_durable::DurableStore>>,
+    /// The wake sink in place of the inner store set's, when layered.
+    wakes: Option<lash_durable::runner::WakeSink>,
     binding: StoreBindingId,
     clock: Arc<dyn Clock>,
     session_store_factory: Arc<dyn DeploymentStore>,
@@ -301,6 +314,13 @@ impl StoreSet for LayeredStoreSet {
 
     fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>> {
         self.inner.node_wakes()
+    }
+
+    fn wake_sink(&self) -> lash_durable::runner::WakeSink {
+        match &self.wakes {
+            Some(wakes) => wakes.clone(),
+            None => self.inner.wake_sink(),
+        }
     }
 
     fn binding_identity(&self) -> &StoreBindingId {

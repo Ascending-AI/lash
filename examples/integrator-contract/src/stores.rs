@@ -34,6 +34,10 @@ impl StoreSet for IntegratorStores {
         self.substrate.durable_store()
     }
 
+    fn wake_sink(&self) -> lash::durable::runner::WakeSink {
+        self.substrate.wake_sink()
+    }
+
     fn node_wakes(&self) -> Option<Arc<dyn NodeWakes>> {
         self.substrate.node_wakes()
     }

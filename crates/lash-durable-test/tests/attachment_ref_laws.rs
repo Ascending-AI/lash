@@ -117,6 +117,9 @@ impl StoreSet for LawStores {
     fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
         self.inner.durable_store()
     }
+    fn wake_sink(&self) -> lash_durable::runner::WakeSink {
+        self.inner.wake_sink()
+    }
     fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>> {
         self.inner.node_wakes()
     }

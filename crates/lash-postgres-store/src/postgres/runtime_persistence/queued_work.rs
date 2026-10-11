@@ -15,8 +15,10 @@ impl PostgresStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
-        let queued = enqueue_queued_work_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
+        let (queued, woken) =
+            enqueue_queued_work_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
+        self.woke(woken.as_ref());
         Ok(queued)
     }
 
@@ -30,9 +32,10 @@ impl PostgresStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
-        let queued =
+        let (queued, woken) =
             enqueue_queued_work_with_outcome_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
+        self.woke(woken.as_ref());
         Ok(queued)
     }
 

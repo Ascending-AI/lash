@@ -11,7 +11,8 @@ impl SqliteStore {
     ) -> Result<QueuedWorkBatch, StoreError> {
         let nonce = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
-        self.conn
+        let (value, woken) = self
+            .conn
             .write_flow(move |tx| {
                 let outcome = ensure_session_not_deleted_conn(tx, &batch.session_id)
                     .and_then(|()| {
@@ -37,7 +38,9 @@ impl SqliteStore {
                 }
             })
             .await
-            .map_err(sqlite_error)?
+            .map_err(sqlite_error)??;
+        self.conn.woke(woken.as_ref());
+        Ok(value)
     }
 
     pub(super) async fn enqueue_queued_work_with_outcome_sqlite(
@@ -46,7 +49,8 @@ impl SqliteStore {
     ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
         let nonce = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
-        self.conn
+        let (value, woken) = self
+            .conn
             .write_flow(move |tx| {
                 let outcome = ensure_session_not_deleted_conn(tx, &batch.session_id)
                     .and_then(|()| {
@@ -70,7 +74,9 @@ impl SqliteStore {
                 }
             })
             .await
-            .map_err(sqlite_error)?
+            .map_err(sqlite_error)??;
+        self.conn.woke(woken.as_ref());
+        Ok(value)
     }
 
     pub(super) async fn cancel_queued_work_batch_sqlite(

@@ -568,6 +568,10 @@ impl StoreSet for RecordingStores {
         Arc::clone(&self.store) as _
     }
 
+    fn wake_sink(&self) -> lash_durable::runner::WakeSink {
+        self.inner.wake_sink()
+    }
+
     fn node_wakes(&self) -> Option<Arc<dyn NodeWakes>> {
         self.inner.node_wakes()
     }

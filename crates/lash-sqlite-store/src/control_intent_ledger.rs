@@ -28,14 +28,17 @@ impl ControlIntentStore for SqliteStore {
             return Ok(None);
         };
         let session_id = session_id.clone();
-        conn.write_flow(move |tx| {
-            Ok(match begin_session_close_conn(tx, &session_id, at_ms) {
-                Ok(intent) => TxOutcome::Commit(Ok(intent)),
-                Err(error) => TxOutcome::Rollback(Err(error)),
+        let (intent, woken) = conn
+            .write_flow(move |tx| {
+                Ok(match begin_session_close_conn(tx, &session_id, at_ms) {
+                    Ok(begun) => TxOutcome::Commit(Ok(begun)),
+                    Err(error) => TxOutcome::Rollback(Err(error)),
+                })
             })
-        })
-        .await
-        .map_err(sqlite_error)?
+            .await
+            .map_err(sqlite_error)??;
+        conn.woke(woken.as_ref());
+        Ok(intent)
     }
 
     async fn session_close_intent(

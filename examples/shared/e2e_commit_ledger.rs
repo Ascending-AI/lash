@@ -246,6 +246,10 @@ impl lash::StoreSet for LedgerStores {
         Arc::clone(&self.durable)
     }
 
+    fn wake_sink(&self) -> lash::durable::runner::WakeSink {
+        self.inner.wake_sink()
+    }
+
     fn node_wakes(&self) -> Option<Arc<dyn NodeWakes>> {
         self.inner.node_wakes().map(|inner| {
             Arc::new(LedgerNodeWakes {

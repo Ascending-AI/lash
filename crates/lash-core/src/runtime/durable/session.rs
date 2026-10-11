@@ -951,9 +951,12 @@ impl Activation for SessionActivation {
                 Err(_) => Exit::Abandoned,
             };
         }
+        witness_claim(owned.claimed_on());
         // An owner with nothing to do keeps the actor hot for `idle_evict`,
         // reading its mailbox at every hint or poll, then releases it.
         let idle_evict = self.backend.config().settings().idle_evict;
+        // What ended the owner's last wait, until the pass after it.
+        let mut woke = None;
         let mut idle_since = None;
         // The owner cache of the session's head, for this claim's epoch.
         let mut heads = HeadCache::default();
@@ -977,6 +980,7 @@ impl Activation for SessionActivation {
                 self.services.announce_head(&cx, &session).await;
                 Box::pin(self.pass(&cx, &session, release, &mut heads, &mut carry_checked)).await
             };
+            witness_pass(woke.take(), &pass);
             if pass.is_ok() {
                 failed_passes = 0;
             }
@@ -984,7 +988,7 @@ impl Activation for SessionActivation {
                 Ok(Pass::Again) => idle_since = None,
                 Ok(Pass::Idle) => {
                     idle_since.get_or_insert_with(|| owned.clock().now());
-                    owned.wait_for_mail().await;
+                    woke = Some(owned.wait_for_mail().await);
                 }
                 Ok(Pass::Released | Pass::Lost)
                 | Err(TurnError::Durable(DurableError::OwnershipLost(_))) => return Exit::Released,
@@ -1030,11 +1034,36 @@ impl Activation for SessionActivation {
                         }
                     }
                     tracing::debug!(%error, "session activation pass failed; reloading");
-                    owned.wait_for_mail().await;
+                    woke = Some(owned.wait_for_mail().await);
                 }
             }
         }
     }
+}
+
+/// Count, for the perf witness, whether the claim that took the session was
+/// rung by a hint or run by the claim poll.
+fn witness_claim(claimed_on: lash_durable::runner::Wake) {
+    #[cfg(feature = "perf-witness")]
+    crate::perf_witness::wakes::record_claim(claimed_on == lash_durable::runner::Wake::Hint);
+    #[cfg(not(feature = "perf-witness"))]
+    let _ = claimed_on;
+}
+
+/// Count, for the perf witness, a pass after a wait a hint or the claim poll
+/// ended (FIG-5932), by whether it found work: work found after the poll is
+/// mail no hint reached.
+fn witness_pass(woke: Option<lash_durable::runner::Wake>, pass: &Result<Pass, TurnError>) {
+    #[cfg(feature = "perf-witness")]
+    if let Some(wake @ (lash_durable::runner::Wake::Hint | lash_durable::runner::Wake::Poll)) = woke
+    {
+        crate::perf_witness::wakes::record_pass(
+            wake == lash_durable::runner::Wake::Hint,
+            matches!(pass, Ok(Pass::Again)),
+        );
+    }
+    #[cfg(not(feature = "perf-witness"))]
+    let _ = (woke, pass);
 }
 
 /// Whether `error` may pass by itself, so the next pass can succeed with

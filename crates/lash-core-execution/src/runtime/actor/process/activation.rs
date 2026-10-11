@@ -398,7 +398,7 @@ impl ProcessActivation {
                 Err(error) => return Err(steps_failure(error)),
             },
             // A draining owner waits for its running steps alone.
-            () = owned.wait_for_mail(), if !owned.draining() => {}
+            _ = owned.wait_for_mail(), if !owned.draining() => {}
             () = sleep, if !owned.draining() => {}
         }
         Ok(Waited::Woke)

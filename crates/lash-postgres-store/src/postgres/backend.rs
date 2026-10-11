@@ -133,6 +133,10 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         Some(Arc::new(self.inner.storage.node_wakes()))
     }
 
+    fn wake_sink(&self) -> lash_durable::runner::WakeSink {
+        self.inner.storage.wake_sink().clone()
+    }
+
     fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
         &self.inner.binding
     }

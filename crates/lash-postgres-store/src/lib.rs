@@ -142,6 +142,9 @@ pub struct PostgresStorage {
     /// this build's writable range and the fleet epoch `F` its fences last
     /// read, seeded with the open transaction's admitted `F`.
     fence: guarded_tx::WriterFence,
+    /// Where every handle's producer commits hand the actor they woke, after
+    /// the commit: the store set's wake sink.
+    wakes: lash_durable::runner::WakeSink,
 }
 
 #[derive(Clone)]
@@ -153,6 +156,9 @@ pub struct PostgresStore {
     observer: StoreObserver,
     catalog_id: Arc<str>,
     fence: guarded_tx::WriterFence,
+    /// The storage's wake sink, which this store's producer commits deliver
+    /// to.
+    wakes: lash_durable::runner::WakeSink,
     clock: Arc<dyn lash_core_execution::Clock>,
     #[cfg(any(test, feature = "testing"))]
     decoded_graph_node_bodies: Arc<std::sync::atomic::AtomicU64>,
@@ -368,6 +374,7 @@ impl PostgresStorage {
             config: Arc::new(config),
             observer,
             catalog_id: catalog_id.into(),
+            wakes: lash_durable::runner::WakeSink::default(),
         })
     }
 
@@ -482,6 +489,7 @@ impl PostgresStorage {
             config: Arc::new(PostgresHostConfig::default()),
             observer: StoreObserver::default(),
             catalog_id: catalog_id.into(),
+            wakes: lash_durable::runner::WakeSink::default(),
         })
     }
 
@@ -666,6 +674,12 @@ impl PostgresStorage {
         self.store()
     }
 
+    /// Where the producer commits of every handle of this storage hand the
+    /// actor they woke, after the commit.
+    pub fn wake_sink(&self) -> &lash_durable::runner::WakeSink {
+        &self.wakes
+    }
+
     /// The fleet format this storage's durable writers emit — the `F` of ADR
     /// 0106 §1 as its writer fences last read it, or as the open admitted it
     /// before any fence ran (ADR 0115 §2.3).
@@ -702,6 +716,7 @@ impl PostgresStorage {
             observer: self.observer.clone(),
             catalog_id: Arc::clone(&self.catalog_id),
             fence: self.fence.clone(),
+            wakes: self.wakes.clone(),
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
@@ -800,6 +815,14 @@ impl PostgresStore {
     pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
         self.clock = clock;
         self
+    }
+
+    /// Hand `woken`, which a transaction of this store committed, to the
+    /// nodes attached to the storage's wake sink.
+    pub(crate) fn woke(&self, woken: Option<&lash_durable::Woken>) {
+        if let Some(woken) = woken {
+            self.wakes.wake(woken);
+        }
     }
 }
 

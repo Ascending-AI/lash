@@ -137,6 +137,10 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("durable store")
     }
 
+    fn wake_sink(&self) -> lash_core::durable_port::runner::WakeSink {
+        lash_core::durable_port::runner::WakeSink::default()
+    }
+
     fn node_wakes(&self) -> Option<Arc<dyn lash_core::durable_port::NodeWakes>> {
         None
     }

@@ -309,7 +309,9 @@ fn release_run_rows_conn(
         params![session_id.as_str(), run.as_str()],
     )
     .map_err(sqlite_error)?;
-    // What the run let go of is the session's to admit again.
+    // What the run let go of is the session's to admit again. A run ends in
+    // its own session's commit, whose owner reads its mail next, or in its
+    // close, which wakes the session itself: no hint follows.
     crate::durable::wake_session_tx(tx, session_id, false, at_ms)?;
     let ended = run_turns_conn(tx, session_id, run)?;
     let open_rows = {
@@ -850,16 +852,17 @@ pub(crate) fn insert_intent_conn(
 ///
 /// The close names the runs it releases: every run without terminal
 /// evidence, each ended `Cancelled` by `SessionDeleted`. It wakes the
-/// session actor, whose close steps act on the intent.
+/// session actor, whose close steps act on the intent, and answers the
+/// actor it woke for the wake sink once the transaction commits.
 ///
 /// [`ControlIntentStore::begin_session_close`]: lash_core_execution::store::ControlIntentStore::begin_session_close
 pub(crate) fn begin_session_close_conn(
     tx: &crate::conn::FencedTx<'_>,
     session_id: &SessionId,
     at_ms: u64,
-) -> Result<Option<ControlIntent>, StoreError> {
+) -> Result<(Option<ControlIntent>, Option<lash_durable::Woken>), StoreError> {
     if let Some(intent) = close_session_intent_conn(tx, session_id)? {
-        return Ok(Some(intent));
+        return Ok((Some(intent), None));
     }
     let exists = tx
         .query_row(
@@ -874,7 +877,7 @@ pub(crate) fn begin_session_close_conn(
         .map_err(sqlite_error)?
         .is_some();
     if !exists {
-        return Ok(None);
+        return Ok((None, None));
     }
     let sql = session_runs_sql();
     let mut runs = std::collections::BTreeSet::new();
@@ -924,8 +927,8 @@ pub(crate) fn begin_session_close_conn(
     if closed != 1 {
         return Err(StoreError::Contended);
     }
-    crate::durable::wake_session_tx(tx, session_id, false, at_ms)?;
-    Ok(Some(intent))
+    let woken = crate::durable::wake_session_tx(tx, session_id, false, at_ms)?;
+    Ok((Some(intent), woken))
 }
 
 /// Forget what session `session_id`'s runs hold, in its deletion's

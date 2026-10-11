@@ -398,6 +398,8 @@ fn enqueue(
         Err(error) => return refused(error.to_string()),
     };
     let now = u64::try_from(commit.now.0).unwrap_or(0);
+    // The owner mails its own session: its next pass reads the input, so the
+    // wake needs no hint.
     match crate::persistence::enqueue_pending_turn_inputs_conn(tx, &batch, now, 0) {
         Ok(_) => Ok(Ok(())),
         Err(lash_core_execution::StoreError::Contended) => {

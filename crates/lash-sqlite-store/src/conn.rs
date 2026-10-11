@@ -512,6 +512,9 @@ pub(crate) struct SqliteConnection {
     read_gate: Arc<RwLock<()>>,
     checkpoint: Option<Arc<CheckpointState>>,
     fence: Arc<WriterFence>,
+    /// Where a producer commit on this connection hands the actor it woke,
+    /// after the commit: the store set's [`WakeSink`](lash_durable::runner::WakeSink).
+    wakes: lash_durable::runner::WakeSink,
     #[cfg(feature = "testing")]
     pauses: Option<crate::testing::SqlitePauses>,
     #[cfg(feature = "testing")]
@@ -519,6 +522,19 @@ pub(crate) struct SqliteConnection {
 }
 
 impl SqliteConnection {
+    /// The wake sink this connection's producer commits deliver to.
+    pub(crate) fn wakes(&self) -> &lash_durable::runner::WakeSink {
+        &self.wakes
+    }
+
+    /// Hand `woken`, which a transaction on this connection committed, to
+    /// the nodes attached to the store set.
+    pub(crate) fn woke(&self, woken: Option<&lash_durable::Woken>) {
+        if let Some(woken) = woken {
+            self.wakes.wake(woken);
+        }
+    }
+
     /// This connection's pause controller, when one was installed at open.
     #[cfg(feature = "testing")]
     pub(crate) fn pauses(&self) -> Option<crate::testing::SqlitePauses> {
@@ -644,6 +660,7 @@ impl SqliteConnection {
             write_gate: gate,
             read_gate: reads,
             fence: WriterFence::new(),
+            wakes: lash_durable::runner::WakeSink::default(),
             #[cfg(feature = "testing")]
             pauses: hooks.pauses,
             #[cfg(feature = "testing")]
@@ -706,6 +723,7 @@ impl SqliteConnection {
             read_gate: read_gate(target),
             checkpoint: None,
             fence: WriterFence::new(),
+            wakes: lash_durable::runner::WakeSink::default(),
             #[cfg(feature = "testing")]
             pauses: None,
             #[cfg(feature = "testing")]

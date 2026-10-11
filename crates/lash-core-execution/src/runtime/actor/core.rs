@@ -281,7 +281,9 @@ impl ActorContext {
     /// fenced read, never here.
     pub async fn wait_for_mail(&self) {
         match &self.inner.mail {
-            Some(mail) => mail.wait().await,
+            Some(mail) => {
+                mail.wait().await;
+            }
             None => {
                 let poll = self
                     .inner

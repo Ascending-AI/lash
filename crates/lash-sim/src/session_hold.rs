@@ -147,6 +147,10 @@ impl lash_core_execution::StoreSet for HoldingStoreSet {
         })
     }
 
+    fn wake_sink(&self) -> lash_durable::runner::WakeSink {
+        lash_core_execution::StoreSet::wake_sink(self.inner.as_ref())
+    }
+
     fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>> {
         lash_core_execution::StoreSet::node_wakes(self.inner.as_ref())
     }

@@ -35,7 +35,8 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         let drafts = batch.drafts().len() as u64;
         let first_nonce = self.commit_count.fetch_add(drafts, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
-        self.conn
+        let (admitted, woken) = self
+            .conn
             .write_flow(move |tx| {
                 let outcome = enqueue_pending_turn_inputs_conn(tx, &batch, now, first_nonce);
                 match outcome {
@@ -44,7 +45,9 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                 }
             })
             .await
-            .map_err(sqlite_error)?
+            .map_err(sqlite_error)??;
+        self.conn.woke(woken.as_ref());
+        Ok(admitted)
     }
 
     async fn admit_pending_turn_inputs(
@@ -54,7 +57,8 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         let drafts = batch.drafts().len() as u64;
         let first_nonce = self.commit_count.fetch_add(drafts, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
-        self.conn
+        let (admission, woken) = self
+            .conn
             .write_flow(move |tx| {
                 let fleet = tx.fleet();
                 let outcome = admit_pending_turn_inputs_conn(tx, &batch, now, first_nonce, fleet);
@@ -64,7 +68,9 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                 }
             })
             .await
-            .map_err(sqlite_error)?
+            .map_err(sqlite_error)??;
+        self.conn.woke(woken.as_ref());
+        Ok(admission)
     }
 
     async fn load_run_spec(
@@ -430,13 +436,20 @@ impl lash_core_execution::QueuedWorkStore for SqliteStore {
 /// transaction holds (FIG-3842): a draft a stored row already answers returns
 /// that row, and every other draft is inserted in request order at the next
 /// positions of the session's ingress sequence. Any refusal rolls the whole
-/// batch back.
+/// batch back. Beside the rows it answers the session actor the batch woke,
+/// for the wake sink once the transaction commits.
 pub(crate) fn enqueue_pending_turn_inputs_conn(
     tx: &Connection,
     batch: &lash_core_execution::PendingTurnInputBatch,
     now: u64,
     first_nonce: u64,
-) -> Result<Vec<lash_core_execution::PendingTurnInput>, StoreError> {
+) -> Result<
+    (
+        Vec<lash_core_execution::PendingTurnInput>,
+        Option<lash_durable::Woken>,
+    ),
+    StoreError,
+> {
     use lash_core_execution::store_backend_support as support;
     let session_id = batch.session_id();
     ensure_session_not_deleted_conn(tx, session_id)?;
@@ -550,8 +563,8 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
     }
     // The rows and the session's wake commit together (ADR 0132 §12): no
     // crash between them can leave input that nothing will admit.
-    crate::durable::wake_session_tx(tx, session_id, false, now)?;
-    Ok(admitted)
+    let woken = crate::durable::wake_session_tx(tx, session_id, false, now)?;
+    Ok((admitted, woken))
 }
 
 /// What session `session_id` records about turn `turn_id`, read under the
@@ -592,15 +605,24 @@ fn admit_pending_turn_inputs_conn(
     now: u64,
     first_nonce: u64,
     fleet: lash_core_execution::FleetFormat,
-) -> Result<lash_core_execution::TurnInputAdmission, StoreError> {
+) -> Result<
+    (
+        lash_core_execution::TurnInputAdmission,
+        Option<lash_durable::Woken>,
+    ),
+    StoreError,
+> {
     let session_id = batch.session_id();
     read_session_state_version_conn(tx, session_id, fleet)?;
-    let rows = enqueue_pending_turn_inputs_conn(tx, batch, now, first_nonce)?;
+    let (rows, woken) = enqueue_pending_turn_inputs_conn(tx, batch, now, first_nonce)?;
     let committed_head = try_load_session_head_meta_from_conn(tx, session_id, fleet)?;
-    Ok(lash_core_execution::TurnInputAdmission::Fused {
-        rows,
-        committed_head,
-    })
+    Ok((
+        lash_core_execution::TurnInputAdmission::Fused {
+            rows,
+            committed_head,
+        },
+        woken,
+    ))
 }
 
 /// Admit `draft`'s run spec inside its enqueue transaction (FIG-3838): refuse

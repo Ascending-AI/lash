@@ -389,6 +389,10 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
             .map(|node_wakes| node_wakes as Arc<dyn lash_durable::NodeWakes>)
     }
 
+    fn wake_sink(&self) -> lash_durable::runner::WakeSink {
+        self.inner.process_env_store.conn.wakes().clone()
+    }
+
     fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
         &self.inner.binding
     }

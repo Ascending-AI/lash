@@ -137,22 +137,24 @@ pub(crate) fn enqueue_queued_work_conn(
     batch: &QueuedWorkBatchDraft,
     now: u64,
     nonce: u64,
-) -> Result<QueuedWorkBatch, StoreError> {
+) -> Result<(QueuedWorkBatch, Option<lash_durable::Woken>), StoreError> {
     enqueue_queued_work_conn_with_outcome(conn, batch, now, nonce)
-        .map(QueuedWorkEnqueueOutcome::into_batch)
+        .map(|(outcome, woken)| (outcome.into_batch(), woken))
 }
 
 /// Admit `batch` under the database write lock the caller's transaction
 /// holds (ADR 0101 §8): a batch the session already filed under the draft's
 /// source key, open or a tombstone, answers an identical submission and
 /// refuses a changed one; otherwise the draft is inserted at the next
-/// position of the session's ingress sequence with its submission digest.
+/// position of the session's ingress sequence with its submission digest,
+/// and the session actor its wake woke is answered beside it, for the wake
+/// sink once the transaction commits.
 pub(crate) fn enqueue_queued_work_conn_with_outcome(
     conn: &Connection,
     batch: &QueuedWorkBatchDraft,
     now: u64,
     nonce: u64,
-) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+) -> Result<(QueuedWorkEnqueueOutcome, Option<lash_durable::Woken>), StoreError> {
     use lash_core_execution::store_backend_support as support;
     support::validate_queued_work_draft(batch)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
@@ -173,7 +175,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
                 load_queued_batch_by_id_conn(conn, batch_id.as_str())?.ok_or_else(|| {
                     StoreError::Backend("queued work source row disappeared".to_string())
                 })?;
-            return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
+            return Ok((QueuedWorkEnqueueOutcome::Existing(existing), None));
         }
     }
     let batch_id = derive_batch_id(
@@ -200,10 +202,10 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     )
     .map_err(sqlite_error)?;
     // The batch and the session's wake commit together (ADR 0132 §12).
-    crate::durable::wake_session_tx(conn, &batch.session_id, false, now)?;
+    let woken = crate::durable::wake_session_tx(conn, &batch.session_id, false, now)?;
     let inserted = load_queued_batch_by_id_conn(conn, &batch_id)?
         .ok_or_else(|| StoreError::Backend("queued work insert disappeared".to_string()))?;
-    Ok(QueuedWorkEnqueueOutcome::Inserted(inserted))
+    Ok((QueuedWorkEnqueueOutcome::Inserted(inserted), woken))
 }
 
 /// Complete batch `batch_id`, which run `run` of session `session_id` must

@@ -31,8 +31,9 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         let now = self.clock.timestamp_ms();
-        let admitted = enqueue_pending_turn_inputs_tx(&mut tx, &batch, now).await?;
+        let (admitted, woken) = enqueue_pending_turn_inputs_tx(&mut tx, &batch, now).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
+        self.woke(woken.as_ref());
         Ok(admitted)
     }
 
@@ -346,13 +347,20 @@ impl lash_core_execution::QueuedWorkStore for PostgresStore {
 /// Admit every draft of `batch` in the caller's transaction `tx` at `now`
 /// (FIG-3842): a draft a stored row already answers returns that row, and
 /// every other draft is inserted in request order at the next positions of
-/// the session's ingress sequence, with the session's wake. Any refusal
-/// fails the whole batch; the caller's transaction rolls it back.
+/// the session's ingress sequence, with the session's wake, whose actor is
+/// answered beside the rows for the wake sink once the transaction commits.
+/// Any refusal fails the whole batch; the caller's transaction rolls it back.
 pub(crate) async fn enqueue_pending_turn_inputs_tx(
     tx: &mut crate::guarded_tx::GuardedTx<'_>,
     batch: &lash_core_execution::PendingTurnInputBatch,
     now: u64,
-) -> Result<Vec<lash_core_execution::PendingTurnInput>, StoreError> {
+) -> Result<
+    (
+        Vec<lash_core_execution::PendingTurnInput>,
+        Option<lash_durable::Woken>,
+    ),
+    StoreError,
+> {
     use lash_core_execution::store_backend_support as support;
     let session_id = batch.session_id();
     ensure_session_not_deleted_tx(tx, session_id).await?;
@@ -466,8 +474,8 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
     }
     // The rows and the session's wake commit together (ADR 0132 §12): no
     // crash between them can leave input that nothing will admit.
-    crate::durable::wake_session_tx(&mut *tx, session_id, false, now).await?;
-    Ok(admitted)
+    let woken = crate::durable::wake_session_tx(&mut *tx, session_id, false, now).await?;
+    Ok((admitted, woken))
 }
 
 /// Admit `draft`'s run spec inside its enqueue transaction (FIG-3838): refuse

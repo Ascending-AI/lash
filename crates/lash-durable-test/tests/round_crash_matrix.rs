@@ -459,7 +459,9 @@ impl Activation for RoundOwner {
             match self.pass(&cx).await {
                 Ok(()) => return Exit::Released,
                 Err(Pass::Lost) => return Exit::Released,
-                Err(Pass::Again) => owned.wait_for_mail().await,
+                Err(Pass::Again) => {
+                    owned.wait_for_mail().await;
+                }
             }
         }
     }

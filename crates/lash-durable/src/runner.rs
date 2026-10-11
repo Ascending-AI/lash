@@ -68,7 +68,7 @@ use crate::tx::{ActorTx, Release};
 use lash_core_ids::clock::Clock;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 use tokio::sync::{Notify, watch};
@@ -280,6 +280,7 @@ pub struct Owned {
     store: Arc<dyn DurableStore>,
     clock: Arc<dyn Clock>,
     claimed: Claimed,
+    claimed_on: Wake,
     hint: Arc<Notify>,
     poll: std::time::Duration,
     drain: Drain,
@@ -303,6 +304,12 @@ impl Owned {
     #[must_use]
     pub fn cause(&self) -> ClaimCause {
         self.claimed.cause
+    }
+
+    /// What woke the claim that took it: a hint, or the claim poll.
+    #[must_use]
+    pub fn claimed_on(&self) -> Wake {
+        self.claimed_on
     }
 
     /// What the node claimed the actor for: a
@@ -371,10 +378,10 @@ impl Owned {
     }
 
     /// Wait until mail may have arrived for the actor: a wake hint, or one
-    /// claim-poll interval, whichever comes first. A hint is only a hint;
-    /// the next [`Owned::begin`] reads what actually arrived.
-    pub async fn wait_for_mail(&self) {
-        self.mail_waker().wait().await;
+    /// claim-poll interval, whichever comes first, and answer which. A hint
+    /// is only a hint; the next [`Owned::begin`] reads what actually arrived.
+    pub async fn wait_for_mail(&self) -> Wake {
+        self.mail_waker().wait().await
     }
 
     /// What [`Owned::wait_for_mail`] waits on, for the activation's context
@@ -418,15 +425,16 @@ pub struct MailWaker {
 }
 
 impl MailWaker {
-    /// Wait for a hint, the drain's start or one poll interval.
-    pub async fn wait(&self) {
+    /// Wait for a hint, the drain's start or one poll interval, and answer
+    /// which came.
+    pub async fn wait(&self) -> Wake {
         if self.drain.started() {
-            return;
+            return Wake::Drain;
         }
         tokio::select! {
-            () = self.hint.notified() => {}
-            () = self.drain.wait() => {}
-            () = self.clock.sleep(self.poll) => {}
+            () = self.hint.notified() => Wake::Hint,
+            () = self.drain.wait() => Wake::Drain,
+            () = self.clock.sleep(self.poll) => Wake::Poll,
         }
     }
 
@@ -442,6 +450,106 @@ impl std::fmt::Debug for MailWaker {
         f.debug_struct("MailWaker")
             .field("poll", &self.poll)
             .finish_non_exhaustive()
+    }
+}
+
+/// What ended a wait for work: a wake hint, the node's drain, or the poll
+/// interval running out with no hint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Wake {
+    /// A wake hint: a commit on this node, or a node wake, named the actor.
+    Hint,
+    /// The node's drain started.
+    Drain,
+    /// One poll interval passed with no hint: the backstop for a hint that
+    /// never came.
+    Poll,
+}
+
+/// Where a store set's producer commits hand what they woke, after the
+/// commit: the session work a host writes beside the session's wake (ADR
+/// 0132 §12) outside any mailbox transaction, such as an accepted send.
+/// Each node this process serves over the store set attaches its [`Hints`]
+/// while it serves. A woken actor goes to the node that owns it, hinted in
+/// process; any other goes to one serving node, which publishes it to its
+/// owner's node or rings a claim as [`Hints::wake`] does. With no node
+/// attached the wake is dropped, and the polls find the work.
+#[derive(Clone, Default)]
+pub struct WakeSink {
+    inner: Arc<WakeSinkInner>,
+}
+
+#[derive(Default)]
+struct WakeSinkInner {
+    /// The attached nodes' hints, by attachment.
+    nodes: Mutex<Vec<(u64, Hints)>>,
+    next: AtomicU64,
+}
+
+impl WakeSink {
+    /// Hand `hints` what this sink is handed, until the answer drops.
+    #[must_use = "the node hears the sink's wakes only while the attachment lives"]
+    pub fn attach(&self, hints: &Hints) -> WakeAttachment {
+        let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
+        self.nodes().push((id, hints.clone()));
+        WakeAttachment {
+            sink: Arc::clone(&self.inner),
+            id,
+        }
+    }
+
+    /// Deliver one actor a committed producer transaction woke.
+    pub fn wake(&self, woken: &Woken) {
+        let hints = {
+            let nodes = self.nodes();
+            let owner = woken
+                .owner
+                .as_ref()
+                .and_then(|owner| nodes.iter().find(|(_, hints)| hints.is_mine(owner)));
+            owner
+                .or_else(|| nodes.first())
+                .map(|(_, hints)| hints.clone())
+        };
+        if let Some(hints) = hints {
+            hints.wake(woken);
+        }
+    }
+
+    fn nodes(&self) -> std::sync::MutexGuard<'_, Vec<(u64, Hints)>> {
+        self.inner
+            .nodes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl std::fmt::Debug for WakeSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WakeSink")
+            .field("nodes", &self.nodes().len())
+            .finish()
+    }
+}
+
+/// A node's attachment to a [`WakeSink`]: dropping it detaches the node.
+pub struct WakeAttachment {
+    sink: Arc<WakeSinkInner>,
+    id: u64,
+}
+
+impl Drop for WakeAttachment {
+    fn drop(&mut self) {
+        self.sink
+            .nodes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(id, _)| *id != self.id);
+    }
+}
+
+impl std::fmt::Debug for WakeAttachment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WakeAttachment").finish_non_exhaustive()
     }
 }
 
@@ -907,6 +1015,9 @@ impl Runner {
                 self.config.max_active.saturating_sub(active.len())
             });
             let mut next = next_reap.min(next_claim);
+            // What woke this turn of the loop: a claim it makes is on a hint,
+            // or on the claim poll.
+            let woke;
             if feed.is_some() {
                 next = next.min(next_watch);
             }
@@ -928,7 +1039,9 @@ impl Runner {
                     continue;
                 }
                 () = self.drain.wait(), if !self.drain.started() => continue,
-                event = next_node_wake(&mut feed) => match event {
+                event = next_node_wake(&mut feed) => {
+                    woke = Wake::Hint;
+                    match event {
                     NodeWakeEvent::Ready => {
                         next_claim = self.clock.now();
                         claim_delay = settings.claim_backoff;
@@ -960,12 +1073,14 @@ impl Runner {
                         next_claim = self.clock.now();
                         claim_delay = settings.claim_backoff;
                     }
-                },
+                    }
+                }
                 () = self.hints.inner.claim.notified() => {
+                    woke = Wake::Hint;
                     next_claim = self.clock.now();
                     claim_delay = settings.claim_backoff;
                 }
-                () = self.clock.sleep_until(next) => {}
+                () = self.clock.sleep_until(next) => woke = Wake::Poll,
             }
             let now = self.clock.now();
             if now >= next_reap {
@@ -1053,7 +1168,7 @@ impl Runner {
                         next_claim = now + claim_delay;
                         adopt = false;
                         for claimed in claimed {
-                            self.activate(&mut active, &mut claims, claimed);
+                            self.activate(&mut active, &mut claims, claimed, woke);
                         }
                     }
                     Err(DurableError::NodeLeaseLost { .. }) => break Stopped::LeaseLost,
@@ -1151,6 +1266,7 @@ impl Runner {
         active: &mut JoinSet<Exit>,
         claims: &mut HashMap<tokio::task::Id, (ActorKey, Epoch)>,
         claimed: Claimed,
+        claimed_on: Wake,
     ) {
         let actor = claimed.actor.clone();
         let claim = (claimed.actor.clone(), claimed.epoch);
@@ -1159,6 +1275,7 @@ impl Runner {
             clock: Arc::clone(&self.clock),
             hint: self.hints.start(actor.clone()),
             claimed,
+            claimed_on,
             poll: self.config.lease.settings().claim_poll,
             drain: self.drain.clone(),
             liveness: self.liveness.clone(),

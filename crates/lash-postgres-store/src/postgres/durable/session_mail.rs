@@ -484,6 +484,8 @@ async fn enqueue(
     let batch = lash_core_execution::PendingTurnInputBatch::new(session.clone(), vec![draft])
         .map_err(|error| refused(error.to_string()))?;
     let now = u64::try_from(commit.now.0).unwrap_or(0);
+    // The owner mails its own session: its next pass reads the input, so the
+    // wake needs no hint.
     match crate::runtime_persistence::enqueue_pending_turn_inputs_tx(tx, &batch, now).await {
         Ok(_) => Ok(()),
         Err(error @ lash_core_execution::StoreError::Contended) => Err(super::store_failure(error)),

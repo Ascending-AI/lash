@@ -673,6 +673,13 @@ pub trait StoreSet: Send + Sync {
     /// in-process hints and the polls.
     fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>>;
 
+    /// Where this store set's producer commits hand the actors they woke,
+    /// after the commit (ADR 0132 §12): a node serving over the store set
+    /// attaches its hints here, so an accepted send reaches the session's
+    /// owner on this node at once and its owner on another node through the
+    /// node wakes, not at the owner's claim poll.
+    fn wake_sink(&self) -> lash_durable::runner::WakeSink;
+
     /// The identity of this store set's storage.
     fn binding_identity(&self) -> &StoreBindingId;
 

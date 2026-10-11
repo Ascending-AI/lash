@@ -358,6 +358,10 @@ impl lash::StoreSet for DeleteStores {
     fn durable_store(&self) -> Arc<dyn DurableStore> {
         self.durable.clone()
     }
+    fn wake_sink(&self) -> lash::durable::runner::WakeSink {
+        self.inner.wake_sink()
+    }
+
     fn node_wakes(&self) -> Option<Arc<dyn lash::durable::NodeWakes>> {
         self.inner.node_wakes()
     }

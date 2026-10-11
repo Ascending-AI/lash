@@ -846,23 +846,26 @@ pub(crate) async fn wake_session_within(
     Ok(wake_within(tx, &actor, control, now).await?.0)
 }
 
-/// [`wake_session_within`] for a session store transaction at `at_ms`. An
-/// absent or deleted session, and one whose actor already ended (its close
-/// finished), wakes nobody and creates nothing; that is no refusal of the
-/// producer's write, which refuses such a session itself.
+/// [`wake_session_within`] for a session store transaction at `at_ms`,
+/// answering the actor it woke for the caller to hand to the storage's wake
+/// sink once the transaction commits. An absent or deleted session, and one
+/// whose actor already ended (its close finished), wakes nobody and creates
+/// nothing; that is no refusal of the producer's write, which refuses such a
+/// session itself.
 pub(crate) async fn wake_session_tx(
     tx: &mut PgConnection,
     session: &lash_sansio::SessionId,
     control: bool,
     at_ms: u64,
-) -> Result<(), StoreError> {
+) -> Result<Option<Woken>, StoreError> {
     let wake = async {
         if !session_mail::standing(tx, session).await?.0 {
-            return Ok(());
+            return Ok(None);
         }
         let now = DurableInstant(integer::<i64>(at_ms)?);
         match wake_session_within(tx, session, control, now).await {
-            Ok(_) | Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_))) => Ok(()),
+            Ok(woken) => Ok(Some(woken)),
+            Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_))) => Ok(None),
             Err(error) => Err(error),
         }
     };

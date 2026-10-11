@@ -10,8 +10,11 @@
 //! - **Claims** take at most `claim_batch` actors at once and never more
 //!   than `max_active` in all.
 //! - **Mail** reaches a hot owner by the wake hint of a mailbox commit made
-//!   on this node ([`Backend::commit_mail`]), published to the owner's node
-//!   when the store set has node wakes and the notifier is `AfterCommit`, or by
+//!   on this node ([`Backend::commit_mail`]) or of a producer commit of the
+//!   store set's (an accepted send: its
+//!   [`StoreSet::wake_sink`](crate::StoreSet::wake_sink)), published
+//!   to the owner's node when the store set has node wakes and the notifier
+//!   is `AfterCommit`, or by
 //!   the owner's own read at every claim poll: the poll is the correctness
 //!   backstop, the hint only cuts latency. With node wakes the node also holds
 //!   a liveness lock, so a crashed node is reaped as soon as its session
@@ -123,6 +126,9 @@ pub async fn serve(
     {
         runner = runner.with_node_wakes(node_wakes);
     }
+    // While the node serves, what its store set's producers commit wakes
+    // its actors through its hints.
+    let _wakes = backend.stores().wake_sink().attach(backend.hints());
     runner.run(stop).await
 }
 

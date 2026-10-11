@@ -183,17 +183,20 @@ async fn enqueue_queued_work_tx(
     tx: &mut sqlx::PgConnection,
     batch: &QueuedWorkBatchDraft,
     now: u64,
-) -> Result<QueuedWorkBatch, StoreError> {
+) -> Result<(QueuedWorkBatch, Option<lash_durable::Woken>), StoreError> {
     enqueue_queued_work_with_outcome_tx(tx, batch, now)
         .await
-        .map(QueuedWorkEnqueueOutcome::into_batch)
+        .map(|(outcome, woken)| (outcome.into_batch(), woken))
 }
 
+/// Admit `batch` in the caller's transaction, with the session's wake,
+/// whose actor is answered beside the outcome for the wake sink once the
+/// transaction commits.
 pub(crate) async fn enqueue_queued_work_with_outcome_tx(
     tx: &mut sqlx::PgConnection,
     batch: &QueuedWorkBatchDraft,
     now: u64,
-) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+) -> Result<(QueuedWorkEnqueueOutcome, Option<lash_durable::Woken>), StoreError> {
     lash_core_execution::store_backend_support::validate_queued_work_draft(batch)?;
     // The actor row, then history, then referrers: an owner commit's order,
     // which an admission from another domain's transaction keeps too.
@@ -228,7 +231,7 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
                 .ok_or_else(|| {
                     StoreError::Backend("queued work source row disappeared".to_string())
                 })?;
-            return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
+            return Ok((QueuedWorkEnqueueOutcome::Existing(existing), None));
         }
     }
     let enqueue_seq = allocate_ingress_sequence_tx(tx, &batch.session_id).await?;
@@ -255,12 +258,12 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
         .await
         .map_err(store_sqlx_error)?;
     // The batch and the session's wake commit together (ADR 0132 §12).
-    crate::durable::wake_session_tx(tx, &batch.session_id, false, now).await?;
+    let woken = crate::durable::wake_session_tx(tx, &batch.session_id, false, now).await?;
     let queued = load_queued_batch(tx, &batch_id)
         .await?
         .ok_or_else(|| StoreError::Backend("queued work insert disappeared".to_string()))?;
     debug_assert_eq!(queued.enqueue_seq, enqueue_seq_u64);
-    Ok(QueuedWorkEnqueueOutcome::Inserted(queued))
+    Ok((QueuedWorkEnqueueOutcome::Inserted(queued), woken))
 }
 
 async fn read_session_state_version_tx(

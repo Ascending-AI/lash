@@ -383,6 +383,7 @@ pub(crate) async fn run_case(
     };
 
     let work_start = collector.snapshot();
+    let wakes_before = lash_core::perf_witness::wakes::counts();
     let started = Instant::now();
     let per_lane = spec.samples.div_ceil(spec.lanes);
     let lane_count = spec.samples.div_ceil(per_lane);
@@ -410,6 +411,7 @@ pub(crate) async fn run_case(
     let wall = started.elapsed();
     let work_end = collector.snapshot();
     let mut workers = worker_delta(&work_start, &work_end);
+    let wakes = lash_core::perf_witness::wakes::counts().since(wakes_before);
     topology.shutdown().await?;
     let mut witness = collector.snapshot();
     if spec.topology == Topology::CrossWorker {
@@ -435,6 +437,10 @@ pub(crate) async fn run_case(
     let mut report = CaseReport::assemble(spec, &samples, errors, wall);
     report.actual_lanes = lane_count;
     report.sqlite_work = SqliteWork::assemble(workers, samples.len(), spec.busy);
+    // A cross-worker case's sessions run in the child: this process saw none.
+    if spec.topology == Topology::SameProcess {
+        report.session_wakes = Some(wakes);
+    }
     Ok((report, samples))
 }
 
@@ -1067,6 +1073,11 @@ pub(crate) struct CaseReport {
     /// The cold/warm split on every phase.
     pub(crate) cold: Option<PhaseSummaries>,
     pub(crate) warm: Option<PhaseSummaries>,
+    /// What brought the case's session owners to their work (FIG-5932):
+    /// `work_on_poll` counts passes that found mail only the claim poll
+    /// reached. Same-process cases only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) session_wakes: Option<lash_core::perf_witness::wakes::Counts>,
 }
 
 impl CaseReport {
@@ -1108,6 +1119,7 @@ impl CaseReport {
             phases_ms: phases_of(&all),
             cold: (!cold.is_empty()).then(|| phases_of(&cold)),
             warm: (!warm.is_empty()).then(|| phases_of(&warm)),
+            session_wakes: None,
         }
     }
 }

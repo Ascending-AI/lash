@@ -437,6 +437,7 @@ mod telemetry_content;
 #[cfg(feature = "otel-trace")]
 mod trace_emission;
 mod tracing;
+mod warm_admission;
 pub(crate) use harness::{
     DecoratedBackend, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,
     llm_profile_spec, mock_llm_profile_spec, mock_session_spec, postgres_store_parts,
