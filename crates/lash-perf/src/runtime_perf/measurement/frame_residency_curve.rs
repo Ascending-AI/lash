@@ -73,13 +73,14 @@ async fn open_catalog(
     if scenario.uses_postgres() {
         let url = postgres_url.ok_or_else(|| anyhow::anyhow!("PostgreSQL URL is required"))?;
         let storage = lash_postgres_store::testing::connect(url).await?;
+        crate::perf_support::require_durable_postgres(storage.pool()).await?;
         Ok(Arc::new(storage.store()))
     } else {
         let root = sqlite_root.ok_or_else(|| anyhow::anyhow!("SQLite root is required"))?;
         Ok(Arc::new(
             lash_sqlite_store::SqliteStore::open(
                 &root.join("lash.db"),
-                lash_sqlite_store::SqliteSynchronous::Normal,
+                lash_sqlite_store::SqliteSynchronous::Full,
             )
             .await?,
         ))

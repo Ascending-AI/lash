@@ -315,7 +315,7 @@ that row's survival.
 **`Once` holds across a database failover only if acknowledged commits
 survive promotion.** The host chooses its topology. Lash runs no startup check
 and offers no mode switch
-([ADR 0132 §13](../adr/0132-durability-is-state-first-over-the-lash-store.md#13-the-postgresql-durability-assumption)).
+([ADR 0132 §13](../adr/0132-durability-is-state-first-over-the-lash-store.md#13-the-storage-durability-assumption)).
 
 - **Synchronous replication** (`synchronous_commit = on` or `remote_apply`,
   with the promoted standby in `synchronous_standby_names`). An acknowledged

@@ -171,7 +171,7 @@ async fn sqlite_writer_settles_its_send_after_a_later_booted_writer_has_left() {
     let dir = tempfile::tempdir().unwrap();
     lash_sqlite_store::SqliteStoreSet::open(
         dir.path().join("lash.db"),
-        lash_sqlite_store::SqliteSynchronous::Normal,
+        lash_sqlite_store::SqliteSynchronous::Full,
     )
     .await
     .unwrap();

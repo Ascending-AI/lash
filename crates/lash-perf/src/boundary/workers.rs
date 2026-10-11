@@ -36,7 +36,7 @@ impl Writer {
         let meter = Meter::new(ledger_cap);
         let stores = lash_sqlite_store::SqliteStoreSet::open(
             store_dir.join("lash.db"),
-            lash_sqlite_store::SqliteSynchronous::Normal,
+            lash_sqlite_store::SqliteSynchronous::Full,
         )
         .await?;
         let core = facade::build(
@@ -107,7 +107,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     // Establish the product baseline once; all child connections open it again.
     let initialized = lash_sqlite_store::SqliteStoreSet::open(
         args.store_dir.join("lash.db"),
-        lash_sqlite_store::SqliteSynchronous::Normal,
+        lash_sqlite_store::SqliteSynchronous::Full,
     )
     .await?;
     drop(initialized);

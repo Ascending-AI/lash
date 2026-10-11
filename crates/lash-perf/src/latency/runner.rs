@@ -97,6 +97,7 @@ impl LatencyEnv {
             "engine_commit_clock": "successful COMMIT start, with terminal COMMIT return retained as the upper bound",
             "engine": "lash-durable",
             "store": "sqlite-file",
+            "sqlite_synchronous": "Full",
             "heap_profile_parent": self.dhat_out,
             "heap_profile_children": self.dhat_out.as_ref().map(|path|
                 "one sibling <parent-stem>.<case>.child.dhat.json per cross-worker case".to_owned() +
@@ -344,7 +345,7 @@ pub(crate) async fn run_case(
             let stores_dir = case_dir.join("same");
             let stores = lash::sqlite::SqliteStoreSet::open(
                 stores_dir.join("lash.db"),
-                lash::sqlite::SqliteSynchronous::Normal,
+                lash::sqlite::SqliteSynchronous::Full,
             )
             .await
             .map_err(|error| anyhow::anyhow!("open case store set: {error}"))?;
@@ -382,6 +383,7 @@ pub(crate) async fn run_case(
         }
     };
 
+    eprintln!("durability-window {} begin", spec.name);
     let work_start = collector.snapshot();
     let wakes_before = lash_core::perf_witness::wakes::counts();
     let started = Instant::now();
@@ -410,6 +412,7 @@ pub(crate) async fn run_case(
     samples.sort_by_key(|sample| (sample.lane, sample.index));
     let wall = started.elapsed();
     let work_end = collector.snapshot();
+    eprintln!("durability-window {} end", spec.name);
     let mut workers = worker_delta(&work_start, &work_end);
     let wakes = lash_core::perf_witness::wakes::counts().since(wakes_before);
     topology.shutdown().await?;
@@ -506,7 +509,7 @@ async fn build_observer_with_mode(
 ) -> Result<lash::LashCore> {
     let stores = lash::sqlite::SqliteStoreSet::open(
         stores_dir.join("lash.db"),
-        lash::sqlite::SqliteSynchronous::Normal,
+        lash::sqlite::SqliteSynchronous::Full,
     )
     .await
     .map_err(|error| anyhow::anyhow!("open observer store set: {error}"))?;
@@ -1259,7 +1262,7 @@ pub(super) async fn run_worker(stores_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(stores_dir)?;
     let stores = lash::sqlite::SqliteStoreSet::open(
         stores_dir.join("lash.db"),
-        lash::sqlite::SqliteSynchronous::Normal,
+        lash::sqlite::SqliteSynchronous::Full,
     )
     .await?;
     let spec = CaseSpec {
@@ -1305,7 +1308,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let _stores = lash_sqlite_store::SqliteStoreSet::open(
             dir.path().join("startup.db"),
-            lash_sqlite_store::SqliteSynchronous::Normal,
+            lash_sqlite_store::SqliteSynchronous::Full,
         )
         .await
         .unwrap();

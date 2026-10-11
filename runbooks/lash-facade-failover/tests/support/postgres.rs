@@ -31,6 +31,7 @@ const SETTINGS: &[(&str, &str)] = &[
     ("unix_socket_directories", ""),
     ("max_connections", "200"),
     ("max_locks_per_transaction", "256"),
+    // Logic laws only; these flush settings do not certify power-loss durability.
     ("fsync", "off"),
     ("synchronous_commit", "off"),
     ("full_page_writes", "off"),

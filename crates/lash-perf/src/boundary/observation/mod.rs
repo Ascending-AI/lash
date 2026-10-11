@@ -174,7 +174,7 @@ impl Fleet {
                     let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
                         lash_sqlite_store::SqliteStoreSet::open(
                             args.store_dir.join("lash.db"),
-                            lash_sqlite_store::SqliteSynchronous::Normal,
+                            lash_sqlite_store::SqliteSynchronous::Full,
                         )
                         .await?,
                     );
@@ -270,6 +270,7 @@ async fn postgres_host(url: &str, run: &str) -> Result<lash::postgres::PostgresH
         Default::default(),
     )
     .await?;
+    crate::perf_support::require_durable_postgres(host.storage.pool()).await?;
     let version: String = sqlx::query_scalar("SHOW server_version_num")
         .fetch_one(host.storage.pool())
         .await?;

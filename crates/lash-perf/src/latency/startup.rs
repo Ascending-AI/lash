@@ -101,7 +101,7 @@ async fn measure(stores_dir: &Path, recorder: &Recorder, announce: bool) -> Resu
     );
     let stores = lash_sqlite_store::SqliteStoreSet::open(
         stores_dir.join("lash.db"),
-        lash_sqlite_store::SqliteSynchronous::Normal,
+        lash_sqlite_store::SqliteSynchronous::Full,
     )
     .await?;
     startup::record(Phase::StoresReady);

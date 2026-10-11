@@ -46,6 +46,27 @@ Validation runs before any I/O and refuses the first broken rule with
 `PostgresHostConfigError { field, reason }`, `field` being the serialized
 path (`roles.work.max_connections`).
 
+## Commit durability
+
+Lash's exactly-once effect admission survives power loss only when PostgreSQL
+has `fsync=on` and `synchronous_commit=on` (or a synchronous level that waits
+for local WAL flush), on storage that honors sync requests. Every boundary
+commit waits at that configured level before its dependent effect or answer
+is released. The host owns these server, database, role and connection
+settings; lash adds no durability default or asynchronous interior tier.
+
+With `synchronous_commit=off`, acknowledged admissions and outcomes can be
+lost. A `Once` start lost after the body ran can be admitted again on recovery,
+so that configuration explicitly has a weaker contract. With `fsync=off`,
+power loss can also corrupt the database. Local synchronous commit does not
+protect against promotion of a replica missing acknowledged commits: the
+host's replication and failover policy must preserve them too
+([ADR 0132 §13](../adr/0132-durability-is-state-first-over-the-lash-store.md#13-the-storage-durability-assumption)).
+
+Performance harnesses use synchronous commit with fsync enabled. Hermetic
+laws and CI may disable both to test logic cheaply; those results do not
+certify power-loss durability.
+
 ## Named presets
 
 `PostgresHostConfig::standard()` is the production preset and `Default`.

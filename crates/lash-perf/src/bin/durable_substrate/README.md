@@ -118,3 +118,26 @@ These functional instruments include observer overhead. Keep the time command's
 peak RSS evidence and reject latency comparisons at load1 >= 8. Do not use a live
 PostgreSQL database. This sweep is a measurement recipe, not an additional landing
 gate; the small SQLite law pins the six owning boundaries deterministically.
+
+## Durable commit baseline (FIG-5957)
+
+SQLite performance cases use `Full`: exactly-once admission across power loss
+requires every boundary commit to be durable before returning. PostgreSQL
+runs require fsync and synchronous commit enabled; `bench.py` supplies both.
+Hermetic law servers with flushes disabled certify logic only.
+
+`--case counted-no-tool --case counted-one-tool --case counted-one-park`
+runs 16 concurrent cold sessions per batch (`--samples` batches), excluding
+session creation and close from the counted windows. The direct one-tool
+fixture makes two model calls around one `Once` tool; the one-park cell also
+makes two model calls, one `Once` tool outcome and one VM admission park.
+Geometry is checked per session. Reports contain all physical SQLite write
+transactions and writer service nanoseconds from the FIG-5933 instrument,
+plus acceptance-to-terminal p50/p99. Stderr `durability-window … begin/end`
+markers delimit matching fsync/fdatasync traces, including checkpoint syncs
+that occur within the window. Counts include cold actor claims and wake work.
+Latency's `fast` fixture retains its separate send-to-host-completion window.
+
+Run under an 8 GiB address-space cap and retain peak RSS. Host load1 must be
+below 8 for a qualified timing; traces and loaded-host percentiles are counts
+and unqualified diagnostics, never a passing fast-gate timing certificate.

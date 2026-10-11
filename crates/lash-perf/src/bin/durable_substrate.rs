@@ -114,6 +114,7 @@ enum Kind {
     Idle { actors: usize },
     Store,
     Operations,
+    Counted,
 }
 
 fn rounds(rounds: usize, tools_per_round: usize) -> Script {
@@ -127,6 +128,15 @@ fn rounds(rounds: usize, tools_per_round: usize) -> Script {
 fn case(name: &str) -> Result<Case> {
     let (kind, script) = match name {
         "operations" => (Kind::Operations, Script::default()),
+        "counted-no-tool" => (Kind::Counted, Script::default()),
+        "counted-one-tool" => (Kind::Counted, rounds(1, 1)),
+        "counted-one-park" => (
+            Kind::Counted,
+            Script {
+                cell_calls: 1,
+                ..Script::default()
+            },
+        ),
         "rounds-1" => (Kind::Rounds { sessions: 1 }, rounds(1, 1)),
         "rounds-5" => (Kind::Rounds { sessions: 1 }, rounds(5, 1)),
         "rounds-20" => (Kind::Rounds { sessions: 1 }, rounds(20, 1)),
@@ -251,6 +261,7 @@ async fn main() -> Result<()> {
         eprintln!("case {name} on {} x{}", args.store, args.nodes);
         match case.kind {
             Kind::Operations => operations::run(&run).await?,
+            Kind::Counted => turns::counted(&run, &case).await?,
             Kind::Rounds { sessions } => turns::rounds(&run, &case, sessions).await?,
             Kind::Resume { prior_turns } => turns::resume(&run, &case, prior_turns).await?,
             Kind::Cell => turns::cell(&run, &case).await?,

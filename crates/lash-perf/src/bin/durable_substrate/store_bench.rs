@@ -45,6 +45,7 @@ async fn nodes(url: &str, count: usize, tag: &str, formats: &FormatSet) -> Resul
         let storage = PostgresStorage::connect(&endpoints, &config, Default::default())
             .await
             .map_err(|error| anyhow::anyhow!("connect: {error}"))?;
+        lash_perf::perf_support::require_durable_postgres(storage.pool()).await?;
         let set = PostgresStoreSet::new(
             &storage,
             Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),

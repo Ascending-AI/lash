@@ -39,6 +39,8 @@ STOP_SECONDS = 5
 # The settings of `scripts/ci/with-service.sh pg`: the statement-count tests
 # read pg_stat_statements, applying the schema takes more locks than the
 # default table holds, and a throwaway cluster has nothing to make durable.
+# These hermetic laws test logic, not power-loss durability. Perf harnesses
+# must override fsync and synchronous_commit to on (FIG-5957).
 SETTINGS = {
     "listen_addresses": "127.0.0.1",
     "unix_socket_directories": "",

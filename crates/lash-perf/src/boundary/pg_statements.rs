@@ -113,6 +113,7 @@ impl Instrument {
             .max_connections(1)
             .connect_with(options.clone())
             .await?;
+        crate::perf_support::require_durable_postgres(&admin).await?;
         let pg_version: String = sqlx::query_scalar("SHOW server_version")
             .fetch_one(&admin)
             .await?;

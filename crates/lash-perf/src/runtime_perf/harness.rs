@@ -1033,7 +1033,7 @@ pub(crate) async fn durable_sqlite_session_store_factory_without_commit_measurem
 )> {
     let sqlite = lash_sqlite_store::SqliteStoreSet::open(
         sessions_root.join("lash.db"),
-        lash_sqlite_store::SqliteSynchronous::Normal,
+        lash_sqlite_store::SqliteSynchronous::Full,
     )
     .await?;
     let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(
@@ -1067,7 +1067,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open(
             root.join("lash.db"),
-            lash_sqlite_store::SqliteSynchronous::Normal,
+            lash_sqlite_store::SqliteSynchronous::Full,
         )
         .await
         .map_err(|err| anyhow::anyhow!(err.to_string()))?,

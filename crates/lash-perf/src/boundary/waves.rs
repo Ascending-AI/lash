@@ -33,7 +33,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     let start = Instant::now();
     let stores = lash_sqlite_store::SqliteStoreSet::open(
         args.store_dir.join("lash.db"),
-        lash_sqlite_store::SqliteSynchronous::Normal,
+        lash_sqlite_store::SqliteSynchronous::Full,
     )
     .await?;
     let core = facade::build(

@@ -131,7 +131,7 @@ impl Deployment {
                 Arc::new(
                     lash_sqlite_store::SqliteStoreSet::open(
                         path,
-                        lash_sqlite_store::SqliteSynchronous::Normal,
+                        lash_sqlite_store::SqliteSynchronous::Full,
                     )
                     .await
                     .with_context(|| format!("open {}", path.display()))?,
@@ -148,6 +148,7 @@ impl Deployment {
                 let storage = PostgresStorage::connect(&endpoints, &config, Default::default())
                     .await
                     .map_err(|error| anyhow::anyhow!("connect PostgreSQL: {error}"))?;
+                lash_perf::perf_support::require_durable_postgres(storage.pool()).await?;
                 let stores = PostgresStoreSet::new(
                     &storage,
                     Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),

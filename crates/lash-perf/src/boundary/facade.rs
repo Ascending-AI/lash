@@ -192,6 +192,7 @@ pub(super) async fn run(
                 Default::default(),
             )
             .await?;
+            crate::perf_support::require_durable_postgres(pg.pool()).await?;
             let version: String = sqlx::query_scalar("SHOW server_version_num")
                 .fetch_one(pg.pool())
                 .await?;
@@ -209,7 +210,7 @@ pub(super) async fn run(
             Arc::new(
                 lash_sqlite_store::SqliteStoreSet::open(
                     args.store_dir.join("lash.db"),
-                    lash_sqlite_store::SqliteSynchronous::Normal,
+                    lash_sqlite_store::SqliteSynchronous::Full,
                 )
                 .await?,
             )

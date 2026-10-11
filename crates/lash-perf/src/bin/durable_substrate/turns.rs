@@ -515,3 +515,119 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
     counters.close().await;
     deployment.shutdown().await
 }
+
+/// FIG-5957: sixteen concurrent cold turns with a checked operation geometry.
+/// Setup and scope retirement are outside each physical-work window. Writer
+/// occupancy is the FIG-5933 SQLite instrument, not commit wall time (which
+/// includes queueing). Sync calls can be joined to the stderr window markers.
+pub async fn counted(run: &Run<'_>, case: &Case) -> Result<()> {
+    use lash_core::perf_witness::latency::Collector;
+    use lash_core_store::checkpoint_graph::NodeKind;
+
+    const LANES: usize = 16;
+    ensure!(run.samples > 0, "counted fixtures need at least one batch");
+    ensure!(
+        matches!(run.database, crate::deploy::Database::Sqlite(_)),
+        "physical writer counts require SQLite"
+    );
+    let collector = Collector::install()
+        .map_err(|_| anyhow::anyhow!("SQLite work collector already installed"))?;
+    let mut deployment = run.deployment();
+    deployment.boot_many(1).await?;
+    let mut totals = Vec::new();
+    let mut writes = 0;
+    let mut writer_ns = 0;
+    for batch in 0..run.samples {
+        let sessions: Vec<_> = (0..LANES)
+            .map(|lane| session_id(&format!("{}-b{batch}-s{lane}", case.name)))
+            .collect::<Result<_>>()?;
+        for session in &sessions {
+            if case.script.cell_calls > 0 {
+                crate::cells::create_session(deployment.cells(0), session).await?;
+            } else {
+                create_session(deployment.producer(0), session).await?;
+            }
+            deployment.scripts.set(session, case.script);
+        }
+        eprintln!("durability-window {}-{batch} begin", case.name);
+        let before = collector.snapshot();
+        let from = deployment.recorder.now_us();
+        let turns =
+            try_join_all(sessions.iter().map(|session| {
+                let deployment = &deployment;
+                async move {
+                    one_turn(deployment, 0, session, &turn_id(&format!("{session}-t0"))?).await
+                }
+            }))
+            .await?;
+        let after = collector.snapshot();
+        eprintln!("durability-window {}-{batch} end", case.name);
+        ensure!(after.dropped_records == 0, "physical work witness overflow");
+        let transactions = deployment.recorder.transactions_since(from);
+        for (session, timing) in sessions.iter().zip(turns) {
+            let actor = session_actor(session)?.to_string();
+            let owned: Vec<_> = transactions
+                .iter()
+                .filter(|tx| tx.ok && tx.actor == actor)
+                .collect();
+            let outcomes = owned
+                .iter()
+                .filter(|tx| tx.label == "round.outcome")
+                .count();
+            let parks = owned
+                .iter()
+                .filter(|tx| tx.label == "cell.snapshot+admit")
+                .count();
+            let ends = owned
+                .iter()
+                .filter(|tx| tx.by_kind.contains_key(&NodeKind::CELL_END.0))
+                .count();
+            let models = deployment.recorder.model_calls(session).len();
+            let expected_models = if case.script.cell_calls > 0 {
+                2
+            } else {
+                case.script.rounds + 1
+            };
+            ensure!(
+                models == expected_models
+                    && outcomes == case.script.rounds + case.script.cell_calls
+                    && parks == case.script.cell_calls
+                    && ends == usize::from(case.script.cell_calls > 0),
+                "{session}: geometry mismatch models={models}, outcomes={outcomes}, parks={parks}, ends={ends}"
+            );
+            totals.push(micros(timing.0, timing.1));
+        }
+        let mut batch_writes = 0;
+        let mut batch_writer_ns = 0;
+        for (key, worker) in &after.workers {
+            let prior = before.workers.get(key);
+            batch_writes += worker.write_transactions - prior.map_or(0, |w| w.write_transactions);
+            if !worker.reader {
+                batch_writer_ns += worker.busy_ns - prior.map_or(0, |w| w.busy_ns);
+            }
+        }
+        writes += batch_writes;
+        writer_ns += batch_writer_ns;
+        run.report.write(
+            "counted_batch",
+            &serde_json::json!({
+                "case": case.name, "batch": batch, "turns": LANES,
+                "write_transactions": batch_writes, "writer_busy_ns": batch_writer_ns,
+                "owner_commits": by_label(&transactions),
+            }),
+        )?;
+        close(&deployment, &sessions).await?;
+    }
+    run.report.write("counted_summary", &serde_json::json!({
+        "case": case.name, "lanes": LANES, "turns": totals.len(),
+        "window": "input acceptance through last terminal commit return; setup and close excluded; cold claims included",
+        "model_calls_per_turn": if case.script.cell_calls > 0 { 2 } else { case.script.rounds + 1 },
+        "tool_outcomes_per_turn": case.script.rounds + case.script.cell_calls,
+        "parks_per_turn": case.script.cell_calls,
+        "write_transactions": writes, "writer_busy_ns": writer_ns,
+        "write_transactions_per_turn": writes as f64 / totals.len() as f64,
+        "writer_busy_ms_per_turn": writer_ns as f64 / 1e6 / totals.len() as f64,
+        "accept_to_terminal": Distribution::of(&totals)?,
+    }))?;
+    deployment.shutdown().await
+}

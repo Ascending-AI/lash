@@ -629,7 +629,7 @@ impl Case {
                 Arc::new(
                     lash::sqlite::SqliteStoreSet::open(
                         &self.store_file,
-                        lash::sqlite::SqliteSynchronous::Normal,
+                        lash::sqlite::SqliteSynchronous::Full,
                     )
                     .await?,
                 )
@@ -649,7 +649,7 @@ impl Case {
                     &storage,
                     lash::sqlite::SqliteStoreSet::open(
                         (self.dir.join("reader-attachments")).join("attachments.db"),
-                        lash::sqlite::SqliteSynchronous::Normal,
+                        lash::sqlite::SqliteSynchronous::Full,
                     )
                     .await?
                     .attachment_store(),

@@ -157,7 +157,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open(
             args.store_dir.join("lash.db"),
-            lash_sqlite_store::SqliteSynchronous::Normal,
+            lash_sqlite_store::SqliteSynchronous::Full,
         )
         .await?,
     );

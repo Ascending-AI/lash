@@ -250,20 +250,27 @@ fn read_gate(target: &DatabaseTarget) -> Arc<RwLock<()>> {
 /// (D-DEFAULTS2). The store runs in WAL mode, where the modes differ as
 /// SQLite documents (<https://www.sqlite.org/pragma.html#pragma_synchronous>,
 /// <https://www.sqlite.org/wal.html>). An application crash alone loses
-/// nothing in any mode.
+/// nothing in any mode. Exactly-once effect admission survives power loss
+/// only under [`Self::Full`], assuming the storage honors sync requests.
+/// `Normal` and `Off` explicitly select weaker contracts: losing an
+/// acknowledged `Once` start can allow its body to execute again after recovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SqliteSynchronous {
     /// Never wait for the filesystem. Fastest writes, but a power loss or
     /// operating-system crash can corrupt the database, not only lose recent
-    /// commits. For stores whose loss is acceptable.
+    /// commits. For stores whose loss is acceptable; no exactly-once admission
+    /// guarantee across power loss.
     Off,
     /// Sync the WAL at checkpoints, not at each commit. The database stays
     /// consistent through a power loss, but the commits since the last
     /// checkpoint can be rolled back: a turn lash answered as committed may
-    /// be gone after the machine restarts.
+    /// be gone after the machine restarts. Exactly-once admission across power
+    /// loss is not guaranteed, even if the tool already performed its effect.
     Normal,
     /// Sync the WAL at every commit. A commit that answered survives a power
-    /// loss, at the cost of one fsync per write transaction.
+    /// loss when the storage honors sync requests. This is the mode required
+    /// for exactly-once effect admission across power loss; each write
+    /// transaction waits for the WAL sync before returning.
     Full,
 }
 

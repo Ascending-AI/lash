@@ -149,7 +149,7 @@ impl ExperimentIdentity {
                         format!(
                             "postgres={pg};sqlite_file={:?};sqlite_memory={:?}",
                             lash_sqlite_store::SqliteStoreSetOptions::standard(
-                                lash_sqlite_store::SqliteSynchronous::Normal
+                                lash_sqlite_store::SqliteSynchronous::Full
                             ),
                             lash_sqlite_store::SqliteStoreSetOptions::memory()
                         )
@@ -164,7 +164,7 @@ impl ExperimentIdentity {
                 "{:?}",
                 if file {
                     lash_sqlite_store::SqliteStoreSetOptions::standard(
-                        lash_sqlite_store::SqliteSynchronous::Normal,
+                        lash_sqlite_store::SqliteSynchronous::Full,
                     )
                 } else {
                     lash_sqlite_store::SqliteStoreSetOptions::memory()

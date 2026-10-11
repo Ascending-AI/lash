@@ -350,7 +350,26 @@ deleted. On SQLite the process registry and durability core share the one
 database file of the deployment, so every producer transaction spans every
 table it writes.
 
-### 13. The PostgreSQL durability assumption
+### 13. The storage durability assumption
+
+Exactly-once effect admission, including NR-2's refusal to restart a `Once`
+body, survives power loss only when every boundary commit is durable before
+it returns. SQLite file stores require `SqliteSynchronous::Full`, with storage
+that honors sync requests. `Normal` may lose acknowledged commits; `Off` may
+also corrupt the database. Both are explicit weaker contracts: losing a
+recorded start after its body ran can admit that body again. The host still
+states the SQLite mode explicitly; there is no default (D-DEFAULTS2).
+
+PostgreSQL requires `fsync=on` and synchronous commit (`synchronous_commit=on`
+or a synchronous level that waits for local WAL flush). Asynchronous commit
+can lose acknowledged starts; disabling fsync also risks corruption. Every
+boundary commit retains the configured durability; there is no asynchronous
+interior tier or later barrier that substitutes for its commit.
+
+Performance gates and E2E harnesses measure this promised configuration.
+Hermetic PostgreSQL laws and CI may disable flushes to test engine logic;
+they do not certify power-loss durability. Process-kill laws alone do not
+simulate power loss.
 
 `Once` holds across a database failover only if acknowledged commits survive
 promotion. The host chooses its PostgreSQL topology. Lash documents this

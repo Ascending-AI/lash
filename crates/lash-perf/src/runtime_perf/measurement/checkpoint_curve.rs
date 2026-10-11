@@ -161,6 +161,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
         let postgres = lash_postgres_store::testing::connect(database.url())
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        crate::perf_support::require_durable_postgres(postgres.pool()).await?;
         durable_postgres_session_store_factory_without_commit_measurement(&postgres)
     } else {
         let root = sqlite_root.as_ref().expect("SQLite checkpoint curve root");

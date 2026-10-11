@@ -167,7 +167,7 @@ pub async fn run(run: &Run<'_>) -> Result<()> {
             Database::Sqlite(path) => {
                 let stores = lash_sqlite_store::SqliteStoreSet::open(
                     path,
-                    lash_sqlite_store::SqliteSynchronous::Normal,
+                    lash_sqlite_store::SqliteSynchronous::Full,
                 )
                 .await?;
                 sql::collect(
@@ -181,6 +181,7 @@ pub async fn run(run: &Run<'_>) -> Result<()> {
             }
             Database::Postgres(url) => {
                 let storage = lash_postgres_store::testing::connect(url).await?;
+                lash_perf::perf_support::require_durable_postgres(storage.pool()).await?;
                 let collected = sql::collect(
                     format!("{session}/gc"),
                     dialect,

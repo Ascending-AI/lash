@@ -96,6 +96,7 @@ struct Samples {
 
 async fn connect(options: &PgConnectOptions, schema: &str) -> Result<PgConnection> {
     let mut conn = PgConnection::connect_with(options).await?;
+    lash_perf::perf_support::require_durable_postgres(&mut conn).await?;
     // schema is generated here, never interpolated from a CLI argument.
     sqlx::raw_sql(&format!(
         "SET search_path TO {schema}, public; SET lock_timeout TO '5s'"

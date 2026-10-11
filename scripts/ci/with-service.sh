@@ -126,6 +126,7 @@ service_run_spec() {
         # power loss (FIG-4721). With ~30 lanes each creating a database per
         # test, the durable defaults made PostgreSQL the shared host's top
         # CPU consumer.
+        # Logic tests only; this does not certify power-loss durability.
         -c fsync=off
         -c synchronous_commit=off
         -c full_page_writes=off
