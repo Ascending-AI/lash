@@ -1005,6 +1005,16 @@ fn postgres_statement_name(query: &str) -> &'static str {
         // shared lock ride the `BEGIN` round trip; its read of the epoch is
         // the transaction's first data statement.
         q if q.starts_with("SET TRANSACTION ISOLATION LEVEL READ COMMITTED") => "begin-isolation",
+        // The checkpoint graph's gate (FIG-5887 §8) rides the same `BEGIN`,
+        // ahead of the fence: shared for every guarded transaction,
+        // exclusive for a collection. Its one bigint key tells it from the
+        // fence's two-int key.
+        q if q.starts_with("SELECT pg_advisory_xact_lock_shared(") && q.contains("::bigint") => {
+            "graph-gate-lock"
+        }
+        q if q.starts_with("SELECT pg_advisory_xact_lock(") && q.contains("::bigint") => {
+            "graph-gate-exclusive"
+        }
         q if q.starts_with("SELECT pg_advisory_xact_lock_shared(") => "writer-fence-lock",
         q if q.starts_with("SELECT format_version FROM lash_fleet_format") => "writer-fence",
         // pg_stat_statements may report the literal text or the parameterised
@@ -1075,6 +1085,13 @@ fn postgres_statement_name(query: &str) -> &'static str {
             "checkpoint-runs"
         }
         q if q.starts_with("SELECT content FROM lash_blobs") => "blob-content-read",
+        q if q.starts_with("SELECT root_ref FROM lash_graph_root_catalog") => "root-catalog-read",
+        q if q.starts_with("SELECT content, encoding FROM lash_blobs") => "blob-node-read",
+        q if q.starts_with("SELECT child_hash FROM lash_blob_edges") => "blob-edges-read",
+        q if q.starts_with("SELECT count(*) FROM lash_blob_edges") => "dangling-edges-check",
+        q if q.starts_with("DELETE FROM lash_blob_edges") => "edges-sweep",
+        // The graph domain's own statement: the expired read pins' retirement.
+        q if q.starts_with("DELETE") && q.contains("blob_read_pins") => "read-pin-expiry",
         q if q.starts_with("DELETE FROM lash_checkpoint_blob_refs") => "checkpoint-edges-sweep",
         q if q.starts_with("DELETE FROM lash_blobs") => "blob-sweep",
         _ => "unrecognized",
@@ -1082,29 +1099,39 @@ fn postgres_statement_name(query: &str) -> &'static str {
 }
 
 /// The statement map `gc_unreachable` must answer for, whatever the dead
-/// set's size: the revision release in its own fenced transaction
-/// (FIG-4731), then fence, table lock, run read, one manifest read per live
-/// run, the edge sever, the single sweep, commit. Each `BEGIN` carries the
-/// ordinary profile's three limits, its isolation and the fence lock in its
-/// own round trip. A per-dead-body deletion loop
-/// would grow `blob-sweep` past 1, and the all-hashes scan would land as a
-/// `blob-lock` row the pin does not expect.
-fn expected_gc_statements(rooted: bool) -> std::collections::BTreeMap<&'static str, i64> {
+/// set's size: the revision release and the expired read pins' retirement
+/// in their own guarded transaction (FIG-4731, FIG-5887 §8), then the
+/// collection under the exclusive graph gate: one read per root catalog
+/// source, one body and one edge read per live blob it marks, the dangling
+/// edge check, the edge severs, the single sweep, commit. Each `BEGIN`
+/// carries the ordinary profile's three limits, its isolation, the graph
+/// gate and the fence lock in its own round trip. A per-dead-body deletion
+/// loop would grow `blob-sweep` past 1, and a read of a dead blob would grow
+/// `blob-node-read` past the live count.
+fn expected_gc_statements(live: i64) -> std::collections::BTreeMap<&'static str, i64> {
     let mut expected = std::collections::BTreeMap::from([
         ("begin", 2),
         ("begin-guards", 6),
         ("begin-isolation", 2),
         ("commit", 2),
+        ("graph-gate-lock", 1),
+        ("graph-gate-exclusive", 1),
         ("writer-fence-lock", 2),
         ("writer-fence", 2),
         ("revision-release", 1),
-        ("blob-table-lock", 1),
-        ("checkpoint-runs", 1),
+        ("read-pin-expiry", 1),
+        (
+            "root-catalog-read",
+            lash_core_store::checkpoint_graph::RootSource::ALL.len() as i64,
+        ),
+        ("dangling-edges-check", 1),
+        ("edges-sweep", 1),
         ("checkpoint-edges-sweep", 1),
         ("blob-sweep", 1),
     ]);
-    if rooted {
-        expected.insert("blob-content-read", 1);
+    if live > 0 {
+        expected.insert("blob-node-read", live);
+        expected.insert("blob-edges-read", live);
     }
     expected
 }
@@ -1182,8 +1209,8 @@ async fn postgres_gc_sweep_statement_count_is_dead_set_invariant_when_configured
     // the measured window; what the pin watches is the sweep itself.
     for (leg, dead_count) in [0usize, 3, 257].into_iter().enumerate() {
         sqlx::query(
-            "INSERT INTO lash_blobs (hash, content)
-             SELECT 'dead-' || $1::text || '-' || g, '\\x00'::bytea
+            "INSERT INTO lash_blobs (hash, content, encoding)
+             SELECT 'dead-' || $1::text || '-' || g, '\\x00'::bytea, 0
              FROM generate_series(1, $2) AS g",
         )
         .bind(leg.to_string())
@@ -1193,22 +1220,12 @@ async fn postgres_gc_sweep_statement_count_is_dead_set_invariant_when_configured
         .expect("seed dead blobs");
         reset_gc_statement_stats(&storage).await;
 
-        let (report, receipt) = lash_core_execution::facade_support::sql::collect(
-            "gc-sweep-pin",
-            "postgres",
-            store.gc_unreachable(),
-        )
-        .await;
-        let report = report.expect("gc sweep");
+        let report = store.gc_unreachable().await.expect("gc sweep");
         let statements = postgres_statement_calls_by_name(storage.pool()).await;
         assert_eq!(
             statements,
-            expected_gc_statements(true),
+            expected_gc_statements(live_blob_count),
             "leg {leg}: gc round trips changed with {dead_count} dead blobs",
-        );
-        assert_eq!(
-            receipt.shapes["lock table lash_blobs in exclusive mode"].statements, 1,
-            "leg {leg}: observation records the unprepared lock without changing its execution",
         );
         assert_eq!(
             report.root_count, 1,
@@ -1265,8 +1282,8 @@ async fn postgres_gc_with_no_roots_sweeps_every_blob_when_configured() {
     // table, because `hash = ANY('{}')` is false for every row.
     const DEAD: usize = 41;
     sqlx::query(
-        "INSERT INTO lash_blobs (hash, content)
-         SELECT 'dead-' || g, '\\x00'::bytea FROM generate_series(1, $1) AS g",
+        "INSERT INTO lash_blobs (hash, content, encoding)
+         SELECT 'dead-' || g, '\\x00'::bytea, 0 FROM generate_series(1, $1) AS g",
     )
     .bind(i64::try_from(DEAD).expect("dead count fits i64"))
     .execute(storage.pool())
@@ -1291,7 +1308,7 @@ async fn postgres_gc_with_no_roots_sweeps_every_blob_when_configured() {
     let statements = postgres_statement_calls_by_name(storage.pool()).await;
     assert_eq!(
         statements,
-        expected_gc_statements(false),
+        expected_gc_statements(0),
         "a rootless sweep issues no manifest read and still one deletion",
     );
     let resident = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM lash_blobs")

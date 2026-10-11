@@ -24,8 +24,10 @@ lash_store_sql::statements! {
         /// `ORDER BY` is the global blob lock order every writer of this table
         /// takes, and `ON CONFLICT DO NOTHING` is safe because the rows are
         /// content-addressed: a conflict is always the same bytes.
-        insert_chunk = "INSERT INTO blobs (hash, content)
-             SELECT hash, content
+        /// Every blob it stores is opaque (encoding 0): graph nodes are
+        /// installed only by the graph commit.
+        insert_chunk = "INSERT INTO blobs (hash, content, encoding)
+             SELECT hash, content, 0
                FROM unnest(?1::text[], ?2::bytea[]) AS blob(hash, content)
               ORDER BY hash
              ON CONFLICT (hash) DO NOTHING";
@@ -56,21 +58,19 @@ lash_store_sql::statements! {
              ORDER BY hash
              FOR UPDATE";
 
-        /// Reclaim the session-delete candidate `?1` if nothing still roots it.
+        /// Reclaim the session-delete candidate `?1` if nothing still roots it:
+        /// no source of the root catalog names it and no node or legacy
+        /// manifest references it, so it is unreachable (FIG-5887 §8).
         ///
-        /// Forks from SQLite's counterpart: this backend has no
-        /// `artifact_refs` pointer table to rule out, because its artifact
-        /// bytes live inline in `lash_lash_vm_artifacts`.
+        /// Forks from SQLite's counterpart, which needs no candidate lock: its
+        /// write lock holds the whole database.
         reclaim_session_candidate = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
-
                AND NOT EXISTS (
-                   SELECT 1 FROM session_revisions AS revision
-                   WHERE revision.checkpoint_ref = candidate.hash
+                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
                )
                AND NOT EXISTS (
-                   SELECT 1 FROM session_meta AS meta
-                   WHERE meta.admission_base_checkpoint_ref = candidate.hash
+                   SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash
                )
                AND NOT EXISTS (
                    SELECT 1 FROM checkpoint_blob_refs AS edge
@@ -81,19 +81,6 @@ lash_store_sql::statements! {
         /// trip. The text-array bind is the fork; SQLite binds a JSON array
         /// and unpacks it with `json_each`.
         select_bodies_by_hash = "SELECT hash, content FROM blobs WHERE hash = ANY(?1::text[])";
-
-        /// Delete every blob the retained set `?1` does not name, in one
-        /// statement.
-        ///
-        /// The mark/sweep collector's deletion phase. The retained content
-        /// addresses are the bind — the dead set is never materialized — so
-        /// the phase's statement count is independent of how much garbage it
-        /// finds, and `rows_affected` is the deleted count. `ANY` over an
-        /// empty array is false for every row, so a sweep that retained
-        /// nothing still empties the table. It runs under the collector's
-        /// `EXCLUSIVE` table lock, so no checkpoint commit can INSERT behind
-        /// the anti-join.
-        sweep_unretained = "DELETE FROM blobs WHERE NOT (hash = ANY(?1::text[]))";
     }
 }
 

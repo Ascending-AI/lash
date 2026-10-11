@@ -28,15 +28,23 @@ CREATE TABLE IF NOT EXISTS run_records (
     run_seq INTEGER NOT NULL,
     ordinal INTEGER NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_run_records_kind
-        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'decide', 'present', 'retry')),
+        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'decide', 'present', 'retry',
+                        'cell_report')),
     call_id TEXT,
-    record_json TEXT NOT NULL,
+    -- Transitional (FIG-5890): the inline record, which the integrator's
+    -- cutover (FIG-5894) deletes with ck_run_records_shape, leaving
+    -- record_ref NOT NULL.
+    record_json TEXT,
+    -- The fact's RoundFact node (FIG-5887 §7).
+    record_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
     written_epoch INTEGER NOT NULL,
-    PRIMARY KEY (owner_key, run_seq, ordinal)
+    PRIMARY KEY (owner_key, run_seq, ordinal),
+    CONSTRAINT ck_run_records_shape CHECK ((record_json IS NULL) <> (record_ref IS NULL))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_run_records_outcome
     ON run_records (owner_key, run_seq, call_id)
     WHERE kind = 'x_outcome' AND call_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_run_records_record_ref ON run_records (record_ref);
 ";
 
 pub(super) fn apply(
@@ -182,6 +190,8 @@ mod tests {
     #[test]
     fn negative_record_identity_is_corruption() {
         let conn = Connection::open_in_memory().expect("open records");
+        conn.execute_batch(crate::schema::SCHEMA)
+            .expect("create blobs");
         conn.execute_batch(TABLES).expect("create records");
         let owner = OwnerKey::Turn("session".into(), "turn".into());
         let actor = lash_durable::ActorKey::session("session").expect("actor");
@@ -212,7 +222,9 @@ mod tests {
         );
 
         conn.execute(
-            "INSERT INTO run_records VALUES (?1, -1, 0, 'admit', NULL, '{}', 1)",
+            "INSERT INTO run_records
+                 (owner_key, run_seq, ordinal, kind, call_id, record_json, written_epoch)
+             VALUES (?1, -1, 0, 'admit', NULL, '{}', 1)",
             [owner.stored()],
         )
         .expect("foreign negative identity");

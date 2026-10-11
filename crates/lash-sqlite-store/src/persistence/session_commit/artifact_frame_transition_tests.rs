@@ -46,6 +46,11 @@ fn first_commit_may_end_its_own_appended_frame_open() {
     let ended = FrameEnvironmentId::new(session.clone(), first);
     let ended_referrer = ArtifactReferrer::FrameEnvironment(ended.clone());
     conn.execute(
+        "INSERT INTO blobs (hash, content, encoding) VALUES ('blob', X'00', 0)",
+        [],
+    )
+    .expect("artifact blob");
+    conn.execute(
         "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, 'module', 'blob')",
         params![crate::artifact_store::MODULE_ARTIFACT_NAMESPACE],
     )
@@ -106,6 +111,11 @@ fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
     );
     let next = FrameEnvironmentId::new(session, FrameNodeId::new("next-frame").expect("frame id"));
     let source = ArtifactReferrer::FrameEnvironment(old.clone());
+    conn.execute(
+        "INSERT INTO blobs (hash, content, encoding) VALUES ('blob', X'00', 0)",
+        [],
+    )
+    .expect("artifact blob");
     conn.execute(
         "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, ?2, 'blob')",
         params![crate::artifact_store::MODULE_ARTIFACT_NAMESPACE, "carried"],

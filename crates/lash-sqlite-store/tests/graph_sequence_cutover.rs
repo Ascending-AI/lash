@@ -32,7 +32,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
     let blob_ref = lash_core_execution::BlobRef::for_content(b"pre-cutover payload");
     connection
         .execute(
-            "INSERT INTO blobs (hash, content) VALUES (?1, ?2)",
+            "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
             rusqlite::params![blob_ref.as_str(), prior_envelope],
         )
         .expect("retain an envelope with the deleted kind field");

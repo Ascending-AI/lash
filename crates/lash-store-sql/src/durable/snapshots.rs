@@ -35,7 +35,7 @@ crate::statements! {
 
         /// Execution `?1`'s snapshot.
         read = "SELECT rev, snapshot_ref, executable_identity, format_version, written_epoch
-             FROM exec_snapshots WHERE exec_key = ?1";
+             FROM exec_snapshots WHERE exec_key = ?1 AND snapshot_ref IS NOT NULL";
 
         /// Every snapshot whose execution key starts with `?1`, by key: the
         /// cells of one turn.
@@ -43,6 +43,7 @@ crate::statements! {
                     written_epoch
              FROM exec_snapshots
              WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)
+               AND snapshot_ref IS NOT NULL
              ORDER BY exec_key";
     }
 }

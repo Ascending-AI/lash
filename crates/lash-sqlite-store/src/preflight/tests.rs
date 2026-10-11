@@ -473,6 +473,10 @@ mod walk {
             .await
             .expect("provision durable core");
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
+        // The foreign key the schema declares is what keeps the store from
+        // writing this; foreign data does not ask it.
+        raw.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("write foreign data");
         raw.execute(
             "INSERT INTO session_revisions (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
              VALUES ('orphaned', '{}', 0, NULL, 'missing-checkpoint-manifest')",
@@ -511,7 +515,7 @@ mod walk {
             .expect("provision durable core");
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
         raw.execute(
-            "INSERT INTO blobs (hash, content) VALUES ('bare-checkpoint', ?1)",
+            "INSERT INTO blobs (hash, content, encoding) VALUES ('bare-checkpoint', ?1, 0)",
             rusqlite::params![b"bare blob body".to_vec()],
         )
         .expect("install a bare checkpoint blob");

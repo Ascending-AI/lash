@@ -39,7 +39,14 @@ CREATE TABLE IF NOT EXISTS turn_phases (
         CHECK (phase IN ('admitted', 'model', 'tools')),
     phase_arg INTEGER,
     iteration INTEGER NOT NULL,
-    checkpoint_ref TEXT,
+    -- Transitional (FIG-5890): the inline checkpoint text, which the
+    -- integrator's cutover (FIG-5894) deletes, restoring
+    -- ck_turn_phases_checkpoint to (phase = 'admitted') = (checkpoint_ref IS NULL).
+    inline_checkpoint TEXT,
+    -- The phase's PhaseRoot node and the post-cell working SessionExecution
+    -- (FIG-5887 §6, §7).
+    checkpoint_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
+    working_execution_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
     model_request_ref TEXT,
     model_deadline_ms INTEGER,
     model_stream_from TEXT,
@@ -50,7 +57,9 @@ CREATE TABLE IF NOT EXISTS turn_phases (
         CONSTRAINT ck_turn_phases_trace_exported CHECK (trace_exported IN (0, 1)),
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
-    CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
+    CONSTRAINT ck_turn_phases_checkpoint CHECK (
+        (phase = 'admitted') = (COALESCE(inline_checkpoint, checkpoint_ref) IS NULL)
+        AND (inline_checkpoint IS NULL OR checkpoint_ref IS NULL)),
     CONSTRAINT ck_turn_phases_model CHECK (
         (phase = 'model') = (model_request_ref IS NOT NULL)
         AND (phase = 'model') = (model_deadline_ms IS NOT NULL)
@@ -65,9 +74,18 @@ CREATE TABLE IF NOT EXISTS turn_namespaces (
     run TEXT NOT NULL,
     plugin TEXT NOT NULL,
     entry TEXT NOT NULL,
+    -- Transitional (FIG-5890): the inline values body, which the
+    -- integrator's cutover (FIG-5894) deletes.
     body BLOB,
+    -- The namespace's NamespaceValue (or checked opaque) node; NULL keeps
+    -- the base-values meaning (FIG-5887 §7).
+    graph_root_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (session_id, run, plugin)
 );
+CREATE INDEX IF NOT EXISTS idx_turn_phases_checkpoint_ref ON turn_phases (checkpoint_ref);
+CREATE INDEX IF NOT EXISTS idx_turn_phases_working_execution_ref
+    ON turn_phases (working_execution_ref);
+CREATE INDEX IF NOT EXISTS idx_turn_namespaces_graph_root_ref ON turn_namespaces (graph_root_ref);
 ";
 
 static SQL: LazyLock<TurnStatements> =
@@ -608,6 +626,7 @@ mod ddl_tests {
 
     fn tables() -> Connection {
         let conn = Connection::open_in_memory().expect("an in-memory database");
+        conn.execute_batch(crate::schema::SCHEMA).expect("blobs");
         conn.execute_batch(super::TABLES).expect("turn_phases");
         conn.execute_batch(crate::schema_fragments::SESSION_RUNS_TABLES)
             .expect("session_runs");
@@ -624,7 +643,7 @@ mod ddl_tests {
     ) -> rusqlite::Result<usize> {
         conn.execute(
             "INSERT INTO turn_phases (session_id, run, phase, phase_arg, iteration,
-                 checkpoint_ref, model_request_ref, model_deadline_ms, model_stream_from,
+                 inline_checkpoint, model_request_ref, model_deadline_ms, model_stream_from,
                  written_epoch)
              VALUES ('s', ?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, 1)",
             params![

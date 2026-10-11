@@ -303,6 +303,7 @@ mod session_fault;
 pub(crate) use history::read_tx;
 mod ingress_settlement;
 mod maintenance;
+pub(crate) use maintenance::legacy_manifest_components;
 mod queued_work;
 mod session_commit;
 pub(crate) use session_commit::apply_runtime_commit_tx;

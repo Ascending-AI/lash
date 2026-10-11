@@ -23,7 +23,9 @@ lash_store_sql::statements! {
         /// through `unnest` and spells the same idempotence as
         /// `ON CONFLICT DO NOTHING`. The bytes are content-addressed, so a
         /// conflict is always the same bytes.
-        insert_ignore = "INSERT OR IGNORE INTO blobs (hash, content) VALUES (?1, ?2)";
+        /// Every blob this writer stores is opaque (encoding 0): checkpoint
+        /// graph nodes are installed by the graph commit alone.
+        insert_ignore = "INSERT OR IGNORE INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)";
 
         /// Which of the content addresses in the JSON array `?1` exist.
         ///
@@ -42,36 +44,31 @@ lash_store_sql::statements! {
         /// Reclaim the blob at `?1` once the artifact pointer that named it
         /// is gone, if nothing else roots it.
         ///
-        /// Every predicate is an indexed `NOT EXISTS` over exact edges; no
-        /// whole-catalog mark/sweep runs in this transaction. PostgreSQL has
-        /// no counterpart: its artifact bytes live inline in
-        /// `lash_lash_vm_artifacts` and never reach this table.
+        /// Every predicate is an indexed `NOT EXISTS` over the root catalog
+        /// and the exact edges; no whole-catalog mark/sweep runs in this
+        /// transaction. PostgreSQL has no counterpart: its artifact bytes live
+        /// in `lash_lash_vm_artifacts` and never reach this table.
         reclaim_unreferenced_artifact = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
-               AND NOT EXISTS (SELECT 1 FROM artifact_refs WHERE blob_ref = candidate.hash)
-
-               AND NOT EXISTS (SELECT 1 FROM session_revisions WHERE checkpoint_ref = candidate.hash)
+               AND NOT EXISTS (
+                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
+               )
+               AND NOT EXISTS (SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash)
                AND NOT EXISTS (SELECT 1 FROM checkpoint_blob_refs WHERE blob_ref = candidate.hash)";
 
-        /// Reclaim the session-delete candidate `?1` if nothing still roots it.
+        /// Reclaim the session-delete candidate `?1` if nothing still roots it:
+        /// no source of the root catalog names it and no node or legacy
+        /// manifest references it, so it is unreachable (FIG-5887 §8).
         ///
-        /// Forks from PostgreSQL's counterpart on the artifact clause: only
-        /// SQLite keeps an `artifact_refs` pointer table. The head table also
-        /// forks by name, `session_head` here and `lash_session_head` there.
+        /// Forks from PostgreSQL's counterpart, which locks its candidates
+        /// first and binds them as an array.
         reclaim_session_candidate = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
-
                AND NOT EXISTS (
-                   SELECT 1 FROM session_revisions AS revision
-                   WHERE revision.checkpoint_ref = candidate.hash
+                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
                )
                AND NOT EXISTS (
-                   SELECT 1 FROM session_meta AS meta
-                   WHERE meta.admission_base_checkpoint_ref = candidate.hash
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM artifact_refs AS artifact
-                   WHERE artifact.blob_ref = candidate.hash
+                   SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash
                )
                AND NOT EXISTS (
                    SELECT 1 FROM checkpoint_blob_refs AS edge

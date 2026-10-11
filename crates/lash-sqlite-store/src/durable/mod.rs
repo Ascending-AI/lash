@@ -44,6 +44,7 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::conn::{FencedTx, SqliteConnection, TxOutcome, cached_execute};
 use crate::liveness_locks::{LivenessLocks, Probed};
 
+mod graph;
 mod park_events;
 pub(crate) mod processes;
 mod prompts;
@@ -64,6 +65,9 @@ pub(crate) use node_wakes::TABLES as NODE_WAKES_TABLES;
 
 // The domain tables I0 creates in the durable core database (FIG-5194);
 // each domain's own lane adds its tables beside them.
+pub(crate) use graph::TABLES as GRAPH_TABLES;
+pub(crate) use graph::{collect_in as collect_graph_in, retire_expired_read_pins_in};
+pub(crate) use lash_durable::domain::graph_commit::CollectionLimits;
 pub(crate) use park_events::TABLES as PARK_EVENTS_TABLES;
 pub(crate) use prompts::TABLES as PROMPT_SNAPSHOTS_TABLES;
 pub(crate) use prompts::release as release_prompt_snapshots;
@@ -1419,6 +1423,10 @@ impl DurableReads for SqliteDurableStore {
 #[cfg(test)]
 #[path = "../durable_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../graph_store_tests.rs"]
+mod graph_store_tests;
 
 #[cfg(test)]
 #[path = "../wait_law_tests.rs"]

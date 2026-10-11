@@ -673,10 +673,12 @@ async fn isolated_cells_do_not_checkpoint_or_share_state() {
         .await
         .expect("second catalog identity");
     assert_ne!(first_id, second_id, "each cell owns an independent catalog");
-    sqlx::query("INSERT INTO lash_blobs (hash, content) VALUES ('cell', 'first'::bytea)")
-        .execute(first_storage.pool())
-        .await
-        .expect("write first cell");
+    sqlx::query(
+        "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('cell', 'first'::bytea, 0)",
+    )
+    .execute(first_storage.pool())
+    .await
+    .expect("write first cell");
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_blobs")
         .fetch_one(second_storage.pool())
         .await

@@ -400,14 +400,19 @@ async fn seed_process(
     record
 }
 
+/// Seeds the session past the foreign keys: a dangling checkpoint root is
+/// foreign data the schema refuses, and the walk must still report it.
 async fn seed_session(scratch: &ScratchSchema, session_id: &SessionId, checkpoint_ref: &str) {
     scratch
         .apply(&format!(
-            "WITH recorded AS (
+            "BEGIN;
+             SET LOCAL session_replication_role = replica;
+             WITH recorded AS (
                  INSERT INTO lash_session_revisions (session_id, head_revision, head_json, checkpoint_ref)
                  VALUES ('{session_id}', 1, '{{}}', '{checkpoint_ref}') RETURNING session_id, head_revision
              ) INSERT INTO lash_session_head (session_id, head_revision)
-                 SELECT session_id, head_revision FROM recorded"
+                 SELECT session_id, head_revision FROM recorded;
+             COMMIT"
         ))
         .await;
 }
@@ -416,7 +421,7 @@ async fn seed_blob(scratch: &ScratchSchema, hash: &str, content: &[u8]) {
     let hex: String = content.iter().map(|byte| format!("{byte:02x}")).collect();
     scratch
         .apply(&format!(
-            "INSERT INTO lash_blobs (hash, content) VALUES ('{hash}', '\\x{hex}')"
+            "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('{hash}', '\\x{hex}', 0)"
         ))
         .await;
 }

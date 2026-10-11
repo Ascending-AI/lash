@@ -27,12 +27,24 @@ pub(crate) const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS exec_snapshots (
     exec_key TEXT PRIMARY KEY,
     rev INTEGER NOT NULL CONSTRAINT ck_exec_snapshots_rev CHECK (rev >= 1),
-    snapshot_ref TEXT NOT NULL,
-    executable_identity TEXT NOT NULL,
-    format_version INTEGER NOT NULL CONSTRAINT ck_exec_snapshots_format_version
+    -- Transitional (FIG-5890): the inline snapshot's three columns, which the
+    -- integrator's cutover (FIG-5894) deletes with ck_exec_snapshots_shape,
+    -- leaving root_ref and commit_id NOT NULL.
+    snapshot_ref TEXT,
+    executable_identity TEXT,
+    format_version INTEGER CONSTRAINT ck_exec_snapshots_format_version
         CHECK (format_version BETWEEN 0 AND 4294967295),
-    written_epoch INTEGER NOT NULL
+    -- The execution's ExecRoot node (FIG-5887 §7) and the commit that wrote it.
+    root_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
+    commit_id BLOB CONSTRAINT ck_exec_snapshots_commit_id CHECK (length(commit_id) = 32),
+    written_epoch INTEGER NOT NULL,
+    CONSTRAINT ck_exec_snapshots_shape CHECK (
+        (root_ref IS NOT NULL AND commit_id IS NOT NULL AND snapshot_ref IS NULL
+            AND executable_identity IS NULL AND format_version IS NULL)
+        OR (root_ref IS NULL AND commit_id IS NULL AND snapshot_ref IS NOT NULL
+            AND executable_identity IS NOT NULL AND format_version IS NOT NULL))
 );
+CREATE INDEX IF NOT EXISTS idx_exec_snapshots_root_ref ON exec_snapshots (root_ref);
 ";
 
 pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &SnapshotWrite) -> Answer<()> {
@@ -156,11 +168,16 @@ mod tests {
     #[test]
     fn snapshots_preserve_full_format_version_and_refuse_oversized_revision() {
         let conn = Connection::open_in_memory().expect("open snapshots");
+        conn.execute_batch(crate::schema::SCHEMA)
+            .expect("create blobs");
         conn.execute_batch(TABLES).expect("create snapshots");
         for version in [-1_i64, i64::from(u32::MAX) + 1] {
             let error = conn
                 .execute(
-                    "INSERT INTO exec_snapshots VALUES ('bad', 1, 'snapshot', 'identity', ?1, 1)",
+                    "INSERT INTO exec_snapshots
+                         (exec_key, rev, snapshot_ref, executable_identity, format_version,
+                          written_epoch)
+                     VALUES ('bad', 1, 'snapshot', 'identity', ?1, 1)",
                     [version],
                 )
                 .expect_err("format versions are u32");

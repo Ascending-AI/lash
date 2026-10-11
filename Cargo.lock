@@ -2401,6 +2401,7 @@ dependencies = [
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-execution",
+ "lash-internal-core-store",
  "lash-internal-durable",
  "lash-internal-postgres-store",
  "lash-internal-sansio",

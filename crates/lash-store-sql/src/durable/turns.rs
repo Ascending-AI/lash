@@ -37,7 +37,7 @@ crate::statements! {
         /// `?4`, iteration `?5`, checkpoint `?6`, pinned request `?7`, model
         /// deadline `?8`, turn deadline `?9`, written at epoch `?10`.
         insert_phase = "INSERT INTO turn_phases
-                 (session_id, run, phase, phase_arg, iteration, checkpoint_ref,
+                 (session_id, run, phase, phase_arg, iteration, inline_checkpoint,
                   model_request_ref, model_deadline_ms, turn_deadline_ms, written_epoch)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
 
@@ -47,7 +47,7 @@ crate::statements! {
         /// turn's latest; a null `?10` keeps the count. No row when the run
         /// has no phase row.
         advance_phase = "UPDATE turn_phases
-             SET phase = ?3, phase_arg = ?4, iteration = ?5, checkpoint_ref = ?6,
+             SET phase = ?3, phase_arg = ?4, iteration = ?5, inline_checkpoint = ?6,
                  model_request_ref = ?7, model_deadline_ms = ?8, written_epoch = ?9,
                  model_calls = COALESCE(?10, model_calls), model_stream_from = ?11
              WHERE session_id = ?1 AND run = ?2
@@ -93,7 +93,7 @@ crate::statements! {
 
         /// Session `?1`'s unfinished turn with its phase row.
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
-                    p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
+                    p.inline_checkpoint, p.model_request_ref, p.model_deadline_ms,
                     p.turn_deadline_ms, p.written_epoch, p.model_calls, p.model_stream_from,
                     p.trace_exported
              FROM session_runs AS r

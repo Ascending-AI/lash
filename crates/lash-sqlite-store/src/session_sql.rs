@@ -442,26 +442,10 @@ lash_store_sql::statements! {
         select_components = "SELECT blob_ref FROM checkpoint_blob_refs
                          WHERE checkpoint_ref = ?1 ORDER BY blob_ref";
 
-        /// Sever every edge whose checkpoint no longer has a live root.
-        ///
-        /// Runs before any hash-ordered blob delete: a component can sort
-        /// before its root, and PostgreSQL's foreign key must never be
-        /// weakened to accommodate stale ownership rows, so SQLite matches the
-        /// ordering even though its side is not enforced.
-        delete_unrooted = "DELETE FROM checkpoint_blob_refs AS edge
-             WHERE NOT EXISTS (
-                       SELECT 1 FROM session_revisions AS revision
-                       WHERE revision.checkpoint_ref = edge.checkpoint_ref
-                   )
-               AND NOT EXISTS (
-                       SELECT 1 FROM session_meta AS meta
-                       WHERE meta.admission_base_checkpoint_ref = edge.checkpoint_ref
-                   )";
-
         /// Sever dead-root edges touching the reclaim candidates in JSON `?1`.
         ///
         /// Both outgoing and incoming edges go before any blob delete. The
-        /// rooting predicates match `delete_unrooted`, including admissions.
+        /// rooting predicates are a retained revision's and an admission base's.
         delete_unrooted_for_candidates = "DELETE FROM checkpoint_blob_refs AS edge
                      WHERE (edge.checkpoint_ref IN (SELECT value FROM json_each(?1))
                             OR edge.blob_ref IN (SELECT value FROM json_each(?1)))

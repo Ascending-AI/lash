@@ -533,21 +533,10 @@ lash_store_sql::statements! {
                  WHERE checkpoint_ref = ANY(?1::TEXT[])
                  ORDER BY blob_ref";
 
-        /// Sever every edge whose checkpoint no longer has a live root.
-        delete_unrooted = "DELETE FROM checkpoint_blob_refs AS edge
-             WHERE NOT EXISTS (
-                       SELECT 1 FROM session_revisions AS revision
-                       WHERE revision.checkpoint_ref = edge.checkpoint_ref
-                   )
-               AND NOT EXISTS (
-                       SELECT 1 FROM session_meta AS meta
-                       WHERE meta.admission_base_checkpoint_ref = edge.checkpoint_ref
-                   )";
-
         /// Sever dead-root edges touching the reclaim candidates in `?1`.
         ///
         /// Both outgoing and incoming edges go before any blob delete. The
-        /// rooting predicates match `delete_unrooted`, including admissions.
+        /// rooting predicates are a retained revision's and an admission base's.
         delete_unrooted_for_candidates = "DELETE FROM checkpoint_blob_refs AS edge
              WHERE (edge.checkpoint_ref = ANY(?1::TEXT[])
                     OR edge.blob_ref = ANY(?1::TEXT[]))

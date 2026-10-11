@@ -195,6 +195,12 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         .execute(&mut *deleting)
         .await
         .expect("sever victim head inside controlled delete");
+    // The victim's revision goes first, as a reclaimer releases it: its
+    // checkpoint root is restricted while a revision names it.
+    sqlx::query("DELETE FROM lash_session_revisions WHERE session_id = 'commit-delete-victim'")
+        .execute(&mut *deleting)
+        .await
+        .expect("release victim revision inside controlled delete");
     sqlx::query("DELETE FROM lash_blobs WHERE hash = $1")
         .bind(victim_receipt.checkpoint_ref.as_str())
         .execute(&mut *deleting)

@@ -289,9 +289,12 @@ fn guard_settings(guards: &TransactionGuards) -> Vec<(&'static str, String)> {
 #[derive(Clone, Debug)]
 pub struct TransactionPrelude {
     begin: Arc<str>,
-    /// The guards, the writer fence's shared lock and then `BEGIN`, in one
-    /// simple query: what a guarded writer begins with.
+    /// The guards, the graph gate and the writer fence's shared locks and
+    /// then `BEGIN`, in one simple query: what a guarded writer begins with.
     fenced: Arc<str>,
+    /// [`Self::fenced`] with the graph gate exclusive: what a collection
+    /// begins with.
+    collecting: Arc<str>,
     deadline: Option<Duration>,
 }
 
@@ -320,6 +323,7 @@ impl TransactionPrelude {
         Self {
             begin: statement.into(),
             fenced: fenced_begin(&settings).into(),
+            collecting: collecting_begin(&settings).into(),
             deadline: guards.operation_deadline,
         }
     }
@@ -330,6 +334,7 @@ impl TransactionPrelude {
         Self {
             begin: "BEGIN".into(),
             fenced: fenced_begin("").into(),
+            collecting: collecting_begin("").into(),
             deadline: None,
         }
     }
@@ -344,6 +349,12 @@ impl TransactionPrelude {
     /// ([`crate::guarded_tx`]).
     pub(crate) fn fenced(&self) -> &str {
         &self.fenced
+    }
+
+    /// A collection's `BEGIN`: the guards, then the graph gate exclusive and
+    /// the writer fence shared, then `BEGIN` ([`crate::guarded_tx`]).
+    pub(crate) fn collecting(&self) -> &str {
+        &self.collecting
     }
 
     /// The whole-operation deadline of the profile.
@@ -402,12 +413,27 @@ impl TransactionPrelude {
 /// back whole and leaves the connection outside any transaction, and the
 /// fence's read, the transaction's next statement, takes its snapshot only
 /// once the lock is held: read committed, whatever the deployment's default.
+///
+/// The checkpoint graph's gate comes first, shared (FIG-5887 §8): it orders
+/// every guarded transaction against a collection, which takes it exclusive
+/// in [`collecting_begin`], and no lock may be taken before it.
 fn fenced_begin(settings: &str) -> String {
+    let sql = crate::connection_sql::connection_sql();
     format!(
-        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; {settings}{}; BEGIN",
-        crate::connection_sql::connection_sql()
-            .lock_xact_fleet_fence_shared
-            .sql()
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; {settings}{}; {}; BEGIN",
+        sql.lock_xact_graph_gate_shared.sql(),
+        sql.lock_xact_fleet_fence_shared.sql()
+    )
+}
+
+/// [`fenced_begin`] for a collection: the graph gate exclusive, then the
+/// writer fence shared.
+fn collecting_begin(settings: &str) -> String {
+    let sql = crate::connection_sql::connection_sql();
+    format!(
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; {settings}{}; {}; BEGIN",
+        sql.lock_xact_graph_gate.sql(),
+        sql.lock_xact_fleet_fence_shared.sql()
     )
 }
 

@@ -540,7 +540,7 @@ mod ddl_tests {
     ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
         sqlx::query(
             "INSERT INTO lash_turn_phases (session_id, run, phase, phase_arg, iteration,
-                 checkpoint_ref, model_request_ref, model_deadline_ms, model_stream_from,
+                 inline_checkpoint, model_request_ref, model_deadline_ms, model_stream_from,
                  written_epoch)
              VALUES ('s', $1, $2, $3, 0, $4, $5, $6, $7, 1)",
         )

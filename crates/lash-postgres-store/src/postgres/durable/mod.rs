@@ -56,6 +56,8 @@ use crate::support::store_sqlx_error;
 
 #[path = "../durable_admission.rs"]
 mod admission;
+mod graph;
+pub(crate) use graph::{collect_in as collect_graph_in, retire_expired_read_pins_in};
 mod park_events;
 pub(crate) mod processes;
 mod prompts;
@@ -1533,7 +1535,7 @@ mod constraint_tests {
             );
         }
         for version in [-1_i64, i64::from(u32::MAX) + 1] {
-            let error = sqlx::query("INSERT INTO lash_exec_snapshots VALUES ('p/process', 1, 'snapshot', 'identity', $1, 1)").bind(version).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("format versions are u32");
+            let error = sqlx::query("INSERT INTO lash_exec_snapshots (exec_key, rev, snapshot_ref, executable_identity, format_version, written_epoch) VALUES ('p/process', 1, 'snapshot', 'identity', $1, 1)").bind(version).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("format versions are u32");
             assert_eq!(
                 error
                     .as_database_error()

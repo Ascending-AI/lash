@@ -31,7 +31,7 @@ crate::statements! {
 
         /// Every record of owner `?1`, by run and ordinal.
         read = "SELECT run_seq, ordinal, kind, call_id, record_json, written_epoch
-             FROM run_records WHERE owner_key = ?1
+             FROM run_records WHERE owner_key = ?1 AND record_json IS NOT NULL
              ORDER BY run_seq, ordinal";
     }
 }

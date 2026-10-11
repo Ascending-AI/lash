@@ -31,6 +31,9 @@
 /// the cutover.
 #[doc(hidden)]
 pub mod graph;
+/// A graph commit's canonical encoding: digest, measurement and receipt.
+#[doc(hidden)]
+pub mod graph_commit;
 mod keys;
 pub mod park_events;
 pub mod processes;

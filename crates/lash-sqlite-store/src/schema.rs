@@ -22,9 +22,13 @@ use super::*;
 /// in the same transaction. Component blobs are shared and have no
 /// component-side cascade.
 pub(crate) const SCHEMA: &str = "
+-- A blob's encoding is stored, never sniffed from its bytes (FIG-5887 §7):
+-- 0 is opaque bytes an adapter's codec owns, with no edges; 1 is a canonical
+-- checkpoint graph node, whose edges are exactly its child table.
 CREATE TABLE IF NOT EXISTS blobs (
-    hash    TEXT PRIMARY KEY,
-    content BLOB NOT NULL
+    hash     TEXT PRIMARY KEY,
+    content  BLOB NOT NULL,
+    encoding INTEGER NOT NULL CONSTRAINT ck_blobs_encoding CHECK (encoding IN (0, 1))
 );
 
 -- One row per published head revision a session still retains (FIG-4731).
@@ -36,7 +40,7 @@ CREATE TABLE IF NOT EXISTS session_revisions (
     session_id     TEXT NOT NULL,
     head_revision  INTEGER NOT NULL,
     leaf_node_id   TEXT,
-    checkpoint_ref TEXT,
+    checkpoint_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
     head_json      TEXT NOT NULL,
     PRIMARY KEY (session_id, head_revision)
 );
@@ -65,6 +69,9 @@ CREATE TABLE IF NOT EXISTS pins (
     CONSTRAINT ck_pins_target_kind CHECK (target_kind IN ('input', 'turn', 'revision'))
 );
 
+-- Transitional (FIG-5890): the integrator's cutover (FIG-5894) deletes this
+-- table and its indexes once session manifests are graph nodes, whose edges
+-- blob_edges holds.
 -- Indexed projection of the exact manifest -> component edges carried in each
 -- checkpoint blob. Each row is owned by the session whose retained revision owns
 -- the checkpoint root named by checkpoint_ref. Owner-scoped session delete or
@@ -144,7 +151,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     caused_by_node_id                 TEXT,
     source_session_id                 TEXT,
     source_node_id                    TEXT,
-    admission_base_checkpoint_ref     TEXT,
+    admission_base_checkpoint_ref     TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
     closing_intent                    INTEGER,
     owning_process_id                 TEXT,
     retention_kind                    TEXT NOT NULL,
@@ -405,7 +412,7 @@ CREATE TABLE IF NOT EXISTS attachment_blobs (
 CREATE TABLE IF NOT EXISTS artifact_refs (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    blob_ref     TEXT NOT NULL,
+    blob_ref     TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (namespace, artifact_ref)
 );
 
@@ -723,7 +730,7 @@ pub(crate) fn expected_version() -> i64 {
 
 /// The shared table sets provisioning applies after the schema bodies, in
 /// order; see [`crate::schema_fragments`].
-pub(crate) const FRAGMENTS: [&str; 11] = [
+pub(crate) const FRAGMENTS: [&str; 12] = [
     crate::schema_fragments::SESSION_INGRESS_TABLE,
     crate::schema_fragments::SESSION_RUNS_TABLES,
     crate::durable::DURABLE_TABLES,
@@ -735,6 +742,8 @@ pub(crate) const FRAGMENTS: [&str; 11] = [
     crate::durable::PARK_EVENTS_TABLES,
     crate::durable::SESSION_CLOSE_TABLES,
     crate::durable::PROMPT_SNAPSHOTS_TABLES,
+    // Last: the root catalog view names every table above.
+    crate::durable::GRAPH_TABLES,
 ];
 
 /// Everything provisioning applies, in order: the durable core's, process
@@ -1078,7 +1087,7 @@ mod nested_format_tests {
         connection.execute_batch(super::SCHEMA).expect("schema");
         connection
             .execute(
-                "INSERT INTO blobs(hash, content) VALUES ('root', X'00')",
+                "INSERT INTO blobs (hash, content, encoding) VALUES ('root', X'00', 0)",
                 [],
             )
             .expect("root");
@@ -1087,7 +1096,7 @@ mod nested_format_tests {
         ).is_err(), "a checkpoint edge cannot name a missing component");
         connection
             .execute(
-                "INSERT INTO blobs(hash, content) VALUES ('component', X'01')",
+                "INSERT INTO blobs (hash, content, encoding) VALUES ('component', X'01', 0)",
                 [],
             )
             .expect("component");

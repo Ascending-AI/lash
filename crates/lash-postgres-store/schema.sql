@@ -77,9 +77,13 @@ CREATE TABLE IF NOT EXISTS lash_fleet_plugin_writers (
     max_format INTEGER NOT NULL
 );
 
+-- A blob's encoding is stored, never sniffed from its bytes (FIG-5887 §7):
+-- 0 is opaque bytes an adapter's codec owns, with no edges; 1 is a canonical
+-- checkpoint graph node, whose edges are exactly its child table.
 CREATE TABLE IF NOT EXISTS lash_blobs (
     hash TEXT PRIMARY KEY,
-    content BYTEA NOT NULL
+    content BYTEA NOT NULL,
+    encoding SMALLINT NOT NULL CONSTRAINT ck_blobs_encoding CHECK (encoding IN (0, 1))
 );
 
 -- One row per published head revision a session still retains (FIG-4731).
@@ -91,7 +95,7 @@ CREATE TABLE IF NOT EXISTS lash_session_revisions (
     session_id TEXT NOT NULL,
     head_revision BIGINT NOT NULL,
     leaf_node_id TEXT,
-    checkpoint_ref TEXT,
+    checkpoint_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     head_json TEXT NOT NULL,
     PRIMARY KEY (session_id, head_revision)
 );
@@ -120,6 +124,9 @@ CREATE TABLE IF NOT EXISTS lash_pins (
     CONSTRAINT ck_pins_target_kind CHECK (target_kind IN ('input', 'turn', 'revision'))
 );
 
+-- Transitional (FIG-5890): the integrator's cutover (FIG-5894) deletes this
+-- table and its index once session manifests are graph nodes, whose edges
+-- lash_blob_edges holds.
 -- Indexed projection of exact checkpoint-manifest component edges. Each row is
 -- owned by the session whose retained revision owns the checkpoint root named by
 -- checkpoint_ref. Session deletion removes an unreferenced root and cascades
@@ -196,7 +203,7 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     caused_by_node_id TEXT,
     source_session_id TEXT,
     source_node_id TEXT,
-    admission_base_checkpoint_ref TEXT,
+    admission_base_checkpoint_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     closing_intent BIGINT,
     owning_process_id TEXT,
     retention_kind TEXT NOT NULL,
@@ -712,12 +719,23 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_retired_owners (
     owner TEXT PRIMARY KEY
 );
 
+-- An artifact is its bytes (storage_kind 0) or, through the graph bridge, a
+-- graph node its namespace codec validates (storage_kind 1), never both
+-- (FIG-5887 §7). Only the bridge's graph_ref roots graph material.
 CREATE TABLE IF NOT EXISTS lash_lash_vm_artifacts (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    artifact_bytes BYTEA NOT NULL,
-    PRIMARY KEY (namespace, artifact_ref)
+    storage_kind SMALLINT NOT NULL CONSTRAINT ck_lash_vm_artifacts_storage_kind
+        CHECK (storage_kind IN (0, 1)),
+    artifact_bytes BYTEA,
+    graph_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    PRIMARY KEY (namespace, artifact_ref),
+    CONSTRAINT ck_lash_vm_artifacts_storage CHECK (
+        (storage_kind = 0 AND artifact_bytes IS NOT NULL AND graph_ref IS NULL)
+        OR (storage_kind = 1 AND artifact_bytes IS NULL AND graph_ref IS NOT NULL))
 );
+CREATE INDEX IF NOT EXISTS idx_lash_lash_vm_artifacts_graph_ref
+    ON lash_lash_vm_artifacts (graph_ref) WHERE graph_ref IS NOT NULL;
 CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
@@ -880,16 +898,24 @@ CREATE TABLE IF NOT EXISTS lash_run_records (
     run_seq BIGINT NOT NULL,
     ordinal BIGINT NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_run_records_kind
-        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'decide', 'present', 'retry')),
+        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'decide', 'present', 'retry',
+                        'cell_report')),
     call_id TEXT,
-    record_json TEXT NOT NULL,
+    -- Transitional (FIG-5890): the inline record, which the integrator's
+    -- cutover (FIG-5894) deletes with ck_run_records_shape, leaving
+    -- record_ref NOT NULL.
+    record_json TEXT,
+    -- The fact's RoundFact node (FIG-5887 §7).
+    record_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     written_epoch BIGINT NOT NULL,
-    PRIMARY KEY (owner_key, run_seq, ordinal)
+    PRIMARY KEY (owner_key, run_seq, ordinal),
+    CONSTRAINT ck_run_records_shape CHECK ((record_json IS NULL) <> (record_ref IS NULL))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_run_records_outcome
     ON lash_run_records (owner_key, run_seq, call_id)
     WHERE kind = 'x_outcome' AND call_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_lash_run_records_record_ref ON lash_run_records (record_ref);
 
 -- Session close (L6b, FIG-5176): a closing session's last step done, each
 -- step its own fenced transaction (ADR 0132 §12). After the 'tombstone'
@@ -930,12 +956,24 @@ CREATE TABLE IF NOT EXISTS lash_park_events (
 CREATE TABLE IF NOT EXISTS lash_exec_snapshots (
     exec_key TEXT COLLATE "C" PRIMARY KEY,
     rev BIGINT NOT NULL CONSTRAINT ck_exec_snapshots_rev CHECK (rev >= 1),
-    snapshot_ref TEXT NOT NULL,
-    executable_identity TEXT NOT NULL,
-    format_version BIGINT NOT NULL CONSTRAINT ck_exec_snapshots_format_version
+    -- Transitional (FIG-5890): the inline snapshot's three columns, which the
+    -- integrator's cutover (FIG-5894) deletes with ck_exec_snapshots_shape,
+    -- leaving root_ref and commit_id NOT NULL.
+    snapshot_ref TEXT,
+    executable_identity TEXT,
+    format_version BIGINT CONSTRAINT ck_exec_snapshots_format_version
         CHECK (format_version BETWEEN 0 AND 4294967295),
-    written_epoch BIGINT NOT NULL
+    -- The execution's ExecRoot node (FIG-5887 §7) and the commit that wrote it.
+    root_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    commit_id BYTEA CONSTRAINT ck_exec_snapshots_commit_id CHECK (octet_length(commit_id) = 32),
+    written_epoch BIGINT NOT NULL,
+    CONSTRAINT ck_exec_snapshots_shape CHECK (
+        (root_ref IS NOT NULL AND commit_id IS NOT NULL AND snapshot_ref IS NULL
+            AND executable_identity IS NULL AND format_version IS NULL)
+        OR (root_ref IS NULL AND commit_id IS NULL AND snapshot_ref IS NOT NULL
+            AND executable_identity IS NOT NULL AND format_version IS NOT NULL))
 );
+CREATE INDEX IF NOT EXISTS idx_lash_exec_snapshots_root_ref ON lash_exec_snapshots (root_ref);
 
 -- Prompt snapshots (P2, FIG-5256; ADR 0133 §5, §6): one audit root per
 -- admitted model call, keyed by its owner (`turn:<run>` or `owned:<scope>`)
@@ -985,7 +1023,14 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
         CHECK (phase IN ('admitted', 'model', 'tools')),
     phase_arg BIGINT,
     iteration BIGINT NOT NULL,
-    checkpoint_ref TEXT,
+    -- Transitional (FIG-5890): the inline checkpoint text, which the
+    -- integrator's cutover (FIG-5894) deletes, restoring
+    -- ck_turn_phases_checkpoint to (phase = 'admitted') = (checkpoint_ref IS NULL).
+    inline_checkpoint TEXT,
+    -- The phase's PhaseRoot node and the post-cell working SessionExecution
+    -- (FIG-5887 §6, §7).
+    checkpoint_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    working_execution_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     model_request_ref TEXT,
     model_deadline_ms BIGINT,
     model_stream_from TEXT,
@@ -995,7 +1040,9 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
     trace_exported BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
-    CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
+    CONSTRAINT ck_turn_phases_checkpoint CHECK (
+        (phase = 'admitted') = (COALESCE(inline_checkpoint, checkpoint_ref) IS NULL)
+        AND (inline_checkpoint IS NULL OR checkpoint_ref IS NULL)),
     CONSTRAINT ck_turn_phases_model CHECK (
         (phase = 'model') = (model_request_ref IS NOT NULL)
         AND (phase = 'model') = (model_deadline_ms IS NOT NULL)
@@ -1010,9 +1057,19 @@ CREATE TABLE IF NOT EXISTS lash_turn_namespaces (
     run TEXT NOT NULL,
     plugin TEXT NOT NULL,
     entry TEXT NOT NULL,
+    -- Transitional (FIG-5890): the inline values body, which the
+    -- integrator's cutover (FIG-5894) deletes.
     body BYTEA,
+    -- The namespace's NamespaceValue (or checked opaque) node; NULL keeps
+    -- the base-values meaning (FIG-5887 §7).
+    graph_root_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (session_id, run, plugin)
 );
+CREATE INDEX IF NOT EXISTS idx_lash_turn_phases_checkpoint_ref ON lash_turn_phases (checkpoint_ref);
+CREATE INDEX IF NOT EXISTS idx_lash_turn_phases_working_execution_ref
+    ON lash_turn_phases (working_execution_ref);
+CREATE INDEX IF NOT EXISTS idx_lash_turn_namespaces_graph_root_ref
+    ON lash_turn_namespaces (graph_root_ref);
 
 -- Waits, keyed promises and timers (L5, FIG-5173; ADR 0132 §6): one row per
 -- wait from its minting. The deadline is written once; a resolution is a
@@ -1057,3 +1114,82 @@ CREATE INDEX IF NOT EXISTS ix_lash_waits_target ON lash_waits (target_process)
     WHERE state = 'pending' AND kind = 'process_terminal';
 CREATE INDEX IF NOT EXISTS ix_lash_waits_child_target ON lash_waits (target_process)
     WHERE state = 'pending' AND kind = 'child_session';
+
+-- The checkpoint graph (FIG-5887 §7, FIG-5890). One row per child of an
+-- installed graph node: exactly its envelope's child table. A parent's edges
+-- go with it; a child cannot go while an edge names it.
+CREATE TABLE IF NOT EXISTS lash_blob_edges (
+    parent_hash TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
+    child_hash TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    PRIMARY KEY (parent_hash, child_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_lash_blob_edges_child ON lash_blob_edges (child_hash, parent_hash);
+
+-- An execution's admitted effect, by its canonical binary identity, to its
+-- Admission node, while a live kernel or a released member needs the lookup.
+CREATE TABLE IF NOT EXISTS lash_effect_admissions (
+    exec_key TEXT COLLATE "C" NOT NULL,
+    effect_id BYTEA NOT NULL,
+    owner_key TEXT COLLATE "C",
+    run_seq BIGINT,
+    member_ordinal BIGINT,
+    admission_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    written_epoch BIGINT NOT NULL,
+    PRIMARY KEY (exec_key, effect_id),
+    UNIQUE (owner_key, run_seq, member_ordinal),
+    CONSTRAINT ck_effect_admissions_member CHECK (
+        (owner_key IS NULL AND run_seq IS NULL AND member_ordinal IS NULL) OR
+        (owner_key IS NOT NULL AND run_seq IS NOT NULL AND member_ordinal IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_lash_effect_admissions_admission_ref
+    ON lash_effect_admissions (admission_ref);
+
+-- A streaming reader's pin on one root. Every row roots, expired or not,
+-- until its explicit retirement.
+CREATE TABLE IF NOT EXISTS lash_blob_read_pins (
+    pin_id TEXT PRIMARY KEY,
+    lease_owner TEXT NOT NULL,
+    generation BIGINT NOT NULL CONSTRAINT ck_blob_read_pins_generation CHECK (generation >= 1),
+    root_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    expires_at_ms BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lash_blob_read_pins_root_ref ON lash_blob_read_pins (root_ref);
+
+-- A deliberately installed runnable release manifest.
+CREATE TABLE IF NOT EXISTS lash_graph_release_pins (
+    release_key TEXT PRIMARY KEY,
+    root_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_lash_graph_release_pins_root_ref
+    ON lash_graph_release_pins (root_ref);
+
+-- A commit's retry identity and the result it answered. It owns no root and
+-- authorizes no hydration.
+CREATE TABLE IF NOT EXISTS lash_graph_commit_receipts (
+    owner_key TEXT COLLATE "C" NOT NULL,
+    commit_id BYTEA NOT NULL CONSTRAINT ck_graph_commit_receipts_commit_id
+        CHECK (octet_length(commit_id) = 32),
+    batch_digest BYTEA NOT NULL CONSTRAINT ck_graph_commit_receipts_batch_digest
+        CHECK (octet_length(batch_digest) = 32),
+    result_bytes BYTEA NOT NULL,
+    written_epoch BIGINT NOT NULL,
+    PRIMARY KEY (owner_key, commit_id)
+);
+
+-- Every root of every source: a view of the owning columns, never a cache.
+CREATE OR REPLACE VIEW lash_graph_root_catalog AS
+    SELECT 'exec' AS source, root_ref FROM lash_exec_snapshots WHERE root_ref IS NOT NULL
+    UNION ALL SELECT 'run_fact', record_ref FROM lash_run_records WHERE record_ref IS NOT NULL
+    UNION ALL SELECT 'admission', admission_ref FROM lash_effect_admissions
+    UNION ALL SELECT 'phase', checkpoint_ref FROM lash_turn_phases WHERE checkpoint_ref IS NOT NULL
+    UNION ALL SELECT 'working', working_execution_ref FROM lash_turn_phases
+        WHERE working_execution_ref IS NOT NULL
+    UNION ALL SELECT 'namespace', graph_root_ref FROM lash_turn_namespaces
+        WHERE graph_root_ref IS NOT NULL
+    UNION ALL SELECT 'revision', checkpoint_ref FROM lash_session_revisions
+        WHERE checkpoint_ref IS NOT NULL
+    UNION ALL SELECT 'admission_base', admission_base_checkpoint_ref FROM lash_session_meta
+        WHERE admission_base_checkpoint_ref IS NOT NULL
+    UNION ALL SELECT 'read_pin', root_ref FROM lash_blob_read_pins
+    UNION ALL SELECT 'artifact', graph_ref FROM lash_lash_vm_artifacts WHERE storage_kind = 1
+    UNION ALL SELECT 'release', root_ref FROM lash_graph_release_pins;
