@@ -548,6 +548,150 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
     );
 }
 
+/// One pair of runtime commits over a fresh file store: a same-operation
+/// pair, or a head CAS pair from one head. Committed one after the other or,
+/// `grouped`, queued behind a held connection thread into one write batch.
+/// Returns each commit's answer, the head after both, and the commits and
+/// rollbacks that ended the pair's transactions.
+async fn commit_pair(same_operation: bool, grouped: bool) -> (Vec<String>, u64, (usize, usize)) {
+    use std::future::Future as _;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = SqliteStore::open_file_with_options_for_testing(
+        &dir.path().join("pair.db"),
+        StoreOptions::standard(SqliteSynchronous::Full),
+    )
+    .await
+    .expect("open writer");
+    let session = SessionId::from("grouped-pair");
+    let state = durable_state(&store, &session).await;
+    let commit = |name: &str| {
+        let mut state = state.clone();
+        state.append_active_read_delta(&[lash_core_execution::Message {
+            id: name.to_owned(),
+            role: lash_core_execution::MessageRole::User,
+            origin: None,
+            parts: Arc::new(vec![lash_core_execution::Part::text(
+                format!("{name}.p0"),
+                name.to_owned(),
+                None,
+            )]),
+            reply_marker: None,
+        }]);
+        RuntimeCommit::persisted_state_with_operation(
+            &mut state,
+            lash_core_execution::OperationId::turn(
+                &session,
+                lash_sansio::TurnId::fixture(name.to_owned()),
+                "commit",
+            ),
+        )
+        .expect("prepare the commit")
+        .0
+    };
+    let (first, second) = if same_operation {
+        (commit("same"), commit("same"))
+    } else {
+        (commit("left"), commit("right"))
+    };
+    let commits = Arc::new(AtomicUsize::new(0));
+    let rollbacks = Arc::new(AtomicUsize::new(0));
+    let (counted_commits, counted_rollbacks) = (Arc::clone(&commits), Arc::clone(&rollbacks));
+    store
+        .conn
+        .call(move |conn| {
+            conn.commit_hook(Some(move || {
+                counted_commits.fetch_add(1, Ordering::SeqCst);
+                false
+            }));
+            conn.rollback_hook(Some(move || {
+                counted_rollbacks.fetch_add(1, Ordering::SeqCst);
+            }));
+            Ok(())
+        })
+        .await
+        .expect("count the writer's transaction ends");
+    let results = if grouped {
+        let (entered, held) = tokio::sync::oneshot::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let conn = store.conn.clone();
+        let holding = tokio::spawn(async move {
+            conn.call(move |_| {
+                let _ = entered.send(());
+                let _ = released.recv();
+                Ok(())
+            })
+            .await
+        });
+        held.await.expect("the connection thread holds");
+        let mut left = Box::pin(store.commit_runtime_state(first));
+        let mut right = Box::pin(store.commit_runtime_state(second));
+        std::future::poll_fn(|cx| {
+            assert!(left.as_mut().poll(cx).is_pending());
+            assert!(right.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        drop(release);
+        holding.await.expect("hold task").expect("the hold returns");
+        vec![left.await, right.await]
+    } else {
+        vec![
+            store.commit_runtime_state(first).await,
+            store.commit_runtime_state(second).await,
+        ]
+    };
+    let answers = results
+        .into_iter()
+        .map(|result| match result {
+            Ok(receipt) => format!(
+                "head {} replayed {}",
+                receipt.head_revision, receipt.receipt_replayed
+            ),
+            Err(error) => format!("{error:?}"),
+        })
+        .collect();
+    let head = store
+        .load_session_head_meta(&session)
+        .await
+        .expect("head after the pair")
+        .expect("the session has a head")
+        .head_revision;
+    (
+        answers,
+        head,
+        (
+            commits.load(Ordering::SeqCst),
+            rollbacks.load(Ordering::SeqCst),
+        ),
+    )
+}
+
+/// FIG-5970: two runtime commits grouped into one write batch, sharing one
+/// transaction that ends in one `COMMIT` and no rollback, answer exactly as
+/// the same pair committed one after the other: a same-operation pair
+/// publishes once and replays once, and a head CAS pair from one head lands
+/// once and refuses the other with `HeadRevisionConflict`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grouped_runtime_commits_answer_exactly_as_their_solo_commits() {
+    for same_operation in [true, false] {
+        let (alone, alone_head, _) = commit_pair(same_operation, false).await;
+        let (grouped, grouped_head, ends) = commit_pair(same_operation, true).await;
+        assert_eq!(ends, (1, 0), "the pair shares one transaction");
+        assert_eq!(grouped, alone, "a grouped commit answers as alone");
+        assert_eq!(grouped_head, alone_head);
+        assert_eq!(grouped_head, 1, "exactly one commit of the pair applied");
+        if same_operation {
+            assert_eq!(alone, ["head 1 replayed false", "head 1 replayed true"]);
+        } else {
+            assert_eq!(alone[0], "head 1 replayed false");
+            assert!(
+                alone[1].starts_with("HeadRevisionConflict"),
+                "the second CAS is refused: {alone:?}"
+            );
+        }
+    }
+}
+
 /// Real SQLITE_FULL on the owning writer publishes neither head nor
 /// receipt; after capacity returns the identical commit applies once.
 #[tokio::test]

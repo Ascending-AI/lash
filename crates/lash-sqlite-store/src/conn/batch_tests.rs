@@ -531,3 +531,177 @@ async fn a_lone_write_is_a_plain_transaction_with_no_wait() {
         "grouped writes take savepoints"
     );
 }
+
+/// Leave `session` heading revision 7 with no such revision: a foreign key
+/// SQLite defers to the outermost `COMMIT`.
+fn dangle(tx: &FencedTx<'_>, session: &str) -> rusqlite::Result<TxOutcome<&'static str>> {
+    tx.execute(
+        "INSERT INTO session_head (session_id, head_revision) VALUES (?1, 7)",
+        [session],
+    )?;
+    Ok(TxOutcome::Commit("dangling"))
+}
+
+/// The session heads an independent reader sees committed.
+fn heads(outside: &Mutex<rusqlite::Connection>) -> Vec<String> {
+    let outside = outside.lock().expect("reader");
+    let mut statement = outside
+        .prepare("SELECT session_id FROM session_head ORDER BY session_id")
+        .expect("read heads");
+    statement
+        .query_map([], |row| row.get(0))
+        .expect("heads")
+        .collect::<rusqlite::Result<_>>()
+        .expect("decode heads")
+}
+
+/// A grouped member answers exactly what its solo commit would (FIG-5970).
+/// A member that leaves `session_head` naming a missing revision is refused
+/// at `COMMIT` when alone; between two siblings it gets that same
+/// `SQLITE_CONSTRAINT_FOREIGNKEY` failure, its siblings commit, and a later
+/// sibling that inserts the missing revision does not heal it into a commit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_member_leaving_a_deferred_foreign_key_dangling_is_refused_as_alone() {
+    let world = world(32, 4_096).await;
+    world
+        .writer
+        .write(|tx| {
+            for table in ["blobs", "session_revisions", "session_head"] {
+                tx.execute_batch(crate::testing::database_table_ddl(table))?;
+            }
+            Ok(())
+        })
+        .await
+        .expect("create the session head tables");
+    let alone = world
+        .writer
+        .write_flow(|tx| dangle(tx, "alone"))
+        .await
+        .expect_err("a lone dangling head is refused at COMMIT");
+    let alone = format!("{alone:?}");
+    assert!(alone.contains("787"), "{alone}");
+
+    let answers = Answers::default();
+    let refusal = |name: &'static str| {
+        let answers = Arc::clone(&answers);
+        move |result: rusqlite::Result<&str>| {
+            answers.lock().expect("answers").push((
+                name.to_owned(),
+                result
+                    .map(str::to_owned)
+                    .map_err(|error| format!("{error:?}")),
+                Vec::new(),
+            ));
+        }
+    };
+    let release = world.hold().await;
+    world.queue(
+        |tx| insert(tx, "before").map(|()| TxOutcome::Commit("kept")),
+        reply(&answers, &world.outside, "before"),
+    );
+    world.queue(|tx| dangle(tx, "between"), refusal("between"));
+    world.queue(
+        |tx| insert(tx, "after").map(|()| TxOutcome::Commit("kept")),
+        reply(&answers, &world.outside, "after"),
+    );
+    drop(release);
+    settled(&answers, 3).await;
+    let release = world.hold().await;
+    world.queue(|tx| dangle(tx, "healed"), refusal("healed"));
+    world.queue(
+        |tx| {
+            tx.execute_batch(
+                "INSERT INTO blobs (hash, content, encoding) VALUES ('config', x'00', 0);
+                 INSERT INTO session_revisions (session_id, head_revision, config_ref)
+                     VALUES ('healed', 7, 'config');",
+            )?;
+            Ok(TxOutcome::Commit("kept"))
+        },
+        reply(&answers, &world.outside, "healer"),
+    );
+    drop(release);
+    let answered = settled(&answers, 5).await;
+    let outcome = |name: &str| {
+        answered
+            .iter()
+            .find(|(member, ..)| member == name)
+            .map(|(_, result, _)| result.clone())
+            .expect("member answered")
+    };
+    assert_eq!(outcome("before"), Ok("\"kept\"".to_owned()));
+    assert_eq!(outcome("between"), Err(alone.clone()), "refused as alone");
+    assert_eq!(outcome("after"), Ok("\"kept\"".to_owned()));
+    assert_eq!(
+        outcome("healed"),
+        Err(alone),
+        "a later sibling does not heal an earlier member into a commit"
+    );
+    assert_eq!(outcome("healer"), Ok("\"kept\"".to_owned()));
+    assert_eq!(
+        world.committed(),
+        vec!["before".to_owned(), "after".to_owned()]
+    );
+    assert!(
+        heads(&world.outside).is_empty(),
+        "no refused member's head is committed"
+    );
+}
+
+/// A member whose body panics fails alone (FIG-5970): it answers a storage
+/// failure naming the panic, its siblings before and after it commit in the
+/// same `COMMIT`, and the connection thread goes on serving, a lone
+/// panicking write included.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_panicking_member_fails_alone_and_its_siblings_commit() {
+    let world = world(32, 4_096).await;
+    let answers = Answers::default();
+    let panicking = |tx: &FencedTx<'_>| -> rusqlite::Result<TxOutcome<&'static str>> {
+        insert(tx, "panicked")?;
+        panic!("a member's bug");
+    };
+    let release = world.hold().await;
+    let before = world.commits.load(Ordering::SeqCst);
+    world.queue(
+        |tx| insert(tx, "before").map(|()| TxOutcome::Commit("kept")),
+        reply(&answers, &world.outside, "before"),
+    );
+    world.queue(panicking, reply(&answers, &world.outside, "panicking"));
+    world.queue(
+        |tx| insert(tx, "after").map(|()| TxOutcome::Commit("kept")),
+        reply(&answers, &world.outside, "after"),
+    );
+    drop(release);
+    let answered = settled(&answers, 3).await;
+    let outcome = |name: &str| {
+        answered
+            .iter()
+            .find(|(member, ..)| member == name)
+            .map(|(_, result, _)| result.clone())
+            .expect("member answered")
+    };
+    let failed = |result: Result<String, String>| {
+        result.is_err_and(|error| error.contains("a write transaction panicked: a member's bug"))
+    };
+    assert_eq!(outcome("before"), Ok("\"kept\"".to_owned()));
+    assert!(failed(outcome("panicking")), "{:?}", outcome("panicking"));
+    assert_eq!(outcome("after"), Ok("\"kept\"".to_owned()));
+    assert_eq!(
+        world.committed(),
+        vec!["before".to_owned(), "after".to_owned()]
+    );
+    assert_eq!(world.commits.load(Ordering::SeqCst) - before, 2);
+    let alone = world.writer.write_flow(panicking).await;
+    assert!(
+        failed(alone.map(str::to_owned).map_err(|error| error.to_string())),
+        "a lone panicking write answers its own failure"
+    );
+    world
+        .writer
+        .write(|tx| insert(tx, "served"))
+        .await
+        .expect("the writer serves the next write");
+    assert_eq!(
+        world.committed(),
+        vec!["before".to_owned(), "after".to_owned(), "served".to_owned()]
+    );
+}

@@ -29,6 +29,19 @@
 //! none is answered committed; the members not yet run lead the next batch,
 //! untouched. Bodies run once, so a lost member is failed, not re-run.
 //!
+//! A member gets exactly the answer its solo commit would have got, and
+//! never changes a sibling's (FIG-5970). SQLite checks a deferred foreign
+//! key only at the outermost `COMMIT`, not at a member's `RELEASE`, so a
+//! kept member that leaves one violated would fail its siblings' `COMMIT`,
+//! or be healed by a later sibling and answered committed. After each kept
+//! member with siblings the batch reads `SQLITE_DBSTATUS_DEFERRED_FKS`: none
+//! is pending when a member starts, so one pending then is that member's.
+//! It is undone and answered the `SQLITE_CONSTRAINT_FOREIGNKEY` failure its
+//! solo `COMMIT` would answer. A member whose body panics is that member's
+//! failure: its savepoint (or a lone write's transaction) is undone and it
+//! answers a storage failure naming the panic, while its siblings run on and
+//! the connection thread keeps serving.
+//!
 //! The synchronous level is the connection's, fixed at open and never
 //! changed per batch: SQLite refuses to change it inside a transaction.
 
@@ -118,6 +131,12 @@ impl Member {
         Window::on_worker(window, || body.run(tx))
     }
 
+    /// Replace the member's own result with `error`, the refusal its solo
+    /// commit would have answered.
+    fn refuse(&mut self, error: rusqlite::Error) {
+        self.body.refuse(error);
+    }
+
     fn answer(self, failure: Option<rusqlite::Error>) {
         let Self {
             body,
@@ -146,6 +165,7 @@ enum Kept {
 
 trait Body: Send {
     fn run(&mut self, tx: &FencedTx<'_>) -> Kept;
+    fn refuse(&mut self, error: rusqlite::Error);
     /// Answer the caller once the batch is settled: with the body's own
     /// result, or with `failure` when the batch lost the body's writes or
     /// never ran it.
@@ -168,13 +188,27 @@ where
         let Some(body) = self.body.take() else {
             return Kept::Nothing;
         };
-        let (result, kept) = match body(tx) {
-            Ok(TxOutcome::Commit(value)) => (Ok(value), Kept::Writes),
-            Ok(TxOutcome::Rollback(value)) => (Ok(value), Kept::Nothing),
-            Err(error) => (Err(error), Kept::Failed),
+        // A panic is this member's failure alone: unwinding further would
+        // end the connection thread and drop every member's answer.
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(tx)));
+        let (result, kept) = match ran {
+            Ok(Ok(TxOutcome::Commit(value))) => (Ok(value), Kept::Writes),
+            Ok(Ok(TxOutcome::Rollback(value))) => (Ok(value), Kept::Nothing),
+            Ok(Err(error)) => (Err(error), Kept::Failed),
+            Err(panic) => (
+                Err(storage_failure(&format!(
+                    "a write transaction panicked: {}",
+                    panic_message(panic.as_ref())
+                ))),
+                Kept::Failed,
+            ),
         };
         self.result = Some(result);
         kept
+    }
+
+    fn refuse(&mut self, error: rusqlite::Error) {
+        self.result = Some(Err(error));
     }
 
     fn answer(self: Box<Self>, failure: Option<rusqlite::Error>) {
@@ -385,6 +419,26 @@ fn transact(
             ran.push(Ran { member, standalone });
             return Settled::ended(ran, members.collect());
         }
+        // A kept member with siblings may not leave a deferred foreign key
+        // violated for the shared `COMMIT` to find: it is refused as its
+        // solo `COMMIT` would be.
+        let outcome = match outcome {
+            Kept::Writes if !solo => match deferred_violation(&tx) {
+                Ok(false) => Kept::Writes,
+                Ok(true) => {
+                    member.refuse(foreign_key_failure());
+                    Kept::Failed
+                }
+                Err(error) => {
+                    ran.push(Ran {
+                        member,
+                        standalone: false,
+                    });
+                    return Settled::failed(ran, &error, members.collect());
+                }
+            },
+            outcome => outcome,
+        };
         let standalone = kept == 0 && !matches!(outcome, Kept::Writes);
         let undo = match outcome {
             Kept::Writes => {
@@ -443,6 +497,53 @@ fn transact(
             ended: true,
         },
         Err(error) => Settled::failed(ran, &error, unrun),
+    }
+}
+
+/// Whether the transaction holds a foreign key violation SQLite defers to
+/// `COMMIT` (`SQLITE_DBSTATUS_DEFERRED_FKS`). `ROLLBACK TO` restores the
+/// count a savepoint started with.
+fn deferred_violation(c: &Connection) -> rusqlite::Result<bool> {
+    let mut current = 0;
+    let mut highwater = 0;
+    // SAFETY: the handle is this live connection's, used on its own thread
+    // for one status read that neither retains nor closes it.
+    #[expect(unsafe_code, reason = "rusqlite exposes no safe sqlite3_db_status")]
+    let status = unsafe {
+        rusqlite::ffi::sqlite3_db_status(
+            c.handle(),
+            rusqlite::ffi::SQLITE_DBSTATUS_DEFERRED_FKS,
+            &mut current,
+            &mut highwater,
+            0,
+        )
+    };
+    if status == rusqlite::ffi::SQLITE_OK {
+        Ok(current != 0)
+    } else {
+        Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(status),
+            None,
+        ))
+    }
+}
+
+/// The refusal a lone write's `COMMIT` answers when it would leave a
+/// deferred foreign key violated.
+fn foreign_key_failure() -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY),
+        Some("FOREIGN KEY constraint failed".to_owned()),
+    )
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        message
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message
+    } else {
+        "a non-string payload"
     }
 }
 

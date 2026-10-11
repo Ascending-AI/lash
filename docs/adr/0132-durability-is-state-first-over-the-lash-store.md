@@ -382,6 +382,20 @@ fails every member. Nothing waits for a batch to fill, and a lone write runs as
 a plain transaction. The synchronous mode stays the connection's, fixed before
 any transaction begins.
 
+A grouped member gets exactly the answer its solo commit would have got, and
+it never changes a sibling's answer (FIG-5970). When SQLite makes that
+impossible because the whole transaction ended, every affected member fails
+with a typed, retryable cause and none is reported committed. SQLite checks a
+deferred foreign key (`session_head` to `session_revisions`) only at the
+outermost `COMMIT`, so after each kept member with siblings the writer reads
+`SQLITE_DBSTATUS_DEFERRED_FKS`. A member that left one violated is undone to
+its savepoint and answered the `SQLITE_CONSTRAINT_FOREIGNKEY` failure its solo
+`COMMIT` would answer: it can neither fail its siblings' `COMMIT` nor be healed
+into a commit by a later sibling. A panic in a member's body is that member's
+failure: its savepoint, or a lone write's transaction, is undone and it
+answers a storage failure naming the panic, while its siblings run on and the
+connection thread keeps serving.
+
 SQLite may end the whole transaction on an error inside a statement
 (`SQLITE_FULL`, an I/O error, `SQLITE_NOMEM`), not only the member's savepoint,
 so the writer checks for autocommit after every member (FIG-5968). A member's

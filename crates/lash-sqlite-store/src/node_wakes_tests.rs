@@ -4,7 +4,8 @@
 //! processes can show, run by this test binary re-executing itself as a
 //! node: a wake crosses processes, a killed process's lock
 //! is released at once, processes writing one file at once lose and double
-//! no work, and a sweep pass's liveness lock is seen from every process.
+//! no work, a sweep pass's liveness lock is seen from every process, and a
+//! grouped commit killed before or after its `COMMIT` is all or nothing.
 
 // Test code: the laws spawn this test binary and read its environment.
 #![allow(clippy::disallowed_methods)]
@@ -713,4 +714,216 @@ async fn a_sweep_pass_in_another_process_holds_its_rows_until_it_dies() {
         vec![swept()],
         "a killed process's pass kept its row"
     );
+}
+
+const GROUP_CUT: &str = "durable::node_wakes::tests::a_grouped_commit_killed_before_or_after_its_commit_is_all_or_nothing";
+
+/// The owner commits the grouped-commit law queues into one batch.
+const GROUPED: usize = 3;
+
+fn grouped(index: usize) -> ActorKey {
+    actor(&format!("grouped-{index}"))
+}
+
+/// Child `cut` over `database`: hold the writer after a heartbeat's fence,
+/// queue `GROUPED` owner commits behind it so they form one batch, then let
+/// it go. Reports each owner's revision, how many actor rows the batch's
+/// `COMMIT` carries, and each commit's answer. Under `before` the connection
+/// thread stops inside that `COMMIT`, before any of it is durable, until the
+/// process is killed.
+async fn run_grouped_child(cut: &str, database: &Path) {
+    use std::future::Future as _;
+    let pauses = crate::testing::SqlitePauses::default();
+    let stores = SqliteStoreSet::open_with_options_and_clock(
+        database,
+        crate::SqliteStoreSetOptions {
+            pauses: Some(pauses.clone()),
+            ..crate::SqliteStoreSetOptions::standard(crate::SqliteSynchronous::Full)
+        },
+        Arc::new(lash_core::testing::TestClock::new(STORE_TIME)),
+    )
+    .await
+    .expect("the child opens the database file");
+    let store = Arc::new(stores.durable_store());
+    let label = CommitLabel::new("law.grouped");
+    let mut tx = MailTx::new();
+    for index in 0..GROUPED {
+        tx.create_actor(grouped(index), formats());
+    }
+    store
+        .commit_mail(tx, label)
+        .await
+        .expect("create the actors");
+    let node = store
+        .register_node(&lash_durable::NodeSpec {
+            node: NodeId::new("grouped"),
+            decodes: vec![formats()],
+            ttl_millis: 15_000,
+        })
+        .await
+        .expect("register the owner");
+    let claimed = store.claim(&node, GROUPED).await.expect("claim the actors");
+    assert_eq!(claimed.len(), GROUPED, "every actor is claimed");
+    let mut owners = Vec::new();
+    for claim in &claimed {
+        let owner = store
+            .begin(&claim.actor, claim.epoch)
+            .await
+            .expect("open the owner");
+        report(&format!("owns {} {}", claim.actor, owner.revision().0));
+        owners.push(owner);
+    }
+    // The batch's COMMIT is the first that carries actor rows: the held
+    // heartbeat's renews only its node.
+    let touched = Arc::new(Mutex::new(BTreeSet::<i64>::new()));
+    let stop = cut == "before";
+    stores
+        .process_env_store()
+        .conn
+        .call({
+            let touched = Arc::clone(&touched);
+            move |c| {
+                let updated = Arc::clone(&touched);
+                c.update_hook(Some(
+                    move |_: rusqlite::hooks::Action, _: &str, table: &str, row: i64| {
+                        if table == "actors" {
+                            updated.lock().expect("touched rows").insert(row);
+                        }
+                    },
+                ));
+                let committing = Arc::clone(&touched);
+                c.commit_hook(Some(move || {
+                    let rows = std::mem::take(&mut *committing.lock().expect("touched rows"));
+                    if !rows.is_empty() {
+                        report(&format!("committing {}", rows.len()));
+                        if stop {
+                            loop {
+                                std::thread::park();
+                            }
+                        }
+                    }
+                    false
+                }));
+                c.rollback_hook(Some(move || touched.lock().expect("touched rows").clear()));
+                Ok(())
+            }
+        })
+        .await
+        .expect("watch the writer's commits");
+    let hold = pauses.pause_after_fence();
+    let holding = tokio::spawn({
+        let store = Arc::clone(&store);
+        let node = node.clone();
+        async move { store.heartbeat(&node).await }
+    });
+    hold.wait_until_reached().await;
+    let mut answers = Vec::new();
+    for owner in owners {
+        let actor = owner.actor().clone();
+        let store = Arc::clone(&store);
+        let mut commit = Box::pin(async move { store.commit(owner, label).await });
+        std::future::poll_fn(|cx| {
+            assert!(commit.as_mut().poll(cx).is_pending(), "the commit queues");
+            std::task::Poll::Ready(())
+        })
+        .await;
+        answers.push(tokio::spawn(async move {
+            match commit.await {
+                Ok(_) => report(&format!("answered {actor} ok")),
+                Err(error) => report(&format!("answered {actor} err {error}")),
+            }
+        }));
+    }
+    hold.release();
+    holding
+        .await
+        .expect("heartbeat task")
+        .expect("the held heartbeat commits");
+    for answer in answers {
+        answer.await.expect("answer task");
+    }
+    std::future::pending::<()>().await;
+}
+
+/// FIG-5970: owner commits queued together form one write batch, and a
+/// process killed around its shared `COMMIT` keeps all of them or none. A
+/// child process groups `GROUPED` owner commits into one batch and is killed
+/// with SIGKILL inside that `COMMIT`, before it is durable, or right after
+/// the first commit is answered. On reopen no actor moved in the first cut;
+/// in the second every actor moved, so every answered commit is present.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_grouped_commit_killed_before_or_after_its_commit_is_all_or_nothing() {
+    if let Some((cut, database)) = child_role() {
+        return run_grouped_child(&cut, &database).await;
+    }
+    for cut in ["before", "after"] {
+        let dir = tempfile::tempdir().expect("a database directory");
+        let database = dir.path().join("lash.db");
+        let mut child = Child::start(GROUP_CUT, cut, &database);
+        let mut owned = BTreeMap::new();
+        for _ in 0..GROUPED {
+            let line = child.next(WATCHDOG).await;
+            let (actor, revision) = line
+                .strip_prefix("owns ")
+                .and_then(|owns| owns.split_once(' '))
+                .unwrap_or_else(|| panic!("an owner report: {line}"));
+            owned.insert(
+                actor.to_owned(),
+                revision.parse::<i64>().expect("a revision"),
+            );
+        }
+        assert_eq!(
+            child.next(WATCHDOG).await,
+            format!("committing {GROUPED}"),
+            "{cut}: the owner commits share one COMMIT"
+        );
+        let mut answered = Vec::new();
+        if cut == "after" {
+            answered.push(child.next(WATCHDOG).await);
+        }
+        child.kill().await;
+        tokio::time::timeout(WATCHDOG, async {
+            while let Some(line) = child.reports.recv().await {
+                answered.push(line);
+            }
+        })
+        .await
+        .expect("hang guard: the killed child's reports end");
+        let stores = SqliteStoreSet::open(&database, crate::SqliteSynchronous::Full)
+            .await
+            .expect("reopen the killed child's database");
+        let store = stores.durable_store();
+        let mut moved = Vec::new();
+        for index in 0..GROUPED {
+            let actor = grouped(index);
+            let revision = store
+                .actor(&actor)
+                .await
+                .expect("read the actor")
+                .expect("the actor exists")
+                .revision
+                .0;
+            if revision != owned[&actor.to_string()] {
+                moved.push(actor.to_string());
+            }
+        }
+        if cut == "before" {
+            assert!(moved.is_empty(), "an uncommitted batch left {moved:?}");
+            assert!(answered.is_empty(), "answered before COMMIT: {answered:?}");
+        } else {
+            assert_eq!(
+                moved.len(),
+                GROUPED,
+                "a committed batch kept only {moved:?}"
+            );
+            assert!(!answered.is_empty());
+            for line in &answered {
+                let actor = line
+                    .strip_prefix("answered ")
+                    .and_then(|answer| answer.strip_suffix(" ok"))
+                    .unwrap_or_else(|| panic!("an Ok answer: {line}"));
+                assert!(moved.iter().any(|moved| moved == actor), "{actor} lost");
+            }
+        }
+    }
 }
