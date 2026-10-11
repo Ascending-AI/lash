@@ -835,10 +835,11 @@ impl SqliteConnection {
             if observed {
                 crate::observed_sql::enable(c);
             }
-            let result =
-                lash_core_execution::facade_support::sql::Window::on_worker(window, || {
-                    catalog.run(c, f)
-                });
+            // Catalog pre/post checks maintain the connection cache, outside
+            // the caller's operation. Reads needed by the callback still count.
+            let result = catalog.run(c, |c| {
+                lash_core_execution::facade_support::sql::Window::on_worker(window, || f(c))
+            });
             if observed {
                 c.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
             }
