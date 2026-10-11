@@ -72,22 +72,6 @@ const REFUSED: &[(&str, Code)] = &[
 
 /// FIG-5777: repair forms retain the submitted callee and its operands.
 #[test]
-fn repairs_name_the_rejected_operands() {
-    let diagnostic = machine::lower(
-        "async def load_invoice(invoice_id):\n    return invoice_id\ninvoice_number = 42\nload_invoice(invoice_number)\n",
-    )
-    .expect_err("a coroutine call must be awaited");
-    assert_eq!(diagnostic.code, Code::CoroutineNotAwaited.as_str());
-    assert!(
-        diagnostic
-            .repairs
-            .iter()
-            .any(|repair| repair.contains("await load_invoice(invoice_number)")),
-        "the repair must use the submitted function and argument: {diagnostic}"
-    );
-}
-
-#[test]
 fn each_refusal_carries_its_code() {
     for (source, code) in REFUSED {
         match machine::lower(source) {

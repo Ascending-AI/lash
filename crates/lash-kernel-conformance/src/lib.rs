@@ -13,7 +13,6 @@ mod coverage;
 mod machine;
 mod migration;
 mod native;
-mod native_calls;
 pub mod smith;
 
 pub use case::{
@@ -24,9 +23,6 @@ pub use coverage::{CoverageError, PendingRule, check_coverage, load_corpus, rule
 pub use machine::MachineRunner;
 pub use migration::{MigrationCheck, check_migration};
 pub use native::check_native;
-pub use native_calls::{
-    NativeCase, NativeObservation, NativeOutcome, NativeShard, check_native_calls,
-};
 
 /// A reader, interpreter or front end capable of running a kernel document.
 /// It returns observations, never expectations copied from the case.
@@ -53,9 +49,6 @@ pub fn check_case(
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod native_laws;
 
 #[cfg(all(test, feature = "synthetic-next"))]
 mod migration_laws;

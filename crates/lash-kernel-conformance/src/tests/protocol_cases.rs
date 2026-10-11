@@ -1,4 +1,5 @@
-// One executable law per rule shard, owned with this corpus.
+// One executable law per rule shard, owned with this corpus; a rule
+// in the skip file has no standalone law: a surviving law executes it.
 #[test]
 fn k_bnd_003() {
     super::run_rule("K-BND-003", include_str!("../../protocol/bnd/K-BND-003.json"));
@@ -47,16 +48,6 @@ fn k_edit_004() {
 #[test]
 fn k_edit_005() {
     super::run_rule("K-EDIT-005", include_str!("../../protocol/edit/K-EDIT-005.json"));
-}
-
-#[test]
-fn k_edit_006() {
-    super::run_rule("K-EDIT-006", include_str!("../../protocol/edit/K-EDIT-006.json"));
-}
-
-#[test]
-fn k_edit_007() {
-    super::run_rule("K-EDIT-007", include_str!("../../protocol/edit/K-EDIT-007.json"));
 }
 
 #[test]

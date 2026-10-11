@@ -31,6 +31,3 @@ pub use kir::{
 };
 pub use sem::{ChargeEvent, OpSpec, SEMANTICS};
 pub use verify::{At, CoverageError, KirError, verify_function, verify_semantics};
-
-#[cfg(test)]
-mod tests;

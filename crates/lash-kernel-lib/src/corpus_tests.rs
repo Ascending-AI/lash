@@ -1,5 +1,4 @@
-//! Independent recorded native outcomes and charges. The same JSON shards
-//! can be fed to lash-kernel-conformance's NativeShard loader by an embedder.
+//! Independent recorded native outcomes and charges.
 
 use std::collections::HashSet;
 use std::sync::Arc;

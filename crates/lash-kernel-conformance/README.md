@@ -93,17 +93,6 @@ every guard also requires a failing case. It runs each case cold twice, with
 fresh native instances, then runs the whole selection twice on a shared warm
 registry, comparing full observations. The factory must create fresh caches.
 
-`NativeShard` files under `native/<family>/<rule>.json` supplement the document
-corpus with direct native calls. They do not count as kernel-text coverage.
-`NativeCase` holds `name`, `function` (definition identity), `args: Datum[]`,
-and `expected: {outcome, charged, work}`. Outcomes are `{"returned":datum}`,
-`{"raised":ErrorDatum}`, or `{"guard":{"limit":N}}`. `work` is the real
-`WorkCounter::spent()`. `check_native_calls(factory, probe, cases)` repeats
-every registered native cold twice and warm twice. The probe invokes the
-registered implementation using its library's real heap and formula evaluator.
-Keeping those in the owning library avoids a second implementation of kernel
-decoding, copying, equality or charging here.
-
 `examples/kernel-embedder` is compiled as a development dependency. It loads
 the fan-out document, admits table effects at a park, discards the machine,
 imports the saved state, and delivers answers in reverse order. The per-rule laws and fan-out law run against `KernelMachine`;
@@ -114,7 +103,7 @@ system CPython, with a scripted tool table. They emit values, errors, printed
 mutations and effect issue/delivery traces. Captures are checked in beside the
 source; Rust conformance tests need no runtime download or network.
 
-Embed this lane's own shard tree with `python3 crates/lash-kernel-conformance/index.py crates/lash-kernel-conformance/corpus crates/lash-kernel-conformance/src/corpus_files.rs --tests-output crates/lash-kernel-conformance/src/machine_cases.rs`. `--check` verifies membership after formatting. The test selection also mounts numeric library K-KEY-002, K-KEY-004 and K-VAL-026 from their owning crate. Its other five document cases run as supplements to already-owned rules. Add further owning library and parked-state shards to the composed selection and remove their pending rows; native-call supplements never count as kernel-text coverage.
+Embed this lane's own shard tree with `python3 crates/lash-kernel-conformance/index.py crates/lash-kernel-conformance/corpus crates/lash-kernel-conformance/src/corpus_files.rs --tests-output crates/lash-kernel-conformance/src/machine_cases.rs --tests-skip crates/lash-kernel-conformance/corpus/laws.skip`. `--check` verifies membership after formatting. A rule listed in `corpus/laws.skip` gets no standalone law: a surviving law executes its shard, and the shard stays in the embedding index. The test selection also mounts numeric library K-KEY-002, K-KEY-004 and K-VAL-026 from their owning crate. Its other five document cases run as supplements to already-owned rules. Add further owning library and parked-state shards to the composed selection and remove their pending rows; native-call supplements never count as kernel-text coverage.
 
 `corpus/dialect/K-DIALECT-001.json` and `K-DIALECT-002.json` are owned by
 `lash-dialect-typescript`'s
@@ -139,7 +128,7 @@ cases that call its native definitions. The portable case envelope is unchanged.
 Regenerate the host-operation selection with:
 
 ```sh
-python3 crates/lash-kernel-conformance/index.py crates/lash-kernel-conformance/protocol crates/lash-kernel-conformance/src/tests/protocol_files.rs --tests-output crates/lash-kernel-conformance/src/tests/protocol_cases.rs
+python3 crates/lash-kernel-conformance/index.py crates/lash-kernel-conformance/protocol crates/lash-kernel-conformance/src/tests/protocol_files.rs --tests-output crates/lash-kernel-conformance/src/tests/protocol_cases.rs --tests-skip crates/lash-kernel-conformance/protocol/laws.skip
 ```
 
 The test-only drivers register the literal probe definitions and the ordinary

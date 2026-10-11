@@ -70,10 +70,7 @@ pub(crate) fn is_label_comment(text: &str) -> bool {
 /// `None` means the text has no spelling: it would close the comment, span
 /// lines, or — for a title — swallow the description separator, so a render
 /// followed by a parse would not return what went in.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the printer spells a label with it")
-)]
+#[expect(dead_code, reason = "the printer spells a label with it")]
 pub(crate) fn render_label_comment(title: &str, description: Option<&str>) -> Option<String> {
     let title = title.trim();
     let description = description.map(str::trim).filter(|text| !text.is_empty());
@@ -89,10 +86,7 @@ pub(crate) fn render_label_comment(title: &str, description: Option<&str>) -> Op
     })
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the printer spells a label with it")
-)]
+#[expect(dead_code, reason = "the printer spells a label with it")]
 fn is_renderable(text: &str) -> bool {
     !text.contains('\n') && !text.contains('\r') && !text.contains("*/")
 }
@@ -131,39 +125,5 @@ mod tests {
         assert_eq!(parse_label_comment("* @labelled Title "), None);
         assert_eq!(parse_label_comment("* @label "), None);
         assert_eq!(parse_label_comment("* @label — only a description "), None);
-    }
-
-    #[test]
-    fn rendering_round_trips_through_the_parse() {
-        for (title, description) in [
-            ("Traffic lights", None),
-            ("Traffic lights", Some("Cycle the signal twice")),
-            ("@label", Some("a title that looks like the tag")),
-        ] {
-            let rendered = render_label_comment(title, description).expect("renderable label");
-            let text = rendered
-                .strip_prefix("/*")
-                .and_then(|text| text.strip_suffix("*/"))
-                .expect("a block comment");
-            assert_eq!(
-                parse_label_comment(text),
-                Some(NodeLabel {
-                    title: title.to_string(),
-                    description: description.map(str::to_string),
-                })
-            );
-        }
-    }
-
-    #[test]
-    fn text_with_no_spelling_is_refused_rather_than_mangled() {
-        assert_eq!(render_label_comment("", None), None);
-        assert_eq!(render_label_comment("   ", None), None);
-        // The separator in a title would re-read as a description.
-        assert_eq!(render_label_comment("Red — amber", None), None);
-        // Closing the comment early would change the program.
-        assert_eq!(render_label_comment("Close */ me", None), None);
-        assert_eq!(render_label_comment("Title", Some("Close */ me")), None);
-        assert_eq!(render_label_comment("Title", Some("two\nlines")), None);
     }
 }

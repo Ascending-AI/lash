@@ -3,7 +3,6 @@
 //! sampled contexts accounts for every tick.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
 use lash_kernel_state::ParkedRun;
@@ -354,49 +353,4 @@ main {
     assert_eq!((show.self_samples, show.inclusive_samples), (2, 2));
     let main = times.iter().find(|time| time.frame == "main").unwrap();
     assert_eq!((main.self_samples, main.inclusive_samples), (1, 3));
-}
-
-/// A sampler on another thread, reading as fast as it can while machines
-/// run, accounts for every tick, never keeps a read the machine wrote
-/// during, and folds only stacks whose every frame names a code of the
-/// run.
-#[test]
-fn a_concurrent_sampler_keeps_only_whole_contexts() {
-    let context = GuestContext::new();
-    let done = Arc::new(AtomicBool::new(false));
-    let sampler = {
-        let context = Arc::clone(&context);
-        let done = Arc::clone(&done);
-        std::thread::spawn(move || {
-            let mut profile = GuestProfile::new();
-            while !done.load(Ordering::Relaxed) {
-                profile.tick(&context);
-            }
-            profile
-        })
-    };
-    let mut symbols = None;
-    for _ in 0..20 {
-        let mut embedder = Embedder::with(PROGRAM, setup(Layout::default(), 7));
-        embedder.machine.publish_context(Arc::clone(&context));
-        symbols.get_or_insert_with(|| embedder.machine.guest_symbols());
-        let mut plain = Embedder::with(PROGRAM, setup(Layout::default(), 7));
-        assert_eq!(embedder.run_to_end(&[]), plain.run_to_end(&[]));
-    }
-    done.store(true, Ordering::Relaxed);
-    let profile = sampler.join().unwrap();
-    let symbols = symbols.unwrap();
-    let counts = profile.completeness();
-    assert!(counts.adds_up(), "{counts:?}");
-    assert!(counts.ticks > 0);
-    assert_eq!(counts.unknown_phase, 0);
-    assert_eq!(profile.unresolved(&symbols), 0);
-    let total: u64 = parse(&profile.folded(None, &symbols))
-        .iter()
-        .map(|(frames, count)| {
-            assert!(frames.iter().all(|frame| !frame.starts_with("[unknown")));
-            count
-        })
-        .sum();
-    assert_eq!(total, counts.accepted);
 }

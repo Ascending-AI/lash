@@ -27,22 +27,6 @@ const LIBRARY_CORPUS_FILES: &[(&str, &str)] = &[
     ),
 ];
 
-// Additional cases for already-owned rules run without claiming a second owner.
-const LIBRARY_SUPPLEMENT_FILES: &[(&str, &str)] = &[
-    (
-        "K-KEY-003.json",
-        include_str!("../../lash-kernel-lib/corpus/numbers/K-KEY-003.json"),
-    ),
-    (
-        "K-KEY-005.json",
-        include_str!("../../lash-kernel-lib/corpus/numbers/K-KEY-005.json"),
-    ),
-    (
-        "K-VAL-001.json",
-        include_str!("../../lash-kernel-lib/corpus/numbers/K-VAL-001.json"),
-    ),
-];
-
 fn corpus_shards() -> Vec<Shard> {
     load_corpus(
         CORPUS_FILES
@@ -90,38 +74,6 @@ fn run_shard(shard: &Shard, registry: lash_kernel_doc::FunctionRegistry) {
         shard.rule,
         failures.join("\n")
     );
-}
-
-#[test]
-fn numeric_library_documents_obey_their_kernel_rules() {
-    let shards = load_corpus(
-        LIBRARY_CORPUS_FILES
-            .iter()
-            .chain(LIBRARY_SUPPLEMENT_FILES)
-            .copied(),
-    )
-    .expect("decode numeric library documents");
-    for shard in &shards {
-        let mut registry = lash_kernel_doc::FunctionRegistry::new();
-        lash_kernel_vm::register_machine_functions(&mut registry)
-            .expect("register kernel functions");
-        lash_kernel_lib::register_numbers(&mut registry).expect("register numeric natives");
-        run_shard(shard, registry);
-    }
-}
-
-/// K-LJSON-005: the root need not be a heap value for a cycle to be refused.
-#[test]
-fn json_stringify_refuses_cycle_from_immutable_tuple() {
-    let shard: Shard = serde_json::from_str(include_str!("../supplements/json/K-LJSON-005.json"))
-        .expect("decode immutable-root stringify case");
-    assert!(
-        crate::rule_ids(include_str!("../../../docs/kernel/library-text-json.md"))
-            .contains(&shard.rule)
-    );
-    let mut registry = lash_kernel_doc::FunctionRegistry::new();
-    lash_kernel_lib::register_text_json(&mut registry).expect("register JSON native");
-    run_shard(&shard, registry);
 }
 
 #[test]

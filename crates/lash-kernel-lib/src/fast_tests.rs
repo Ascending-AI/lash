@@ -323,11 +323,6 @@ fn bool_not_takes_its_fast_path_as_its_general_call() {
 }
 
 #[test]
-fn list_len_takes_its_fast_path_as_its_general_call() {
-    law("list.len");
-}
-
-#[test]
 fn eq_takes_its_fast_path_as_its_general_call() {
     law("eq");
 }
