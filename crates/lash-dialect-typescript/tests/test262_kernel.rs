@@ -141,20 +141,48 @@ fn run_selection(shard: usize) {
     );
 }
 
-/// K-DIALECT-001 over every recorded Test262 program, rather than a sample.
-#[test]
-fn every_lowered_test262_program_prints_to_the_same_kernel_behavior() {
+/// K-DIALECT-001 over a disjoint part of the complete recorded corpus.
+/// Keep the printer work spread across test actions, just like execution,
+/// so one full-corpus law cannot monopolize the remote action's deadline.
+fn run_printing_selection(shard: usize) {
     let recorded = runner::recorded_classes();
-    let accepted = recorded
+    let paths: Vec<_> = recorded
         .keys()
+        .enumerate()
+        .filter(|(index, _)| index % 8 == shard)
+        .map(|(_, path)| path)
+        .collect();
+    assert!(!paths.is_empty(), "the printer selection is empty");
+    let accepted = paths
+        .iter()
         .filter(|path| runner::printing_relowers(path))
         .count();
     assert!(accepted > 0, "no Test262 program reached the printer law");
     println!(
-        "printer law: considered={} lowered={accepted} refused_or_missing_harness={}",
-        recorded.len(),
-        recorded.len() - accepted
+        "printer law: shard={shard} considered={} lowered={accepted} refused_or_missing_harness={}",
+        paths.len(),
+        paths.len() - accepted
     );
+}
+
+/// Every recorded case reaches exactly one K-DIALECT-001 printer law.
+mod printing {
+    macro_rules! shards {
+        ($($name:ident: $index:literal),* $(,)?) => {$ (
+            #[test]
+            fn $name() { super::run_printing_selection($index); }
+        )*};
+    }
+    shards! {
+        shard_00: 0,
+        shard_01: 1,
+        shard_02: 2,
+        shard_03: 3,
+        shard_04: 4,
+        shard_05: 5,
+        shard_06: 6,
+        shard_07: 7,
+    }
 }
 
 /// Every recorded case belongs to exactly one of these full-selection laws.
