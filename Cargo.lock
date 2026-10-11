@@ -2229,6 +2229,7 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-trace",
  "lash-internal-vm-protocol",
+ "lash-kernel-doc",
  "rmp-serde",
  "schemars",
  "serde",
@@ -2289,8 +2290,8 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-vm-client",
- "lash-internal-vm-protocol",
  "lash-internal-vm-runtime",
+ "lash-kernel-state",
  "lash-kernel-vm",
  "lash-runtime",
  "rusqlite",
@@ -2403,6 +2404,7 @@ dependencies = [
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-execution",
+ "lash-internal-core-store",
  "lash-internal-durable",
  "lash-internal-postgres-store",
  "lash-internal-sansio",
@@ -2674,6 +2676,7 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-vm-protocol",
+ "lash-internal-vm-releases",
  "lash-kernel-doc",
  "lash-kernel-state",
  "lash-kernel-vm",
@@ -2691,11 +2694,14 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "lash-internal-core-execution",
+ "lash-internal-core-store",
  "lash-internal-sansio",
  "lash-internal-vm-broker",
  "lash-internal-vm-protocol",
+ "lash-internal-vm-releases",
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "lash-kernel-state",
  "lash-kernel-vm",
  "libc",
  "quote",
@@ -2722,7 +2728,6 @@ dependencies = [
 name = "lash-internal-vm-protocol"
 version = "0.0.0-dev"
 dependencies = [
- "base64 0.23.1",
  "blake3",
  "lash-internal-sansio",
  "rmp-serde",
@@ -2748,6 +2753,7 @@ dependencies = [
  "lash-kernel-vm",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -2755,14 +2761,18 @@ name = "lash-internal-vm-runtime"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "base64 0.23.1",
  "lash-dialect-typescript",
  "lash-internal-core",
  "lash-internal-core-execution",
+ "lash-internal-core-store",
  "lash-internal-sansio",
  "lash-internal-trace",
  "lash-internal-vm-broker",
  "lash-internal-vm-client",
  "lash-internal-vm-library",
+ "lash-internal-vm-protocol",
+ "lash-internal-vm-releases",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -2787,6 +2797,7 @@ dependencies = [
  "lash-ext-regex-ecma",
  "lash-ext-url-whatwg",
  "lash-internal-core-execution",
+ "lash-internal-core-store",
  "lash-internal-vm-client",
  "lash-internal-vm-library",
  "lash-internal-vm-protocol",

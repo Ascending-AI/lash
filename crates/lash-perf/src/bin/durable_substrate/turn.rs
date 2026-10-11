@@ -63,6 +63,9 @@ pub struct Script {
     pub cell_calls: usize,
     /// Bytes of padding each cell operation answers, retained in the heap.
     pub cell_payload: usize,
+    /// Each cell operation's padding is a text of its own, not the one
+    /// literal every await repeats.
+    pub cell_fresh: bool,
     /// Hold the first attempt of this model call (0-based) until the node
     /// serving it stops.
     pub hold_call: Option<usize>,

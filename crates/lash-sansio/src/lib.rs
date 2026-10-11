@@ -2,6 +2,7 @@ pub mod append_vec;
 pub mod attachment;
 mod blake3_domains;
 pub mod causal;
+mod codec_variants;
 mod compat;
 pub mod core_support;
 pub mod definition_id;

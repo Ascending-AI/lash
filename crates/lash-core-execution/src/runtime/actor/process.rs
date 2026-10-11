@@ -8,6 +8,8 @@ mod activation;
 mod carry;
 mod driver;
 mod session_turn;
+#[doc(hidden)]
+pub mod state_graph;
 mod terminal;
 mod waiting;
 

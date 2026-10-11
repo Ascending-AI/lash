@@ -135,6 +135,8 @@ pub(super) struct ContentAliasedCheckpointRoots {
     pub(super) dependent_root: crate::BlobRef,
     pub(super) aliased_root: crate::BlobRef,
     pub(super) aliased_component: crate::BlobRef,
+    /// The OpaqueLeaf through which the aliased root names its component.
+    pub(super) aliased_leaf: crate::BlobRef,
 }
 
 #[expect(
@@ -142,7 +144,46 @@ pub(super) struct ContentAliasedCheckpointRoots {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 fn encoded_checkpoint_manifest(manifest: &crate::SessionCheckpoint) -> Vec<u8> {
-    rmp_serde::to_vec_named(manifest).expect("encode checkpoint manifest for content alias")
+    let (root, nodes) = manifest
+        .to_graph()
+        .expect("encode checkpoint manifest for content alias");
+    nodes[&root].bytes.to_vec()
+}
+
+/// The OpaqueLeaf through which `manifest` names component `name`: a
+/// checkpoint root's edge goes to the leaf, and the leaf's to the
+/// component's blob.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+fn component_leaf(manifest: &crate::SessionCheckpoint, name: &str) -> crate::BlobRef {
+    let blob = &manifest.components[name].blob_ref;
+    let (root, nodes) = manifest.to_graph().expect("stage the checkpoint manifest");
+    nodes
+        .values()
+        .find(|node| {
+            node.id != root
+                && node.children().is_ok_and(|children| {
+                    children.iter().any(|child| child.to_hex() == blob.as_str())
+                })
+        })
+        .map(|leaf| crate::BlobRef::for_content(&leaf.bytes))
+        .expect("the manifest names the component through a leaf")
+}
+
+/// Whether `root` still projects onto `blob` through `leaf`, when the
+/// backend materializes edges: the root's edge to the leaf and the leaf's
+/// to the blob both stand.
+async fn projects(
+    probe: &dyn SessionDeleteBlobProbe,
+    root: &crate::BlobRef,
+    leaf: &crate::BlobRef,
+    blob: &crate::BlobRef,
+) -> Option<bool> {
+    let to_leaf = probe.checkpoint_component_edge_exists(root, leaf).await?;
+    let to_blob = probe.checkpoint_component_edge_exists(leaf, blob).await?;
+    Some(to_leaf && to_blob)
 }
 
 /// The nonce makes B sort before A, reproducing the restrictive-FK delete order that matters
@@ -213,6 +254,7 @@ pub(super) async fn commit_content_aliased_checkpoint_roots(
 
     ContentAliasedCheckpointRoots {
         dependent_root: receipt.checkpoint_ref,
+        aliased_leaf: component_leaf(&aliased.manifest, "conformance/session-delete-owned"),
         aliased_root: aliased.checkpoint_ref,
         aliased_component: aliased
             .component_refs
@@ -296,12 +338,9 @@ where
         Some(&shared),
         "{backend}: the advanced head shares a component with both dead roots"
     );
+    let leaf = component_leaf(&first.manifest, "conformance/session-delete-owned");
     for root in [&first.checkpoint_ref, &second.checkpoint_ref] {
-        if let Some(exists) = handles
-            .probe
-            .checkpoint_component_edge_exists(root, &shared)
-            .await
-        {
+        if let Some(exists) = projects(handles.probe.as_ref(), root, &leaf, &shared).await {
             assert!(
                 exists,
                 "{backend}: the fixture must contain a dead-root edge"
@@ -332,7 +371,7 @@ where
     for root in [&first.checkpoint_ref, &second.checkpoint_ref] {
         if let Some(exists) = handles
             .probe
-            .checkpoint_component_edge_exists(root, &shared)
+            .checkpoint_component_edge_exists(root, &leaf)
             .await
         {
             assert!(
@@ -424,10 +463,14 @@ where
             handles.probe.blob_exists(shared).await,
             "{backend}: retain the base's exclusive component"
         );
-        if let Some(exists) = handles
-            .probe
-            .checkpoint_component_edge_exists(&source.checkpoint_ref, shared)
-            .await
+        let leaf = component_leaf(&source.manifest, "conformance/session-delete-owned");
+        if let Some(exists) = projects(
+            handles.probe.as_ref(),
+            &source.checkpoint_ref,
+            &leaf,
+            shared,
+        )
+        .await
         {
             assert!(
                 exists,
@@ -508,18 +551,23 @@ async fn session_delete_reclaims_content_aliased_checkpoint_roots(
         handles.probe.blob_exists(&roots.aliased_root).await,
         "{backend}: deleting B's head must retain B while live root A aliases its bytes"
     );
+    // A node's references are its bytes': while A aliases B's bytes, B's
+    // root still names its component, which stays.
     assert!(
-        !handles.probe.blob_exists(&roots.aliased_component).await,
-        "{backend}: deleting B's head must reclaim B's now-unowned component"
+        handles.probe.blob_exists(&roots.aliased_component).await,
+        "{backend}: what B's retained root references must stay while A aliases it"
     );
-    if let Some(edge_exists) = handles
-        .probe
-        .checkpoint_component_edge_exists(&roots.aliased_root, &roots.aliased_component)
-        .await
+    if let Some(projects) = projects(
+        handles.probe.as_ref(),
+        &roots.aliased_root,
+        &roots.aliased_leaf,
+        &roots.aliased_component,
+    )
+    .await
     {
         assert!(
-            !edge_exists,
-            "{backend}: deleting B's head must sever B's outgoing projection edge before deleting its component"
+            projects,
+            "{backend}: B's retained root keeps its edges to what it references"
         );
     }
 
@@ -531,6 +579,10 @@ async fn session_delete_reclaims_content_aliased_checkpoint_roots(
     assert!(
         !handles.probe.blob_exists(&roots.aliased_root).await,
         "{backend}: deleting root A must reclaim the now-unowned aliased root B"
+    );
+    assert!(
+        !handles.probe.blob_exists(&roots.aliased_component).await,
+        "{backend}: deleting root A must reclaim what only B's root referenced"
     );
 }
 

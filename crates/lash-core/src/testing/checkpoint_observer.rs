@@ -470,20 +470,24 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
             kind: CheckpointComponentWriteKind::UnchangedRef,
         });
     }
-    // Execution state is an opaque `Vec<u8>` the engine owns, so it is recorded
-    // as written without a size. Measuring it the way typed components are
-    // measured would serialize the bytes as a JSON decimal array, which reports
-    // roughly 3.5x the real length and — because digits per byte depend on the
-    // byte's value — shifts whenever an embedded identifier changes. That made
-    // transcripts flaky on cosmetic churn while staying blind to real payload
-    // differences, since genuinely different execution states round to the same
-    // rendered size. `lash-sim`'s contract support omits it for the same reason.
+    // Execution state is a SessionExecution graph the engine owns, recorded as
+    // written without a size: its encoded bytes shift whenever an embedded
+    // identifier changes, which made transcripts flaky on cosmetic churn while
+    // staying blind to real payload differences. A commit that sends nodes
+    // stores it; one that sends none references the root it names.
+    // `lash-sim`'s contract support omits its size for the same reason.
+    let execution_ref = checkpoint
+        .execution
+        .as_ref()
+        .map(crate::store::CheckpointExecution::root_ref);
     record_component(
         &mut components,
         CheckpointComponent::ExecutionState,
-        checkpoint.component_ref(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
+        execution_ref.as_ref(),
         checkpoint
-            .component_body(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+            .execution
+            .as_ref()
+            .filter(|execution| !execution.nodes.is_empty())
             .map(|_| None),
     );
     CheckpointWriteEvent {

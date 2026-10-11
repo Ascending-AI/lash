@@ -22,7 +22,7 @@
 //! is one build-wide question owned by the format manifest, and a backend that
 //! answered it locally would be a second place for the answer to drift. The one
 //! decode that does happen — the checkpoint manifest, to find the
-//! execution-state component it names — is a *navigation* step, not a verdict:
+//! SessionExecution root it names — is a *navigation* step, not a verdict:
 //! it reads one reference out of a container and deliberately refuses to judge
 //! what it found. See [`execution_state_ref`] for why it cannot use the crate's
 //! strict decoder.
@@ -196,7 +196,7 @@ async fn scan_session_checkpoints(
             status: None,
             owner_record: None,
             payload: match blobs.get(session.checkpoint_ref.as_str()) {
-                Some(content) => DurablePayload::MessagePack(content.clone()),
+                Some(content) => DurablePayload::GraphNode(content.clone()),
                 // A dangling root is a finding, not an error and not an
                 // omission: the session is named on the report with the ref it
                 // points at, which is the only form of this defect an operator
@@ -221,25 +221,24 @@ async fn scan_session_checkpoints(
     finish(snapshot, Ok(scanned(items, next))).await
 }
 
-/// One protocol execution-state component body per session that stores one.
+/// One protocol execution-state root per session that stores one.
 ///
 /// This is the session walk one level deeper: read the manifest, follow the
-/// reference it holds under the `execution_state` key, and return that blob's
-/// bytes. Two properties of the result are load-bearing.
+/// SessionExecution root it names, and return that node's bytes. Two
+/// properties of the result are load-bearing.
 ///
 /// **A page can be shorter than the sessions it scanned.** A session whose
-/// manifest names no execution-state component contributes no item — that
+/// manifest names no SessionExecution root contributes no item — that
 /// session genuinely has none, and emitting an empty or `Missing` item for it
 /// would invent a defect. The page's `next` is therefore taken from the *last
 /// session scanned*, never from the last item emitted: a page of ten sessions
 /// that yielded one item must resume after the tenth, and resuming after the
 /// first would walk the other nine forever.
 ///
-/// **Only the named component is read.** Execution state is stored as a
-/// component whose body may itself be split into leaves keyed
-/// `execution_state/…`; those are the component's internals and reading them
-/// here would turn a bounded per-session read into an unbounded fan-out, on a
-/// surface whose entire justification is that it is bounded.
+/// **Only the named root is read.** Execution state is a graph beneath its
+/// root; reading that graph here would turn a bounded per-session read into
+/// an unbounded fan-out, on a surface whose entire justification is that it
+/// is bounded.
 async fn scan_session_execution_state(
     pool: &PgPool,
     scan: &DurableScan,
@@ -260,7 +259,7 @@ async fn scan_session_execution_state(
 
     // A manifest blob that is itself absent drops out here too: the dangling root is already a
     // `Missing` item on the `SessionCheckpoint` surface, and reporting it a second time as an
-    // absent execution state would claim a component the store never said existed.
+    // absent execution state would claim a root the store never said existed.
     let mut resolved: Vec<(String, String)> = Vec::with_capacity(sessions.len());
     for session in &sessions {
         let Some(manifest) = manifests.get(session.checkpoint_ref.as_str()) else {
@@ -289,7 +288,7 @@ async fn scan_session_execution_state(
             status: None,
             owner_record: None,
             payload: match components.get(blob_ref.as_str()) {
-                Some(content) => DurablePayload::MessagePack(content.clone()),
+                Some(content) => DurablePayload::GraphNode(content.clone()),
                 // The manifest named it, so the store believes it exists. That
                 // makes its absence a real dangling reference rather than the
                 // "this session has none" case above.
@@ -313,42 +312,24 @@ async fn scan_session_execution_state(
     finish(snapshot, Ok(scanned(items, next))).await
 }
 
-/// **Why not the crate's `decode_versioned_msgpack_record`.** That helper
-/// validates the record's schema version and fails when it disagrees with this
-/// build — which is precisely the condition a preflight exists to *describe*. A
-/// walk that used it would refuse to enumerate the deployment whose format
-/// mismatch is the finding, turning the most valuable report into an error.
-///
-/// **Why a bespoke probe rather than a generic value tree.** Reading the
-/// manifest into `serde_json::Value` cannot represent MessagePack's binary type,
-/// so any byte-carrying field anywhere in the record — present or added later —
-/// would fail the whole decode and silently drop a session that does have
-/// execution state. A struct that names only what is navigated lets serde ignore
-/// everything else, whatever type it is.
+/// **Why not the crate's validating manifest load.** That reads every child
+/// and fails when the record disagrees with this build — which is precisely
+/// the condition a preflight exists to *describe*. A walk that used it would
+/// refuse to enumerate the deployment whose format mismatch is the finding,
+/// turning the most valuable report into an error. This reads the one root
+/// the manifest's body names.
 ///
 /// A manifest that will not decode at all contributes nothing rather than
 /// erroring: it is one session's container, and failing the page over it would
 /// hide every session behind it.
 fn execution_state_ref(manifest: &[u8]) -> Option<String> {
-    let probe: ManifestProbe = rmp_serde::from_slice(manifest).ok()?;
-    probe
-        .components
-        .get(lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
-        .map(|component| component.blob_ref.clone())
-}
-
-/// The narrowest possible view of a checkpoint manifest: the one map, and the
-/// one field of the one entry, that navigation needs. Everything else is
-/// ignored by construction.
-#[derive(serde::Deserialize)]
-struct ManifestProbe {
-    #[serde(default)]
-    components: std::collections::BTreeMap<String, ManifestComponentProbe>,
-}
-
-#[derive(serde::Deserialize)]
-struct ManifestComponentProbe {
-    blob_ref: String,
+    let node = lash_core_store::checkpoint_graph::EncodedNode {
+        id: lash_core_store::checkpoint_graph::NodeId::of_envelope(manifest),
+        bytes: std::sync::Arc::from(manifest),
+    };
+    lash_core_execution::store::SessionCheckpoint::named(&node)?
+        .execution
+        .map(|root| root.to_hex())
 }
 
 /// One page of sessions holding a checkpoint root, shared by both deep surfaces.
@@ -524,57 +505,27 @@ mod tests {
 
     #[test]
     fn a_manifest_without_execution_state_names_nothing() {
-        #[derive(serde::Serialize)]
-        struct Manifest {
-            schema_version: u32,
-            components: std::collections::BTreeMap<String, Component>,
-        }
-        #[derive(Clone, serde::Serialize)]
-        struct Component {
-            blob_ref: String,
-            encoding_version: u32,
-        }
-
-        let mut components = std::collections::BTreeMap::new();
-        components.insert(
-            "tool_state".to_string(),
-            Component {
-                blob_ref: "aaaa".to_string(),
-                encoding_version: 2,
-            },
+        use lash_core_execution::store::{BlobRef, SessionCheckpoint};
+        let manifest_bytes = |execution_ref: Option<BlobRef>| {
+            let manifest = SessionCheckpoint::new(
+                lash_core_execution::PersistedTurnState::default(),
+                std::collections::BTreeMap::new(),
+                execution_ref,
+                lash_core_execution::FleetFormat::current(),
+            );
+            let (root, nodes) = manifest.to_graph().expect("the manifest stages");
+            nodes[&root].bytes.to_vec()
+        };
+        assert_eq!(execution_state_ref(&manifest_bytes(None)), None);
+        let root = lash_core_store::checkpoint_graph::NodeId::of_envelope(b"session execution");
+        assert_eq!(
+            execution_state_ref(&manifest_bytes(Some(BlobRef(root.to_hex())))),
+            Some(root.to_hex())
         );
-        let mut buf = Vec::new();
-        rmp_serde::encode::write_named(
-            &mut buf,
-            &Manifest {
-                schema_version: 1,
-                components: components.clone(),
-            },
-        )
-        .expect("encode probe manifest");
-        assert_eq!(execution_state_ref(&buf), None);
-
-        components.insert(
-            lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
-            Component {
-                blob_ref: "bbbb".to_string(),
-                encoding_version: 2,
-            },
-        );
-        let mut buf = Vec::new();
-        rmp_serde::encode::write_named(
-            &mut buf,
-            &Manifest {
-                schema_version: 1,
-                components,
-            },
-        )
-        .expect("encode probe manifest");
-        assert_eq!(execution_state_ref(&buf), Some("bbbb".to_string()));
     }
 
     #[test]
     fn an_undecodable_manifest_names_nothing_rather_than_failing() {
-        assert_eq!(execution_state_ref(b"not messagepack at all"), None);
+        assert_eq!(execution_state_ref(b"not a graph node at all"), None);
     }
 }

@@ -4,11 +4,13 @@
 The engine's tables (`nodes`, `actors`, `actor_mail`, and the domain tables
 the runtime lanes add to the fenced commit: `run_records`, `exec_snapshots`,
 `waits`, `park_events`, `turn_phases`, `turn_namespaces`, `session_close`, `session_scope_ends`,
-`prompt_snapshots`, `prompt_texts`, `prompt_snapshot_texts`; `lash_`-prefixed on PostgreSQL) are written by one
+`prompt_snapshots`, `prompt_texts`, `prompt_snapshot_texts`, and the checkpoint graph's
+`effect_admissions`, `blob_read_pins`, `graph_release_pins`, `graph_commit_receipts`;
+`lash_`-prefixed on PostgreSQL) are written by one
 neutral statement set and one module per dialect. Since I0 (FIG-5194) each
 of those is a directory: the core in `durable/mod.rs` and one file per
 domain (`turns`, `run_records`, `snapshots`, `waits`, `processes`,
-`session_close`, `session_mail`, `park_events`, `prompts`), each owned by its lane. This check fails
+`session_close`, `session_mail`, `park_events`, `prompts`, `graph`), each owned by its lane. This check fails
 when:
 
 - SQL naming an engine table appears in any tracked Rust or SQL file outside
@@ -43,6 +45,7 @@ DOMAINS = (
     "session_mail",
     "park_events",
     "prompts",
+    "graph",
 )
 NEUTRAL_DIR = "crates/lash-store-sql/src/durable"
 DIALECT_DIRS = (
@@ -73,6 +76,10 @@ TABLES = (
     "prompt_snapshots",
     "prompt_texts",
     "prompt_snapshot_texts",
+    "effect_admissions",
+    "blob_read_pins",
+    "graph_release_pins",
+    "graph_commit_receipts",
 )
 
 ENGINE_SQL = re.compile(

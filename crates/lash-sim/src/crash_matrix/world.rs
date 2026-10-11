@@ -238,7 +238,7 @@ impl World {
             .and_then(|host| host.nodes.upgrade())
     }
 
-    /// Whether `owner`'s run records hold a committed `x_start` for `call`:
+    /// Whether `owner`'s run facts hold a committed `x_start` for `call`:
     /// what a body reads first, so a law can tell one that started before
     /// its admission committed.
     pub async fn admitted(&self, owner: &OwnerKey, call: &ToolCallId) -> bool {
@@ -250,9 +250,9 @@ impl World {
         let Some(reader) = reader else {
             return false;
         };
-        reader.run_records(owner).await.is_ok_and(|rows| {
-            rows.iter().any(|row| {
-                row.kind == lash_durable::domain::RunRecordKind::XStart
+        reader.run_facts(owner).await.is_ok_and(|facts| {
+            facts.rows.iter().any(|row| {
+                row.kind == lash_durable::domain::RunFactKind::XStart
                     && row.call.as_ref() == Some(call)
             })
         })

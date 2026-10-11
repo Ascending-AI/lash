@@ -30,8 +30,9 @@ async fn round_trips<T>(work: impl std::future::Future<Output = T>) -> (T, u64) 
 /// `model.start`, measured at FIG-5275 (14 before it): the open, which also
 /// reads the turn's cancel and the clock, with its checkout; and the commit:
 /// its checkout, the fenced `BEGIN`, the envelope's one statement, the
-/// phase's `Advance` and `COMMIT`.
-const MODEL_START_ROUND_TRIPS: u64 = 7;
+/// install of the phase's checkpoint node (FIG-5894), the phase's `Advance`
+/// and `COMMIT`.
+const MODEL_START_ROUND_TRIPS: u64 = 8;
 
 /// The owner's path from a model call's first poll to its committed
 /// `model.start` stays within its round-trip budget, so a read or an
@@ -92,6 +93,23 @@ async fn a_model_start_commit_stays_within_its_round_trip_budget() {
         let mut tx = store.begin(&actor, epoch).await.expect("open model.start");
         assert!(tx.turn_cancel().is_none(), "no cancel was requested");
         let deadline = tx.opened_at().after_millis(60_000);
+        // The phase's checkpoint is a node the commit installs with it.
+        let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
+            lash_core_store::checkpoint_graph::EncodeBudget::new(
+                lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
+            ),
+        );
+        let checkpoint = staging
+            .encode(
+                lash_core_store::checkpoint_graph::NodeKind::TURN_CONTENT,
+                lash_core_store::checkpoint_graph::TypedBody::logical(&{
+                    let mut body = lash_core_store::checkpoint_graph::TokenWriter::new();
+                    body.text("{}");
+                    body.into_bytes()
+                }),
+            )
+            .expect("the checkpoint stages");
+        tx.stage_all(staging);
         tx.write(DomainWrite::Turn(TurnWrite::Advance {
             session: session.clone(),
             run: run.clone(),
@@ -103,7 +121,7 @@ async fn a_model_start_commit_stays_within_its_round_trip_budget() {
                     deadline,
                     stream_from: "stream".to_owned(),
                 },
-                checkpoint: "{}".to_owned(),
+                checkpoint,
             },
             iteration: 0,
         }));

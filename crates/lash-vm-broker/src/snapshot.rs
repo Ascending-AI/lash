@@ -2,30 +2,36 @@
 //!
 //! A run is saved when it parks: [`kernel::store`](crate::kernel::store)
 //! commits its state, the ledger that matches it and the admission of every
-//! effect it requested, in one transaction. This module is what that
-//! transaction stands on: the execution's snapshot row and its revision,
-//! the identity an admitted execution takes, and the members that run the
-//! admitted bodies on this activation.
+//! effect it requested, in one transaction, as the execution's root graph.
+//! This module is what that transaction stands on: the execution's root row
+//! and its revision, the admissions its activation knows, the identity an
+//! admitted execution takes, and the members that run the admitted bodies
+//! on this activation.
 //!
-//! A member's identity is minted at admission and stored in the saved
-//! ledger. It is never a journal position.
+//! A member's identity is minted at admission and stored in its admission.
+//! It is never a journal position.
 
 use std::sync::{Arc, Mutex};
 
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::PolicyView;
 use lash_core_execution::runtime::actor::round::lifecycle::MemberBodies;
+use lash_core_store::checkpoint_graph::{DecodeLimits, NodeId};
 use lash_durable::CommitLabel;
-use lash_durable::domain::{AdmittedId, ExecKey, Ordinal, RunSeq, SnapshotRev};
-use serde::{Deserialize, Serialize};
+use lash_durable::domain::{AdmittedId, ExecKey, ExecRootRow, Ordinal, RunSeq, SnapshotRev};
 
+use crate::kernel::graph::AdmissionBook;
 use crate::members::Members;
+
+/// The most a read of an execution's root graph takes in. A read counts a
+/// shared node each time it reads it, so a state's own byte length is no
+/// bound on reading it.
+pub const READ_LIMITS: DecodeLimits = DecodeLimits::within_total(1 << 34);
 
 /// One admitted member's identity: the run of its operation's admission
 /// and its ordinal there, under its execution's owner. Minted at admission,
 /// stored in the snapshot, never a journal position.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OperationId {
     /// The run it was admitted in.
     pub run: u64,
@@ -54,15 +60,32 @@ impl OperationId {
     }
 }
 
+/// The root an execution's row holds: its revision and node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeldRoot {
+    pub rev: SnapshotRev,
+    pub root: NodeId,
+}
+
 /// The durable snapshot store of one execution, over an actor's context:
-/// rows in `lash_exec_snapshots` and `lash_run_records`, committed under the
-/// actor's epoch. It holds the execution's admitted members on this
-/// activation and runs their bodies from the host's [`MemberBodies`].
+/// its root row and graph, its admissions and its run facts, committed
+/// under the actor's epoch. It holds the execution's admitted members on
+/// this activation and runs their bodies from the host's [`MemberBodies`].
 pub struct DurableSnapshotStore {
     pub(crate) cx: ActorContext,
     pub(crate) exec: ExecKey,
-    /// The revision it last read or wrote.
-    rev: Mutex<Option<Option<SnapshotRev>>>,
+    /// The root it last read or wrote: `Some(None)` when it knows the
+    /// execution has none.
+    held: Mutex<Option<Option<HeldRoot>>>,
+    /// The admissions the execution's latest root names, as this activation
+    /// knows them.
+    pub(crate) book: Mutex<AdmissionBook>,
+    /// The latest root as last read, until a commit replaces it.
+    pub(crate) latest: Mutex<Option<std::sync::Arc<crate::kernel::store::RootRead>>>,
+    /// Nodes the execution's latest root reaches, as this activation read
+    /// or committed them: stored until a commit replaces that root, so a
+    /// park stages only the others. Emptied when a commit fails.
+    pub(crate) stored: Mutex<std::collections::BTreeSet<NodeId>>,
     pub(crate) members: tokio::sync::Mutex<Members>,
 }
 
@@ -82,7 +105,10 @@ impl DurableSnapshotStore {
             members: tokio::sync::Mutex::new(Members::new(cx, exec.owner())),
             cx: cx.clone(),
             exec,
-            rev: Mutex::new(None),
+            held: Mutex::new(None),
+            book: Mutex::new(AdmissionBook::default()),
+            latest: Mutex::new(None),
+            stored: Mutex::default(),
         }
     }
 
@@ -105,37 +131,47 @@ impl DurableSnapshotStore {
         &self.exec
     }
 
-    pub(crate) fn held_rev(&self) -> std::sync::MutexGuard<'_, Option<Option<SnapshotRev>>> {
-        self.rev
+    pub(crate) fn held(&self) -> std::sync::MutexGuard<'_, Option<Option<HeldRoot>>> {
+        self.held
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// The revision a write replaces: the one last read or written, or the
+    /// The root a write replaces: the one last read or written, or the
     /// stored one.
-    pub(crate) async fn revision(&self) -> Result<Option<SnapshotRev>, QuietPointRefusal> {
-        if let Some(rev) = *self.held_rev() {
-            return Ok(rev);
+    pub(crate) async fn revision(&self) -> Result<Option<HeldRoot>, QuietPointRefusal> {
+        if let Some(held) = *self.held() {
+            return Ok(held);
         }
-        let rev = self.read().await?.map(|row| row.rev);
-        *self.held_rev() = Some(rev);
-        Ok(rev)
+        let held = self.read().await?.map(|row| HeldRoot {
+            rev: row.rev,
+            root: row.root,
+        });
+        *self.held() = Some(held);
+        Ok(held)
     }
 
-    pub(crate) async fn read(
-        &self,
-    ) -> Result<Option<lash_durable::domain::SnapshotRow>, QuietPointRefusal> {
+    pub(crate) async fn read(&self) -> Result<Option<ExecRootRow>, QuietPointRefusal> {
         self.cx
             .durable_reads()
             .map_err(refused)?
-            .snapshot(&self.exec)
+            .exec_root(&self.exec)
             .await
             .map_err(refused)
     }
 
+    /// The nodes the execution's latest root reaches, as this activation
+    /// knows them.
+    pub(crate) fn stored_nodes(&self) -> std::collections::BTreeSet<NodeId> {
+        self.stored
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     /// Commit `tx` under `label`. A refused or unacknowledged commit forgets
-    /// the revision and the records the members read: the next write reads
-    /// them back.
+    /// the revision, the records the members read and the nodes it knew
+    /// stored: the next write reads them back.
     pub(crate) async fn commit(
         &self,
         tx: lash_durable::ActorTx,
@@ -143,10 +179,18 @@ impl DurableSnapshotStore {
         members: &mut Members,
     ) -> Result<(), QuietPointRefusal> {
         members.forget();
+        *self
+            .latest
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         match self.cx.commit(tx, label).await {
             Ok(_) => Ok(()),
             Err(error) => {
-                *self.held_rev() = None;
+                *self.held() = None;
+                self.stored
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clear();
                 Err(refused(error))
             }
         }

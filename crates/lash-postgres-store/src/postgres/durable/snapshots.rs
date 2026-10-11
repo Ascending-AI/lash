@@ -1,19 +1,21 @@
-//! VM snapshots on PostgreSQL: the `snapshots` domain's statements, apply and read
-//! (I0, FIG-5194).
+//! Execution roots on PostgreSQL: the `snapshots` domain's statements, apply
+//! and read (I0, FIG-5194).
 //!
 //! Owned by V0 (FIG-5170), then L7 (FIG-5177). The dispatch in `durable/mod.rs` calls these inside the
-//! fenced owner commit (or the mailbox commit), after the fence; a refusal
-//! rolls the whole commit back. The DDL is in `schema.sql`.
+//! fenced owner commit, after the fence and the installation of the commit's
+//! staged graph nodes; a refusal rolls the whole commit back. The DDL is in
+//! `schema.sql`.
 
 use std::sync::LazyLock;
 
-use lash_durable::domain::{DomainRefusal, ExecKey, SnapshotRev, SnapshotRow, SnapshotWrite};
+use lash_core_store::checkpoint_graph::{CommitId, NodeId};
+use lash_durable::domain::{DomainRefusal, ExecKey, ExecRootRow, ExecRootWrite, SnapshotRev};
 use lash_durable::{DurableError, Epoch};
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::snapshots::SnapshotStatements;
 use sqlx::{PgConnection, Row};
 
-use super::{Committing, integer, sqlx_failure};
+use super::{Committing, corrupt, integer, node_ref, sqlx_failure};
 
 static SQL: LazyLock<SnapshotStatements> =
     LazyLock::new(|| SnapshotStatements::render(Dialect::postgres()));
@@ -22,63 +24,90 @@ fn revision(stored: i64) -> Result<SnapshotRev, DurableError> {
     integer(stored).map(SnapshotRev)
 }
 
+fn conflict(
+    exec: &ExecKey,
+    expected: Option<SnapshotRev>,
+    found: Option<SnapshotRev>,
+) -> DurableError {
+    DurableError::Domain(DomainRefusal::SnapshotRevConflict {
+        exec: exec.clone(),
+        expected,
+        found,
+    })
+}
+
 pub(super) async fn apply(
     tx: &mut PgConnection,
     commit: &Committing<'_>,
-    write: &SnapshotWrite,
+    write: &ExecRootWrite,
 ) -> Result<(), DurableError> {
     match write {
-        SnapshotWrite::Put {
+        ExecRootWrite::Put {
             exec,
             expected,
-            snapshot_ref,
-            executable_identity,
-            format_version,
+            expected_root,
+            root,
+            commit_id,
         } => {
             let key = exec.stored();
-            let found: Option<i64> = sqlx::query_scalar(SQL.rev.sql())
+            let found = sqlx::query(SQL.root.sql())
                 .bind(&key)
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
-            let found = found.map(revision).transpose()?;
-            if found != *expected {
-                return Err(DurableError::Domain(DomainRefusal::SnapshotRevConflict {
-                    exec: exec.clone(),
-                    expected: *expected,
-                    found,
-                }));
+            let (found_rev, found_root) = match found {
+                None => (None, None),
+                Some(row) => {
+                    let rev: i64 = row.try_get(0).map_err(sqlx_failure)?;
+                    let stored: String = row.try_get(1).map_err(sqlx_failure)?;
+                    (Some(revision(rev)?), Some(node_ref(&stored)?))
+                }
+            };
+            if found_rev != *expected || found_root != *expected_root {
+                return Err(conflict(exec, *expected, found_rev));
             }
-            let format_version = integer::<i64>(*format_version)?;
             match expected {
                 None => {
                     sqlx::query(SQL.insert.sql())
                         .bind(&key)
-                        .bind(snapshot_ref)
-                        .bind(executable_identity)
-                        .bind(format_version)
+                        .bind(root.to_hex())
+                        .bind(commit_id.0.to_vec())
                         .bind(commit.epoch.0)
                         .execute(crate::observed_sql::executor(&mut *tx))
                         .await
                         .map_err(sqlx_failure)?;
                 }
-                Some(expected) => {
-                    sqlx::query(SQL.replace.sql())
+                Some(rev) => {
+                    let replaced = sqlx::query(SQL.replace.sql())
                         .bind(&key)
-                        .bind(integer::<i64>(expected.0)?)
-                        .bind(snapshot_ref)
-                        .bind(executable_identity)
-                        .bind(format_version)
+                        .bind(integer::<i64>(rev.0)?)
+                        .bind(root.to_hex())
+                        .bind(commit_id.0.to_vec())
                         .bind(commit.epoch.0)
-                        .fetch_one(crate::observed_sql::executor(&mut *tx))
+                        .fetch_optional(crate::observed_sql::executor(&mut *tx))
                         .await
                         .map_err(sqlx_failure)?;
+                    if replaced.is_none() {
+                        return Err(conflict(exec, *expected, found_rev));
+                    }
                 }
             }
             Ok(())
         }
-        SnapshotWrite::Delete { exec } => {
-            sqlx::query(SQL.delete.sql())
+        ExecRootWrite::Retire { exec, expected } => {
+            let retired = sqlx::query(SQL.retire.sql())
+                .bind(exec.stored())
+                .bind(expected.to_hex())
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+            if retired.is_none() {
+                return Err(conflict(exec, None, None));
+            }
+            Ok(())
+        }
+        ExecRootWrite::Clear { exec } => {
+            sqlx::query(SQL.clear.sql())
                 .bind(exec.stored())
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
@@ -88,10 +117,29 @@ pub(super) async fn apply(
     }
 }
 
+fn row_of(
+    exec: ExecKey,
+    rev: i64,
+    root: &str,
+    epoch: i64,
+    commit_id: &[u8],
+) -> Result<ExecRootRow, DurableError> {
+    let root: NodeId = node_ref(root)?;
+    let commit_id =
+        <[u8; 32]>::try_from(commit_id).map_err(|_| corrupt("commit id", &exec.stored()))?;
+    Ok(ExecRootRow {
+        exec,
+        rev: revision(rev)?,
+        root,
+        written_epoch: Epoch(epoch),
+        commit_id: CommitId(commit_id),
+    })
+}
+
 pub(super) async fn read(
     tx: &mut PgConnection,
     exec: &ExecKey,
-) -> Result<Option<SnapshotRow>, DurableError> {
+) -> Result<Option<ExecRootRow>, DurableError> {
     let Some(row) = sqlx::query(SQL.read.sql())
         .bind(exec.stored())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -100,22 +148,23 @@ pub(super) async fn read(
     else {
         return Ok(None);
     };
-    let format_version: i64 = row.try_get(3).map_err(sqlx_failure)?;
-    Ok(Some(SnapshotRow {
-        exec: exec.clone(),
-        rev: revision(row.try_get(0).map_err(sqlx_failure)?)?,
-        snapshot_ref: row.try_get(1).map_err(sqlx_failure)?,
-        executable_identity: row.try_get(2).map_err(sqlx_failure)?,
-        format_version: integer::<u32>(format_version)?,
-        written_epoch: Epoch(row.try_get(4).map_err(sqlx_failure)?),
-    }))
+    let root: String = row.try_get(1).map_err(sqlx_failure)?;
+    let commit_id: Vec<u8> = row.try_get(3).map_err(sqlx_failure)?;
+    row_of(
+        exec.clone(),
+        row.try_get(0).map_err(sqlx_failure)?,
+        &root,
+        row.try_get(2).map_err(sqlx_failure)?,
+        &commit_id,
+    )
+    .map(Some)
 }
 
-/// Every snapshot whose execution key starts with `prefix`, by key.
+/// Every execution root whose key starts with `prefix`, by key.
 pub(super) async fn under(
     tx: &mut PgConnection,
     prefix: &str,
-) -> Result<Vec<SnapshotRow>, DurableError> {
+) -> Result<Vec<ExecRootRow>, DurableError> {
     let rows = sqlx::query(SQL.under.sql())
         .bind(prefix)
         .fetch_all(crate::observed_sql::executor(&mut *tx))
@@ -124,68 +173,15 @@ pub(super) async fn under(
     rows.iter()
         .map(|row| {
             let key: String = row.try_get(0).map_err(sqlx_failure)?;
-            let format_version: i64 = row.try_get(4).map_err(sqlx_failure)?;
-            Ok(SnapshotRow {
-                exec: ExecKey::parse(&key)
-                    .map_err(|error| super::corrupt("execution key", &error.0))?,
-                rev: revision(row.try_get(1).map_err(sqlx_failure)?)?,
-                snapshot_ref: row.try_get(2).map_err(sqlx_failure)?,
-                executable_identity: row.try_get(3).map_err(sqlx_failure)?,
-                format_version: integer::<u32>(format_version)?,
-                written_epoch: Epoch(row.try_get(5).map_err(sqlx_failure)?),
-            })
+            let root: String = row.try_get(2).map_err(sqlx_failure)?;
+            let commit_id: Vec<u8> = row.try_get(4).map_err(sqlx_failure)?;
+            row_of(
+                ExecKey::parse(&key).map_err(|error| corrupt("execution key", &error.0))?,
+                row.try_get(1).map_err(sqlx_failure)?,
+                &root,
+                row.try_get(3).map_err(sqlx_failure)?,
+                &commit_id,
+            )
         })
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lash_durable::domain::CellId;
-    use lash_durable::{ActorKey, DurableInstant};
-    use sqlx::Connection as _;
-
-    #[tokio::test]
-    async fn snapshots_preserve_full_format_version_and_refuse_oversized_revision() {
-        let url = crate::testing::required_database_url();
-        let database = crate::testing::IsolatedDatabase::create(&url).await;
-        let mut conn = sqlx::PgConnection::connect(database.url())
-            .await
-            .expect("open snapshots");
-        sqlx::raw_sql(crate::PostgresStorage::schema_ddl())
-            .execute(&mut conn)
-            .await
-            .expect("create snapshots");
-        let actor = ActorKey::session("session").expect("actor");
-        let commit = Committing {
-            checkpoint_ref_chunk: crate::host::MaintenancePolicy::default().checkpoint_ref_chunk
-                as usize,
-            actor: &actor,
-            epoch: Epoch(1),
-            now: DurableInstant(1),
-            fleet: lash_core_execution::FleetFormat::current(),
-        };
-        let exec = ExecKey::Cell("session".into(), "turn".into(), CellId::new("cell"));
-        let put = |expected| SnapshotWrite::Put {
-            exec: exec.clone(),
-            expected,
-            snapshot_ref: "snapshot".into(),
-            executable_identity: "identity".into(),
-            format_version: u32::MAX,
-        };
-        apply(&mut conn, &commit, &put(None))
-            .await
-            .expect("insert snapshot");
-        let before = read(&mut conn, &exec)
-            .await
-            .expect("read")
-            .expect("snapshot");
-        assert_eq!(before.format_version, u32::MAX);
-        assert!(
-            apply(&mut conn, &commit, &put(Some(SnapshotRev(u64::MAX))))
-                .await
-                .is_err()
-        );
-        assert_eq!(read(&mut conn, &exec).await.expect("read"), Some(before));
-    }
 }

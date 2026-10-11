@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use lash_durable::domain::{OwnerKey, RunRecordRow, RunSeq};
+use lash_durable::domain::{OwnerKey, RunFacts, RunSeq};
 use lash_durable::{CommitLabel, DueSource, DurableError, DurableInstant};
 use tokio_util::sync::CancellationToken;
 
@@ -186,7 +186,7 @@ impl RoundRunner {
                 .settled();
             let idle = match self.lifecycle.act(&folded).await? {
                 Act::Committed(appended) => {
-                    rows.extend(appended.into_iter().filter(|row| row.run == self.run));
+                    rows.extend(appended.of_run(self.run));
                     quiet_since = None;
                     continue;
                 }
@@ -234,14 +234,9 @@ async fn load(
     cx: &ActorContext,
     owner: &OwnerKey,
     run: RunSeq,
-) -> Result<(Vec<RunRecordRow>, PinnedWaits), RoundError> {
+) -> Result<(RunFacts, PinnedWaits), RoundError> {
     let reads = cx.durable_reads()?;
-    let rows: Vec<_> = reads
-        .run_records(owner)
-        .await?
-        .into_iter()
-        .filter(|row| row.run == run)
-        .collect();
+    let rows = reads.run_facts(owner).await?.of_run(run);
     let waits = PinnedWaits::read(reads, &rows).await?;
     Ok((rows, waits))
 }

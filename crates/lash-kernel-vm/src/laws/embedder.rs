@@ -6,12 +6,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use lash_kernel_doc::graph_tokens::{ChildRef, TokenError, decode_body, encode_body};
 use lash_kernel_doc::{
     Datum, Document, ErrorDatum, ErrorValue, FunctionId, FunctionRegistry, Handle, Integer,
     NativeCall, NativeError, NativeFunction, NativeHeap, NumberToken, Object, Site, Timestamp,
     Unit, Value, parse_definition, parse_document,
 };
-use lash_kernel_state::{Baseline, ParkedRun};
+use lash_kernel_doc::{EffectIdentity, FrozenDatum};
+use lash_kernel_state::{AdmittedRequest, Baseline, KernelWhole, ParkedRun};
 use num_traits::ToPrimitive;
 
 use crate::{
@@ -449,6 +451,74 @@ impl Embedder {
         self.library = library;
     }
 
+    /// Parks the run as its whole binary state and resumes it cold in
+    /// another machine (FIG-5887 PC-EXACT): the state is captured with each
+    /// wait as its identity alone, written in its one binary spelling, read
+    /// back, and imported against a program compiled afresh, each wait's
+    /// request resolved from what the park handed out, as an embedder's
+    /// admission holds it. Re-exporting the resumed machine gives the same
+    /// whole, and every meter is unchanged.
+    pub(crate) fn relay_whole(&mut self, native_twice: bool, frozen: &mut FrozenStore) {
+        let release = ChildRef([0xee; 32]);
+        let owner = ChildRef([0x0e; 32]);
+        let whole = self
+            .machine
+            .export_whole(release, owner, |datum| frozen.freeze(datum))
+            .unwrap();
+        // The export collected the heap: the machine that goes on accounts
+        // its memory as the one that imports the state.
+        let meters = self.machine.meters();
+        let bytes = encode_body(&whole);
+        let read: KernelWhole = decode_body(&bytes).unwrap();
+        assert_eq!(read, whole);
+        let (program, library) = self.program(native_twice);
+        let admissions = self.admissions();
+        self.machine = KernelMachine::import_whole(
+            program,
+            self.bounds,
+            read,
+            |child| frozen.thaw(child),
+            |identity| admissions.get(identity).cloned(),
+        )
+        .unwrap();
+        self.library = library;
+        assert_eq!(
+            self.machine.meters(),
+            meters,
+            "a cold restore keeps every meter"
+        );
+        let again = self
+            .machine
+            .export_whole(release, owner, |datum| frozen.freeze(datum))
+            .unwrap();
+        assert_eq!(
+            again, whole,
+            "a resumed machine exports the whole it resumed from"
+        );
+    }
+
+    /// Every request the machine handed out, as an admission holds it.
+    pub(crate) fn admissions(&self) -> BTreeMap<EffectIdentity, AdmittedRequest> {
+        self.requests
+            .iter()
+            .map(|request| match request {
+                Request::Effect(effect) => (
+                    effect.identity.clone(),
+                    AdmittedRequest::Effect {
+                        effect: effect.effect.clone(),
+                        args: effect.args.clone(),
+                    },
+                ),
+                Request::Sleep(sleep) => (
+                    sleep.identity.clone(),
+                    AdmittedRequest::Sleep {
+                        duration: sleep.duration.into(),
+                    },
+                ),
+            })
+            .collect()
+    }
+
     /// Runs the machine once and keeps what a park hands out.
     pub(crate) fn run(&mut self) -> Step {
         let step = self.machine.run(&mut self.world, self.slice).unwrap();
@@ -549,4 +619,41 @@ pub(crate) fn main_site<const N: usize>(path: [u32; N]) -> Site {
 
 pub(crate) fn function_site<const N: usize>(name: &str, path: [u32; N]) -> Site {
     Site::new(Unit::Function(name.into()), path)
+}
+
+/// FrozenValue nodes in memory: each distinct body is one reference, so
+/// equal outcomes share one.
+#[derive(Default)]
+pub(crate) struct FrozenStore {
+    bodies: Vec<Vec<u8>>,
+}
+
+impl FrozenStore {
+    pub(crate) fn freeze(&mut self, datum: &FrozenDatum) -> Result<ChildRef, TokenError> {
+        let body = encode_body(datum);
+        let index = match self.bodies.iter().position(|held| *held == body) {
+            Some(index) => index,
+            None => {
+                self.bodies.push(body);
+                self.bodies.len() - 1
+            }
+        };
+        let mut digest = [0_u8; 32];
+        digest[..8].copy_from_slice(&(index as u64).to_le_bytes());
+        Ok(ChildRef(digest))
+    }
+
+    pub(crate) fn thaw(&self, child: ChildRef) -> Result<Datum, TokenError> {
+        let mut index = [0_u8; 8];
+        index.copy_from_slice(&child.0[..8]);
+        let body = self
+            .bodies
+            .get(u64::from_le_bytes(index) as usize)
+            .ok_or_else(|| TokenError::Invalid("no such frozen value".to_owned()))?;
+        decode_body::<FrozenDatum>(body).map(|frozen| frozen.0)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.bodies.len()
+    }
 }

@@ -7,9 +7,9 @@ use super::budgets::{
 use super::guards::required_phases;
 use super::{RuntimePerfScenario, ScenarioHarnessKind};
 use crate::runtime_perf::measurement::{
-    CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY, CheckpointCurveAxis, CheckpointCurveConfig,
-    HighTrafficConfig, RuntimePerfPhaseProbe, checkpoint_curve_points, phase_name, run_once,
-    run_once_durable_checkpoint_curve, run_once_store_hardening_hot_paths,
+    CheckpointCurveAxis, CheckpointCurveConfig, HighTrafficConfig, RuntimePerfPhaseProbe,
+    checkpoint_curve_points, phase_name, run_once, run_once_durable_checkpoint_curve,
+    run_once_store_hardening_hot_paths,
 };
 use crate::runtime_perf::scenarios::ScenarioPhaseContract;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
@@ -278,8 +278,8 @@ async fn checkpoint_state_hot_paths_capture_one_changed_component_per_turn() {
 
     assert_eq!(result.turns.len(), 2);
     assert_eq!(result.extra_counters["execution_state_bindings"], 300);
-    assert_eq!(result.extra_counters["execution_state_components"], 300);
-    assert_eq!(result.extra_counters["incremental_changed_components"], 1);
+    assert_eq!(result.extra_counters["execution_state_value_leaves"], 300);
+    assert_eq!(result.extra_counters["incremental_value_leaves"], 1);
     assert!(result.extra_counters["checkpoint_bytes"] > 0);
     assert!(result.extra_counters["hydrated_execution_state_bytes"] > 0);
     for turn in &result.turns {
@@ -325,9 +325,10 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
     for point in &points {
         let prefix = point.prefix();
         for metric in [
-            "manifest_count",
-            "changed_body_count",
-            "changed_body_bytes",
+            "reachable_node_count",
+            "staged_node_count",
+            "staged_node_bytes",
+            "staged_leaf_bytes",
             "runtime_hash_count",
             "runtime_hash_bytes",
         ] {
@@ -353,28 +354,13 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
         for sample in 0..samples {
             let value =
                 |metric: &str| result.metric_samples[&format!("{prefix}.{metric}")][sample] as u64;
-            let changed_count = value("changed_body_count");
-            let changed_bytes = value("changed_body_bytes");
             assert!(
-                changed_count > 0,
-                "{prefix} sample {sample} must change bodies"
+                value("staged_node_count") > 0 && value("staged_node_bytes") > 0,
+                "{prefix} sample {sample} must stage the reassigned binding"
             );
             assert!(
-                changed_bytes > 0,
-                "{prefix} sample {sample} must change bytes"
-            );
-            let hash_count = value("runtime_hash_count");
-            let hash_bytes = value("runtime_hash_bytes");
-            let manifest_count = value("manifest_count");
-            let expected_hash_count =
-                changed_count * CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY + manifest_count;
-            assert_eq!(
-                hash_count, expected_hash_count,
-                "{prefix} sample {sample} observed {hash_count} runtime hash passes for {changed_count} changed bodies and {manifest_count} loaded bodies; expected exactly {expected_hash_count}"
-            );
-            assert!(
-                hash_bytes >= changed_bytes,
-                "{prefix} sample {sample} hashed {hash_bytes} bytes for {changed_bytes} changed-body bytes"
+                value("staged_leaf_bytes") < point.transcript_bytes as u64,
+                "{prefix} sample {sample} restaged a binding's large value"
             );
         }
     }
@@ -384,25 +370,17 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
         .filter(|point| point.axis == CheckpointCurveAxis::Components)
         .collect::<Vec<_>>();
     for pair in component_points.windows(2) {
-        let left = &result.metric_samples[&format!("{}.manifest_count", pair[0].prefix())];
-        let right = &result.metric_samples[&format!("{}.manifest_count", pair[1].prefix())];
+        let left = &result.metric_samples[&format!("{}.reachable_node_count", pair[0].prefix())];
+        let right = &result.metric_samples[&format!("{}.reachable_node_count", pair[1].prefix())];
         assert!(
             left.iter().zip(right).all(|(left, right)| left < right),
-            "component curve manifest count must increase monotonically: left={left:?}, right={right:?}"
+            "component curve reachable nodes must increase monotonically: left={left:?}, right={right:?}"
         );
-        let left = &result.metric_samples[&format!("{}.runtime_hash_count", pair[0].prefix())];
-        let right = &result.metric_samples[&format!("{}.runtime_hash_count", pair[1].prefix())];
-        let manifest_left = &result.metric_samples[&format!("{}.manifest_count", pair[0].prefix())];
-        let manifest_right =
-            &result.metric_samples[&format!("{}.manifest_count", pair[1].prefix())];
-        assert!(
-            left.iter()
-                .zip(right)
-                .zip(manifest_left.iter().zip(manifest_right))
-                .all(|((left, right), (manifest_left, manifest_right))| {
-                    left - manifest_left == right - manifest_right
-                }),
-            "component curve commit-side hash count must stay flat after accounting for loaded-body validation: left={left:?}, right={right:?}, manifest_left={manifest_left:?}, manifest_right={manifest_right:?}"
+        let left = &result.metric_samples[&format!("{}.staged_leaf_bytes", pair[0].prefix())];
+        let right = &result.metric_samples[&format!("{}.staged_leaf_bytes", pair[1].prefix())];
+        assert_eq!(
+            left, right,
+            "component curve staged leaf bytes must stay flat: one binding is reassigned at every size"
         );
     }
     let byte_points = points
@@ -410,20 +388,12 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
         .filter(|point| point.axis == CheckpointCurveAxis::Bytes)
         .collect::<Vec<_>>();
     for pair in byte_points.windows(2) {
-        let left = &result.metric_samples[&format!("{}.changed_body_bytes", pair[0].prefix())];
-        let right = &result.metric_samples[&format!("{}.changed_body_bytes", pair[1].prefix())];
+        let left = &result.metric_samples[&format!("{}.staged_node_bytes", pair[0].prefix())];
+        let right = &result.metric_samples[&format!("{}.staged_node_bytes", pair[1].prefix())];
         assert!(
             left.iter().zip(right).all(|(left, right)| left < right),
-            "byte curve changed-body bytes must increase strictly: left={left:?}, right={right:?}"
+            "byte curve staged bytes must increase strictly: left={left:?}, right={right:?}"
         );
-        for metric in ["runtime_hash_count", "runtime_hash_bytes"] {
-            let left = &result.metric_samples[&format!("{}.{metric}", pair[0].prefix())];
-            let right = &result.metric_samples[&format!("{}.{metric}", pair[1].prefix())];
-            assert!(
-                left.iter().zip(right).all(|(left, right)| left <= right),
-                "byte curve {metric} must be monotonic"
-            );
-        }
     }
 }
 

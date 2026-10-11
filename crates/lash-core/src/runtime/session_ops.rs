@@ -158,17 +158,18 @@ impl LashRuntime {
         Ok(())
     }
 
-    /// Explicitly snapshot protocol-local execution state, including leaf bodies, if any.
+    /// Explicitly snapshot protocol-local execution state: its whole
+    /// SessionExecution graph, every node present, if any.
     ///
     /// This reads the executor's complete live state and stages nothing. A turn's
-    /// capture is a checkpoint delta whose unchanged leaves ride as body-free
-    /// refs, and the runtime releases their resident bodies once the durable refs
-    /// are authoritative — so reassembling a portable snapshot out of resident
-    /// checkpoint state would be both incomplete and a capture this path cannot
-    /// honestly acknowledge, because it writes nothing durable.
-    pub async fn snapshot_execution_state(
+    /// capture sends only the nodes no commit installed, and the runtime releases
+    /// the resident graph once the durable head holds it — so reassembling a
+    /// portable snapshot out of resident checkpoint state would be both
+    /// incomplete and a capture this path cannot honestly acknowledge, because it
+    /// writes nothing durable.
+    pub async fn snapshot_execution_graph(
         &mut self,
-    ) -> Result<Option<crate::plugin::HydratedExecutionState>, SessionError> {
+    ) -> Result<Option<crate::plugin::HydratedExecutionGraph>, SessionError> {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
         let Some(session) = self.session.as_mut() else {
@@ -182,21 +183,21 @@ impl LashRuntime {
             .ok_or(SessionError::CodeExecutionUnavailable)?;
         let session_id = self.state.session_id.clone();
         code_executor
-            .hydrated_execution_state(crate::plugin::ProtocolSessionContext::new(
+            .hydrated_execution_graph(crate::plugin::ProtocolSessionContext::new(
                 &session_id,
                 session.fleet_format(),
             ))
             .await
     }
 
-    /// Explicitly restore protocol-local execution state from a hydrated snapshot.
+    /// Explicitly restore protocol-local execution state from a hydrated graph.
     ///
-    /// While session capabilities are deferred, this stages the components for
-    /// the next journal-scoped operation's recorded activation. It does not
+    /// While session capabilities are deferred, this stages the graph for the
+    /// next journal-scoped operation's recorded activation. It does not
     /// construct a live executor; observe live state after that operation runs.
-    pub async fn restore_execution_state(
+    pub async fn restore_execution_graph(
         &mut self,
-        snapshot: &crate::plugin::HydratedExecutionState,
+        snapshot: &crate::plugin::HydratedExecutionGraph,
     ) -> Result<(), SessionError> {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
@@ -207,20 +208,14 @@ impl LashRuntime {
                 .ok_or(SessionError::CodeExecutionUnavailable)?;
             let session_id = self.state.session_id.clone();
             code_executor
-                .restore_execution_state(
+                .restore_execution_graph(
                     crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
                     snapshot,
+                    crate::plugin::ExecutionGraphPurpose::Final,
                 )
                 .await?;
         }
-        self.state
-            .set_execution_state_components(crate::plugin::ExecutionStateCapture::from_hydrated(
-                snapshot.clone(),
-            ))
-            .map_err(|source| SessionError::Store {
-                context: "failed to stage restored execution-state components".to_string(),
-                source,
-            })?;
+        self.state.stage_restored_execution_graph(snapshot.clone());
         Ok(())
     }
 

@@ -488,17 +488,17 @@ pub fn measure_runtime_commit_budget(
     commit.measure_budget()
 }
 
-/// Stage a protocol-owned execution-state root and its complete keyed leaf set
-/// into resident session state, exactly as the runtime's turn boundary does.
+/// Stage a protocol-owned SessionExecution capture into resident session
+/// state, exactly as the runtime's turn boundary does.
 ///
 /// The staging mutator itself is runtime-owned (ADR 0051's "neither" class), so
 /// protocol crates reach it through this fixture rather than through
 /// `RuntimeSessionState`'s public surface.
-pub fn stage_execution_state_components(
+pub fn stage_execution_graph(
     state: &mut RuntimeSessionState,
-    snapshot: crate::plugin::ExecutionStateCapture,
-) -> Result<(), crate::StoreError> {
-    state.set_execution_state_components(snapshot)
+    capture: crate::plugin::ExecutionGraphCapture,
+) {
+    state.set_execution_graph(capture);
 }
 
 type CompletionFuture =

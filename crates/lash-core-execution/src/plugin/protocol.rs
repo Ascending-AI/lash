@@ -5,8 +5,8 @@
 //! `Session` / `LashRuntime` internals.
 
 pub use lash_core_store::execution_state::{
-    CheckpointComponentKey, ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState,
-    InvalidExecutionLeafName, LeafChange, PluginOptions,
+    CheckpointComponentKey, ExecutionGraphCapture, ExecutionGraphPurpose, HydratedExecutionGraph,
+    PluginOptions,
 };
 
 use crate::SessionId;
@@ -96,9 +96,10 @@ pub trait ProtocolSessionPlugin: Send + Sync {
 pub struct ProtocolSessionRestoreView {
     /// Active frame identity, used to reset protocol-local execution on a switch.
     pub current_frame_node_id: Option<crate::FrameNodeId>,
-    /// Protocol execution root and leaves, or the typed hydration failure.
-    /// Restore implementations retain responsibility for reporting that failure.
-    pub execution_state: Result<Option<HydratedExecutionState>, crate::StoreError>,
+    /// The session's SessionExecution graph, or the typed hydration
+    /// failure. Restore implementations retain responsibility for reporting
+    /// that failure.
+    pub execution_state: Result<Option<HydratedExecutionGraph>, crate::StoreError>,
     /// Active history to replay protocol seed and globals events.
     pub active_events: Vec<crate::SessionHistoryRecord>,
 }
@@ -180,32 +181,6 @@ pub struct ProtocolBeforeLlmCallContext {
     pub latest_prompt_usage: Option<LlmUsage>,
 }
 
-/// Minimum encoded body size at which a composite protocol-owned
-/// execution-state value is persisted as its own content-addressed checkpoint
-/// leaf instead of being inlined into the execution-state root.
-///
-/// This is a checkpoint-shape decision, not a storage decision, and it is
-/// deliberately independent of any store's blob-compression profile: "is this
-/// value worth its own component" and "should these bytes be compressed" are
-/// different questions, and snapshot shape must not change because a different
-/// backend is configured.
-///
-/// The line follows from what each choice costs *per commit*, because the root
-/// is re-encoded in full on every commit while an unchanged leaf rides as a
-/// body-free reference: an inline value costs its own encoded length plus its
-/// root map entry, while a leaf costs its root reference plus its checkpoint
-/// manifest row and nothing else. Measured against the budget accounting a
-/// commit is actually charged for, a retained file leaf has 273 bytes of fixed
-/// overhead and crosses the inline layout at a 272-byte body. This line stays
-/// comfortably above that marginal point, which keeps every promotion a clear
-/// win and keeps the manifest — the per-commit floor of a session made of short
-/// values — small.
-///
-/// Above the line, per-commit bytes stop tracking retained state: a session of
-/// 300 mid-size bindings (1.09 MB retained) commits ~100 KB when one binding
-/// changes, where inlining them all commits the whole 1.09 MB every turn.
-pub const EXECUTION_STATE_LEAF_MIN_BODY_BYTES: usize = 512;
-
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ProtocolLlmCallAction {
     SwitchAgentFrame {
@@ -230,16 +205,27 @@ pub enum CodeExecutionOutcome {
     Terminated,
 }
 
-/// A cell's stored snapshot carried to this build's formats
-/// ([`CodeExecutorPlugin::carried_cell_snapshot`]).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CarriedCellSnapshot {
-    /// The snapshot, as the executor encodes one.
-    pub snapshot: String,
-    /// The executable the carried continuation runs on.
-    pub executable_identity: String,
-    /// The format version the carried snapshot is in.
-    pub format_version: u32,
+/// A cell's stored execution root as a turn restored on the cell reads it:
+/// its row and every node it reaches, read under one protection
+/// (FIG-5887 §3).
+#[derive(Clone, Debug)]
+pub struct StoredCell {
+    pub exec: lash_durable::domain::ExecKey,
+    pub row: lash_durable::domain::ExecRootRow,
+    pub graph: lash_durable::domain::graph::HydratedGraph,
+}
+
+/// A cell's root carried to this build's formats
+/// ([`CodeExecutorPlugin::carried_cell_snapshot`]): the nodes of its new
+/// complete root and the writes that publish it in place of the stored one,
+/// its admissions re-keyed with it.
+#[derive(Clone, Debug)]
+pub struct CarriedCell {
+    pub nodes: std::collections::BTreeMap<
+        lash_core_store::checkpoint_graph::NodeId,
+        lash_core_store::checkpoint_graph::EncodedNode,
+    >,
+    pub writes: Vec<lash_durable::DomainWrite>,
 }
 
 #[async_trait::async_trait]
@@ -268,16 +254,15 @@ pub trait CodeExecutorPlugin: Send + Sync {
     }
 
     /// The records of the tool calls a cell completed, in call order, as
-    /// `snapshot` holds them: the cell's stored snapshot, as this executor
-    /// wrote it. A turn that stops on the cell records them from here, since
-    /// the cell never answers (FIG-5330).
+    /// `cell`, its stored root, holds them. A turn that stops on the cell
+    /// records them from here, since the cell never answers (FIG-5330).
     ///
     /// # Errors
     ///
-    /// [`crate::SessionError`] when the snapshot does not decode.
+    /// [`crate::SessionError`] when the root does not decode.
     fn snapshot_tool_calls(
         &self,
-        _snapshot: &str,
+        _cell: &StoredCell,
     ) -> Result<Vec<crate::ToolCallRecord>, crate::SessionError> {
         Ok(Vec::new())
     }
@@ -297,7 +282,7 @@ pub trait CodeExecutorPlugin: Send + Sync {
     /// is known of the snapshot, and the restore is tried again.
     async fn check_cell_snapshot(
         &self,
-        _snapshot: &str,
+        _cell: &StoredCell,
     ) -> Result<Result<(), String>, crate::RuntimeError> {
         Ok(Ok(()))
     }
@@ -316,8 +301,8 @@ pub trait CodeExecutorPlugin: Send + Sync {
     /// is known of the snapshot, and the restore is tried again.
     async fn carried_cell_snapshot(
         &self,
-        _snapshot: &str,
-    ) -> Result<Result<Option<CarriedCellSnapshot>, String>, crate::RuntimeError> {
+        _cell: &StoredCell,
+    ) -> Result<Result<Option<CarriedCell>, String>, crate::RuntimeError> {
         Ok(Ok(None))
     }
 
@@ -329,13 +314,6 @@ pub trait CodeExecutorPlugin: Send + Sync {
     /// change could move.
     fn executable_generation(&self) -> Option<crate::ExecutableGeneration> {
         None
-    }
-
-    async fn snapshot_execution_state(
-        &self,
-        _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<ExecutionStateCapture, crate::SessionError> {
-        Ok(ExecutionStateCapture::default())
     }
 
     /// The attachments `record`, a protocol record of this executor's
@@ -373,9 +351,9 @@ pub trait CodeExecutorPlugin: Send + Sync {
     /// there if the answer is an error. An implementation must not stage,
     /// acknowledge, or roll back anything: it answers only whether the same
     /// capture attempted at this instant would fail. An executor that
-    /// implements [`CodeExecutorPlugin::snapshot_execution_state`] with fallible
-    /// encoding or I/O should implement this too; the default answers "no known
-    /// obstacle".
+    /// implements [`CodeExecutorPlugin::capture_execution_graph`] with
+    /// fallible encoding should implement this too; the default answers "no
+    /// known obstacle".
     async fn probe_execution_state_capture(
         &self,
         _ctx: ProtocolSessionContext<'_>,
@@ -383,18 +361,14 @@ pub trait CodeExecutorPlugin: Send + Sync {
         Ok(())
     }
 
-    /// [`CodeExecutorPlugin::snapshot_execution_state`] is a checkpoint delta:
-    /// it reports unchanged leaves as body-free references, and the runtime
-    /// releases their resident bodies once the durable refs are authoritative.
-    /// Explicit administrative snapshot needs the whole state instead, so it
-    /// asks the executor rather than reassembling one from resident checkpoint
-    /// bodies. Implementations build this from live state and stage nothing.
-    /// `None` means the executor holds no snapshotable state; an executor that
-    /// implements `snapshot_execution_state` should implement this too.
-    async fn hydrated_execution_state(
+    /// The session's whole SessionExecution graph, every node's body
+    /// present, built from live state and staging nothing: what an explicit
+    /// administrative snapshot reads. `None` means the executor holds no
+    /// execution state.
+    async fn hydrated_execution_graph(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<Option<HydratedExecutionState>, crate::SessionError> {
+    ) -> Result<Option<HydratedExecutionGraph>, crate::SessionError> {
         Ok(None)
     }
 
@@ -419,10 +393,30 @@ pub trait CodeExecutorPlugin: Send + Sync {
         Ok(())
     }
 
-    async fn restore_execution_state(
+    /// The session's complete SessionExecution graph for `purpose`
+    /// (FIG-5887 §4, §6), built from live state: a working capture after
+    /// each successful cell, a final capture for the turn's commit. Its
+    /// staged nodes are kept until
+    /// [`Self::acknowledge_execution_state_capture`]; a refused commit
+    /// resends them. An executor that holds no execution state keeps the
+    /// default.
+    async fn capture_execution_graph(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-        _state: &HydratedExecutionState,
+        _purpose: ExecutionGraphPurpose,
+    ) -> Result<ExecutionGraphCapture, crate::SessionError> {
+        Ok(ExecutionGraphCapture::Clear)
+    }
+
+    /// Installs a hydrated SessionExecution graph into the executor
+    /// (FIG-5887 §6): a session revision's, or the working state a turn
+    /// phase owns, before any model continuation or cell compiles. An
+    /// executor that holds no execution state keeps the default.
+    async fn restore_execution_graph(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+        _graph: &HydratedExecutionGraph,
+        _purpose: ExecutionGraphPurpose,
     ) -> Result<(), crate::SessionError> {
         Ok(())
     }

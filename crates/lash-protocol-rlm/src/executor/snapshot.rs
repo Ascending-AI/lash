@@ -10,17 +10,17 @@ use thiserror::Error;
 ///
 /// version_guard(
 ///     shapes(
-///         path = "crates/lash-protocol-rlm/src/executor/session.rs",
+///         path = "crates/lash-protocol-rlm/src/executor/session/graph.rs",
 ///         path = "crates/lash-protocol-rlm/src/deferred.rs",
-///         cover(CodeModeSnapshotRoot),
+///         cover(SessionExecutionBody),
 ///     ),
 ///     roots(path = "crates/lash-rlm-types/src/lib.rs", CodeModeProjectedSeedEntry),
 ///     roots(path = "crates/lash-sansio/src/causal.rs", CausalRef),
 /// )
-// The root is a session's bindings in the kernel's parked-run terms: a
-// header and one fragment per binding (`lash-kernel-state`), each fragment
-// inline or a content-addressed leaf. The kernel version the header states
-// is the kernel's own; this version covers the root that carries it.
+// The root is a session's SessionExecution checkpoint graph node
+// (FIG-5887 §3): bindings, one local object table, an alias table into
+// shared function bundles. The graph carries no format version of its
+// own; this constant names the surface for the formats manifest.
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "CodeModeSnapshotEnvelope"
@@ -36,55 +36,38 @@ pub const CODEMODE_SNAPSHOT_VERSION: u32 = 2;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
-/// Why a saved code mode session could not be restored. No bindings are adopted
-/// when any check fails: fragments can share objects across bindings.
+/// Why a saved code mode session could not be restored. No bindings are
+/// adopted when any check fails.
 ///
 /// [`lash_core::SessionError::ExecutionStateRestore`] retains this error as
 /// its source, which hosts can downcast to inspect the failed check.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum CodeModeSnapshotError {
-    /// The root cannot decode as this build's snapshot envelope.
+    /// The graph is well formed, but its bindings, objects or alias table
+    /// are not a session's.
     #[error("code mode snapshot root is not this build's: {details}; {CUTOVER_REMEDY}")]
     FormatMismatch { details: String },
-    /// The snapshot envelope version is outside the reader's window.
-    #[error(
-        "code mode snapshot version {found} is incompatible with version {expected}; {CUTOVER_REMEDY}"
-    )]
-    VersionMismatch { expected: u32, found: u32 },
     /// The recorded dialect differs from the session's dialect.
     #[error(
         "code mode snapshot was recorded by a `{found}` session; this session's dialect is `{expected}`"
     )]
     DialectMismatch { expected: String, found: String },
-    /// A binding's content-addressed fragment was not supplied.
+    /// The recorded number policy differs from the session's.
     #[error(
-        "code mode snapshot binding `{logical_key}` references missing leaf component `{component:?}`"
+        "code mode snapshot decodes numbers by {found:?}; this session decodes them by {expected:?}"
     )]
-    MissingLeaf {
-        logical_key: String,
-        component: lash_core::plugin::ExecutionLeafName,
+    NumberPolicyMismatch {
+        expected: lash_kernel_doc::NumberPolicy,
+        found: lash_kernel_doc::NumberPolicy,
     },
-    /// A binding's fragment bytes do not match their content address.
-    #[error(
-        "code mode snapshot binding `{logical_key}` references leaf component `{component:?}` whose content address is `{actual_component:?}`"
-    )]
-    LeafHashMismatch {
-        logical_key: String,
-        component: lash_core::plugin::ExecutionLeafName,
-        actual_component: lash_core::plugin::ExecutionLeafName,
-    },
-    /// The supplied leaf set differs from the set the root references.
-    #[error(
-        "code mode snapshot root/leaf set is inconsistent; missing={missing:?}, unexpected={unexpected:?}"
-    )]
-    LeafSetMismatch {
-        missing: Vec<lash_core::plugin::ExecutionLeafName>,
-        unexpected: Vec<lash_core::plugin::ExecutionLeafName>,
-    },
-    /// The kernel refuses the decoded fragments as stored state.
-    #[error("code mode session bindings are not a kernel state this build reads: {0}")]
-    Kernel(#[from] lash_kernel_state::LoadError),
+    /// A node of the state's graph is missing, malformed, of the wrong kind
+    /// or not the node its name names.
+    #[error("code mode snapshot graph is refused: {0}")]
+    Graph(#[from] lash_core_store::checkpoint_graph::GraphRefusal),
+    /// A function bundle is not one a session writes.
+    #[error("code mode snapshot function bundle is refused: {0}")]
+    Bundle(#[from] lash_kernel_dialect::BundleRefusal),
 }
 
 impl From<CodeModeSnapshotError> for lash_core::SessionError {

@@ -45,7 +45,7 @@ pub use lash_core_execution::testing::{
     process_work_wiring_for_registry, publish_process_execution_env_for_testing,
     queued_work_admission_policy, run_tool, run_tool_granted, runbook_evidence,
     runtime_lease_owner, runtime_services_without_ports, sansio_transcript,
-    single_llm_profile_registry, stage_execution_state_components, staged_start_record,
+    single_llm_profile_registry, stage_execution_graph, staged_start_record,
     standard_test_llm_profiles, standard_test_policy, store_fixtures, test_code_protocol_factories,
     test_llm_profile_config, test_llm_profile_metadata, test_plugin_host,
     test_protocol_factories_ending_without_done, test_standard_protocol_factories,

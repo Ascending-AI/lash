@@ -66,7 +66,7 @@ use crate::{ActorContext, EffectId, Response};
 pub(super) enum RoundExit {
     /// The machine is answered. The round's presentation commits with the
     /// turn's next commit.
-    Answered(Option<DomainWrite>),
+    Answered(Option<lash_core_execution::runtime::actor::round::PresentRecord>),
     /// The turn accepted a cancel: its stop settles the round's unfinished
     /// members `Cancelled` as it ends the turn.
     CancelRequested,
@@ -89,7 +89,9 @@ async fn record_trace_exported(cx: &ActorContext, round: &AdmittedRound) -> Resu
 
 /// The label of the turn's next model call: `round.present+model.start` when
 /// it carries a round's presentation.
-pub(super) fn model_start_label(carry: &Option<DomainWrite>) -> CommitLabel {
+pub(super) fn model_start_label(
+    carry: &Option<lash_core_execution::runtime::actor::round::PresentRecord>,
+) -> CommitLabel {
     if carry.is_some() {
         CommitLabel::ROUND_PRESENT_MODEL_START
     } else {
@@ -112,7 +114,7 @@ fn round_error(error: RoundError) -> TurnError {
 /// What a round's `model.done` commits beside its admission.
 pub(super) struct ModelDone<'a> {
     /// The turn's checkpoint, re-delivering the round.
-    pub(super) checkpoint: String,
+    pub(super) checkpoint: super::phase_root::StagedPhase,
     /// The protocol iteration the turn stands in.
     pub(super) iteration: u32,
     /// The cell whose answer the turn has yet to record, if any.
@@ -120,7 +122,7 @@ pub(super) struct ModelDone<'a> {
     /// The presentation of an earlier round of the same step, which the
     /// turn has yet to commit: a held control call's round follows its
     /// siblings' (FIG-5781).
-    pub(super) present: &'a mut Option<DomainWrite>,
+    pub(super) present: &'a mut Option<lash_core_execution::runtime::actor::round::PresentRecord>,
 }
 
 /// Run the tool round of effect `id` over `calls` to its members' outcomes,
@@ -158,12 +160,7 @@ pub(super) async fn run(
         return Ok(RoundExit::Answered(None));
     }
     let reads = cx.durable_reads()?;
-    let rows: Vec<_> = reads
-        .run_records(&owner)
-        .await?
-        .into_iter()
-        .filter(|stored| stored.run == run)
-        .collect();
+    let rows = reads.run_facts(&owner).await?.of_run(run);
     let waits = round::PinnedWaits::read(reads, &rows).await?;
     let folded = round::fold(&rows, &policies, &waits).map_err(exec)?;
     // Each member's attempt reads the turn's accepted stop before its answer
@@ -223,10 +220,11 @@ pub(super) async fn run(
                 .map_err(exec)?;
             let refused = tools.refusal(&calls);
             if let Some(present) = present.take() {
-                tx.write(present);
+                present.write(&mut tx);
             }
-            record_answered_cell(cx, &mut tx, row, answered_cell)?;
+            consume_answered_cell(cx, drive, &mut tx, row, answered_cell, true).await?;
             let written = super::phases::write_run_changes(&*drive, &mut tx, &session, &row.run);
+            let checkpoint = checkpoint.staged_in(&mut tx);
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session.clone(),
                 run: row.run.clone(),
@@ -267,6 +265,7 @@ pub(super) async fn run(
             }
             committed?;
             drive.run_changes_committed(&written);
+            drive.phase_committed().await;
             // The candidates are selected: their exports are discharged
             // before any body runs, so an owner that takes the round over
             // exports none again.
@@ -396,9 +395,9 @@ pub(super) fn record_refused(
     Ok(())
 }
 
-/// The tool calls of a cell the turn has yet to record: one that answered
-/// the machine, which the turn's next commit records, or one the turn
-/// stopped on, which the commit that ends the turn records.
+/// A cell the turn has yet to record: one that answered the machine, whose
+/// tool calls and working state the turn's next commit records, or one the
+/// turn stopped on, whose tool calls the commit that ends the turn records.
 #[derive(Debug)]
 pub(super) struct AnsweredCell {
     /// The cell's effect.
@@ -407,40 +406,15 @@ pub(super) struct AnsweredCell {
     pub(super) calls: CellToolCalls,
 }
 
-/// The tool a cell round's last member is recorded under when the code
-/// executor's bound left calls out: the member's answer is their
-/// [`OmittedToolCalls`](crate::OmittedToolCalls) accounting, not a call.
-const OMITTED_CELL_CALLS: &str = "cell-omitted:";
-
-/// The accounting a cell round's member holds of the calls its bound left
-/// out, when `tool` and `answer` are such a member's.
-pub(super) fn omitted_cell_calls(
-    tool: &crate::ToolId,
-    answer: &round::CompletedCall,
-) -> Option<crate::OmittedToolCalls> {
-    if tool.as_str() != OMITTED_CELL_CALLS {
-        return None;
-    }
-    let crate::ToolCallOutcome::Success(value) = &answer.output.outcome else {
-        return None;
-    };
-    serde_json::from_value(value.to_json_value()).ok()
-}
-
-/// Record the tool calls of the cell `answered` names as a settled round of
-/// the turn at the cell's effect, in the transaction that checkpoints past
-/// the cell or ends the turn on it (FIG-5330). The cell's own records of
-/// them are pruned as it advances, and its answer and its snapshot are their
-/// last copies: recorded here, the turn's settled-round fold reports them
-/// beside its other rounds, in call order. A crash before this commit
-/// re-delivers the cell, which answers with them again from its snapshot.
-///
-/// The round is bounded by the code executor
-/// ([`bound_tool_call_records`](crate::plugin::CodeExecutorPlugin::bound_tool_call_records)):
-/// it holds one member for each record the bound keeps, with the output the
-/// bound cut, and one more for the accounting of the calls it left out.
-pub(super) fn record_answered_cell(
-    cx: &ActorContext,
+/// Record the tool calls of the cell `answered` names as the cell's report,
+/// at the cell's effect, in the transaction that checkpoints past the cell
+/// or ends the turn on it (FIG-5330): one CellReport fact over the bounded
+/// view the code executor keeps
+/// ([`bound_tool_call_records`](crate::plugin::CodeExecutorPlugin::bound_tool_call_records)),
+/// with the accounting of the calls it left out. The turn's fold reports it
+/// beside its rounds, in call order. A crash before this commit re-delivers
+/// the cell, which answers with them again from its root.
+pub(super) fn report_answered_cell(
     tx: &mut lash_durable::ActorTx,
     row: &TurnRow,
     answered: &mut Option<AnsweredCell>,
@@ -449,44 +423,39 @@ pub(super) fn record_answered_cell(
         return Ok(());
     };
     let CellToolCalls { calls, omitted } = calls;
-    let mut completed = calls
-        .into_iter()
-        .map(|record| round::CompletedCall {
-            model_return: crate::ModelToolReturn::from_output(record.tool.clone(), &record.output),
-            call_id: record.call_id,
-            provider_call_id: record.provider_call_id,
-            tool_name: record.tool,
-            args: record.args,
-            output: record.output,
-            intent_outcomes: Vec::new(),
-            replay: None,
-        })
-        .collect::<Vec<_>>();
-    if let Some(omitted) = omitted {
-        let root = crate::ToolCallRoot::turn(row.run.as_str()).map_err(exec)?;
-        let output = crate::ToolCallOutput::success(serde_json::to_value(&omitted).map_err(exec)?);
-        completed.push(round::CompletedCall {
-            model_return: crate::ModelToolReturn::from_output(
-                OMITTED_CELL_CALLS.to_owned(),
-                &output,
-            ),
-            call_id: crate::ToolCallId::derive(
-                "",
-                root,
-                &[crate::ToolCallPosition::EffectOrdinal(id.0)],
-            ),
-            provider_call_id: None,
-            tool_name: OMITTED_CELL_CALLS.to_owned(),
-            args: serde_json::Value::Null,
-            output,
-            intent_outcomes: Vec::new(),
-            replay: None,
-        });
-    }
-    if completed.is_empty() {
+    if calls.is_empty() && omitted.is_none() {
         return Ok(());
     }
-    record_refused(cx, tx, row, id, &completed)
+    round::report_cell(
+        tx,
+        &OwnerKey::Turn(row.session.clone(), row.run.clone()),
+        RunSeq(id.0),
+        &calls,
+        omitted.as_ref(),
+    )
+    .map_err(exec)
+}
+
+/// Record the cell `answered` names, in the transaction that consumes its
+/// answer: its report ([`report_answered_cell`]), and its handoff
+/// ([`TurnDrive::consume_cell`](super::session::TurnDrive::consume_cell)):
+/// with `working`, the session's state after it as the turn's working
+/// state, and the retirement of its ended root. The phase's commit is then
+/// answered with
+/// [`TurnDrive::phase_committed`](super::session::TurnDrive::phase_committed).
+pub(super) async fn consume_answered_cell(
+    cx: &ActorContext,
+    drive: &mut dyn TurnDrive,
+    tx: &mut lash_durable::ActorTx,
+    row: &TurnRow,
+    answered: &mut Option<AnsweredCell>,
+    working: bool,
+) -> Result<(), TurnError> {
+    let Some(id) = answered.as_ref().map(|cell| cell.id) else {
+        return Ok(());
+    };
+    report_answered_cell(tx, row, answered)?;
+    drive.consume_cell(cx, tx, id, working).await
 }
 
 fn missing_round(run: RunSeq) -> lash_durable::StoreFailure {

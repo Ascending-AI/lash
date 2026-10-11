@@ -1,0 +1,611 @@
+//! Decoding: from stored nodes back to the logical body a typed codec reads
+//! (FIG-5887 §2, §3).
+//!
+//! [`GraphDecoder::logical_body`] checks the node's envelope and digest,
+//! unwraps an enveloped kind's inline or streamed body, joins its structure
+//! blocks, and puts every placed text and bytes value back inline. Every
+//! non-canonical form is refused, never repaired: an inline value over the
+//! inline bound, a placed value under it, a value chunked or indexed in any
+//! shape but the canonical one, a stream whose declared lengths disagree
+//! with its blocks, and a body streamed where it fits inline or cut at other
+//! block boundaries. The final check re-encodes the decoded body and
+//! requires the node's own identity back.
+
+use std::collections::BTreeMap;
+
+use lash_kernel_doc::graph_tokens::{
+    CanonicalFault, DecodeDimension, RefForm, TokenCodec, TokenEvent, TokenReader, TokenWriter,
+};
+
+use super::commit::{EncodeBudget, ExplicitLimit};
+use super::encode::{GraphStaging, TypedBody, to_physical, token_len};
+use super::node::{
+    EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, NodeEnvelope, NodeId, check_envelope, envelope_len,
+};
+use super::refusal::{DecodeLimits, GraphRefusal};
+use super::registry::{BodyShape, NodeKind};
+
+/// How a stored blob's bytes are to be read: never sniffed from the bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum BlobEncoding {
+    /// Raw bytes an adapter's codec owns; no edges.
+    Opaque = 0,
+    /// A canonical graph node envelope; its edges are its child table.
+    Graph = 1,
+}
+
+/// One stored blob as a source holds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StoredNode<'a> {
+    pub encoding: BlobEncoding,
+    pub bytes: &'a [u8],
+}
+
+/// Where a decoder reads nodes from: a hydrated graph, a pinned batch, or a
+/// staging area.
+pub trait NodeSource {
+    fn fetch(&self, id: &NodeId) -> Option<StoredNode<'_>>;
+}
+
+/// Every graph node `root` reaches in `source`, `root` included, each
+/// envelope checked against its digest within `limits`: a root's whole
+/// graph, as one map. An opaque blob a node names is not a graph node and
+/// is not included.
+///
+/// # Errors
+///
+/// [`GraphRefusal::MissingNode`] for a node `source` does not hold, or
+/// any refusal of [`check_envelope`].
+pub fn closure(
+    source: &dyn NodeSource,
+    root: NodeId,
+    limits: &DecodeLimits,
+) -> Result<BTreeMap<NodeId, EncodedNode>, GraphRefusal> {
+    let mut nodes = BTreeMap::new();
+    let mut pending = vec![root];
+    while let Some(id) = pending.pop() {
+        if nodes.contains_key(&id) {
+            continue;
+        }
+        let stored = source.fetch(&id).ok_or(GraphRefusal::MissingNode(id))?;
+        if stored.encoding != BlobEncoding::Graph {
+            continue;
+        }
+        pending.extend(check_envelope(stored.bytes, id, limits)?.children.iter());
+        nodes.insert(
+            id,
+            EncodedNode {
+                id,
+                bytes: std::sync::Arc::from(stored.bytes),
+            },
+        );
+    }
+    Ok(nodes)
+}
+
+impl NodeSource for BTreeMap<NodeId, EncodedNode> {
+    fn fetch(&self, id: &NodeId) -> Option<StoredNode<'_>> {
+        self.get(id).map(|node| StoredNode {
+            encoding: BlobEncoding::Graph,
+            bytes: &node.bytes,
+        })
+    }
+}
+
+impl NodeSource for GraphStaging {
+    fn fetch(&self, id: &NodeId) -> Option<StoredNode<'_>> {
+        self.nodes().fetch(id)
+    }
+}
+
+/// Which family a placed value belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Family {
+    Text,
+    Bytes,
+}
+
+impl Family {
+    fn of(kind: NodeKind) -> Option<(Self, bool)> {
+        match kind {
+            NodeKind::TEXT_LEAF => Some((Self::Text, true)),
+            NodeKind::TEXT_INDEX => Some((Self::Text, false)),
+            NodeKind::BYTES_LEAF => Some((Self::Bytes, true)),
+            NodeKind::BYTES_INDEX => Some((Self::Bytes, false)),
+            _ => None,
+        }
+    }
+}
+
+/// Reads nodes from one source within one set of limits.
+pub struct GraphDecoder<'s> {
+    source: &'s dyn NodeSource,
+    limits: DecodeLimits,
+    nodes_read: u64,
+    bytes_read: u64,
+}
+
+fn verifier() -> GraphStaging {
+    GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)))
+}
+
+fn non_canonical(node: NodeId, reason: CanonicalFault) -> GraphRefusal {
+    GraphRefusal::NonCanonical {
+        node: Some(node),
+        reason,
+    }
+}
+
+impl<'s> GraphDecoder<'s> {
+    #[must_use]
+    pub fn new(source: &'s dyn NodeSource, limits: DecodeLimits) -> Self {
+        Self {
+            source,
+            limits,
+            nodes_read: 0,
+            bytes_read: 0,
+        }
+    }
+
+    /// Nodes and envelope bytes read so far: a restore's read cost.
+    #[must_use]
+    pub fn read(&self) -> (u64, u64) {
+        (self.nodes_read, self.bytes_read)
+    }
+
+    /// Fetches, counts and checks one graph node.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphRefusal::MissingNode`], [`GraphRefusal::EncodingConflict`] for
+    /// an opaque blob, [`GraphRefusal::DecodeLimit`], or any refusal of
+    /// [`check_envelope`].
+    pub fn envelope(&mut self, id: NodeId) -> Result<NodeEnvelope<'s>, GraphRefusal> {
+        let stored = self
+            .source
+            .fetch(&id)
+            .ok_or(GraphRefusal::MissingNode(id))?;
+        if stored.encoding != BlobEncoding::Graph {
+            return Err(GraphRefusal::EncodingConflict(id));
+        }
+        self.nodes_read += 1;
+        self.bytes_read += stored.bytes.len() as u64;
+        self.limit(DecodeDimension::Nodes, self.nodes_read, self.limits.nodes)?;
+        self.limit(
+            DecodeDimension::TotalBytes,
+            self.bytes_read,
+            self.limits.total_bytes,
+        )?;
+        check_envelope(stored.bytes, id, &self.limits)
+    }
+
+    fn limit(
+        &self,
+        dimension: DecodeDimension,
+        actual: u64,
+        limit: u64,
+    ) -> Result<(), GraphRefusal> {
+        if actual > limit {
+            Err(GraphRefusal::DecodeLimit {
+                dimension,
+                actual,
+                limit,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// The kind of `child`, refused unless it is one of `allowed`: what a
+    /// typed decoder checks of each reference it reads.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphRefusal::WrongChildKind`], or any refusal of
+    /// [`Self::envelope`].
+    pub fn child_kind(
+        &mut self,
+        parent: NodeId,
+        child: NodeId,
+        allowed: &[NodeKind],
+    ) -> Result<NodeKind, GraphRefusal> {
+        let kind = self.envelope(child)?.kind;
+        if allowed.contains(&kind) {
+            Ok(kind)
+        } else {
+            Err(GraphRefusal::WrongChildKind { parent, child })
+        }
+    }
+
+    /// Decodes node `id` of kind `expected` as one `T`.
+    ///
+    /// # Errors
+    ///
+    /// Any refusal of [`Self::logical_body`] or of `T`'s decoder.
+    pub fn decode<T: TokenCodec>(
+        &mut self,
+        id: NodeId,
+        expected: NodeKind,
+    ) -> Result<T, GraphRefusal> {
+        let logical = self.logical_body(id, expected)?;
+        let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(expected.0));
+        let mut reader = TokenReader::new(&logical);
+        let value = T::decode(&mut reader).map_err(refuse)?;
+        reader.finish().map_err(refuse)?;
+        Ok(value)
+    }
+
+    /// The logical body of node `id` of kind `expected`: references as
+    /// digests, placed values inline, a streamed body joined.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphRefusal::KindMismatch`], [`GraphRefusal::UnsupportedKind`],
+    /// [`GraphRefusal::UnsupportedVariant`], [`GraphRefusal::NonCanonical`]
+    /// for every non-canonical form, or any refusal of a node read.
+    pub fn logical_body(
+        &mut self,
+        id: NodeId,
+        expected: NodeKind,
+    ) -> Result<Vec<u8>, GraphRefusal> {
+        let envelope = self.envelope(id)?;
+        if envelope.kind != expected {
+            return Err(GraphRefusal::KindMismatch {
+                node: id,
+                expected: expected.0,
+                found: envelope.kind.0,
+            });
+        }
+        let spec = expected
+            .spec()
+            .ok_or(GraphRefusal::UnsupportedKind(expected.0))?;
+        let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(expected.0));
+        match spec.shape {
+            BodyShape::Direct => to_logical(&envelope, envelope.body, id),
+            BodyShape::Enveloped => {
+                let mut reader = envelope.reader();
+                let (variant, fields) = reader.sum().map_err(refuse)?;
+                if variant > 1 {
+                    return Err(GraphRefusal::UnsupportedVariant {
+                        kind: expected.0,
+                        variant,
+                    });
+                }
+                TokenReader::expect_fields(fields, 1).map_err(refuse)?;
+                let rest = &envelope.body[reader.position()..];
+                let placed = if variant == 0 {
+                    let placed = to_logical(&envelope, rest, id)?;
+                    let mut tree = TokenReader::new(&placed);
+                    tree.skip_tree().map_err(refuse)?;
+                    if !tree.is_empty() {
+                        return Err(non_canonical(id, CanonicalFault::NotOneToken));
+                    }
+                    placed
+                } else {
+                    let mut reader = TokenReader::with_form(rest, RefForm::Physical);
+                    let slot = match reader.next_event().map_err(refuse)? {
+                        TokenEvent::Slot(slot) => slot,
+                        _ => return Err(non_canonical(id, CanonicalFault::InvalidBodyForm)),
+                    };
+                    reader.finish().map_err(refuse)?;
+                    let stream = envelope
+                        .children
+                        .get(slot)
+                        .ok_or(non_canonical(id, CanonicalFault::ChildSlotOutOfRange(slot)))?;
+                    let placed = self.stream(id, stream, expected)?;
+                    let (children, physical) = to_physical(&placed, expected)?;
+                    if envelope_len(expected, children.len(), physical.len() + 3) as u64
+                        <= spec.bound.bytes()
+                    {
+                        return Err(non_canonical(id, CanonicalFault::InvalidBodyForm));
+                    }
+                    placed
+                };
+                let logical = self.unplace(id, &placed)?;
+                let mut check = verifier();
+                if check.encode(expected, TypedBody::logical(&logical))? != id {
+                    return Err(non_canonical(id, CanonicalFault::InvalidBodyForm));
+                }
+                Ok(logical)
+            }
+        }
+    }
+
+    /// The text placed at `id`, a TextLeaf or TextIndex.
+    ///
+    /// # Errors
+    ///
+    /// A wrong kind, a non-canonical chunking, or any node read's refusal.
+    pub fn text(&mut self, id: NodeId) -> Result<String, GraphRefusal> {
+        let bytes = self.placed(id, Family::Text)?;
+        String::from_utf8(bytes).map_err(|_| GraphRefusal::InvalidUtf8)
+    }
+
+    /// The bytes placed at `id`, a BytesLeaf or BytesIndex.
+    ///
+    /// # Errors
+    ///
+    /// A wrong kind, a non-canonical chunking, or any node read's refusal.
+    pub fn bytes(&mut self, id: NodeId) -> Result<Vec<u8>, GraphRefusal> {
+        self.placed(id, Family::Bytes)
+    }
+
+    /// A placed value, assembled and then required to be exactly what
+    /// placing it again stages.
+    fn placed(&mut self, id: NodeId, family: Family) -> Result<Vec<u8>, GraphRefusal> {
+        let mut value = Vec::new();
+        self.assemble(id, family, 0, &mut value)?;
+        let mut check = verifier();
+        let again = match family {
+            Family::Text => {
+                let text = std::str::from_utf8(&value).map_err(|_| GraphRefusal::InvalidUtf8)?;
+                check.place_text(text)?
+            }
+            Family::Bytes => check.place_bytes(&value)?,
+        };
+        if again != id {
+            return Err(non_canonical(id, CanonicalFault::InvalidChunking));
+        }
+        Ok(value)
+    }
+
+    /// Appends the value under `id` to `out` and returns its length.
+    fn assemble(
+        &mut self,
+        id: NodeId,
+        family: Family,
+        depth: u64,
+        out: &mut Vec<u8>,
+    ) -> Result<u64, GraphRefusal> {
+        self.limit(DecodeDimension::Depth, depth, self.limits.depth)?;
+        let envelope = self.envelope(id)?;
+        let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(envelope.kind.0));
+        let (found, leaf) = Family::of(envelope.kind).ok_or(GraphRefusal::KindMismatch {
+            node: id,
+            expected: match family {
+                Family::Text => NodeKind::TEXT_LEAF.0,
+                Family::Bytes => NodeKind::BYTES_LEAF.0,
+            },
+            found: envelope.kind.0,
+        })?;
+        if found != family {
+            return Err(non_canonical(id, CanonicalFault::InvalidChunking));
+        }
+        let mut reader = envelope.reader();
+        if leaf {
+            let payload = match family {
+                Family::Text => reader.text().map_err(refuse)?.as_bytes(),
+                Family::Bytes => reader.bytes().map_err(refuse)?,
+            };
+            reader.finish().map_err(refuse)?;
+            self.grow(out, payload)?;
+            return Ok(payload.len() as u64);
+        }
+        reader.expect_struct(2).map_err(refuse)?;
+        let total = reader.unsigned().map_err(refuse)?;
+        let count = reader.seq().map_err(refuse)?;
+        if count == 0 || count > INDEX_FANOUT as u64 {
+            return Err(non_canonical(id, CanonicalFault::InvalidChunking));
+        }
+        let mut sum = 0_u64;
+        for _ in 0..count {
+            reader.expect_struct(2).map_err(refuse)?;
+            let slot = match reader.next_event().map_err(refuse)? {
+                TokenEvent::Slot(slot) => slot,
+                _ => return Err(non_canonical(id, CanonicalFault::InvalidChunking)),
+            };
+            let declared = reader.unsigned().map_err(refuse)?;
+            let child = envelope
+                .children
+                .get(slot)
+                .ok_or(non_canonical(id, CanonicalFault::ChildSlotOutOfRange(slot)))?;
+            let actual = self.assemble(child, family, depth + 1, out)?;
+            if actual != declared {
+                return Err(non_canonical(id, CanonicalFault::AggregateLengthMismatch));
+            }
+            sum = sum.saturating_add(actual);
+        }
+        reader.finish().map_err(refuse)?;
+        if sum != total {
+            return Err(non_canonical(id, CanonicalFault::AggregateLengthMismatch));
+        }
+        Ok(total)
+    }
+
+    fn grow(&self, out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), GraphRefusal> {
+        let len = (out.len() + bytes.len()) as u64;
+        self.limit(
+            DecodeDimension::LogicalBytes,
+            len,
+            self.limits.logical_bytes,
+        )?;
+        out.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    /// Joins the structure blocks of `stream`, the WholeStream of `parent`
+    /// of `kind`, into the placed logical body.
+    fn stream(
+        &mut self,
+        parent: NodeId,
+        stream: NodeId,
+        kind: NodeKind,
+    ) -> Result<Vec<u8>, GraphRefusal> {
+        let envelope = self.envelope(stream)?;
+        if envelope.kind != NodeKind::WHOLE_STREAM {
+            return Err(GraphRefusal::WrongChildKind {
+                parent,
+                child: stream,
+            });
+        }
+        let refuse = |error| GraphRefusal::from_token(error, Some(stream), Some(5));
+        let mut reader = envelope.reader();
+        reader.expect_struct(4).map_err(refuse)?;
+        let schema = reader.unsigned().map_err(refuse)?;
+        if schema != u64::from(kind.0) {
+            return Err(GraphRefusal::KindMismatch {
+                node: stream,
+                expected: kind.0,
+                found: u32::try_from(schema).unwrap_or(u32::MAX),
+            });
+        }
+        let declared_len = reader.unsigned().map_err(refuse)?;
+        self.limit(
+            DecodeDimension::LogicalBytes,
+            declared_len,
+            self.limits.logical_bytes,
+        )?;
+        let tree = match reader.next_event().map_err(refuse)? {
+            TokenEvent::Slot(slot) => envelope.children.get(slot).ok_or(non_canonical(
+                stream,
+                CanonicalFault::ChildSlotOutOfRange(slot),
+            ))?,
+            _ => return Err(non_canonical(stream, CanonicalFault::InvalidChunking)),
+        };
+        let declared_blocks = reader.unsigned().map_err(refuse)?;
+        reader.finish().map_err(refuse)?;
+        let mut placed = Vec::new();
+        let blocks = self.blocks(stream, tree, 0, &mut placed)?;
+        if blocks != declared_blocks || placed.len() as u64 != declared_len {
+            return Err(non_canonical(
+                stream,
+                CanonicalFault::AggregateLengthMismatch,
+            ));
+        }
+        Ok(placed)
+    }
+
+    /// Appends the blocks under `node` and returns how many there were.
+    fn blocks(
+        &mut self,
+        parent: NodeId,
+        node: NodeId,
+        depth: u64,
+        out: &mut Vec<u8>,
+    ) -> Result<u64, GraphRefusal> {
+        self.limit(DecodeDimension::Depth, depth, self.limits.depth)?;
+        let envelope = self.envelope(node)?;
+        match envelope.kind {
+            NodeKind::STRUCTURE_BLOCK => {
+                let logical = to_logical(&envelope, envelope.body, node)?;
+                self.grow(out, &logical)?;
+                Ok(1)
+            }
+            NodeKind::STREAM_INDEX => {
+                let refuse = |error| GraphRefusal::from_token(error, Some(node), Some(7));
+                let mut reader = envelope.reader();
+                reader.expect_struct(3).map_err(refuse)?;
+                let _level = reader.unsigned().map_err(refuse)?;
+                let declared = reader.unsigned().map_err(refuse)?;
+                let count = reader.seq().map_err(refuse)?;
+                if count == 0 || count > INDEX_FANOUT as u64 {
+                    return Err(non_canonical(node, CanonicalFault::InvalidChunking));
+                }
+                let mut sum = 0_u64;
+                for _ in 0..count {
+                    reader.expect_struct(2).map_err(refuse)?;
+                    let child = match reader.next_event().map_err(refuse)? {
+                        TokenEvent::Slot(slot) => envelope.children.get(slot).ok_or(
+                            non_canonical(node, CanonicalFault::ChildSlotOutOfRange(slot)),
+                        )?,
+                        _ => return Err(non_canonical(node, CanonicalFault::InvalidChunking)),
+                    };
+                    let child_declared = reader.unsigned().map_err(refuse)?;
+                    let actual = self.blocks(node, child, depth + 1, out)?;
+                    if actual != child_declared {
+                        return Err(non_canonical(node, CanonicalFault::AggregateLengthMismatch));
+                    }
+                    sum = sum.saturating_add(actual);
+                }
+                reader.finish().map_err(refuse)?;
+                if sum != declared {
+                    return Err(non_canonical(node, CanonicalFault::AggregateLengthMismatch));
+                }
+                Ok(sum)
+            }
+            _ => Err(GraphRefusal::WrongChildKind {
+                parent,
+                child: node,
+            }),
+        }
+    }
+
+    /// Puts every placed value of `placed` back inline, refusing an inline
+    /// value over the bound and a placed one under it.
+    fn unplace(&mut self, id: NodeId, placed: &[u8]) -> Result<Vec<u8>, GraphRefusal> {
+        let refuse = |error| GraphRefusal::from_token(error, Some(id), None);
+        let mut reader = TokenReader::new(placed);
+        let mut out = TokenWriter::with_capacity(placed.len());
+        while !reader.is_empty() {
+            let start = reader.position();
+            match reader.next_event().map_err(refuse)? {
+                TokenEvent::Text(text) if token_len(text.len()) > INLINE_TOKEN_MAX => {
+                    return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
+                }
+                TokenEvent::Bytes(bytes) if token_len(bytes.len()) > INLINE_TOKEN_MAX => {
+                    return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
+                }
+                TokenEvent::Child(child) => {
+                    let child = NodeId::from(child);
+                    let stored = self
+                        .source
+                        .fetch(&child)
+                        .ok_or(GraphRefusal::MissingNode(child))?;
+                    let kind = match stored.encoding {
+                        BlobEncoding::Graph => Some(self.envelope(child)?.kind),
+                        BlobEncoding::Opaque => None,
+                    };
+                    match kind.and_then(Family::of) {
+                        Some((family, _)) => {
+                            let value = self.placed(child, family)?;
+                            if token_len(value.len()) <= INLINE_TOKEN_MAX {
+                                return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
+                            }
+                            match family {
+                                Family::Text => out.text(
+                                    std::str::from_utf8(&value)
+                                        .map_err(|_| GraphRefusal::InvalidUtf8)?,
+                                ),
+                                Family::Bytes => out.bytes(&value),
+                            }
+                        }
+                        None => out.child(child.child_ref()),
+                    }
+                }
+                _ => out.raw(&placed[start..reader.position()]),
+            }
+            self.limit(
+                DecodeDimension::LogicalBytes,
+                out.len() as u64,
+                self.limits.logical_bytes,
+            )?;
+        }
+        Ok(out.into_bytes())
+    }
+}
+
+/// A physical body's logical form: each slot its child's digest.
+fn to_logical(
+    envelope: &NodeEnvelope<'_>,
+    body: &[u8],
+    id: NodeId,
+) -> Result<Vec<u8>, GraphRefusal> {
+    let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(envelope.kind.0));
+    let mut reader = TokenReader::with_form(body, RefForm::Physical);
+    let mut out = TokenWriter::with_capacity(body.len() + 32 * envelope.children.len());
+    while !reader.is_empty() {
+        let start = reader.position();
+        match reader.next_event().map_err(refuse)? {
+            TokenEvent::Slot(slot) => {
+                let child = envelope
+                    .children
+                    .get(slot)
+                    .ok_or(non_canonical(id, CanonicalFault::ChildSlotOutOfRange(slot)))?;
+                out.child(child.child_ref());
+            }
+            _ => out.raw(&body[start..reader.position()]),
+        }
+    }
+    Ok(out.into_bytes())
+}

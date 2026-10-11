@@ -113,7 +113,29 @@ fn ended(step: RunStep) -> End {
         panic!("the run ends: {step:?}")
     };
     let end: EndWire = wire::decode(PayloadKind::End, &end).expect("end");
-    end.map_or(End::Cancelled, wire::RecordedEnd::into_end)
+    // The read decodes the release's nodes beside the end's own, so the
+    // end's size does not bound it.
+    end.map_or(End::Cancelled, |state| {
+        lash_vm_client::graph::read_end(
+            &state,
+            lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 30),
+        )
+        .expect("the end reads back")
+    })
+}
+
+/// The run's state at its park, bound to one cell.
+fn export(checkout: &mut Checkout) -> SealedGraphState {
+    let binding = lash_core_store::checkpoint_graph::bodies::OwnerBinding::Cell {
+        session: "session-A".into(),
+        turn: "turn-1".into(),
+        cell: "cell-1".into(),
+    };
+    checkout
+        .export_graph(EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(
+            &binding,
+        )))
+        .expect("export graph")
 }
 
 fn int(value: i64) -> Datum {
@@ -152,9 +174,9 @@ fn killed_at_a_park_and_resumed(
     let (wait, argument) = requested(first.run(SLICE, false).expect("run"));
     asked.push(argument.clone());
     assert!(!first.deliver(wait, completed(argument)).expect("deliver"));
-    let (wait, argument) = requested(first.run(SLICE, false).expect("run"));
+    let (wait, argument, admission) = admitted(first.run(SLICE, false).expect("run"));
     asked.push(argument.clone());
-    let state = first.export().expect("export");
+    let state = export(&mut first);
     assert_eq!(state.document(), identity);
     // Killed at the park: the worker is discarded, not reset.
     drop(first);
@@ -166,7 +188,10 @@ fn killed_at_a_park_and_resumed(
             Start {
                 owner: owner(),
                 document: document.clone(),
-                from: StartFrom::Parked(state),
+                from: StartFrom::ParkedGraph(ParkedGraph {
+                    state,
+                    admissions: vec![admission],
+                }),
                 bounds: bounds(),
             },
             identity,
@@ -197,6 +222,89 @@ fn a_parked_run_carries_on_in_another_worker_without_asking_again() {
     let (finished, asked) = killed_at_a_park_and_resumed(&pool, &identity, &document);
     assert_eq!(finished.result, int(6));
     assert_eq!(asked, [int(1), int(2), int(3)], "each effect is asked once");
+}
+
+/// The one effect the park requests, as the parent's admission freezes it.
+fn admitted(step: RunStep) -> (u64, Datum, EncodedPayload) {
+    let RunStep::Parked { park, .. } = step else {
+        panic!("the run parks: {step:?}")
+    };
+    let park: ParkWire = wire::decode(PayloadKind::Park, &park).expect("park");
+    let park = lash_kernel_vm::Park::try_from(park).expect("canonical park");
+    let [Request::Effect(request)] = &park.requests[..] else {
+        panic!("one effect: {park:?}")
+    };
+    let admission = lash_vm_client::graph::admission(&lash_kernel_state::AdmittedWait {
+        identity: request.identity.clone(),
+        request: lash_kernel_state::AdmittedRequest::Effect {
+            effect: request.effect.clone(),
+            args: request.args.clone(),
+        },
+    });
+    (request.wait.0, request.args[0].clone(), admission)
+}
+
+/// FIG-5887 §3: a run exported at a park as checkpoint graph state, its
+/// worker killed, resumes in another worker from the state and the
+/// admission of the wait it holds, and finishes without asking again. The
+/// state alone, without the admission, is refused with the kernel's typed
+/// refusal.
+#[test]
+fn a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission() {
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let (identity, document) = document(TOOL_LOOP);
+    let mut first = checkout(&pool);
+    first
+        .start(
+            fresh(&document, Target::Main, Vec::new()),
+            &identity,
+            ExecutionClass::Cell,
+        )
+        .expect("start");
+    let (wait, argument) = requested(first.run(SLICE, false).expect("run"));
+    assert!(!first.deliver(wait, completed(argument)).expect("deliver"));
+    let (wait, argument, admission) = admitted(first.run(SLICE, false).expect("run"));
+    let state = export(&mut first);
+    assert_eq!(state.document(), identity);
+    drop(first);
+
+    let resume = |admissions: Vec<EncodedPayload>| Start {
+        owner: owner(),
+        document: document.clone(),
+        from: StartFrom::ParkedGraph(ParkedGraph {
+            state: state.clone(),
+            admissions,
+        }),
+        bounds: bounds(),
+    };
+    let mut refused = checkout(&pool);
+    let refusal = refused
+        .start(resume(Vec::new()), &identity, ExecutionClass::Cell)
+        .expect_err("a wait with no admission");
+    assert!(
+        matches!(
+            refusal,
+            PoolError::Infrastructure(InfrastructureOutcome::RunRefused {
+                refusal: RunRefusal::Restore {
+                    refusal: KernelRestoreRefusal::AdmissionUnresolved { .. },
+                }
+            })
+        ),
+        "{refusal:?}"
+    );
+
+    let mut second = checkout(&pool);
+    second
+        .start(resume(vec![admission]), &identity, ExecutionClass::Cell)
+        .expect("resume from graph state");
+    assert!(!second.deliver(wait, completed(argument)).expect("deliver"));
+    let (wait, argument) = requested(second.run(SLICE, false).expect("run"));
+    assert_eq!(argument, int(3), "the answered effects are not asked again");
+    assert!(!second.deliver(wait, completed(argument)).expect("deliver"));
+    let End::Finished(finished) = ended(second.run(SLICE, false).expect("run")) else {
+        panic!("the run finishes")
+    };
+    assert_eq!(finished.result, int(6));
 }
 
 /// Targets 1 and 5: a TypeScript cell is lowered in the worker against the
@@ -274,8 +382,8 @@ fn a_parked_run_is_refused_under_another_document() {
             ExecutionClass::Cell,
         )
         .expect("start");
-    requested(worker.run(SLICE, false).expect("run"));
-    let state = worker.export().expect("export");
+    let (_, _, admission) = admitted(worker.run(SLICE, false).expect("run"));
+    let state = export(&mut worker);
     worker.release().expect("release at the park");
 
     let mut next = checkout(&pool);
@@ -284,7 +392,10 @@ fn a_parked_run_is_refused_under_another_document() {
             Start {
                 owner: owner(),
                 document: document_b,
-                from: StartFrom::Parked(state),
+                from: StartFrom::ParkedGraph(ParkedGraph {
+                    state,
+                    admissions: vec![admission],
+                }),
                 bounds: bounds(),
             },
             &other,
@@ -295,8 +406,8 @@ fn a_parked_run_is_refused_under_another_document() {
         matches!(
             refused,
             PoolError::Infrastructure(InfrastructureOutcome::RunRefused {
-                refusal: RunRefusal::State {
-                    refusal: OpaqueStateRefusal::WrongDocument { .. },
+                refusal: RunRefusal::GraphState {
+                    refusal: GraphStateRefusal::WrongDocument { .. },
                 }
             })
         ),

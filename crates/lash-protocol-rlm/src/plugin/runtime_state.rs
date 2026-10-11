@@ -201,7 +201,6 @@ impl RlmRuntimeState {
     pub(crate) async fn restore_runtime_session_state(
         &self,
         state: lash_core::plugin::ProtocolSessionRestoreView,
-        fleet_format: lash_core::FleetFormat,
     ) -> Result<(), SessionError> {
         let mut execution_guard = self.execution.lock().await;
         let execution = &mut *execution_guard;
@@ -213,9 +212,10 @@ impl RlmRuntimeState {
         *self.session_projected_bindings.lock().await = CodeModeProjectedBindings::new();
         let protected_names = self.protected_projected_binding_names().await;
         if let Some(snapshot) = snapshot {
-            execution
-                .restore_execution_state(&snapshot, fleet_format)
-                .await?;
+            execution.restore_execution_graph(
+                &snapshot,
+                lash_core_store::execution_state::ExecutionGraphPurpose::Final,
+            )?;
             execution.prune_protected_globals(&protected_names).await?;
         }
         for event in &state.active_events {
@@ -272,36 +272,28 @@ impl RlmRuntimeState {
             .unwrap_or(true)
     }
 
-    pub(crate) async fn snapshot_execution_state(
+    pub(crate) async fn capture_execution_graph(
         &self,
-        fleet_format: lash_core::FleetFormat,
-    ) -> Result<lash_core::plugin::ExecutionStateCapture, SessionError> {
+        purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
+    ) -> Result<lash_core_store::execution_state::ExecutionGraphCapture, SessionError> {
+        self.execution.lock().await.capture_execution_graph(purpose)
+    }
+
+    pub(crate) async fn probe_execution_state_capture(&self) -> Result<(), SessionError> {
         self.execution
             .lock()
             .await
-            .snapshot_execution_state(fleet_format)
+            .probe_execution_state_capture()
             .await
     }
 
-    pub(crate) async fn probe_execution_state_capture(
+    pub(crate) async fn hydrated_execution_graph(
         &self,
-        fleet_format: lash_core::FleetFormat,
-    ) -> Result<(), SessionError> {
+    ) -> Result<Option<lash_core::plugin::HydratedExecutionGraph>, SessionError> {
         self.execution
             .lock()
             .await
-            .probe_execution_state_capture(fleet_format)
-            .await
-    }
-
-    pub(crate) async fn hydrated_execution_state(
-        &self,
-        fleet_format: lash_core::FleetFormat,
-    ) -> Result<Option<lash_core::plugin::HydratedExecutionState>, SessionError> {
-        self.execution
-            .lock()
-            .await
-            .hydrated_execution_state(fleet_format)
+            .hydrated_execution_graph()
             .await
             .map(Some)
     }
@@ -325,16 +317,19 @@ impl RlmRuntimeState {
         self.execution.lock().await.settle_code_execution(outcome)
     }
 
-    pub(crate) async fn restore_execution_state(
+    /// Installs a hydrated SessionExecution graph (FIG-5887 §6): the
+    /// working state a turn phase owns, or a session revision's, as
+    /// `purpose` says, before any model continuation or cell compiles. A
+    /// read-only projected name still shadows a stored binding.
+    pub(crate) async fn restore_execution_graph(
         &self,
-        state: &lash_core::plugin::HydratedExecutionState,
-        fleet_format: lash_core::FleetFormat,
+        graph: &lash_core_store::execution_state::HydratedExecutionGraph,
+        purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
     ) -> Result<(), SessionError> {
-        self.execution
-            .lock()
-            .await
-            .restore_execution_state(state, fleet_format)
-            .await
+        let protected_names = self.protected_projected_binding_names().await;
+        let mut execution = self.execution.lock().await;
+        execution.restore_execution_graph(graph, purpose)?;
+        execution.prune_protected_globals(&protected_names).await
     }
 
     async fn apply_seed_or_globals_event(
@@ -446,30 +441,28 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
 
     fn snapshot_tool_calls(
         &self,
-        snapshot: &str,
+        cell: &lash_core::plugin::StoredCell,
     ) -> Result<Vec<lash_core::ToolCallRecord>, SessionError> {
-        crate::executor::snapshot_tool_calls(snapshot).map_err(SessionError::Protocol)
+        crate::executor::snapshot_tool_calls(cell).map_err(SessionError::Protocol)
     }
 
     async fn check_cell_snapshot(
         &self,
-        snapshot: &str,
+        cell: &lash_core::plugin::StoredCell,
     ) -> Result<Result<(), String>, lash_core::RuntimeError> {
-        Ok(crate::executor::check_cell_snapshot(snapshot))
+        Ok(crate::executor::check_cell_snapshot(cell))
     }
 
     async fn carried_cell_snapshot(
         &self,
-        snapshot: &str,
-    ) -> Result<
-        Result<Option<lash_core::plugin::CarriedCellSnapshot>, String>,
-        lash_core::RuntimeError,
-    > {
+        cell: &lash_core::plugin::StoredCell,
+    ) -> Result<Result<Option<lash_core::plugin::CarriedCell>, String>, lash_core::RuntimeError>
+    {
         Ok(self
             .state
             .dialect
             .kernel()
-            .cell_snapshot(snapshot)
+            .cell_snapshot(cell)
             .map_err(|refusal| refusal.to_string()))
     }
 
@@ -510,41 +503,35 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
         Some(crate::executor::cell_generation())
     }
 
-    async fn snapshot_execution_state(
-        &self,
-        ctx: ProtocolSessionContext<'_>,
-    ) -> Result<lash_core::plugin::ExecutionStateCapture, SessionError> {
-        self.state
-            .snapshot_execution_state(ctx.fleet_format())
-            .await
-    }
-
     async fn probe_execution_state_capture(
         &self,
-        ctx: ProtocolSessionContext<'_>,
+        _ctx: ProtocolSessionContext<'_>,
     ) -> Result<(), SessionError> {
-        self.state
-            .probe_execution_state_capture(ctx.fleet_format())
-            .await
+        self.state.probe_execution_state_capture().await
     }
 
-    async fn hydrated_execution_state(
+    async fn hydrated_execution_graph(
         &self,
-        ctx: ProtocolSessionContext<'_>,
-    ) -> Result<Option<lash_core::plugin::HydratedExecutionState>, SessionError> {
-        self.state
-            .hydrated_execution_state(ctx.fleet_format())
-            .await
+        _ctx: ProtocolSessionContext<'_>,
+    ) -> Result<Option<lash_core::plugin::HydratedExecutionGraph>, SessionError> {
+        self.state.hydrated_execution_graph().await
     }
 
-    async fn restore_execution_state(
+    async fn capture_execution_graph(
         &self,
-        ctx: ProtocolSessionContext<'_>,
-        state: &lash_core::plugin::HydratedExecutionState,
+        _ctx: ProtocolSessionContext<'_>,
+        purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
+    ) -> Result<lash_core_store::execution_state::ExecutionGraphCapture, SessionError> {
+        self.state.capture_execution_graph(purpose).await
+    }
+
+    async fn restore_execution_graph(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+        graph: &lash_core_store::execution_state::HydratedExecutionGraph,
+        purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
     ) -> Result<(), SessionError> {
-        self.state
-            .restore_execution_state(state, ctx.fleet_format())
-            .await
+        self.state.restore_execution_graph(graph, purpose).await
     }
 
     async fn acknowledge_execution_state_capture(&self) {
@@ -692,7 +679,7 @@ mod tests {
                     assert!(state.execution_state_dirty(), "a running cell is dirty");
                 }
                 state
-                    .snapshot_execution_state(lash_core::FleetFormat::current())
+                    .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
                     .await
                     .expect("capture idle state");
                 state.acknowledge_execution_state_capture().await;
@@ -719,11 +706,14 @@ mod tests {
                     "an accepted cell has uncaptured changes"
                 );
                 let capture = state
-                    .snapshot_execution_state(lash_core::FleetFormat::current())
+                    .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
                     .await
                     .expect("capture");
                 assert!(
-                    capture.root().is_some_and(|root| !root.is_empty()),
+                    matches!(
+                        capture,
+                        lash_core::plugin::ExecutionGraphCapture::Replace { .. }
+                    ),
                     "the capture carries the execution state"
                 );
                 lash_core::plugin::ProtocolSessionPlugin::restore_session(
@@ -901,7 +891,7 @@ mod tests {
     /// active history.
     fn restore_view(
         frame: &str,
-        snapshot: Option<lash_core::plugin::HydratedExecutionState>,
+        snapshot: Option<lash_core::plugin::HydratedExecutionGraph>,
         nodes: Vec<lash_core::SessionAppendNode>,
     ) -> lash_core::plugin::ProtocolSessionRestoreView {
         lash_core::plugin::ProtocolSessionRestoreView {
@@ -986,20 +976,14 @@ mod tests {
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("state");
                 state
-                    .restore_runtime_session_state(
-                        seed_restore_view("frame-1", &["seed"]),
-                        lash_core::FleetFormat::current(),
-                    )
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
                     .await
                     .expect("first restore binds the seed");
                 let first = state.read_only_variables_prompt().await;
                 assert_eq!(projected_binding_names(&first), ["projected_seed"]);
 
                 state
-                    .restore_runtime_session_state(
-                        seed_restore_view("frame-1", &["seed"]),
-                        lash_core::FleetFormat::current(),
-                    )
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
                     .await
                     .expect("a same-frame restore re-binds the seed it already holds");
                 let second = state.read_only_variables_prompt().await;
@@ -1028,10 +1012,7 @@ mod tests {
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("state");
                 state
-                    .restore_runtime_session_state(
-                        seed_restore_view("frame-1", &["seed"]),
-                        lash_core::FleetFormat::current(),
-                    )
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
                     .await
                     .expect("restore binds the durable seed");
                 let durable = state.read_only_variables_prompt().await;
@@ -1047,10 +1028,7 @@ mod tests {
                 );
 
                 state
-                    .restore_runtime_session_state(
-                        seed_restore_view("frame-1", &["seed"]),
-                        lash_core::FleetFormat::current(),
-                    )
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
                     .await
                     .expect("rolling back to the durable view on the same frame succeeds");
                 let rolled_back = state.read_only_variables_prompt().await;
@@ -1335,10 +1313,11 @@ mod tests {
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("state");
                 state
-                    .restore_runtime_session_state(
-                        restore_view("frame-1", None, baton_seed_nodes("committed")),
-                        lash_core::FleetFormat::current(),
-                    )
+                    .restore_runtime_session_state(restore_view(
+                        "frame-1",
+                        None,
+                        baton_seed_nodes("committed"),
+                    ))
                     .await
                     .expect("restore seeds the committed baton");
                 assert_eq!(
@@ -1362,10 +1341,11 @@ mod tests {
                     .expect("settle the mutating cell");
 
                 state
-                    .restore_runtime_session_state(
-                        restore_view("frame-1", None, baton_seed_nodes("committed")),
-                        lash_core::FleetFormat::current(),
-                    )
+                    .restore_runtime_session_state(restore_view(
+                        "frame-1",
+                        None,
+                        baton_seed_nodes("committed"),
+                    ))
                     .await
                     .expect("a same-frame restore without a snapshot succeeds");
                 assert_eq!(
@@ -1390,14 +1370,15 @@ mod tests {
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("state");
                 state
-                    .restore_runtime_session_state(
-                        restore_view("frame-1", None, baton_seed_nodes("committed")),
-                        lash_core::FleetFormat::current(),
-                    )
+                    .restore_runtime_session_state(restore_view(
+                        "frame-1",
+                        None,
+                        baton_seed_nodes("committed"),
+                    ))
                     .await
                     .expect("restore seeds the committed baton");
                 let committed = state
-                    .hydrated_execution_state(lash_core::FleetFormat::current())
+                    .hydrated_execution_graph()
                     .await
                     .expect("capture")
                     .expect("the code mode executor always holds a snapshotable state");
@@ -1418,14 +1399,11 @@ mod tests {
                     .expect("settle the mutating cell");
 
                 state
-                    .restore_runtime_session_state(
-                        restore_view(
-                            "frame-1",
-                            Some(committed.clone()),
-                            baton_seed_nodes("committed"),
-                        ),
-                        lash_core::FleetFormat::current(),
-                    )
+                    .restore_runtime_session_state(restore_view(
+                        "frame-1",
+                        Some(committed.clone()),
+                        baton_seed_nodes("committed"),
+                    ))
                     .await
                     .expect("a same-frame restore with a snapshot succeeds");
                 // Compared before any further cell runs: executing a cell pins
@@ -1433,7 +1411,7 @@ mod tests {
                 // a write the restore itself must not make.
                 assert_eq!(
                     state
-                        .hydrated_execution_state(lash_core::FleetFormat::current())
+                        .hydrated_execution_graph()
                         .await
                         .expect("capture")
                         .expect("state"),

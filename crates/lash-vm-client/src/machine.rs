@@ -10,14 +10,17 @@
 
 use std::sync::Arc;
 
+use lash_core_store::checkpoint_graph::bodies::OwnerBinding;
+use lash_core_store::checkpoint_graph::{DecodeLimits, NodeKind};
 use lash_kernel_doc::{Datum, Document, DocumentId, ErrorDatum, Handle, KernelVersion, Timestamp};
 use lash_kernel_vm::{Bounds, Delivered, End, Outcome, Start, Step, WaitId};
 use lash_sansio::VersionRange;
 use lash_vm_broker::ParentFault;
-use lash_vm_broker::kernel::{DrivenMachine, KernelFailure, Machines};
+use lash_vm_broker::kernel::state::{GraphStateFailure, ReleaseGraph, WholeState};
+use lash_vm_broker::kernel::{DrivenMachine, KernelFailure, Machines, ParkedState};
 use lash_vm_protocol::{
-    EncodedPayload, FrameEpoch, HostReadKind, OpaqueVmState, OwnerEpoch, PayloadKind, RunBounds,
-    StartFrom, VmOwner,
+    EncodedPayload, FrameEpoch, GraphStateExpectation, HostReadKind, OwnerEpoch, PayloadKind,
+    RunBounds, StartFrom, VmOwner,
 };
 
 use crate::service::{CallHeld, Service};
@@ -68,6 +71,7 @@ pub struct RemoteMachines {
     encoded: Arc<Vec<u8>>,
     start: Start,
     bounds: Bounds,
+    releases: std::sync::OnceLock<Result<ReleaseGraph, GraphStateFailure>>,
 }
 
 impl RemoteMachines {
@@ -102,6 +106,7 @@ impl RemoteMachines {
             ),
             start,
             bounds,
+            releases: std::sync::OnceLock::new(),
         })
     }
 
@@ -122,7 +127,14 @@ impl RemoteMachines {
         let reservation = start.document.0.len()
             + match &start.from {
                 StartFrom::Fresh(payload) => payload.0.len(),
-                StartFrom::Parked(state) => state.bytes().len(),
+                StartFrom::ParkedGraph(parked) => {
+                    parked.state.byte_len() as usize
+                        + parked
+                            .admissions
+                            .iter()
+                            .map(|admission| admission.0.len())
+                            .sum::<usize>()
+                }
             }
             + 4096;
         let service = self.service.clone();
@@ -157,6 +169,8 @@ impl RemoteMachines {
             checkout: Some(checkout),
             service: self.service.clone(),
             host: Arc::clone(&self.host),
+            owner: self.owner.clone(),
+            document: self.document.to_string(),
         })
     }
 }
@@ -179,8 +193,39 @@ impl Machines for RemoteMachines {
         self.checkout(StartFrom::Fresh(start)).await
     }
 
-    async fn resume(&self, parked: OpaqueVmState) -> Result<RemoteMachine, KernelFailure> {
-        self.checkout(StartFrom::Parked(parked)).await
+    fn releases(&self) -> Result<&ReleaseGraph, KernelFailure> {
+        self.releases
+            .get_or_init(lash_vm_broker::kernel::state::release_manifests)
+            .as_ref()
+            .map_err(|failure| KernelFailure::State(failure.clone()))
+    }
+
+    /// Resumes a parked run from its checkpoint graph state and the
+    /// admission of each wait it holds (FIG-5887 §3).
+    async fn resume(&self, parked: &ParkedState) -> Result<RemoteMachine, KernelFailure> {
+        self.resume_sealed(parked.sealed(self.owner.clone())).await
+    }
+}
+
+impl RemoteMachines {
+    /// Resumes a parked run from sealed graph state and the admission of
+    /// each wait it holds: a holder that keeps the state sealed, such as a
+    /// kernel process's engine.
+    ///
+    /// # Errors
+    ///
+    /// The worker's refusal of the state, its release or an admission.
+    pub async fn resume_sealed(
+        &self,
+        parked: lash_vm_protocol::ParkedGraph,
+    ) -> Result<RemoteMachine, KernelFailure> {
+        self.checkout(StartFrom::ParkedGraph(parked)).await
+    }
+
+    /// Whose runs these machines are.
+    #[must_use]
+    pub fn owner(&self) -> &VmOwner {
+        &self.owner
     }
 }
 
@@ -190,9 +235,35 @@ pub struct RemoteMachine {
     checkout: Option<Checkout>,
     service: Service,
     host: Arc<dyn RunHost>,
+    owner: VmOwner,
+    document: String,
 }
 
 impl RemoteMachine {
+    /// The run's end, as the worker sealed it: refused unless it is this
+    /// owner's TerminalWhole under the run's document.
+    fn end(&self, end: EndWire) -> Result<End, KernelFailure> {
+        let Some(state) = end else {
+            return Ok(End::Cancelled);
+        };
+        state
+            .check(&GraphStateExpectation {
+                owner: &self.owner,
+                kernel: kernel_reads(),
+                document: Some(&self.document),
+                root_kinds: &[NodeKind::TERMINAL_WHOLE.0],
+                max_nodes: u64::MAX,
+                max_bytes: u64::MAX,
+            })
+            .map_err(|refusal| {
+                worker(PoolError::from(
+                    lash_vm_protocol::InfrastructureOutcome::output_graph_state(refusal),
+                ))
+            })?;
+        lash_vm_broker::kernel::state::read_end(&state, lash_vm_broker::snapshot::READ_LIMITS)
+            .map_err(KernelFailure::State)
+    }
+
     /// One blocking exchange on the checkout, off the async runtime.
     async fn with<T: Send + 'static>(
         &mut self,
@@ -258,8 +329,6 @@ async fn answer(
 
 #[async_trait::async_trait]
 impl DrivenMachine for RemoteMachine {
-    type Parked = OpaqueVmState;
-
     async fn run(&mut self, slice: u64, cancel: bool) -> Result<Step, KernelFailure> {
         let mut step = self
             .with(move |checkout| checkout.run(slice, cancel))
@@ -281,10 +350,7 @@ impl DrivenMachine for RemoteMachine {
                 RunStep::Slice { .. } => return Ok(Step::Slice),
                 RunStep::Ended { end, .. } => {
                     let end: EndWire = wire::decode(PayloadKind::End, &end).map_err(worker)?;
-                    return Ok(Step::Ended(match end {
-                        Some(end) => end.into_end(),
-                        None => End::Cancelled,
-                    }));
+                    return Ok(Step::Ended(self.end(end)?));
                 }
             }
         }
@@ -307,8 +373,16 @@ impl DrivenMachine for RemoteMachine {
         })
     }
 
-    async fn export(&mut self) -> Result<OpaqueVmState, KernelFailure> {
-        self.with(Checkout::export).await
+    /// The run's state at this park as checkpoint graph state, bound to the
+    /// execution `binding` names (FIG-5887 §3): sealed by the worker,
+    /// checked by the pool, and each node checked against its digest here.
+    async fn export(&mut self, binding: &OwnerBinding) -> Result<WholeState, KernelFailure> {
+        let binding = EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(binding));
+        let state = self
+            .with(move |checkout| checkout.export_graph(binding))
+            .await?;
+        WholeState::of_sealed(&state, &DecodeLimits::within_total(state.byte_len()))
+            .map_err(|refusal| KernelFailure::State(GraphStateFailure::Graph(refusal)))
     }
 
     async fn release(mut self) -> Result<(), KernelFailure> {

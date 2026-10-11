@@ -257,23 +257,6 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     )?))
 }
 
-/// Decode a checkpoint manifest under the store's recorded `F`: the manifest
-/// admits the `[N-1, N]` reader window `fleet` names and an admitted older
-/// payload climbs the surface's upcaster hooks before decode (FIG-3796).
-pub(crate) fn decode_checkpoint_for_fleet(
-    bytes: &[u8],
-    fleet: lash_core_execution::FleetFormat,
-) -> Result<SessionCheckpoint, StoreError> {
-    lash_core_execution::store::decode_versioned_msgpack_record_for_fleet(
-        bytes,
-        "SessionCheckpoint",
-        lash_core_execution::surface_format!(
-            lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION
-        ),
-        fleet,
-    )
-}
-
 pub(crate) fn encode_msgpack<T: serde::Serialize>(
     value: &T,
     record_kind: &str,

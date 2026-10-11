@@ -8,10 +8,8 @@ use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
     KnownFailureReason, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
 };
-use lash_durable::domain::{Ordinal, OwnerKey, RunRecordRow, RunRecordWrite, RunSeq};
-use lash_durable::{
-    ActorKey, ActorTx, DomainWrite, DurableInstant, Epoch, MailSeq, OpenedActor, StateRevision,
-};
+use lash_durable::domain::{Ordinal, OwnerKey, RunFacts, RunSeq};
+use lash_durable::{ActorKey, ActorTx, DurableInstant, Epoch, MailSeq, OpenedActor, StateRevision};
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
 
 use super::{
@@ -27,17 +25,8 @@ const RUN: RunSeq = RunSeq(1);
 fn presentation_before_all_members_settle_is_refused() {
     let mut tx = opened();
     admitted(&mut tx, vec![draft("a", "once", ExecutionPolicy::Once)]);
-    let mut records = rows(&tx);
-    records.push(RunRecordRow {
-        owner: owner(),
-        run: RUN,
-        ordinal: Ordinal(2),
-        kind: lash_durable::domain::RunRecordKind::Present,
-        call: None,
-        record_json: "{}".to_owned(),
-        written_epoch: Epoch(1),
-    });
-    assert!(fold(&records, &PolicyView::default(), &PinnedWaits::default()).is_err());
+    present(&mut tx, Ordinal(2));
+    assert!(fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()).is_err());
 }
 
 /// V24: the marker derives every presented call from ordered admission.
@@ -54,24 +43,25 @@ fn a_presentation_marker_derives_its_members_in_admission_order() {
     for member in members.iter().rev() {
         settle(&mut tx, member, SettledOutput::Interrupted, Vec::new()).unwrap();
     }
-    let mut records = rows(&tx);
-    records.push(RunRecordRow {
-        owner: owner(),
-        run: RUN,
-        ordinal: Ordinal(records.len() as u64),
-        kind: lash_durable::domain::RunRecordKind::Present,
-        call: None,
-        record_json: "{}".to_owned(),
-        written_epoch: Epoch(1),
-    });
-    let folded = fold(&records, &PolicyView::default(), &PinnedWaits::default()).unwrap();
+    let next = Ordinal(rows(&tx).rows.len() as u64);
+    present(&mut tx, next);
+    let folded = fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()).unwrap();
     assert_eq!(
         folded.round(RUN).unwrap().presented(),
         Some(vec![ToolCallId::fixture("a"), ToolCallId::fixture("b")])
     );
-    records.last_mut().unwrap().record_json =
-        serde_json::json!({"calls": [ToolCallId::fixture("b")]}).to_string();
-    assert!(fold(&records, &PolicyView::default(), &PinnedWaits::default()).is_err());
+}
+
+/// Appends the run's presentation marker at `ordinal`.
+fn present(tx: &mut ActorTx, ordinal: Ordinal) {
+    super::records::append(
+        tx,
+        &owner(),
+        RUN,
+        ordinal,
+        None,
+        &super::records::Record::Present,
+    );
 }
 
 fn owner() -> OwnerKey {
@@ -94,30 +84,9 @@ fn opened() -> ActorTx {
     })
 }
 
-/// The rows `tx` appends, as the store would hold them.
-fn rows(tx: &ActorTx) -> Vec<RunRecordRow> {
-    tx.domain()
-        .iter()
-        .filter_map(|write| match write {
-            DomainWrite::RunRecord(RunRecordWrite::Append {
-                owner,
-                run,
-                ordinal,
-                kind,
-                call,
-                record_json,
-            }) => Some(RunRecordRow {
-                owner: owner.clone(),
-                run: *run,
-                ordinal: *ordinal,
-                kind: *kind,
-                call: call.clone(),
-                record_json: record_json.clone(),
-                written_epoch: Epoch(1),
-            }),
-            _ => None,
-        })
-        .collect()
+/// The facts `tx` appends, as the store would hold them.
+fn rows(tx: &ActorTx) -> RunFacts {
+    RunFacts::appended(tx.domain(), tx.graph(), Epoch(1))
 }
 
 fn run_owner() -> MaterialOwner {
@@ -247,7 +216,7 @@ fn a_gap_in_a_runs_ordinals_is_refused() {
         ],
     );
     let mut rows = rows(&tx);
-    rows.remove(1);
+    rows.rows.remove(1);
     assert_eq!(
         fold(&rows, &PolicyView::default(), &PinnedWaits::default()),
         Err(FoldRefusal::OrdinalGap {
@@ -292,7 +261,9 @@ fn a_retried_attempt_takes_the_next_ordinal_only_after_its_retry() {
     let mut stray = opened();
     start_retry(&mut stray, &resumed.admitted(members[0].id()).unwrap());
     let mut rows = early;
-    rows.extend(super::fold_tests::rows(&stray));
+    let stray = super::fold_tests::rows(&stray);
+    rows.rows.extend(stray.rows);
+    rows.nodes.extend(stray.nodes);
     assert_eq!(
         fold(&rows, &PolicyView::default(), &PinnedWaits::default()),
         Err(FoldRefusal::OutOfOrder {
@@ -318,63 +289,4 @@ fn a_call_whose_retry_is_due_ends_at_its_failed_attempt() {
         recoveries(&fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()).unwrap()),
         vec![Recovery::Settled(failed())]
     );
-}
-
-/// An outcome record decodes only with the payload its outcome names: an
-/// `x_outcome`, `x_wait` or `retry` record whose payload is missing, or
-/// whose bytes do not hash to the outcome's digest, is refused when the
-/// fold decodes it.
-#[test]
-fn an_outcome_record_without_its_payload_or_with_other_bytes_is_refused_at_decode() {
-    let mut tx = opened();
-    let members = admitted(
-        &mut tx,
-        vec![
-            draft("a", "once", ExecutionPolicy::Once),
-            draft("b", "repeats", repeatable()),
-            draft("c", "parks", ExecutionPolicy::Once),
-        ],
-    );
-    settle(
-        &mut tx,
-        &members[0],
-        SettledOutput::Completed(journal("alpha-out")),
-        Vec::new(),
-    )
-    .unwrap();
-    settle_retry(
-        &mut tx,
-        &members[1],
-        SettledOutput::Failed(journal("alpha-fail").failure(KnownFailureReason::Reported, None)),
-        DurableInstant(50),
-    )
-    .unwrap();
-    settle(
-        &mut tx,
-        &members[2],
-        SettledOutput::Waiting(journal("alpha-park").parked("00".repeat(16))),
-        Vec::new(),
-    )
-    .unwrap();
-    let rows = rows(&tx);
-    assert!(fold(&rows, &PolicyView::default(), &PinnedWaits::default()).is_ok());
-    for payload in ["alpha-out", "alpha-fail", "alpha-park"] {
-        for forged in ["\"omega\"", "null"] {
-            let tampered: Vec<RunRecordRow> = rows
-                .iter()
-                .cloned()
-                .map(|mut row| {
-                    row.record_json = row.record_json.replace(&format!("\"{payload}\""), forged);
-                    row
-                })
-                .collect();
-            assert!(
-                matches!(
-                    fold(&tampered, &PolicyView::default(), &PinnedWaits::default()),
-                    Err(FoldRefusal::Undecodable { .. })
-                ),
-                "{payload} as {forged} is refused at decode"
-            );
-        }
-    }
 }

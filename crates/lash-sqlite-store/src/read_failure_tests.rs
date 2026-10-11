@@ -54,7 +54,7 @@ async fn corrupt_non_msgpack_blob_surfaces_stored_data_corrupt_from_get_blob() {
         .conn
         .call(move |conn| {
             conn.execute(
-                "INSERT INTO blobs (hash, content) VALUES (?1, ?2)",
+                "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
                 params![blob_hash, raw_content],
             )?;
             Ok(())
@@ -97,7 +97,7 @@ async fn blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes() {
             .conn
             .call(move |conn| {
                 conn.execute(
-                    "INSERT INTO blobs (hash, content) VALUES (?1, ?2)",
+                    "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
                     params![hash, bytes],
                 )?;
                 Ok(())
@@ -219,22 +219,6 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
         .await
         .map_err(sqlite_error);
     assert_storage_failure("insert_artifact_blob_conn", raw);
-
-    let typed = store
-        .conn
-        .call(|conn| {
-            SqliteStore::put_typed_artifact_blob_conn(
-                conn,
-                BlobArtifactDescriptor::checkpoint_component(),
-                &42_u64,
-                BuiltinBlobProfile::LowLatency,
-                FleetFormat::current(),
-            )
-            .map_err(sqlite_conversion_error)
-        })
-        .await
-        .map_err(sqlite_error);
-    assert_storage_failure("put_typed_artifact_blob_conn", typed);
 
     assert_storage_failure(
         "put_checkpoint",
@@ -690,7 +674,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     .expect("repair relation");
 
     raw.execute(
-        "INSERT INTO blobs (hash, content) VALUES ('corrupt-blob', X'C1')",
+        "INSERT INTO blobs (hash, content, encoding) VALUES ('corrupt-blob', X'C1', 0)",
         [],
     )
     .expect("insert malformed blob");
@@ -703,10 +687,10 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     );
     assert_corrupt(
         store.get_checkpoint(&corrupt_blob).await,
-        "artifact blob envelope",
+        "SessionCheckpoint",
     );
     raw.execute(
-        "INSERT INTO blobs (hash, content) VALUES ('corrupt-compressed', ?1)",
+        "INSERT INTO blobs (hash, content, encoding) VALUES ('corrupt-compressed', ?1, 0)",
         params![
             encode_msgpack(
                 &StoredBlobEnvelope {
@@ -741,6 +725,10 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         Err(StoreError::Incompatible { .. })
     ));
 
+    // The schema's foreign key keeps the store from writing a dangling
+    // pointer; foreign data does not ask it.
+    raw.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("write foreign data");
     raw.execute(
         "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
          VALUES (?1, 'dangling-artifact', 'missing-artifact-blob')",

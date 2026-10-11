@@ -12,9 +12,11 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
     turn_cancel_undelivered_wire,
 };
+use lash_durable::domain::graph::OWNER_READ_LIMITS;
+use lash_durable::domain::namespace_value::NamespaceValue;
 use lash_durable::domain::{
-    DomainRefusal, RunValuesWrite, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest,
-    TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
+    DomainRefusal, SessionCommitWrite, StoredValues, TurnCancelAnswer, TurnCancelRequest, TurnEnd,
+    TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -22,7 +24,7 @@ use lash_store_sql::Dialect;
 use lash_store_sql::durable::turns::TurnStatements;
 use sqlx::{PgConnection, Row};
 
-use super::{Committing, corrupt, integer, sqlx_failure};
+use super::{Committing, corrupt, integer, node_ref, sqlx_failure};
 
 static SQL: LazyLock<TurnStatements> =
     LazyLock::new(|| TurnStatements::render(Dialect::postgres()));
@@ -99,7 +101,7 @@ pub(super) async fn apply(
                 .bind(stored)
                 .bind(argument.map(integer::<i64>).transpose()?)
                 .bind(i64::from(*iteration))
-                .bind(phase.checkpoint())
+                .bind(phase.checkpoint().map(|checkpoint| checkpoint.to_hex()))
                 .bind(pin.map(|pin| pin.request_ref.as_str()))
                 .bind(pin.map(|pin| pin.deadline.0))
                 .bind(commit.epoch.0)
@@ -157,11 +159,37 @@ pub(super) async fn apply(
                     .bind(run.as_str())
                     .bind(namespace.plugin.as_str())
                     .bind(entry)
-                    .bind(namespace.values.body())
-                    .bind(matches!(namespace.values, RunValuesWrite::Held))
+                    .bind(match &namespace.values {
+                        StoredValues::Root(root) => Some(root.to_hex()),
+                        StoredValues::Base | StoredValues::Held => None,
+                    })
+                    .bind(matches!(namespace.values, StoredValues::Held))
                     .execute(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(sqlx_failure)?;
+            }
+            Ok(())
+        }
+        TurnWrite::Working {
+            session,
+            run,
+            expected,
+            working,
+        } => {
+            let set: Option<String> = sqlx::query_scalar(SQL.working_set.sql())
+                .bind(session.as_str())
+                .bind(run.as_str())
+                .bind(working.map(|working| working.to_hex()))
+                .bind(expected.map(|expected| expected.to_hex()))
+                .bind(commit.epoch.0)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+            if set.is_none() {
+                return refuse(DomainRefusal::TurnNotOpen {
+                    session: session.clone(),
+                    run: run.clone(),
+                });
             }
             Ok(())
         }
@@ -426,20 +454,28 @@ pub(super) async fn turn_namespaces(
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    rows.into_iter()
-        .map(|row| {
-            let plugin: String = row.try_get(0).map_err(sqlx_failure)?;
-            let entry: String = row.try_get(1).map_err(sqlx_failure)?;
-            let body: Option<Vec<u8>> = row.try_get(2).map_err(sqlx_failure)?;
-            let entry = serde_json::from_str(&entry)
-                .map_err(|_| corrupt("turn namespace entry", &plugin))?;
-            Ok(TurnNamespace {
-                plugin,
-                entry,
-                body: body.map(Into::into),
-            })
-        })
-        .collect()
+    let mut namespaces = Vec::with_capacity(rows.len());
+    for row in rows {
+        let plugin: String = row.try_get(0).map_err(sqlx_failure)?;
+        let entry: String = row.try_get(1).map_err(sqlx_failure)?;
+        let root: Option<String> = row.try_get(2).map_err(sqlx_failure)?;
+        let entry =
+            serde_json::from_str(&entry).map_err(|_| corrupt("turn namespace entry", &plugin))?;
+        let body = match root {
+            None => None,
+            Some(root) => {
+                let root = node_ref(&root)?;
+                let nodes = super::graph::graph_closure(tx, root, &OWNER_READ_LIMITS).await?;
+                Some(NamespaceValue::load(&nodes, root, &plugin, OWNER_READ_LIMITS)?.body)
+            }
+        };
+        namespaces.push(TurnNamespace {
+            plugin,
+            entry,
+            body,
+        });
+    }
+    Ok(namespaces)
 }
 
 pub(super) async fn turn(
@@ -461,6 +497,9 @@ pub(super) async fn turn(
     let argument: Option<i64> = row.try_get(3).map_err(decode)?;
     let argument = argument.map(integer::<u64>).transpose()?;
     let checkpoint: Option<String> = row.try_get(5).map_err(decode)?;
+    let checkpoint = checkpoint.as_deref().map(node_ref).transpose()?;
+    let working: Option<String> = row.try_get(13).map_err(decode)?;
+    let working = working.as_deref().map(node_ref).transpose()?;
     let request: Option<String> = row.try_get(6).map_err(decode)?;
     let deadline: Option<i64> = row.try_get(7).map_err(decode)?;
     let stream_from: Option<String> = row.try_get(11).map_err(decode)?;
@@ -486,6 +525,7 @@ pub(super) async fn turn(
         run,
         admission,
         phase,
+        working,
         iteration,
         model_calls,
         turn_deadline: turn_deadline.map(DurableInstant),
@@ -513,9 +553,13 @@ mod ddl_tests {
         crate::testing::connect(database.url())
             .await
             .expect("provision the isolated store");
-        let connection = sqlx::PgConnection::connect(database.url())
+        let mut connection = sqlx::PgConnection::connect(database.url())
             .await
             .expect("connect to the isolated store");
+        sqlx::query("INSERT INTO lash_blobs (hash, content, encoding) VALUES ('{}', '\\x00', 1)")
+            .execute(&mut connection)
+            .await
+            .expect("a checkpoint blob");
         Some((database, connection))
     }
 

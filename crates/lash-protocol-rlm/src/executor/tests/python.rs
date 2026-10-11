@@ -384,21 +384,19 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
         written.metadata.as_ref().expect("call metadata")["is_async"],
         true
     );
-    let fleet = lash_core::FleetFormat::current();
     source
-        .snapshot_execution_state(fleet)
-        .await
+        .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
         .expect("snapshot");
     source.acknowledge_execution_state_capture();
     let saved = source
-        .hydrated_execution_state(fleet)
+        .hydrated_execution_graph()
         .await
         .expect("saved state");
+    host.install(&saved).await;
     drop(source);
     let mut restored = state();
     restored
-        .restore_execution_state(&saved, fleet)
-        .await
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Final)
         .expect("cold restore");
     let called = saved_cell(
         &mut restored,

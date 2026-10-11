@@ -1,4 +1,4 @@
-//! Run records on PostgreSQL: the `run_records` domain's statements, apply and read
+//! Run facts on PostgreSQL: the `run_records` domain's statements, apply and read
 //! (I0, FIG-5194).
 //!
 //! Owned by V0 (FIG-5170), then L4 (FIG-5174). The dispatch in `durable/mod.rs` calls these inside the
@@ -8,7 +8,7 @@
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    DomainRefusal, Ordinal, OwnerKey, RunRecordKind, RunRecordRow, RunRecordWrite, RunSeq,
+    DomainRefusal, Ordinal, OwnerKey, RunFactKind, RunFactRow, RunFactWrite, RunSeq,
 };
 use lash_durable::{DurableError, Epoch};
 use lash_sansio::ToolCallId;
@@ -16,7 +16,7 @@ use lash_store_sql::Dialect;
 use lash_store_sql::durable::run_records::RunRecordStatements;
 use sqlx::{PgConnection, Row};
 
-use super::{Committing, corrupt, integer, sqlx_failure};
+use super::{Committing, corrupt, integer, node_ref, sqlx_failure};
 
 static SQL: LazyLock<RunRecordStatements> =
     LazyLock::new(|| RunRecordStatements::render(Dialect::postgres()));
@@ -24,16 +24,16 @@ static SQL: LazyLock<RunRecordStatements> =
 pub(super) async fn apply(
     tx: &mut PgConnection,
     commit: &Committing<'_>,
-    write: &RunRecordWrite,
+    write: &RunFactWrite,
 ) -> Result<(), DurableError> {
     match write {
-        RunRecordWrite::Append {
+        RunFactWrite::Append {
             owner,
             run,
             ordinal,
             kind,
             call,
-            record_json,
+            record,
         } => {
             let owner_key = owner.stored();
             let taken: Option<i32> = sqlx::query_scalar(SQL.ordinal_taken.sql())
@@ -66,7 +66,7 @@ pub(super) async fn apply(
                     }));
                 }
             }
-            if *kind == RunRecordKind::XOutcome
+            if *kind == RunFactKind::XOutcome
                 && let Some(call) = call
             {
                 let exists: Option<i32> = sqlx::query_scalar(SQL.outcome_exists.sql())
@@ -90,14 +90,14 @@ pub(super) async fn apply(
                 .bind(integer::<i64>(ordinal.0)?)
                 .bind(kind.as_str())
                 .bind(call.as_ref().map(ToolCallId::as_str))
-                .bind(record_json)
+                .bind(record.to_hex())
                 .bind(commit.epoch.0)
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
         }
-        RunRecordWrite::Prune { owner, before } => {
+        RunFactWrite::Prune { owner, before } => {
             sqlx::query(SQL.prune.sql())
                 .bind(owner.stored())
                 .bind(integer::<i64>(before.0)?)
@@ -112,7 +112,7 @@ pub(super) async fn apply(
 pub(super) async fn read(
     tx: &mut PgConnection,
     owner: &OwnerKey,
-) -> Result<Vec<RunRecordRow>, DurableError> {
+) -> Result<Vec<RunFactRow>, DurableError> {
     let rows = sqlx::query(SQL.read.sql())
         .bind(owner.stored())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
@@ -125,17 +125,18 @@ pub(super) async fn read(
             let kind: String = row.try_get(2).map_err(sqlx_failure)?;
             let call: Option<String> = row.try_get(3).map_err(sqlx_failure)?;
             let kind =
-                RunRecordKind::parse(&kind).ok_or_else(|| corrupt("run record kind", &kind))?;
+                RunFactKind::parse(&kind).ok_or_else(|| corrupt("run record kind", &kind))?;
             let call = call
                 .map(|call| ToolCallId::parse(&call).map_err(|_| corrupt("tool call id", &call)))
                 .transpose()?;
-            Ok(RunRecordRow {
+            let record: String = row.try_get(4).map_err(sqlx_failure)?;
+            Ok(RunFactRow {
                 owner: owner.clone(),
                 run: RunSeq(integer::<u64>(run)?),
                 ordinal: Ordinal(integer::<u64>(ordinal)?),
                 kind,
                 call,
-                record_json: row.try_get(4).map_err(sqlx_failure)?,
+                record: node_ref(&record)?,
                 written_epoch: Epoch(row.try_get(5).map_err(sqlx_failure)?),
             })
         })

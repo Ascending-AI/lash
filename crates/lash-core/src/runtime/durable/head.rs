@@ -135,7 +135,7 @@ impl SessionHead {
             .map_err(|error| TurnError::Exec(format!("the turn's head commit: {error}")))?;
         Ok(TurnCommit {
             expected_head: commit.expected_head_revision,
-            commit_json: crate::store::encode_session_commit(&commit)
+            commit: crate::store::encode_session_commit(&commit)
                 .map_err(|error| TurnError::Exec(error.to_string()))?,
         })
     }

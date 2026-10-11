@@ -6,6 +6,9 @@
 //!
 //! - [`ledger`]: the set of waits a saved state stands on, keyed by the
 //!   machine's effect identity, and which records stay reachable for it.
+//! - [`graph`]: a run's admissions, membership, root and end as checkpoint
+//!   graph nodes.
+//! - [`state`]: a machine's state as graph nodes, written and read.
 //! - [`store`]: the park transaction (saved state and the admission of
 //!   every effect requested since the last park, together), delivery of
 //!   committed outcomes in any order, and settlement over tasks.
@@ -14,21 +17,21 @@
 //! - [`value`]: effect values as JSON text, every number carried as
 //!   written.
 
+pub mod graph;
 pub mod ledger;
 pub mod run;
+pub mod state;
 pub mod store;
 pub mod value;
 
-pub use ledger::{
-    AdmittedEffect, CheckpointPhase, EffectLedger, LedgerRefusal, ParkedCheckpoint, PendingEffect,
-    RecordedBound, RecordedEnd, Standing,
-};
+pub use ledger::{AdmittedEffect, EffectLedger, LedgerRefusal, PendingEffect, Standing};
 pub use run::{
     DrivenMachine, InProcess, InProcessMachine, KernelBroker, KernelCeilings, KernelEffects,
     KernelEnd, KernelFailure, Machines, park_bound,
 };
 pub use store::{
-    AdmitAs, EFFECT_CANCELLED, EFFECT_FAILED, EFFECT_INTERRUPTED, EFFECT_RESULT, EFFECT_TIMED_OUT,
-    EffectAdmission, EndSave, OutcomeOf, ParkSave, Saved, Settled, outcome_of,
+    AdmitAs, AdmittedCall, Checkpoint, EFFECT_CANCELLED, EFFECT_FAILED, EFFECT_INTERRUPTED,
+    EFFECT_RESULT, EFFECT_TIMED_OUT, EffectAdmission, EndSave, HostParts, OutcomeOf, ParkSave,
+    ParkedState, RootRead, Saved, SessionGraph, Settled, outcome_of,
 };
 pub use value::{InvalidJson, JsonlessKind, NotJson, datum_from_json, datum_to_json};

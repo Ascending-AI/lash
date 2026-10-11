@@ -71,7 +71,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lash_core_store::tool_run::{CompletionSource, MaterialRef};
-use lash_durable::domain::{AdmittedId, Ordinal, RunRecordKind};
+use lash_durable::domain::{AdmittedId, Ordinal};
 use lash_durable::{ActorTx, DurableError};
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, LimitCause};
 use tokio_util::sync::CancellationToken;
@@ -83,10 +83,13 @@ use crate::{ToolCallId, ToolId};
 pub use crate::plugin::StagedPluginState;
 pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
 
+mod codec_variants;
 mod context;
 mod fold;
 #[cfg(test)]
 mod fold_tests;
+#[doc(hidden)]
+pub mod graph;
 pub mod lifecycle;
 mod output;
 mod parked;
@@ -104,7 +107,8 @@ pub use output::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use parked::{CallOwner, ParkedCall, PinnedWaits, parked};
 pub use records::RUN_RECORD_FORMAT_VERSION;
 pub use rounds::{
-    admit_round, present, presentation, record_trace_exported, settle_retry, start_retry,
+    PinnedRound, PresentRecord, admit_round, pin_round, present, presentation,
+    record_trace_exported, settle_retry, start_retry,
 };
 pub use runner::{RoundEnd, RoundError, RoundRunner, SettledRound};
 pub use tools::{
@@ -113,7 +117,7 @@ pub use tools::{
     require_admitted, settle_cancelled,
 };
 
-use records::{OutcomeBody, append, encode, first_start};
+use records::{OutcomeBody, Record, append, first_start};
 
 /// The tool completion wait a round pinned for a member that may defer,
 /// with its admission: its id is also its completion key.
@@ -400,6 +404,9 @@ pub enum AdmissionRefusal {
     /// One call appears twice.
     #[error("call {0} is admitted twice")]
     DuplicateCall(ToolCallId),
+    /// A round admitted by admission names one Admission per member.
+    #[error("{drafts} members are admitted by {admissions} admissions")]
+    Admissions { drafts: usize, admissions: usize },
 }
 
 /// Why a settle was refused; nothing was recorded.
@@ -526,6 +533,7 @@ pub enum Recovery {
 pub struct RunFold {
     recoveries: Vec<(AdmittedId, Recovery)>,
     rounds: std::collections::BTreeMap<RunSeq, RoundView>,
+    reports: std::collections::BTreeMap<RunSeq, lash_core_store::checkpoint_graph::NodeId>,
 }
 
 impl RunFold {
@@ -535,6 +543,7 @@ impl RunFold {
         Self {
             recoveries,
             rounds: std::collections::BTreeMap::new(),
+            reports: std::collections::BTreeMap::new(),
         }
     }
 
@@ -596,6 +605,65 @@ impl RunFold {
     pub fn rounds(&self) -> impl Iterator<Item = &RoundView> {
         self.rounds.values()
     }
+
+    /// Each cell's ReportView, by the run of the cell's effect: what the
+    /// turn recorded of a cell's calls (FIG-5330), read with
+    /// [`cell_report`] from the facts this fold read.
+    #[must_use]
+    pub fn reports(
+        &self,
+    ) -> &std::collections::BTreeMap<RunSeq, lash_core_store::checkpoint_graph::NodeId> {
+        &self.reports
+    }
+}
+
+/// The cell's calls ReportView `report` in `facts` holds, as
+/// [`RunFold::reports`] names it.
+///
+/// # Errors
+///
+/// Any refusal of [`graph::ReportView::records`].
+pub fn cell_report(
+    facts: &lash_durable::domain::RunFacts,
+    report: lash_core_store::checkpoint_graph::NodeId,
+) -> Result<graph::CellReport, lash_core_store::checkpoint_graph::GraphRefusal> {
+    let mut decoder = lash_core_store::checkpoint_graph::GraphDecoder::new(
+        facts,
+        lash_durable::domain::graph::OWNER_READ_LIMITS,
+    );
+    graph::ReportView::records(&mut decoder, report)
+}
+
+/// Record `calls`, a cell's calls as its executor's bound keeps them, in
+/// call order, with `omitted`, the accounting of those it left out, as the
+/// report of the cell whose effect is run `run` of `owner`: one CellReport
+/// fact over its ReportView, in the transaction that checkpoints past the
+/// cell or ends the turn on it (FIG-5330). A crash before this commit
+/// re-delivers the cell, which answers with them again from its root.
+///
+/// # Errors
+///
+/// A ReportView refusal: an accounting that does not encode.
+pub fn report_cell(
+    tx: &mut lash_durable::ActorTx,
+    owner: &OwnerKey,
+    run: RunSeq,
+    calls: &[crate::ToolCallRecord],
+    omitted: Option<&crate::OmittedToolCalls>,
+) -> Result<(), lash_core_store::checkpoint_graph::GraphRefusal> {
+    use lash_core_store::checkpoint_graph::{EncodeBudget, ExplicitLimit, GraphStaging};
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let report = graph::ReportView::stage(&mut staging, calls, omitted)?;
+    tx.stage_all(staging);
+    records::append(
+        tx,
+        owner,
+        run,
+        records::ADMIT_ORDINAL,
+        None,
+        &records::Record::CellReport(report),
+    );
+    Ok(())
 }
 
 /// A store write whose effect is a lash store row, committed in the same
@@ -713,15 +781,38 @@ pub fn admit(
     run: RunSeq,
     drafts: Vec<ExecutionDraft>,
 ) -> Result<Vec<AdmittedExecution>, AdmissionRefusal> {
+    admit_by(tx, owner, run, drafts, Vec::new())
+}
+
+/// [`admit`], the admission record naming each member by its Admission
+/// node in `admissions`, one per draft and staged in `tx`: each holds its
+/// member's pin, which the record then does not copy. An empty
+/// `admissions` writes each pin into the record.
+///
+/// # Errors
+///
+/// As [`admit`], and [`AdmissionRefusal::Admissions`] for a count that is
+/// not the drafts'.
+pub fn admit_by(
+    tx: &mut ActorTx,
+    owner: &OwnerKey,
+    run: RunSeq,
+    drafts: Vec<ExecutionDraft>,
+    admissions: Vec<lash_core_store::checkpoint_graph::NodeId>,
+) -> Result<Vec<AdmittedExecution>, AdmissionRefusal> {
     check_drafts(&drafts)?;
-    tx.write(records::admit_record(owner, run, &drafts));
+    if !admissions.is_empty() && admissions.len() != drafts.len() {
+        return Err(AdmissionRefusal::Admissions {
+            drafts: drafts.len(),
+            admissions: admissions.len(),
+        });
+    }
+    records::admit_record(tx, owner, run, &drafts, admissions);
     let cursor = RunCursor::at(first_start(drafts.len() as u64));
     let mut admitted = Vec::with_capacity(drafts.len());
     for (member, draft) in (0_u64..).zip(drafts) {
         let ordinal = first_start(member);
-        tx.write(records::start_record(
-            owner, run, ordinal, &draft, member, 1,
-        ));
+        records::start_record(tx, owner, run, ordinal, &draft, member, 1);
         admitted.push(AdmittedExecution::admitted(
             AdmittedId {
                 owner: owner.clone(),
@@ -902,22 +993,23 @@ fn record_outcome(
     state: Vec<crate::plugin::StateResolution>,
 ) {
     let id = admitted.id();
-    // A park is no outcome: the call's one `x_outcome` follows it.
-    let kind = if matches!(output, SettledOutput::Waiting(_)) {
-        RunRecordKind::XWait
-    } else {
-        RunRecordKind::XOutcome
+    let body = OutcomeBody {
+        start: id.ordinal.0,
+        output,
+        state,
     };
-    tx.write(append(
+    // A park is no outcome: the call's one `x_outcome` follows it.
+    let record = if matches!(body.output, SettledOutput::Waiting(_)) {
+        Record::Wait(body)
+    } else {
+        Record::Outcome(body)
+    };
+    append(
+        tx,
         &id.owner,
         id.run,
         admitted.cursor().take(),
-        kind,
         Some(admitted.call()),
-        encode(&OutcomeBody {
-            start: id.ordinal.0,
-            output,
-            state,
-        }),
-    ));
+        &record,
+    );
 }

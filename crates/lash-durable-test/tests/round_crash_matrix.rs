@@ -56,7 +56,7 @@ use lash_core_store::tool_run::{
     CompletionSource, KnownFailureReason, MaterialDigest, MaterialLocation, MaterialOwner,
     MaterialRef, MaterialRole,
 };
-use lash_durable::domain::{AdmittedId, OwnerKey, RunRecordKind, RunSeq};
+use lash_durable::domain::{AdmittedId, OwnerKey, RunFactKind, RunSeq};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, MailTx, Release,
@@ -352,11 +352,11 @@ impl RoundOwner {
         let rows = cx
             .durable_reads()
             .map_err(Pass::from)?
-            .run_records(&owner())
+            .run_facts(&owner())
             .await
             .map_err(Pass::from)?;
         let bodies: Arc<dyn MemberBodies> = Arc::clone(&self.bodies) as _;
-        let runner = if rows.iter().any(|row| row.run == RUN) {
+        let runner = if rows.rows.iter().any(|row| row.run == RUN) {
             RoundRunner::resumed(cx, owner(), RUN, self.policies(), bodies)
         } else {
             let now = cx.durable_now().await.map_err(Pass::from)?;
@@ -611,13 +611,14 @@ impl Scenario for RoundScenario {
 
     async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
         let mut violations = Vec::new();
-        let rows = match nodes.database().run_records(&owner()).await {
+        let rows = match nodes.database().run_facts(&owner()).await {
             Ok(rows) => rows,
-            Err(error) => return vec![format!("the run records do not read: {error}")],
+            Err(error) => return vec![format!("the run facts do not read: {error}")],
         };
         *self.outcomes.lock_recover() = rows
+            .rows
             .iter()
-            .filter(|row| row.kind == RunRecordKind::XOutcome)
+            .filter(|row| row.kind == RunFactKind::XOutcome)
             .filter_map(|row| row.call.clone())
             .collect();
         let waits = match round::PinnedWaits::read(nodes.database().as_ref(), &rows).await {
@@ -643,8 +644,9 @@ impl Scenario for RoundScenario {
             &self.tripwire,
         ));
         let committed_starts: BTreeSet<AdmittedId> = rows
+            .rows
             .iter()
-            .filter(|row| row.kind == RunRecordKind::XStart)
+            .filter(|row| row.kind == RunFactKind::XStart)
             .map(|row| AdmittedId {
                 owner: row.owner.clone(),
                 run: row.run,

@@ -12,16 +12,18 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
     turn_cancel_undelivered_wire,
 };
+use lash_durable::domain::graph::OWNER_READ_LIMITS;
+use lash_durable::domain::namespace_value::NamespaceValue;
 use lash_durable::domain::{
-    DomainRefusal, RunValuesWrite, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest,
-    TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
+    DomainRefusal, SessionCommitWrite, StoredValues, TurnCancelAnswer, TurnCancelRequest, TurnEnd,
+    TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
 use lash_store_sql::durable::turns::TurnStatements;
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing, corrupt, integer};
+use super::{Answer, Committing, corrupt, integer, node_ref};
 use crate::conn::cached_execute;
 
 /// `turn_phases`: V0's (FIG-5170) side table of `session_runs`. Each phase
@@ -39,7 +41,10 @@ CREATE TABLE IF NOT EXISTS turn_phases (
         CHECK (phase IN ('admitted', 'model', 'tools')),
     phase_arg INTEGER,
     iteration INTEGER NOT NULL,
-    checkpoint_ref TEXT,
+    -- The phase's PhaseRoot node and the post-cell working SessionExecution
+    -- (FIG-5887 §6, §7).
+    checkpoint_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
+    working_execution_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
     model_request_ref TEXT,
     model_deadline_ms INTEGER,
     model_stream_from TEXT,
@@ -58,16 +63,22 @@ CREATE TABLE IF NOT EXISTS turn_phases (
 );
 
 -- The plugin namespaces an unfinished turn's run changed (FIG-5301): the
--- entry (values address and metadata, JSON) and its matching values body,
--- NULL exactly for base values, dropped with the phase row when the turn ends.
+-- entry (values address and metadata, JSON) and its values, dropped with the
+-- phase row when the turn ends.
 CREATE TABLE IF NOT EXISTS turn_namespaces (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
     plugin TEXT NOT NULL,
     entry TEXT NOT NULL,
-    body BLOB,
+    -- The namespace's NamespaceValue node; NULL exactly for base values
+    -- (FIG-5887 §7).
+    graph_root_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (session_id, run, plugin)
 );
+CREATE INDEX IF NOT EXISTS idx_turn_phases_checkpoint_ref ON turn_phases (checkpoint_ref);
+CREATE INDEX IF NOT EXISTS idx_turn_phases_working_execution_ref
+    ON turn_phases (working_execution_ref);
+CREATE INDEX IF NOT EXISTS idx_turn_namespaces_graph_root_ref ON turn_namespaces (graph_root_ref);
 ";
 
 static SQL: LazyLock<TurnStatements> =
@@ -151,7 +162,7 @@ pub(super) fn apply(
                         stored,
                         argument.map(integer::<i64>).transpose()?,
                         i64::from(*iteration),
-                        phase.checkpoint(),
+                        phase.checkpoint().map(|checkpoint| checkpoint.to_hex()),
                         pin.map(|pin| pin.request_ref.as_str()),
                         pin.map(|pin| pin.deadline.0),
                         commit.epoch.0,
@@ -215,12 +226,42 @@ pub(super) fn apply(
                         run.as_str(),
                         namespace.plugin,
                         entry,
-                        namespace.values.body(),
-                        matches!(namespace.values, RunValuesWrite::Held),
+                        match &namespace.values {
+                            StoredValues::Root(root) => Some(root.to_hex()),
+                            StoredValues::Base | StoredValues::Held => None,
+                        },
+                        matches!(namespace.values, StoredValues::Held),
                     ],
                 )?;
             }
             Ok(Ok(()))
+        }
+        TurnWrite::Working {
+            session,
+            run,
+            expected,
+            working,
+        } => {
+            let set = tx
+                .prepare_cached(SQL.working_set.sql())?
+                .query_row(
+                    rusqlite::params![
+                        session.as_str(),
+                        run.as_str(),
+                        working.map(|working| working.to_hex()),
+                        expected.map(|expected| expected.to_hex()),
+                        commit.epoch.0,
+                    ],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            match set {
+                Some(()) => Ok(Ok(())),
+                None => refuse(DomainRefusal::TurnNotOpen {
+                    session: session.clone(),
+                    run: run.clone(),
+                }),
+            }
         }
         TurnWrite::Terminal {
             session,
@@ -503,19 +544,36 @@ pub(super) fn turn_namespaces(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, Option<Vec<u8>>>(2)?,
+                row.get::<_, Option<String>>(2)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     let mut namespaces = Vec::with_capacity(rows.len());
-    for (plugin, entry, body) in rows {
+    for (plugin, entry, root) in rows {
         let Ok(entry) = serde_json::from_str(&entry) else {
             return Ok(Err(corrupt("turn namespace entry", &plugin)));
+        };
+        let body = match root {
+            None => None,
+            Some(root) => {
+                let root = match node_ref(&root) {
+                    Ok(root) => root,
+                    Err(error) => return Ok(Err(error)),
+                };
+                let nodes = match super::graph::graph_closure(tx, root, &OWNER_READ_LIMITS)? {
+                    Ok(nodes) => nodes,
+                    Err(refusal) => return Ok(Err(DurableError::from(refusal))),
+                };
+                match NamespaceValue::load(&nodes, root, &plugin, OWNER_READ_LIMITS) {
+                    Ok(value) => Some(value.body),
+                    Err(refusal) => return Ok(Err(DurableError::from(refusal))),
+                }
+            }
         };
         namespaces.push(TurnNamespace {
             plugin,
             entry,
-            body: body.map(Into::into),
+            body,
         });
     }
     Ok(Ok(namespaces))
@@ -529,6 +587,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         argument: Option<i64>,
         iteration: i64,
         checkpoint: Option<String>,
+        working: Option<String>,
         request: Option<String>,
         deadline: Option<i64>,
         turn_deadline: Option<i64>,
@@ -547,6 +606,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
                 argument: row.get(3)?,
                 iteration: row.get(4)?,
                 checkpoint: row.get(5)?,
+                working: row.get(13)?,
                 request: row.get(6)?,
                 deadline: row.get(7)?,
                 turn_deadline: row.get(8)?,
@@ -575,8 +635,15 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         .zip(stored.deadline.map(DurableInstant))
         .zip(stored.stream_from)
         .map(|((request, deadline), stream_from)| (request, deadline, stream_from));
-    let Some(phase) =
-        UnfinishedPhase::parse(&stored.phase, argument, stored.checkpoint, pin, model_calls)
+    let checkpoint = match stored.checkpoint.as_deref().map(node_ref).transpose() {
+        Ok(checkpoint) => checkpoint,
+        Err(error) => return Ok(Err(error)),
+    };
+    let working = match stored.working.as_deref().map(node_ref).transpose() {
+        Ok(working) => working,
+        Err(error) => return Ok(Err(error)),
+    };
+    let Some(phase) = UnfinishedPhase::parse(&stored.phase, argument, checkpoint, pin, model_calls)
     else {
         return Ok(Err(corrupt("turn phase", &stored.phase)));
     };
@@ -589,6 +656,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         run,
         admission,
         phase,
+        working,
         iteration,
         model_calls,
         turn_deadline: stored.turn_deadline.map(DurableInstant),
@@ -608,6 +676,12 @@ mod ddl_tests {
 
     fn tables() -> Connection {
         let conn = Connection::open_in_memory().expect("an in-memory database");
+        conn.execute_batch(crate::schema::SCHEMA).expect("blobs");
+        conn.execute(
+            "INSERT INTO blobs (hash, content, encoding) VALUES ('{}', x'00', 1)",
+            [],
+        )
+        .expect("a checkpoint blob");
         conn.execute_batch(super::TABLES).expect("turn_phases");
         conn.execute_batch(crate::schema_fragments::SESSION_RUNS_TABLES)
             .expect("session_runs");

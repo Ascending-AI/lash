@@ -23,7 +23,9 @@ lash_store_sql::statements! {
         /// through `unnest` and spells the same idempotence as
         /// `ON CONFLICT DO NOTHING`. The bytes are content-addressed, so a
         /// conflict is always the same bytes.
-        insert_ignore = "INSERT OR IGNORE INTO blobs (hash, content) VALUES (?1, ?2)";
+        /// Every blob this writer stores is opaque (encoding 0): checkpoint
+        /// graph nodes are installed by the graph commit alone.
+        insert_ignore = "INSERT OR IGNORE INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)";
 
         /// Which of the content addresses in the JSON array `?1` exist.
         ///
@@ -42,40 +44,30 @@ lash_store_sql::statements! {
         /// Reclaim the blob at `?1` once the artifact pointer that named it
         /// is gone, if nothing else roots it.
         ///
-        /// Every predicate is an indexed `NOT EXISTS` over exact edges; no
-        /// whole-catalog mark/sweep runs in this transaction. PostgreSQL has
-        /// no counterpart: its artifact bytes live inline in
-        /// `lash_lash_vm_artifacts` and never reach this table.
+        /// Every predicate is an indexed `NOT EXISTS` over the root catalog
+        /// and the exact edges; no whole-catalog mark/sweep runs in this
+        /// transaction. PostgreSQL has no counterpart: its artifact bytes live
+        /// in `lash_lash_vm_artifacts` and never reach this table.
         reclaim_unreferenced_artifact = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
-               AND NOT EXISTS (SELECT 1 FROM artifact_refs WHERE blob_ref = candidate.hash)
+               AND NOT EXISTS (
+                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
+               )
+               AND NOT EXISTS (SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash)";
 
-               AND NOT EXISTS (SELECT 1 FROM session_revisions WHERE checkpoint_ref = candidate.hash)
-               AND NOT EXISTS (SELECT 1 FROM checkpoint_blob_refs WHERE blob_ref = candidate.hash)";
-
-        /// Reclaim the session-delete candidate `?1` if nothing still roots it.
+        /// Reclaim the session-delete candidate `?1` if nothing still roots it:
+        /// no source of the root catalog names it and no node references it,
+        /// so it is unreachable (FIG-5887 §8). Its own edges go with it.
         ///
-        /// Forks from PostgreSQL's counterpart on the artifact clause: only
-        /// SQLite keeps an `artifact_refs` pointer table. The head table also
-        /// forks by name, `session_head` here and `lash_session_head` there.
+        /// Forks from PostgreSQL's counterpart, which locks its candidates
+        /// first and binds them as an array.
         reclaim_session_candidate = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
-
                AND NOT EXISTS (
-                   SELECT 1 FROM session_revisions AS revision
-                   WHERE revision.checkpoint_ref = candidate.hash
+                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
                )
                AND NOT EXISTS (
-                   SELECT 1 FROM session_meta AS meta
-                   WHERE meta.admission_base_checkpoint_ref = candidate.hash
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM artifact_refs AS artifact
-                   WHERE artifact.blob_ref = candidate.hash
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM checkpoint_blob_refs AS edge
-                   WHERE edge.blob_ref = candidate.hash
+                   SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash
                )";
 
         /// One preflight page of sessions that have published a checkpoint
@@ -87,7 +79,7 @@ lash_store_sql::statements! {
         /// rendered as "no such session". PostgreSQL's walk reads its own
         /// head table, `lash_session_head`, so the two texts fork on the table
         /// name alone.
-        select_session_checkpoint_page = "SELECT session_head.session_id, revision.checkpoint_ref, blobs.content
+        select_session_checkpoint_page = "SELECT session_head.session_id, revision.checkpoint_ref, blobs.content, blobs.encoding
              FROM session_head JOIN session_revisions AS revision
                ON revision.session_id = session_head.session_id
               AND revision.head_revision = session_head.head_revision
@@ -102,6 +94,18 @@ lash_store_sql::statements! {
         /// write lock. PostgreSQL gets the same proof from the row lock its
         /// candidate read takes, so it has no separate existence check.
         select_exists = "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)";
+    }
+}
+
+/// A checkpoint graph refusal on the session path, as the store reports it.
+pub(crate) fn graph_store_error(
+    refusal: lash_core_store::checkpoint_graph::GraphRefusal,
+) -> StoreError {
+    match refusal {
+        lash_core_store::checkpoint_graph::GraphRefusal::Backend(failure) => {
+            StoreError::Backend(failure.message)
+        }
+        refusal => stored_data_corrupt("SessionCheckpoint", refusal),
     }
 }
 
@@ -174,17 +178,6 @@ impl SqliteStore {
         )
         .map_err(sqlite_error)?;
         Ok(())
-    }
-
-    pub(crate) fn put_typed_artifact_blob_conn<T: serde::Serialize>(
-        conn: &Connection,
-        descriptor: BlobArtifactDescriptor,
-        value: &T,
-        profile: BuiltinBlobProfile,
-        fleet: FleetFormat,
-    ) -> Result<BlobRef, StoreError> {
-        let bytes = encode_msgpack(value, "SQLite typed artifact blob")?;
-        Self::insert_artifact_blob_conn_typed(conn, descriptor, &bytes, profile, fleet)
     }
 
     /// Seed an intentionally unrooted artifact for GC and failure-path tests.
@@ -260,29 +253,18 @@ impl SqliteStore {
                 )?;
             }
         }
-        let checkpoint_ref = Self::put_typed_artifact_blob_conn(
-            conn,
-            BlobArtifactDescriptor::checkpoint_manifest(),
-            &manifest,
-            profile,
-            fleet_format,
-        )?;
-        let component_refs_json = encode_json(
-            &manifest
-                .components
-                .values()
-                .map(|descriptor| descriptor.blob_ref.as_str())
-                .collect::<Vec<_>>(),
-        )?;
-        crate::conn::cached_execute(
-            conn,
-            crate::session_sql::session_sql()
-                .checkpoint_edges
-                .insert_batch
-                .sql(),
-            params![checkpoint_ref.as_str(), component_refs_json],
-        )
-        .map_err(sqlite_error)?;
+        // The manifest is a SessionManifest node over its components' opaque
+        // blobs and its SessionExecution root, installed with its edges once
+        // every component exists, beside the execution nodes no earlier
+        // commit installed.
+        let (root, mut nodes) = manifest.to_graph().map_err(graph_store_error)?;
+        if let Some(execution) = &checkpoint.execution {
+            nodes.extend(execution.nodes.iter().map(|(id, node)| (*id, node.clone())));
+        }
+        crate::durable::install_staged(conn, &nodes)
+            .map_err(sqlite_error)?
+            .map_err(graph_store_error)?;
+        let checkpoint_ref = BlobRef(root.to_hex());
         Ok(StoredSessionCheckpoint {
             checkpoint_ref,
             manifest,
@@ -391,18 +373,80 @@ impl SqliteStore {
         bytes.map(|bytes| decode_artifact_blob(&bytes)).transpose()
     }
 
-    /// `fleet` is the store's recorded `F`: the manifest and its component
-    /// encodings admit the `[N-1, N]` reader window `F` names (FIG-3796).
+    /// The SessionManifest node `blob_ref` names with every graph node it
+    /// reaches: its SessionExecution graph among them.
+    fn checkpoint_graph_conn(
+        conn: &Connection,
+        blob_ref: &BlobRef,
+    ) -> Result<Option<(SessionCheckpoint, crate::durable::GraphClosure)>, StoreError> {
+        let Some(root) = lash_core_store::checkpoint_graph::NodeId::from_hex(blob_ref.as_str())
+        else {
+            // No node is stored under a reference that is not a digest: no
+            // row is an absent checkpoint, and a blob stored there is no
+            // manifest.
+            let stored = conn
+                .query_row(
+                    artifact_sql().blobs.select_content.sql(),
+                    params![blob_ref.as_str()],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(sqlite_error)?;
+            return match stored {
+                None => Ok(None),
+                Some(()) => Err(stored_data_corrupt(
+                    "SessionCheckpoint",
+                    format_args!("`{blob_ref}` is not a node reference"),
+                )),
+            };
+        };
+        let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 32);
+        let closure =
+            match crate::durable::graph_closure(conn, root, &limits).map_err(sqlite_error)? {
+                Ok(closure) => closure,
+                Err(lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(missing))
+                    if missing == root =>
+                {
+                    return Ok(None);
+                }
+                Err(refusal) => return Err(graph_store_error(refusal)),
+            };
+        let manifest =
+            SessionCheckpoint::load(&closure, root, limits).map_err(graph_store_error)?;
+        Ok(Some((manifest, closure)))
+    }
+
+    /// `fleet` is the store's recorded `F`: the component encodings admit
+    /// the `[N-1, N]` reader window `F` names (FIG-3796).
     pub(crate) fn get_checkpoint_conn(
         conn: &Connection,
         blob_ref: &BlobRef,
         fleet: lash_core_execution::FleetFormat,
         chunk_size: usize,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
-        let Some(bytes) = Self::get_blob_conn(conn, blob_ref)? else {
+        let Some((record, closure)) = Self::checkpoint_graph_conn(conn, blob_ref)? else {
             return Ok(None);
         };
-        let record = decode_checkpoint_for_fleet(&bytes, fleet)?;
+        let execution = record
+            .execution_ref
+            .as_ref()
+            .map(|root| {
+                let root = lash_core_store::checkpoint_graph::NodeId::from_hex(root.as_str())
+                    .ok_or_else(|| {
+                        stored_data_corrupt(
+                            "SessionCheckpoint",
+                            format_args!("`{root}` is not a node reference"),
+                        )
+                    })?;
+                let nodes = lash_core_store::checkpoint_graph::closure(
+                    &closure,
+                    root,
+                    &lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 32),
+                )
+                .map_err(graph_store_error)?;
+                Ok::<_, StoreError>(lash_core_execution::store::CheckpointExecution { root, nodes })
+            })
+            .transpose()?;
         record.validate_component_encoding_versions_for_fleet(fleet)?;
         let bodies = Self::checkpoint_component_bodies_conn(conn, &record, chunk_size)?;
         let mut components = std::collections::BTreeMap::new();
@@ -424,6 +468,7 @@ impl SqliteStore {
         Ok(Some(HydratedSessionCheckpoint {
             turn_state: record.turn_state,
             components,
+            execution,
         }))
     }
 

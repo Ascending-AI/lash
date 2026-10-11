@@ -455,12 +455,7 @@ pub async fn settle_cancelled(
     run: RunSeq,
 ) -> Result<(), RoundError> {
     let reads = cx.durable_reads()?;
-    let rows: Vec<_> = reads
-        .run_records(owner)
-        .await?
-        .into_iter()
-        .filter(|row| row.run == run)
-        .collect();
+    let rows = reads.run_facts(owner).await?.of_run(run);
     let waits = PinnedWaits::read(reads, &rows).await?;
     let folded = fold(&rows, &PolicyView::default(), &waits)?;
     let Some(view) = folded.round(run) else {

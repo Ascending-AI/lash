@@ -1,4 +1,4 @@
-//! Run records on SQLite: the `run_records` domain's statements, apply and read
+//! Run facts on SQLite: the `run_records` domain's statements, apply and read
 //! (I0, FIG-5194).
 //!
 //! Owned by V0 (FIG-5170), then L4 (FIG-5174). The dispatch in `durable/mod.rs` calls these inside the
@@ -8,14 +8,14 @@
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    DomainRefusal, Ordinal, OwnerKey, RunRecordKind, RunRecordRow, RunRecordWrite, RunSeq,
+    DomainRefusal, Ordinal, OwnerKey, RunFactKind, RunFactRow, RunFactWrite, RunSeq,
 };
 use lash_durable::{DurableError, Epoch};
 use lash_sansio::ToolCallId;
 use lash_store_sql::durable::run_records::RunRecordStatements;
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing, corrupt, integer};
+use super::{Answer, Committing, corrupt, integer, node_ref};
 use crate::conn::cached_execute;
 
 static SQL: LazyLock<RunRecordStatements> =
@@ -28,30 +28,29 @@ CREATE TABLE IF NOT EXISTS run_records (
     run_seq INTEGER NOT NULL,
     ordinal INTEGER NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_run_records_kind
-        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'decide', 'present', 'retry')),
+        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'decide', 'present', 'retry',
+                        'cell_report')),
     call_id TEXT,
-    record_json TEXT NOT NULL,
+    -- The fact's RoundFact node (FIG-5887 §7).
+    record_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     written_epoch INTEGER NOT NULL,
     PRIMARY KEY (owner_key, run_seq, ordinal)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_run_records_outcome
     ON run_records (owner_key, run_seq, call_id)
     WHERE kind = 'x_outcome' AND call_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_run_records_record_ref ON run_records (record_ref);
 ";
 
-pub(super) fn apply(
-    tx: &Connection,
-    commit: &Committing<'_>,
-    write: &RunRecordWrite,
-) -> Answer<()> {
+pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &RunFactWrite) -> Answer<()> {
     match write {
-        RunRecordWrite::Append {
+        RunFactWrite::Append {
             owner,
             run,
             ordinal,
             kind,
             call,
-            record_json,
+            record,
         } => {
             let owner_key = owner.stored();
             let taken = tx
@@ -92,7 +91,7 @@ pub(super) fn apply(
                     })));
                 }
             }
-            if *kind == RunRecordKind::XOutcome
+            if *kind == RunFactKind::XOutcome
                 && let Some(call) = call
             {
                 let exists = tx
@@ -119,13 +118,13 @@ pub(super) fn apply(
                     integer::<i64>(ordinal.0)?,
                     kind.as_str(),
                     call.as_ref().map(ToolCallId::as_str),
-                    record_json,
+                    record.to_hex(),
                     commit.epoch.0,
                 ],
             )?;
             Ok(Ok(()))
         }
-        RunRecordWrite::Prune { owner, before } => {
+        RunFactWrite::Prune { owner, before } => {
             cached_execute(
                 tx,
                 SQL.prune.sql(),
@@ -136,7 +135,7 @@ pub(super) fn apply(
     }
 }
 
-pub(super) fn read(tx: &Connection, owner: &OwnerKey) -> Answer<Vec<RunRecordRow>> {
+pub(super) fn read(tx: &Connection, owner: &OwnerKey) -> Answer<Vec<RunFactRow>> {
     let rows = tx
         .prepare_cached(SQL.read.sql())?
         .query_map([owner.stored()], |row| {
@@ -151,8 +150,8 @@ pub(super) fn read(tx: &Connection, owner: &OwnerKey) -> Answer<Vec<RunRecordRow
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut records = Vec::with_capacity(rows.len());
-    for (run, ordinal, kind, call, record_json, epoch) in rows {
-        let Some(kind) = RunRecordKind::parse(&kind) else {
+    for (run, ordinal, kind, call, record, epoch) in rows {
+        let Some(kind) = RunFactKind::parse(&kind) else {
             return Ok(Err(corrupt("run record kind", &kind)));
         };
         let call = match call {
@@ -162,13 +161,17 @@ pub(super) fn read(tx: &Connection, owner: &OwnerKey) -> Answer<Vec<RunRecordRow
                 Err(_) => return Ok(Err(corrupt("tool call id", &call))),
             },
         };
-        records.push(RunRecordRow {
+        let record = match node_ref(&record) {
+            Ok(record) => record,
+            Err(error) => return Ok(Err(error)),
+        };
+        records.push(RunFactRow {
             owner: owner.clone(),
             run: RunSeq(integer::<u64>(run)?),
             ordinal: Ordinal(integer::<u64>(ordinal)?),
             kind,
             call,
-            record_json,
+            record,
             written_epoch: Epoch(epoch),
         });
     }
@@ -182,6 +185,8 @@ mod tests {
     #[test]
     fn negative_record_identity_is_corruption() {
         let conn = Connection::open_in_memory().expect("open records");
+        conn.execute_batch(crate::schema::SCHEMA)
+            .expect("create blobs");
         conn.execute_batch(TABLES).expect("create records");
         let owner = OwnerKey::Turn("session".into(), "turn".into());
         let actor = lash_durable::ActorKey::session("session").expect("actor");
@@ -192,13 +197,19 @@ mod tests {
             fleet: lash_core_execution::FleetFormat::current(),
             blob_profile: crate::BuiltinBlobProfile::default(),
         };
-        let write = RunRecordWrite::Append {
+        let record = lash_core_store::checkpoint_graph::NodeId([7; 32]);
+        conn.execute(
+            "INSERT INTO blobs (hash, content, encoding) VALUES (?1, x'00', 1)",
+            [record.to_hex()],
+        )
+        .expect("a record blob");
+        let write = RunFactWrite::Append {
             owner: owner.clone(),
             run: RunSeq(u64::MAX),
             ordinal: Ordinal(0),
-            kind: RunRecordKind::Admit,
+            kind: RunFactKind::Admit,
             call: None,
-            record_json: "{}".into(),
+            record,
         };
         assert!(
             !matches!(apply(&conn, &commit, &write), Ok(Ok(()))),
@@ -212,8 +223,10 @@ mod tests {
         );
 
         conn.execute(
-            "INSERT INTO run_records VALUES (?1, -1, 0, 'admit', NULL, '{}', 1)",
-            [owner.stored()],
+            "INSERT INTO run_records
+                 (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
+             VALUES (?1, -1, 0, 'admit', NULL, ?2, 1)",
+            [owner.stored(), record.to_hex()],
         )
         .expect("foreign negative identity");
         let answer = read(&conn, &owner);

@@ -23,7 +23,7 @@ fn definition(name: &str, native: bool) -> FunctionDefinition {
 
 /// A catalog holding one native function, `num.neg`, and one with only a
 /// kernel-code body, `helper.twice`, and the header that names both.
-fn catalog() -> (BTreeMap<FunctionId, FunctionDefinition>, String) {
+pub(crate) fn catalog() -> (BTreeMap<FunctionId, FunctionDefinition>, String) {
     let mut catalog = BTreeMap::new();
     let mut header = String::from("kernel 1\nnumbers float\neffect fetch(url: Text) -> Any\n");
     for (name, native) in [("num.neg", true), ("helper.twice", false)] {
@@ -37,7 +37,7 @@ fn catalog() -> (BTreeMap<FunctionId, FunctionDefinition>, String) {
 
 /// Documents that together use every form, every literal, every type and
 /// every way of naming a thing (`K-TEXT-002`).
-fn every_form_corpus() -> Vec<String> {
+pub(crate) fn every_form_corpus() -> Vec<String> {
     let (_, header) = catalog();
     let id_a = "a".repeat(64);
     let id_b = "b".repeat(64);

@@ -77,10 +77,10 @@ impl RuntimeTurnServices {
     /// including protocol-refused calls settled before dispatch, in admission
     /// order. This reads every step under the turn's owner, so
     /// an owner change or a gap in live activity cannot drop earlier calls.
-    /// A code cell's tool calls are among them: the turn records them as a
-    /// settled round of its own once the cell answers, or when the turn ends
-    /// on the cell (FIG-5330). That round is bounded by the code executor:
-    /// the calls its bound left out are in the omitted-call summary.
+    /// A code cell's tool calls are among them: the turn records them as the
+    /// cell's report once the cell answers, or when the turn ends on the cell
+    /// (FIG-5330). That report is bounded by the code executor: the calls its
+    /// bound left out are in the omitted-call summary.
     /// Cell host operations are not catalog tool calls. Calls that settled
     /// without material have no retained request/output record and remain
     /// accounted for in the omitted-call summary.
@@ -107,15 +107,37 @@ impl RuntimeTurnServices {
         };
         let owner = OwnerKey::Turn(session.clone(), run.clone());
         let reads = cx.durable_reads()?;
-        let rows = reads.run_records(&owner).await?;
-        let waits = round::PinnedWaits::read(reads, &rows).await?;
+        let facts = reads.run_facts(&owner).await?;
+        let waits = round::PinnedWaits::read(reads, &facts).await?;
         // Reporting folds only settled facts and never consults live policies
         // to run a recovery. The empty policy view executes nothing.
-        let fold = round::fold(&rows, &PolicyView::new([]), &waits)
+        let fold = round::fold(&facts, &PolicyView::new([]), &waits)
             .map_err(|error| corrupt(format!("the turn's tool records: {error}")))?;
         let mut calls = Vec::new();
         let mut omitted = None;
-        for round in fold.rounds() {
+        // Rounds and cell reports, in the order of the effects they answer.
+        let mut runs: std::collections::BTreeMap<_, Result<_, _>> = fold
+            .rounds()
+            .map(|round| (round.run(), Ok(round)))
+            .collect();
+        runs.extend(
+            fold.reports()
+                .iter()
+                .map(|(run, report)| (*run, Err(*report))),
+        );
+        for entry in runs.into_values() {
+            let round = match entry {
+                Ok(round) => round,
+                Err(report) => {
+                    let report = round::cell_report(&facts, report)
+                        .map_err(|error| corrupt(format!("a cell's report: {error}")))?;
+                    calls.extend(report.calls);
+                    if let Some(left_out) = report.omitted {
+                        super::session::add_omitted(&mut omitted, left_out);
+                    }
+                    continue;
+                }
+            };
             for member in round.members() {
                 if member.draft().tool().as_str().starts_with("cell-host:") {
                     continue;
@@ -141,12 +163,6 @@ impl RuntimeTurnServices {
                         "call {} has another call's recorded answer",
                         member.call(),
                     )));
-                }
-                if let Some(left_out) =
-                    super::tool_round::omitted_cell_calls(member.draft().tool(), &completed)
-                {
-                    super::session::add_omitted(&mut omitted, left_out);
-                    continue;
                 }
                 calls.push(crate::ToolCallRecord {
                     call_id: completed.call_id,
@@ -238,9 +254,9 @@ impl TurnServices for RuntimeTurnServices {
     async fn resume(
         &self,
         cx: &ActorContext,
-        restore: TurnRestore<'_>,
+        mut restore: TurnRestore<'_>,
     ) -> Result<OpenTurn, TurnError> {
-        let recorded = restore.recorded_preparation()?;
+        let recorded = restore.recorded_preparation().await?;
         let (turn, parts) = self.prepare(cx, restore.row(), Some(recorded)).await?;
         RuntimeDrive::resume(cx, turn, parts, restore).await
     }

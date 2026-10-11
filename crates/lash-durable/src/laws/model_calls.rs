@@ -26,11 +26,31 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
     let owner = node(store, "count-owner").await?;
     let epoch = store.claim(&owner, 1).await?[0].epoch;
     let (actor, id) = (&actor, &id);
+    let nodes = std::sync::Mutex::new(std::collections::BTreeMap::new());
+    let nodes = &nodes;
     let commit = |write: TurnWrite| async move {
         let mut tx = store.begin(actor, epoch).await?;
+        if let TurnWrite::Advance { phase, .. } = &write
+            && let Some(checkpoint) = phase.checkpoint()
+        {
+            let node = nodes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&checkpoint)
+                .cloned();
+            tx.stage(node);
+        }
         tx.write(DomainWrite::Turn(write));
         store.commit(tx, LABEL).await?;
         Ok::<_, LawBroken>(())
+    };
+    let checkpoint = |tag: &str| {
+        let (root, node) = super::tagged_node(tag);
+        nodes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(root, node);
+        root
     };
     let model = |call: u32, attempt: u32| UnfinishedPhase::Model {
         pin: ModelPin {
@@ -40,7 +60,7 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
             deadline: DurableInstant(1_000),
             stream_from: format!("stream-{call}"),
         },
-        checkpoint: format!("checkpoint-{call}-{attempt}"),
+        checkpoint: checkpoint(&format!("checkpoint-{call}-{attempt}")),
     };
     let advance = |phase: UnfinishedPhase| TurnWrite::Advance {
         session: id.clone(),
@@ -79,7 +99,7 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
         (
             UnfinishedPhase::Tools {
                 run: RunSeq(1),
-                checkpoint: "round".to_owned(),
+                checkpoint: checkpoint("round"),
             },
             (1, None),
             "a tool round",

@@ -21,7 +21,9 @@ use lash_vm_broker::kernel::{
 use lash_vm_client::{FrameEpoch, InfrastructureOutcome, OwnerEpoch, RunHost, VmOwner};
 use tokio_util::sync::CancellationToken;
 
-use super::state::{Issued, KernelProcessInput, KernelRunInput, KernelRunOutput};
+use super::state::{
+    Admission, Issued, KernelProcessInput, KernelRunInput, KernelRunOutput, SealedRun,
+};
 use super::{
     EFFECT_ARGUMENTS, EFFECT_UNKNOWN, KernelProcessEngine, KernelProcessFailureCode,
     KernelRecordedSettings, definition_of_entry, failure,
@@ -214,6 +216,8 @@ async fn kernel_run(
     .map_err(|error| RunFault(error.to_string()))?;
     let driven = drive(
         &machines,
+        &run.process,
+        &process_input.document.to_string(),
         input,
         engine.workers.config().tuning.slice,
         &stop,
@@ -263,16 +267,33 @@ async fn kernel_run(
 }
 
 /// Starts or resumes the machine, hands it the settled outcomes and runs
-/// it until it parks or ends. A parked machine answers its exported state.
+/// it until it parks or ends. A parked machine answers its exported state,
+/// bound to `process` and sealed under `document`.
 async fn drive(
     machines: &lash_vm_client::RemoteMachines,
+    process: &ProcessId,
+    document: &str,
     input: KernelRunInput,
     slice: u64,
     stop: &CancellationToken,
-) -> Result<(Step, Option<lash_vm_client::OpaqueVmState>), KernelFailure> {
+) -> Result<(Step, Option<SealedRun>), KernelFailure> {
     let mut machine = match input.parked {
-        Some(parked) => machines.resume(parked).await?,
+        Some(parked) => {
+            machines
+                .resume_sealed(lash_vm_protocol::ParkedGraph {
+                    state: parked.0,
+                    admissions: input
+                        .admissions
+                        .iter()
+                        .map(|admission| lash_vm_client::graph::admission(&admission.0))
+                        .collect(),
+                })
+                .await?
+        }
         None => machines.start().await?,
+    };
+    let binding = lash_core_store::checkpoint_graph::bodies::OwnerBinding::Process {
+        process: process.as_str().to_owned(),
     };
     for delivery in input.deliver {
         machine
@@ -288,9 +309,10 @@ async fn drive(
             Step::Slice if stop.is_cancelled() => return Ok((Step::Slice, None)),
             Step::Slice => {}
             Step::Parked(park) => {
-                let state = machine.export().await?;
+                let state = machine.export(&binding).await?;
                 machine.release().await?;
-                return Ok((Step::Parked(park), Some(state)));
+                let sealed = SealedRun(state.sealed(machines.owner().clone(), document));
+                return Ok((Step::Parked(park), Some(sealed)));
             }
             Step::Ended(end) => {
                 machine.release().await?;
@@ -379,17 +401,29 @@ fn issue(
             let millis = i64::try_from(sleep.duration.as_millis()).unwrap_or(i64::MAX);
             return Issued::Sleep {
                 wait: sleep.wait.0,
-                identity: sleep.identity,
+                admission: Admission(lash_kernel_state::AdmittedWait {
+                    identity: sleep.identity,
+                    request: lash_kernel_state::AdmittedRequest::Sleep {
+                        duration: sleep.duration.into(),
+                    },
+                }),
                 until_ms: now_ms.saturating_add(millis),
             };
         }
         Request::Effect(request) => request,
     };
     let wait = request.wait.0;
+    let admission = Admission(lash_kernel_state::AdmittedWait {
+        identity: request.identity.clone(),
+        request: lash_kernel_state::AdmittedRequest::Effect {
+            effect: request.effect.clone(),
+            args: request.args.clone(),
+        },
+    });
     let Some(effect) = boundary.effect(&request.effect) else {
         return Issued::Refused {
             wait,
-            identity: request.identity,
+            admission,
             kind: EFFECT_UNKNOWN.to_owned(),
             message: format!("the host offers no effect `{}`", request.effect),
         };
@@ -406,13 +440,13 @@ fn issue(
     match input {
         Ok(input) => Issued::Effect {
             wait,
-            identity: request.identity,
+            admission,
             tool: effect.tool.clone(),
             input,
         },
         Err(message) => Issued::Refused {
             wait,
-            identity: request.identity,
+            admission,
             kind: EFFECT_ARGUMENTS.to_owned(),
             message,
         },

@@ -434,53 +434,6 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    /// `checkpoint_blob_refs` statements only SQLite issues.
-    pub(crate) struct CheckpointBlobRefSqliteStatements @ "checkpoint_blob_ref" {
-        /// Record every edge from checkpoint `?1` to the component refs in the
-        /// JSON array `?2`. PostgreSQL binds a text array through `unnest`.
-        insert_batch = "INSERT OR IGNORE INTO checkpoint_blob_refs (checkpoint_ref, blob_ref)
-                 SELECT ?1, CAST(value AS TEXT) FROM json_each(?2)";
-
-        /// Every component of checkpoint `?1`, in hash order, which is the
-        /// order the delete-time blob locks are taken in.
-        select_components = "SELECT blob_ref FROM checkpoint_blob_refs
-                         WHERE checkpoint_ref = ?1 ORDER BY blob_ref";
-
-        /// Sever every edge whose checkpoint no longer has a live root.
-        ///
-        /// Runs before any hash-ordered blob delete: a component can sort
-        /// before its root, and PostgreSQL's foreign key must never be
-        /// weakened to accommodate stale ownership rows, so SQLite matches the
-        /// ordering even though its side is not enforced.
-        delete_unrooted = "DELETE FROM checkpoint_blob_refs AS edge
-             WHERE NOT EXISTS (
-                       SELECT 1 FROM session_revisions AS revision
-                       WHERE revision.checkpoint_ref = edge.checkpoint_ref
-                   )
-               AND NOT EXISTS (
-                       SELECT 1 FROM session_meta AS meta
-                       WHERE meta.admission_base_checkpoint_ref = edge.checkpoint_ref
-                   )";
-
-        /// Sever dead-root edges touching the reclaim candidates in JSON `?1`.
-        ///
-        /// Both outgoing and incoming edges go before any blob delete. The
-        /// rooting predicates match `delete_unrooted`, including admissions.
-        delete_unrooted_for_candidates = "DELETE FROM checkpoint_blob_refs AS edge
-                     WHERE (edge.checkpoint_ref IN (SELECT value FROM json_each(?1))
-                            OR edge.blob_ref IN (SELECT value FROM json_each(?1)))
-                       AND NOT EXISTS (
-                           SELECT 1 FROM session_revisions AS revision
-                           WHERE revision.checkpoint_ref = edge.checkpoint_ref
-                       )
-                       AND NOT EXISTS (
-                           SELECT 1 FROM session_meta AS meta
-                           WHERE meta.admission_base_checkpoint_ref = edge.checkpoint_ref
-                       )";
-    }
-}
-
-lash_store_sql::statements! {
     /// `release_stamp` statements. All of them fork: SQLite's singleton flag
     /// is the integer `1` and PostgreSQL's is `TRUE`, and the write instant is
     /// the opening host's here and the server's there.
@@ -533,8 +486,6 @@ pub(crate) struct SessionSql {
     pub(crate) turn_commits_sqlite: TurnCommitSqliteStatements,
     /// `deleted_sessions` statements only SQLite issues.
     pub(crate) deleted_sqlite: DeletedSessionSqliteStatements,
-    /// `checkpoint_blob_refs` statements only SQLite issues.
-    pub(crate) checkpoint_edges: CheckpointBlobRefSqliteStatements,
     /// `release_stamp` statements only SQLite issues.
     pub(crate) release_stamp: ReleaseStampStatements,
 }
@@ -555,7 +506,6 @@ static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
         turn_commits: TurnCommitStatements::render(dialect),
         turn_commits_sqlite: TurnCommitSqliteStatements::render(dialect),
         deleted_sqlite: DeletedSessionSqliteStatements::render(dialect),
-        checkpoint_edges: CheckpointBlobRefSqliteStatements::render(dialect),
         release_stamp: ReleaseStampStatements::render(dialect),
     }
 });

@@ -267,12 +267,25 @@ impl Activation for PoisonFirst {
                 },
                 turn_deadline: None,
             }));
+            // A phase naming a node that is no PhaseRoot.
+            let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
+                lash_core_store::checkpoint_graph::EncodeBudget::new(
+                    lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
+                ),
+            );
+            let checkpoint = staging
+                .encode_value(
+                    lash_core_store::checkpoint_graph::NodeKind::TURN_CONTENT,
+                    &"not a turn checkpoint".to_owned(),
+                )
+                .expect("the poison node encodes");
+            tx.stage_all(staging);
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session(),
                 run: run(),
                 phase: UnfinishedPhase::Tools {
                     run: lash_durable::domain::RunSeq(1),
-                    checkpoint: "not a turn checkpoint".to_owned(),
+                    checkpoint,
                 },
                 iteration: 0,
             }));

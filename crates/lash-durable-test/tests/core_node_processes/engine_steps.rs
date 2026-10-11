@@ -196,10 +196,10 @@ async fn engine_step_without_the_capability_is_refused_before_admission(tier: Ti
     let rows = deployment
         .backend
         .durable()
-        .run_records(&lash_durable::domain::OwnerKey::Process(process))
+        .run_facts(&lash_durable::domain::OwnerKey::Process(process))
         .await
-        .expect("the process's run records are read");
-    assert!(rows.is_empty(), "no step was admitted: {rows:?}");
+        .expect("the process's run facts are read");
+    assert!(rows.rows.is_empty(), "no step was admitted: {rows:?}");
 }
 
 on_every_tier!(engine_step_without_the_capability_is_refused_before_admission);

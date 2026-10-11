@@ -2,7 +2,9 @@
 //! stands on.
 //!
 //! The machine parks; the engine commits (kernel spec §9 rule 4). The state
-//! holds the run as the machine exported it at its last park, every wait
+//! holds the run as the machine exported it at its last park, as sealed
+//! checkpoint graph state (a KernelWhole), the admission of every wait the
+//! run holds (the state holds a wait as its identity alone), every wait
 //! that park left open with the step or timer that answers it, and the
 //! outcomes that settled while a run was in flight. It is committed with
 //! the admission of the steps a park asked for, in one `process.advance`
@@ -12,10 +14,11 @@ use std::collections::BTreeMap;
 
 use lash_core::StepName;
 use lash_kernel_doc::{Datum, DocumentId, EffectIdentity, Name};
+use lash_kernel_state::AdmittedWait;
 use lash_sansio::ToolId;
-use lash_vm_client::OpaqueVmState;
 use lash_vm_client::wire::OutcomeWire;
-use serde::{Deserialize, Serialize};
+use lash_vm_protocol::{PayloadKind, SealedGraphState};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The engine step that runs the machine from its saved state to its next
 /// park.
@@ -93,6 +96,63 @@ impl KernelProcessDefinition {
     }
 }
 
+/// A parked run as the engine's JSON state carries it: its sealed graph
+/// state in the wire encoding, as base64 text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SealedRun(pub(crate) SealedGraphState);
+
+impl Serialize for SealedRun {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let payload = lash_vm_client::wire::encode(PayloadKind::ParkedRun, &self.0)
+            .map_err(serde::ser::Error::custom)?;
+        serializer.serialize_str(&BASE64.encode(payload.0))
+    }
+}
+
+impl<'de> Deserialize<'de> for SealedRun {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        let bytes = BASE64.decode(text).map_err(serde::de::Error::custom)?;
+        lash_vm_client::wire::decode(
+            PayloadKind::ParkedRun,
+            &lash_vm_protocol::EncodedPayload(bytes),
+        )
+        .map(Self)
+        .map_err(serde::de::Error::custom)
+    }
+}
+
+/// The admission of one wait the run holds: the request the state does not
+/// carry, in the kernel's binary encoding, as base64 text.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Admission(pub(crate) AdmittedWait);
+
+impl Admission {
+    pub(crate) fn identity(&self) -> &EffectIdentity {
+        &self.0.identity
+    }
+}
+
+impl Serialize for Admission {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer
+            .serialize_str(&BASE64.encode(lash_kernel_doc::graph_tokens::encode_body(&self.0)))
+    }
+}
+
+impl<'de> Deserialize<'de> for Admission {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        let bytes = BASE64.decode(text).map_err(serde::de::Error::custom)?;
+        lash_kernel_doc::graph_tokens::decode_body(&bytes)
+            .map(Self)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+use base64::Engine as _;
+const BASE64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
+
 /// One outcome the machine has not been handed in a committed state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -142,7 +202,11 @@ pub(crate) struct KernelEngineState {
     /// The run as the machine exported it at its last park; `None` before
     /// the first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) parked: Option<OpaqueVmState>,
+    pub(crate) parked: Option<SealedRun>,
+    /// The admission of every wait the parked run holds, by the machine's
+    /// wait id, until a committed run has been handed its outcome.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) admissions: BTreeMap<u64, Admission>,
     /// How many `kernel_run` steps the process has asked for.
     pub(crate) runs: u64,
     /// How many effect steps the process has asked for.
@@ -163,13 +227,16 @@ pub(crate) struct KernelEngineState {
 pub(crate) struct KernelRunInput {
     pub(crate) payload: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) parked: Option<OpaqueVmState>,
+    pub(crate) parked: Option<SealedRun>,
+    /// The admission of each wait the parked run holds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) admissions: Vec<Admission>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) deliver: Vec<Delivery>,
 }
 
 /// One wait the machine asked for at a park, as the step resolved it
-/// against the host boundary.
+/// against the host boundary, with its admission.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Issued {
@@ -177,7 +244,7 @@ pub(crate) enum Issued {
     /// the tool's input.
     Effect {
         wait: u64,
-        identity: EffectIdentity,
+        admission: Admission,
         tool: ToolId,
         input: serde_json::Value,
     },
@@ -185,16 +252,34 @@ pub(crate) enum Issued {
     /// `perform`, which the guest may catch, and nothing is dispatched.
     Refused {
         wait: u64,
-        identity: EffectIdentity,
+        admission: Admission,
         kind: String,
         message: String,
     },
     /// A `sleep`.
     Sleep {
         wait: u64,
-        identity: EffectIdentity,
+        admission: Admission,
         until_ms: i64,
     },
+}
+
+impl Issued {
+    pub(crate) fn wait(&self) -> u64 {
+        match self {
+            Self::Effect { wait, .. } | Self::Refused { wait, .. } | Self::Sleep { wait, .. } => {
+                *wait
+            }
+        }
+    }
+
+    pub(crate) fn admission(&self) -> &Admission {
+        match self {
+            Self::Effect { admission, .. }
+            | Self::Refused { admission, .. }
+            | Self::Sleep { admission, .. } => admission,
+        }
+    }
 }
 
 /// What one `kernel_run` answers.
@@ -204,7 +289,7 @@ pub(crate) enum KernelRunOutput {
     /// The run parked: its exported state, the waits it asked for since
     /// its last park and the waits it withdrew.
     Parked {
-        state: OpaqueVmState,
+        state: SealedRun,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         issued: Vec<Issued>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -3,13 +3,16 @@ use lash_core::{
     EngineAction, EngineEvent, EngineState, Material, SettledOutput, StepName, StepRequest,
 };
 use lash_kernel_doc::{DocumentId, EffectIdentity, Site, TaskIdentity, Unit};
+use lash_vm_client::VmOwner;
 use lash_vm_client::wire::OutcomeWire;
-use lash_vm_client::{OpaqueVmState, VmOwner};
 
 use super::advance::{advance, decode, state_format};
-use super::state::{Issued, KERNEL_RUN_STEP, KernelRunInput, KernelRunOutput, Phase, refused};
+use super::state::{
+    Admission, Issued, KERNEL_RUN_STEP, KernelRunInput, KernelRunOutput, Phase, SealedRun, refused,
+};
 use lash_kernel_doc::KernelVersion;
-use lash_kernel_state::{ParkedRun, Run};
+use lash_kernel_state::{AdmittedRequest, AdmittedWait, ParkedRun, Run};
+use lash_vm_broker::kernel::state::{OpenedRun, capture_whole};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn process() -> lash_core::ProcessId {
@@ -26,10 +29,15 @@ fn completed(text: String) -> SettledOutput {
     ))
 }
 
-/// A parked run sealed under this build's kernel version, whose bytes state
-/// kernel version `stated`: what a worker exports when `stated` is the
-/// seal's version.
-fn sealed(stated: u32) -> OpaqueVmState {
+/// A parked run of this build's kernel version as sealed graph state: what
+/// a worker exports.
+fn sealed() -> SealedRun {
+    sealed_stating(crate::LASH_KERNEL_VERSION)
+}
+
+/// A parked run whose whole states kernel version `stated`, sealed under
+/// this build's.
+fn sealed_stating(stated: u32) -> SealedRun {
     let document = DocumentId::from_bytes([7; 32]);
     let run = ParkedRun {
         run: Run {
@@ -47,18 +55,153 @@ fn sealed(stated: u32) -> OpaqueVmState {
         tasks: Vec::new(),
         objects: BTreeMap::new(),
     };
-    OpaqueVmState::seal(
-        VmOwner::new("process:law"),
-        crate::LASH_KERNEL_VERSION,
-        document.to_string(),
-        run.to_json().expect("a parked run serializes"),
+    let whole = capture_whole(
+        &OpenedRun {
+            run,
+            release: super::migrate::current_release().expect("the build holds a release"),
+            binding: lash_core_store::checkpoint_graph::bodies::OwnerBinding::Process {
+                process: "law".to_owned(),
+            },
+        },
+        u64::MAX,
     )
+    .expect("a parked run stages");
+    let whole = lash_vm_broker::kernel::state::WholeState {
+        kernel: crate::LASH_KERNEL_VERSION,
+        ..whole
+    };
+    SealedRun(whole.sealed(VmOwner::new("process:law"), &document.to_string()))
+}
+
+/// KMIGRATE's stale-seal check (FIG-5793) where a process opens its parked
+/// run: a run whose whole states another kernel version than the one it is
+/// sealed under is refused, and one that states its seal's opens.
+#[test]
+fn a_parked_run_whose_whole_states_another_kernel_version_than_its_seal_is_refused_at_open() {
+    let base = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
+    let open = |run: &SealedRun| {
+        let whole = super::migrate::unsealed(run).expect("the sealed run is whole");
+        super::migrate::open_run(&whole, &[], &base).map(drop)
+    };
+    open(&sealed()).expect("a run that states its seal opens");
+    let refused = open(&sealed_stating(crate::LASH_KERNEL_VERSION + 1))
+        .expect_err("a run that states another kernel version is refused");
+    assert!(
+        refused.contains(&format!(
+            "sealed under kernel version {}, and its whole states {}",
+            crate::LASH_KERNEL_VERSION,
+            crate::LASH_KERNEL_VERSION + 1
+        )),
+        "{refused}"
+    );
+}
+
+/// FIG-5793's saved-process coverage, with the graph decoder's open boundary:
+/// every process phase that retains a run can reopen its sealed graph, and
+/// refuses one whose whole states a different kernel version than its seal.
+#[test]
+fn every_engine_state_holding_a_run_is_read_against_its_seal() {
+    let mut written = Vec::new();
+    let (state, run0) = started();
+    let (state, action) = settle(
+        state,
+        &run0,
+        parked(
+            vec![
+                effect(1, element(0)),
+                Issued::Sleep {
+                    wait: 2,
+                    admission: admitted(element(1)),
+                    until_ms: 5_000,
+                },
+            ],
+            vec![],
+        ),
+    );
+    written.push(state.clone());
+    let EngineAction::Steps { steps, .. } = &action else {
+        panic!("a park on an effect asks for its step, found {action:?}");
+    };
+    let effect_step = steps[0].step().clone();
+    let (state, action) = settle(state, &effect_step, completed("\"a\"".to_owned()));
+    let (run1, _, _) = run_of(&action);
+    written.push(state.clone());
+    let (state, action) = settle(state, &run1, parked(vec![], vec![]));
+    assert!(matches!(action, EngineAction::Sleep { .. }));
+    written.push(state.clone());
+    let (state, action) =
+        advance(KernelVersion::NEWEST, state, EngineEvent::Woke).expect("a wake advances");
+    let (run2, _, _) = run_of(&action);
+    written.push(state.clone());
+    let outcome = lash_core::ProcessAwaitOutput::from_tool_output(
+        lash_core::ToolCallOutput::success(serde_json::json!("done")),
+    );
+    let (state, _) = settle(
+        state,
+        &run2,
+        completed(
+            serde_json::to_string(&KernelRunOutput::Ended {
+                outcome: Box::new(outcome),
+            })
+            .expect("a run output serializes"),
+        ),
+    );
+    written.push(state);
+
+    let phases = |phase: &Phase| match phase {
+        Phase::Running { .. } => "running",
+        Phase::Parked => "parked",
+        Phase::Ended => "ended",
+    };
+    let base = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
+    let mut seen = Vec::new();
+    for state in written {
+        let (mut decoded, _) = decode(KernelVersion::NEWEST, &state)
+            .unwrap_or_else(|error| panic!("a written state decodes: {error:?}"));
+        assert!(decoded.parked.is_some(), "the state holds its run");
+        seen.push(phases(&decoded.phase));
+
+        decoded.parked = Some(sealed_stating(crate::LASH_KERNEL_VERSION + 1));
+        let stale =
+            super::advance::encode(&decoded, KernelVersion::NEWEST).expect("a state encodes");
+        let (decoded, _) = decode(KernelVersion::NEWEST, &stale)
+            .unwrap_or_else(|error| panic!("the saved process state decodes: {error:?}"));
+        let whole =
+            super::migrate::unsealed(decoded.parked.as_ref().expect("the state holds its run"))
+                .expect("the sealed run is a whole state");
+        let refused = super::migrate::open_run(&whole, &[], &base)
+            .expect_err("a run whose whole states another version is refused");
+        assert!(
+            refused.contains(&format!(
+                "sealed under kernel version {}, and its whole states {}",
+                crate::LASH_KERNEL_VERSION,
+                crate::LASH_KERNEL_VERSION + 1
+            )),
+            "{refused}"
+        );
+    }
+    assert_eq!(
+        seen,
+        vec!["parked", "running", "parked", "running", "ended"],
+        "every process phase that holds a run is read"
+    );
+}
+
+/// The admission of a `perform` of `fetch` at `identity`.
+fn admitted(identity: EffectIdentity) -> Admission {
+    Admission(AdmittedWait {
+        identity,
+        request: AdmittedRequest::Effect {
+            effect: lash_kernel_doc::EffectName::new("fetch").expect("a name"),
+            args: Vec::new(),
+        },
+    })
 }
 
 fn parked(issued: Vec<Issued>, withdrawn: Vec<u64>) -> SettledOutput {
     completed(
         serde_json::to_string(&KernelRunOutput::Parked {
-            state: sealed(crate::LASH_KERNEL_VERSION),
+            state: sealed(),
             issued,
             withdrawn,
         })
@@ -87,7 +230,7 @@ fn element(element: u64) -> EffectIdentity {
 fn effect(wait: u64, identity: EffectIdentity) -> Issued {
     Issued::Effect {
         wait,
-        identity,
+        admission: admitted(identity),
         tool: lash_sansio::ToolId::new("tool:fetch"),
         input: serde_json::json!({ "wait": wait }),
     }
@@ -156,7 +299,8 @@ fn started() -> (EngineState, StepName) {
 /// (the task component tells the elements apart), and each outcome is
 /// handed to the machine as it settles, in whatever order: one that settles
 /// while a run is in flight is handed to the next run, and none is handed
-/// twice.
+/// twice. Each run resumes with the admission of every wait the parked run
+/// still holds, and no other: the state holds a wait as its identity alone.
 #[test]
 fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order() {
     let (state, run0) = started();
@@ -189,6 +333,14 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         vec![11]
     );
     assert!(input.parked.is_some());
+    let held = |input: &KernelRunInput| {
+        input
+            .admissions
+            .iter()
+            .map(|admission| admission.identity().clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(held(&input), vec![element(0), element(1)]);
 
     // The first settles while that run is in flight: nothing new is asked.
     let (state, action) = settle(state, &first, completed("\"a\"".to_owned()));
@@ -201,6 +353,11 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     assert_eq!(
         input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
         vec![10]
+    );
+    assert_eq!(
+        held(&input),
+        vec![element(0)],
+        "a consumed wait's admission goes"
     );
     assert_eq!(
         input.deliver[0].outcome,
@@ -245,13 +402,13 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
                 effect(1, element(0)),
                 Issued::Refused {
                     wait: 2,
-                    identity: element(1),
+                    admission: admitted(element(1)),
                     kind: super::EFFECT_UNKNOWN.to_owned(),
                     message: "no such effect".to_owned(),
                 },
                 Issued::Sleep {
                     wait: 3,
-                    identity: element(2),
+                    admission: admitted(element(2)),
                     until_ms: 5_000,
                 },
             ],
@@ -299,93 +456,5 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
             .map(|d| (d.wait, d.outcome.clone()))
             .collect::<Vec<_>>(),
         vec![(3, OutcomeWire::Elapsed)]
-    );
-}
-
-/// KMIGRATE's stale-seal check at every engine state that holds a run
-/// (FIG-5793): a process's decode reads the kernel version the parked
-/// run's bytes state in each state the transitions write with a run in it
-/// (parked on a step and a timer, a run in flight, asleep on the timer,
-/// ended) and accepts it under its seal, and refuses each one whose bytes
-/// state another version than the seal.
-#[test]
-fn every_engine_state_holding_a_run_is_read_against_its_seal() {
-    let mut written = Vec::new();
-    let (state, run0) = started();
-    let (state, action) = settle(
-        state,
-        &run0,
-        parked(
-            vec![
-                effect(1, element(0)),
-                Issued::Sleep {
-                    wait: 2,
-                    identity: element(1),
-                    until_ms: 5_000,
-                },
-            ],
-            vec![],
-        ),
-    );
-    written.push(state.clone());
-    let EngineAction::Steps { steps, .. } = &action else {
-        panic!("a park on an effect asks for its step, found {action:?}");
-    };
-    let effect_step = steps[0].step().clone();
-    let (state, action) = settle(state, &effect_step, completed("\"a\"".to_owned()));
-    let (run1, _, _) = run_of(&action);
-    written.push(state.clone());
-    let (state, action) = settle(state, &run1, parked(vec![], vec![]));
-    assert!(matches!(action, EngineAction::Sleep { .. }));
-    written.push(state.clone());
-    let (state, action) =
-        advance(KernelVersion::NEWEST, state, EngineEvent::Woke).expect("a wake advances");
-    let (run2, _, _) = run_of(&action);
-    written.push(state.clone());
-    let outcome = lash_core::ProcessAwaitOutput::from_tool_output(
-        lash_core::ToolCallOutput::success(serde_json::json!("done")),
-    );
-    let (state, _) = settle(
-        state,
-        &run2,
-        completed(
-            serde_json::to_string(&KernelRunOutput::Ended {
-                outcome: Box::new(outcome),
-            })
-            .expect("a run output serializes"),
-        ),
-    );
-    written.push(state);
-
-    let phases = |phase: &Phase| match phase {
-        Phase::Running { .. } => "running",
-        Phase::Parked => "parked",
-        Phase::Ended => "ended",
-    };
-    let mut seen = Vec::new();
-    for state in written {
-        let (mut decoded, _) = decode(KernelVersion::NEWEST, &state)
-            .unwrap_or_else(|error| panic!("a written state decodes: {error:?}"));
-        assert!(decoded.parked.is_some(), "the state holds its run");
-        seen.push(phases(&decoded.phase));
-
-        decoded.parked = Some(sealed(crate::LASH_KERNEL_VERSION + 1));
-        let stale =
-            super::advance::encode(&decoded, KernelVersion::NEWEST).expect("a state encodes");
-        let refused = decode(KernelVersion::NEWEST, &stale)
-            .expect_err("a run whose bytes state another version is refused");
-        assert!(
-            format!("{refused:?}").contains(&format!(
-                "sealed under kernel version {}, and its bytes state kernel version {}",
-                crate::LASH_KERNEL_VERSION,
-                crate::LASH_KERNEL_VERSION + 1
-            )),
-            "{refused:?}"
-        );
-    }
-    assert_eq!(
-        seen,
-        vec!["parked", "running", "parked", "running", "ended"],
-        "every kind of state that holds a run is read"
     );
 }

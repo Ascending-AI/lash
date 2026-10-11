@@ -254,7 +254,6 @@ fn stamp_compat(path: &std::path::Path, version: i64, min_reader: i64) {
 mod walk {
     use lash_core_execution::{
         DurablePayload, DurableScan, DurableSurface, ScanCoverage, StorePreflight,
-        store::EXECUTION_STATE_CHECKPOINT_COMPONENT,
     };
     use lash_core_execution::{ProcessLifecycle as _, ProcessRegistrar as _};
     use lash_sansio::ProcessId;
@@ -473,6 +472,10 @@ mod walk {
             .await
             .expect("provision durable core");
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
+        // The foreign key the schema declares is what keeps the store from
+        // writing this; foreign data does not ask it.
+        raw.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("write foreign data");
         raw.execute(
             "INSERT INTO session_revisions (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
              VALUES ('orphaned', '{}', 0, NULL, 'missing-checkpoint-manifest')",
@@ -511,7 +514,7 @@ mod walk {
             .expect("provision durable core");
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
         raw.execute(
-            "INSERT INTO blobs (hash, content) VALUES ('bare-checkpoint', ?1)",
+            "INSERT INTO blobs (hash, content, encoding) VALUES ('bare-checkpoint', ?1, 0)",
             rusqlite::params![b"bare blob body".to_vec()],
         )
         .expect("install a bare checkpoint blob");
@@ -533,34 +536,38 @@ mod walk {
         assert_eq!(page.items.len(), 1, "{page:?}");
         match &page.items[0].payload {
             DurablePayload::Missing { reason } => {
-                assert!(reason.contains("artifact blob envelope"), "{reason}");
+                assert!(reason.contains("not a SessionManifest node"), "{reason}");
             }
             other => panic!("expected a Missing payload, got {other:?}"),
         }
     }
 
     #[tokio::test]
-    async fn a_real_checkpoint_yields_logical_manifest_and_execution_state_bytes() {
-        // Written through the store's own commit path so the bytes carry the
-        // real envelope framing, which is what makes "logical bytes" a claim
-        // worth asserting: the walk must strip this crate's storage wrapper and
-        // hand back what the format manifest describes.
+    async fn a_real_checkpoint_yields_its_manifest_and_execution_root_nodes() {
+        // Written through the store's own commit path, so the bytes are the
+        // graph nodes the store installed: the manifest node names its
+        // execution root, and the walk hands back that root's node.
         let root = super::temp_root();
         let core = root.path().join("lash.db");
         let store = SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
-        let body = rmp_serde::to_vec_named(&serde_json::json!({"execution": "state"}))
-            .expect("encode an execution-state component");
-        let mut components = std::collections::BTreeMap::new();
-        components.insert(
-            EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
-            lash_core_execution::HydratedCheckpointComponent::changed(body.clone()),
-        );
+        let lash_core_execution::plugin::ExecutionGraphCapture::Replace {
+            root: execution_root,
+            nodes,
+        } = lash_core_store::testing::store_fixtures::execution_graph("execution state")
+        else {
+            unreachable!("the fixture stages a root")
+        };
+        let execution_bytes = nodes[&execution_root].bytes.to_vec();
         let stored = store
             .put_checkpoint(&lash_core_execution::HydratedSessionCheckpoint {
                 turn_state: lash_core_execution::PersistedTurnState::default(),
-                components,
+                components: std::collections::BTreeMap::new(),
+                execution: Some(lash_core_execution::store::CheckpointExecution {
+                    root: execution_root,
+                    nodes,
+                }),
             })
             .await
             .expect("commit a checkpoint");
@@ -587,22 +594,17 @@ mod walk {
             .expect("walk session checkpoints");
         assert_eq!(manifests.items.len(), 1, "{:?}", manifests.items);
         match &manifests.items[0].payload {
-            DurablePayload::MessagePack(bytes) => {
-                // Logical bytes, not the stored envelope: the manifest decodes
-                // on its own, which the wrapped form would not.
-                let decoded: serde_json::Value =
-                    rmp_serde::from_slice(bytes).expect("the manifest's logical bytes decode");
-                assert!(
-                    decoded
-                        .get("components")
-                        .and_then(|components| {
-                            components.get(EXECUTION_STATE_CHECKPOINT_COMPONENT)
-                        })
-                        .is_some(),
-                    "{decoded:?}"
-                );
+            DurablePayload::GraphNode(bytes) => {
+                let node = lash_core_store::checkpoint_graph::EncodedNode {
+                    id: lash_core_store::checkpoint_graph::NodeId::of_envelope(bytes),
+                    bytes: std::sync::Arc::from(bytes.as_slice()),
+                };
+                assert_eq!(node.id.to_hex(), stored.checkpoint_ref.as_str());
+                let named = lash_core_execution::store::SessionCheckpoint::named(&node)
+                    .expect("the manifest node reads");
+                assert_eq!(named.execution, Some(execution_root), "{named:?}");
             }
-            other => panic!("expected the manifest bytes, got {other:?}"),
+            other => panic!("expected the manifest node, got {other:?}"),
         }
 
         let execution_state = preflight
@@ -620,8 +622,8 @@ mod walk {
         );
         assert_eq!(
             execution_state.items[0].payload,
-            DurablePayload::MessagePack(body),
-            "the component's logical bytes travel unchanged"
+            DurablePayload::GraphNode(execution_bytes),
+            "the root node's bytes travel unchanged"
         );
         assert_eq!(
             execution_state.items[0].cursor, "published",
@@ -649,6 +651,7 @@ mod walk {
             .put_checkpoint(&lash_core_execution::HydratedSessionCheckpoint {
                 turn_state: lash_core_execution::PersistedTurnState::default(),
                 components,
+                execution: None,
             })
             .await
             .expect("commit a checkpoint");

@@ -162,11 +162,11 @@ async fn helper_session(
     let reads = backend.durable();
     let mut cells = Vec::new();
     if let Some(turn) = reads.turn(&session).await? {
-        for cell in reads.cell_snapshots(&session, &turn.run).await? {
+        for cell in crate::kernel_migration::stored_cells(&**reads, &session, &turn.run).await? {
             let lash_core::durable_port::domain::ExecKey::Cell(_, _, id) = &cell.exec else {
                 continue;
             };
-            if lash_protocol_rlm::cell_snapshot_functions(&cell.snapshot_ref).is_some_and(reaches) {
+            if lash_protocol_rlm::cell_snapshot_functions(&cell).is_some_and(reaches) {
                 cells.push(id.as_str().to_owned());
             }
         }
@@ -183,7 +183,7 @@ async fn helper_session(
         .map(|loaded| loaded.state.execution_state_hydration())
         .transpose()?
         .flatten()
-        && let Ok(pins) = lash_protocol_rlm::saved_function_pins(&hydrated.root)
+        && let Ok(pins) = lash_protocol_rlm::saved_function_pins(&hydrated)
     {
         saved.extend(
             pins.into_iter()

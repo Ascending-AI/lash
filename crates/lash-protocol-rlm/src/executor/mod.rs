@@ -16,8 +16,9 @@ mod carry;
 mod cell_outputs;
 use cell_outputs::record_cell_outputs;
 mod cell_run;
-mod envelope;
+pub(crate) mod envelope;
 mod host;
+pub(crate) mod host_graph;
 mod processes;
 mod session;
 mod snapshot;
@@ -131,7 +132,7 @@ pub(crate) async fn execute_cell(
     let prints = Arc::new(Mutex::new(
         resumed
             .as_ref()
-            .map(|resumed| resumed.state.prints.clone())
+            .map(|resumed| resumed.prints.clone())
             .unwrap_or_default(),
     ));
     let mut response = Box::pin(run_cell(
@@ -216,9 +217,10 @@ struct LinkedCell {
     /// starts with them.
     start: Bindings,
     ledgers: CellHostLedgers,
-    /// The requests of the calls a resumed cell's ledger holds open.
-    open_calls: Vec<lash_vm_protocol::EncodedPayload>,
-    /// The effect identity each of those calls was performed at.
+    /// The host graph a resumed cell's root holds.
+    graph: host::HostGraph,
+    /// The effect identity each call a resumed cell holds open was
+    /// performed at.
     open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectIdentity>,
     resumed: bool,
 }
@@ -262,8 +264,8 @@ async fn link_cell(
         // A resumed cell runs what its first activation admitted: the
         // envelope carries the document and everything it was lowered
         // against, and nothing here is journaled or lowered again.
-        resumed.state.restore_context(ctx);
-        let envelope = resumed.state.cell;
+        ctx.restore_started_process_ids(&resumed.started_process_ids);
+        let envelope = resumed.cell;
         if envelope.dialect != state.dialect() {
             return Err(host_failure(format!(
                 "the cell was parked as `{}` and this session's dialect is `{}`",
@@ -277,8 +279,8 @@ async fn link_cell(
             envelope,
             // The machine resumes from its parked state, not from a start.
             start: Bindings::default(),
-            ledgers: resumed.state.host,
-            open_calls: resumed.open_calls,
+            ledgers: resumed.ledgers,
+            graph: resumed.graph,
             open_sites: resumed.open_sites,
             resumed: true,
         });
@@ -463,7 +465,7 @@ async fn link_cell(
         boundary,
         start,
         ledgers: CellHostLedgers::default(),
-        open_calls: Vec::new(),
+        graph: host::HostGraph::default(),
         open_sites: BTreeMap::new(),
         resumed: false,
     })
@@ -570,34 +572,6 @@ async fn run_cell(
                 );
             }
         };
-    for open in &linked.open_calls {
-        match lash_core::tool_dispatch::CellMember::decode(&open.0) {
-            // An open call this node cannot run is not taken up: the cell
-            // stops unrecorded, and its turn waits for a node that can.
-            Ok(member) => match members.require_capable(&member) {
-                Ok(()) => members.register(member),
-                Err(error) => {
-                    let message = error.to_string();
-                    ctx.record_nested_runtime_effect_error(error);
-                    return exec_setup_failure_or_stop(
-                        state,
-                        &ctx,
-                        lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
-                    );
-                }
-            },
-            Err(error) => {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailure::new(
-                        lash_core::CellFailureKind::Host,
-                        format!("an open call of the cell cannot be read: {error}"),
-                    ),
-                );
-            }
-        }
-    }
     snapshots
         .bind_members(Arc::clone(&members) as _, members.policies())
         .await;
@@ -622,9 +596,9 @@ async fn run_cell(
         boundary,
         start,
         ledgers,
+        graph,
         open_sites,
         resumed: runs_on,
-        ..
     } = linked;
     let projected = envelope.projected.clone();
     let annotations =
@@ -677,6 +651,7 @@ async fn run_cell(
         prints: Arc::clone(&prints),
         ledgers: Mutex::new(ledgers),
         envelope,
+        graph: Mutex::new(graph),
     };
     let printed = Arc::clone(&prints);
     let random = std::collections::hash_map::RandomState::new();
@@ -730,6 +705,16 @@ async fn run_cell(
     .run(&machines, &ctx.cancellation())
     .await;
 
+    // A run that parked owes its end over its root: recorded once the
+    // session adopted what the cell left, so the end names that state.
+    let owed = match &run {
+        Ok(KernelEnd::Ended {
+            end,
+            owed: Some(ledger),
+        }) => Some((ledger.as_ref().clone(), end.clone())),
+        _ => None,
+    };
+    let document_id = document_identity.clone();
     // The rest answers the cell from what the run left; the execution's
     // terminal fact follows its answer.
     let answer = || -> ExecResponse {
@@ -741,7 +726,7 @@ async fn run_cell(
             )))
         };
         let end = match run {
-            Ok(KernelEnd::Ended(end)) => end,
+            Ok(KernelEnd::Ended { end, .. }) => end,
             // The cell stays parked on waits that outlive this activation: its
             // checkpoint, committed with its envelope, holds everything the
             // cell holds, and the cell has no answer yet.
@@ -776,12 +761,9 @@ async fn run_cell(
         }
         match end {
             End::Finished(finished) => {
-                let document = match document_identity {
-                    Ok(document) => document,
-                    Err(error) => {
-                        return failed(lash_core::CellFailureKind::Host, error.to_string());
-                    }
-                };
+                if let Err(error) = document_identity {
+                    return failed(lash_core::CellFailureKind::Host, error.to_string());
+                }
                 let mut left = finished.bindings;
                 // A process the cell bound or answered with leaves it as its
                 // definition.
@@ -796,7 +778,6 @@ async fn run_cell(
                     .retain(|name, _| !projected.contains(name.as_str()));
                 let bindings = state.settle_cell(session::CellLeft {
                     document: &host.entries.document,
-                    identity: document,
                     annotations: annotations.as_ref(),
                     bindings: left,
                     not_carried: finished.not_carried,
@@ -862,7 +843,16 @@ async fn run_cell(
             ),
         }
     };
-    let response = answer();
+    let mut response = answer();
+    if let Some((ledger, end)) = owed {
+        let recorded = match document_id {
+            Ok(document) => record_end(state, snapshots, &host, document, ledger, end).await,
+            Err(error) => Err(KernelFailure::Document(error)),
+        };
+        if let Err(failure) = recorded {
+            response = broker_failure(state, &ctx, failure, runs_on, &host.ledgers());
+        }
+    }
     if let Some(trace) = &host.trace
         && !response.suspended
     {
@@ -875,6 +865,51 @@ async fn run_cell(
         }
     }
     response
+}
+
+/// Commits the end of a cell that parked over its root: the run's terminal,
+/// the session's working state as the cell left it, the host's state and
+/// envelope, in one CellEnd (FIG-5887 §6). The turn's consuming phase
+/// adopts the working state and retires the root.
+async fn record_end(
+    state: &mut CodeModeExecutionState,
+    snapshots: &lash_vm_broker::DurableSnapshotStore,
+    host: &CellHost<'_>,
+    document: lash_kernel_doc::DocumentId,
+    ledger: lash_vm_broker::kernel::EffectLedger,
+    end: End,
+) -> Result<(), KernelFailure> {
+    use lash_core_store::execution_state::{ExecutionGraphCapture, ExecutionGraphPurpose};
+    let refused =
+        |message: String| KernelFailure::Checkpoint(lash_vm_broker::QuietPointRefusal(message));
+    let ExecutionGraphCapture::Replace { root, nodes } = state
+        .capture_execution_graph(ExecutionGraphPurpose::Working)
+        .map_err(|error| refused(error.to_string()))?
+    else {
+        return Err(refused("the session holds no execution state".to_owned()));
+    };
+    let saved = snapshots
+        .commit_run_end(
+            lash_vm_broker::kernel::EndSave {
+                document,
+                ledger,
+                end,
+                session: lash_vm_broker::kernel::SessionGraph { root, nodes },
+                with: Vec::new(),
+            },
+            host,
+        )
+        .await;
+    match saved {
+        Ok(_) => {
+            state.acknowledge_execution_state_capture();
+            Ok(())
+        }
+        Err(refusal) => {
+            state.abort_execution_state_capture();
+            Err(KernelFailure::Checkpoint(refusal))
+        }
+    }
 }
 
 /// How a broker failure answers the cell. Nothing about the guest: the
@@ -919,7 +954,11 @@ fn broker_failure(
             // cell's checkpoint.
             if runs_on
                 && let lash_vm_protocol::InfrastructureOutcome::RunRefused { refusal } = &outcome
-                && matches!(refusal, lash_vm_protocol::RunRefusal::State { .. })
+                && matches!(
+                    refusal,
+                    lash_vm_protocol::RunRefusal::GraphState { .. }
+                        | lash_vm_protocol::RunRefusal::Restore { .. }
+                )
             {
                 let mut refused = lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::VmWorkerFailed,
@@ -1144,10 +1183,9 @@ impl CodeModeCheckpointPerfFixture {
 
     pub async fn capture(
         &mut self,
-    ) -> Result<lash_core::plugin::ExecutionStateCapture, lash_core::SessionError> {
+    ) -> Result<lash_core::plugin::ExecutionGraphCapture, lash_core::SessionError> {
         self.state
-            .snapshot_execution_state(lash_core::FleetFormat::current())
-            .await
+            .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
     }
 
     pub fn acknowledge_capture(&mut self) {
@@ -1189,12 +1227,11 @@ impl CodeModeCheckpointPerfFixture {
 
     pub async fn restore(
         dialect: &crate::CellDialect,
-        state: &lash_core::plugin::HydratedExecutionState,
+        state: &lash_core::plugin::HydratedExecutionGraph,
     ) -> Result<(), lash_core::SessionError> {
         let mut restored = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
         restored
-            .restore_execution_state(state, lash_core::FleetFormat::current())
-            .await
+            .restore_execution_graph(state, lash_core::plugin::ExecutionGraphPurpose::Final)
             .map_err(lash_core::SessionError::from)
     }
 }

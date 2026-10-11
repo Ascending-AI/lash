@@ -223,6 +223,8 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
     // FIG-4236: the usage deltas left the intent (ADR 0125).
     // FIG-5172: the interrupted-turn closure left the intent (turn cancel
     // is session mail), and with it the always-present turn id field.
+    // FIG-5894: the checkpoint's execution state is named by its
+    // SessionExecution root, not a set of named leaves.
     let baseline = intent_fixture();
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(

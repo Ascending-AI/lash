@@ -84,6 +84,7 @@ fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> Hydrate
                 )
             })
             .collect(),
+        execution: None,
     }
 }
 
@@ -147,10 +148,14 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
     }
     storage.pool().close().await;
     drop(isolated_database);
+    // An unchanged commit locks its components, checks the nodes the graph
+    // references without supplying, installs the manifest graph in one
+    // statement, reads back the nodes already stored and locks the root;
+    // a load reads the root's whole reach and then the component bodies.
     assert!(
         observed
             .iter()
-            .all(|(_, commit, load)| (*commit, *load) == (3, 2)),
+            .all(|(_, commit, load)| (*commit, *load) == (5, 2)),
         "checkpoint commit/load statement counts must be independent of component depth: {observed:?}"
     );
 }

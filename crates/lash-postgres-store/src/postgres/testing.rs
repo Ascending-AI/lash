@@ -188,6 +188,29 @@ pub struct StoredCell {
     pub documents: Vec<serde_json::Value>,
 }
 
+/// Session manifest `blob_ref` read back through the store's own checkpoint
+/// read, outside any store handle: the raw durable reader of the
+/// cross-backend differential (as SQLite's
+/// `raw_checkpoint_from_path_for_testing`). It never writes.
+///
+/// # Errors
+///
+/// The account of a connection or a read that fails.
+pub async fn raw_checkpoint_for_testing(
+    pool: &sqlx::PgPool,
+    blob_ref: &lash_core_execution::BlobRef,
+) -> Result<Option<lash_core_execution::store::HydratedSessionCheckpoint>, String> {
+    let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+    crate::support::get_checkpoint_tx(
+        &mut connection,
+        blob_ref,
+        lash_core_execution::FleetFormat::current(),
+        crate::host::MaintenancePolicy::default().checkpoint_ref_chunk as usize,
+    )
+    .await
+    .map_err(|error| error.to_string())
+}
+
 /// Every column declaration and every non-null cell of every table in the
 /// storage's schema, with the documents each decodes to.
 ///

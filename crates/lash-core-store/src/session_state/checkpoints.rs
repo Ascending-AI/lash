@@ -69,10 +69,11 @@ impl RuntimeSessionState {
             })
     }
 
-    /// Durable reference for the well-known execution-state component.
-    pub fn execution_state_ref(&self) -> Option<&crate::store::BlobRef> {
+    /// The SessionExecution root the next checkpoint names, if any.
+    pub fn execution_state_ref(&self) -> Option<crate::store::BlobRef> {
         self.checkpoint_components
-            .component_ref(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+            .execution_root()
+            .map(|root| crate::store::BlobRef(root.to_hex()))
     }
 
     /// Advances resident state to a store's committed head revision and realized timestamps, adopts
@@ -167,76 +168,45 @@ impl RuntimeSessionState {
             .discard_known_bodies(true, AcceptedExecutionRetention::Resident);
     }
 
-    /// Updates execution state snapshot state for protocol and process-engine implementors while
-    /// materializing or restoring protocol session state.
-    pub fn set_execution_state_snapshot(
+    /// Replaces the session's protocol execution state with `capture`, a
+    /// complete SessionExecution root (FIG-5887 §6), or clears it: a
+    /// materialized frame switch clears it, since the new frame starts
+    /// with no globals.
+    ///
+    /// Runtime-owned staging: the turn boundary and the explicit
+    /// administrative restore path are the only callers, so this is not
+    /// integrator surface (ADR 0051's "neither" class — it only mutates
+    /// state the runtime owns). Downstream tests reach the same staging
+    /// through `lash_core::testing::stage_execution_graph`.
+    pub fn set_execution_graph(&mut self, capture: crate::plugin::ExecutionGraphCapture) {
+        self.checkpoint_components.set_execution_graph(capture);
+    }
+
+    /// Stages a complete graph the protocol session was just restored to
+    /// (FIG-2521): every node is sent, and the store installs those it does
+    /// not hold. The root is staged as changed: a capture may carry
+    /// appended seed globals the durable root does not.
+    pub fn stage_restored_execution_graph(
         &mut self,
-        execution_state_snapshot: Option<std::sync::Arc<[u8]>>,
+        restored: crate::plugin::HydratedExecutionGraph,
     ) {
-        // A materialized frame-switch outcome passes `None` here to clear the checkpoint. Clear
-        // the durable ref with the resident body: every store interprets an absent body with a
-        // present ref as an unchanged component, which would otherwise restore the old frame.
-        self.checkpoint_components
-            .set_execution_state_snapshot(execution_state_snapshot);
-    }
-
-    /// Replaces the complete protocol-owned execution-state root and leaf set.
-    ///
-    /// Runtime-owned staging: the turn boundary and the explicit administrative
-    /// restore path are the only callers, so this is not integrator surface
-    /// (ADR 0051's "neither" class — it only mutates state the runtime owns).
-    /// Downstream tests reach the same staging through
-    /// `lash_core::testing::stage_execution_state_components`.
-    pub fn set_execution_state_components(
-        &mut self,
-        snapshot: crate::plugin::ExecutionStateCapture,
-    ) -> Result<(), crate::StoreError> {
-        self.checkpoint_components
-            .set_execution_state_components(snapshot)
-    }
-
-    /// Stages a complete execution capture the protocol session was just
-    /// restored to, over the resident set this state already holds (FIG-2521).
-    ///
-    /// The executor treats every restored leaf as its persisted baseline, so
-    /// the next commit references them as unchanged. A leaf the resident set
-    /// holds — durably, or as a body still waiting for its first commit —
-    /// keeps exactly that bookkeeping; only a leaf the set never held is
-    /// staged with its body. The run is staged as changed: a capture may
-    /// carry appended seed globals the durable root does not.
-    pub fn stage_restored_execution_state(
-        &mut self,
-        restored: crate::plugin::HydratedExecutionState,
-    ) -> Result<(), crate::StoreError> {
-        let leaves = restored
-            .components
-            .into_iter()
-            .map(|(key, body)| {
-                let change = if self.checkpoint_components.holds_execution_state_leaf(&key) {
-                    crate::LeafChange::Unchanged
-                } else {
-                    crate::LeafChange::Changed(body)
-                };
-                (key, change)
-            })
-            .collect();
-        self.set_execution_state_components(crate::ExecutionStateCapture::Replace {
+        self.set_execution_graph(crate::plugin::ExecutionGraphCapture::Replace {
             root: restored.root,
-            leaves,
-        })
+            nodes: restored.nodes,
+        });
     }
 
-    /// Exposes execution state snapshot to protocol and process-engine implementors while
-    /// materializing or restoring protocol session state. Returns `None` when no execution state
-    /// snapshot is present.
-    pub fn execution_state_snapshot(&self) -> Option<std::sync::Arc<[u8]>> {
-        self.checkpoint_components.execution_state_snapshot()
-    }
-
-    /// Returns the fully hydrated protocol-owned execution-state root and leaves.
+    /// The SessionExecution graph the next checkpoint names, every node
+    /// present; `None` when the session holds no execution state.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::StoreError::ExecutionStateBodiesReleased`] when a commit
+    /// released the graph for the durable head to supply, or a stored-data
+    /// error when the last commit's result disagreed with its intent.
     pub fn execution_state_hydration(
         &self,
-    ) -> Result<Option<crate::plugin::HydratedExecutionState>, crate::StoreError> {
+    ) -> Result<Option<crate::plugin::HydratedExecutionGraph>, crate::StoreError> {
         self.checkpoint_components.execution_state_hydration()
     }
 

@@ -107,17 +107,9 @@ pub(super) async fn delete_session_from_catalog(
                     .into_iter()
                     .collect();
             retained_leaves.extend(leaf_node_id);
-            let mut candidates = std::collections::BTreeSet::new();
-            for checkpoint_ref in &roots {
-                candidates.insert(checkpoint_ref.clone());
-                let mut stmt = tx
-                    .prepare(session_sql().checkpoint_edges.select_components.sql())
-                    .map_err(sqlite_error)?;
-                let rows = stmt
-                    .query_map(params![checkpoint_ref], |row| row.get::<_, String>(0))
-                    .map_err(sqlite_error)?;
-                candidates.extend(rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?);
-            }
+            // Every blob the session's roots reach is a candidate: a graph
+            // manifest's nodes and the component blobs they name.
+            let candidates = crate::durable::reachable_from(tx, &roots).map_err(sqlite_error)?;
             for blob_ref in &candidates {
                 let exists = tx
                     .query_row(
@@ -219,39 +211,21 @@ pub(super) async fn delete_session_from_catalog(
             // root shares.
             crate::durable::release_prompt_snapshots(tx, &session_id, None)
                 .map_err(sqlite_error)?;
-            if !candidates.is_empty() {
-                // A superseded root outside this session can still reference
-                // a candidate. Apply GC's root rules to every touching edge
-                // before deleting any blob; surviving roots retain their edges.
-                let candidate_json = crate::codec::encode_json(&candidates)?;
-                crate::conn::cached_execute(
-                    tx,
-                    session_sql()
-                        .checkpoint_edges
-                        .delete_unrooted_for_candidates
-                        .sql(),
-                    params![candidate_json],
-                )
-                .map_err(sqlite_error)?;
-            }
-            // Every predicate is an indexed NOT EXISTS over exact edges; no
-            // whole-catalog mark/sweep runs in this transaction.
-            for blob_ref in candidates {
-                let deleted = tx
-                    .execute(
-                        crate::artifact_store::artifact_sql()
-                            .blobs_sqlite
-                            .reclaim_session_candidate
-                            .sql(),
-                        params![blob_ref],
-                    )
-                    .map_err(sqlite_error)?;
-                if deleted == 0 {
-                    report.retained_blob_count += 1;
-                } else {
-                    report.deleted_blob_count += deleted;
-                }
-            }
+            // Every predicate is an indexed NOT EXISTS over the root catalog
+            // and exact edges; no whole-catalog mark/sweep runs in this
+            // transaction. A candidate another root still reaches keeps an
+            // edge from it and is retained.
+            let (deleted, retained) = crate::durable::reclaim_candidates(
+                tx,
+                candidates,
+                crate::artifact_store::artifact_sql()
+                    .blobs_sqlite
+                    .reclaim_session_candidate
+                    .sql(),
+            )
+            .map_err(sqlite_error)?;
+            report.deleted_blob_count += deleted;
+            report.retained_blob_count += retained;
             tracing::debug!(
                 session_id = session_id.as_str(),
                 enumerated_blob_count = report.enumerated_blob_count,

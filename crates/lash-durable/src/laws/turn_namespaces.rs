@@ -48,14 +48,19 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
         tx.write(DomainWrite::Turn(write));
         store.commit(tx, LABEL).await
     };
-    let write = |entry: &NamespaceEntry, values: RunValuesWrite| TurnWrite::Namespaces {
-        session: id.clone(),
-        run: run.clone(),
-        namespaces: vec![TurnNamespaceWrite {
-            plugin: "memory".to_owned(),
-            entry: entry.clone(),
-            values,
-        }],
+    let write = |entry: NamespaceEntry, values: RunValuesWrite| async move {
+        let mut tx = store.begin(actor, epoch).await?;
+        tx.write_namespaces(
+            id,
+            run,
+            &[TurnNamespaceWrite {
+                plugin: "memory".to_owned(),
+                entry,
+                values,
+            }],
+        )
+        .map_err(DurableError::from)?;
+        store.commit(tx, LABEL).await
     };
     let rows = || async move {
         let rows = store.turn_namespaces(id, run).await?;
@@ -81,7 +86,7 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
     })
     .await?;
     let (first, first_body) = namespace(1, "first");
-    commit(write(&first, RunValuesWrite::Body(first_body.clone()))).await?;
+    write(first.clone(), RunValuesWrite::Body(first_body.clone())).await?;
     let read = rows().await?;
     ensure!(
         read == [("memory".to_owned(), first.clone(), Some(first_body.clone()))],
@@ -93,7 +98,7 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
         generation: 2,
         ..first.clone()
     };
-    commit(write(&refused, RunValuesWrite::Held)).await?;
+    write(refused.clone(), RunValuesWrite::Held).await?;
     let read = rows().await?;
     ensure!(
         read == [(
@@ -105,7 +110,7 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
     );
 
     let (second, second_body) = namespace(3, "second");
-    commit(write(&second, RunValuesWrite::Body(second_body.clone()))).await?;
+    write(second.clone(), RunValuesWrite::Body(second_body.clone())).await?;
     let read = rows().await?;
     ensure!(
         read == [("memory".to_owned(), second.clone(), Some(second_body))],
@@ -116,7 +121,7 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
         generation: 4,
         ..first.clone()
     };
-    commit(write(&base, RunValuesWrite::Base)).await?;
+    write(base.clone(), RunValuesWrite::Base).await?;
     let read = rows().await?;
     ensure!(
         read == [("memory".to_owned(), base.clone(), None)],
@@ -126,13 +131,13 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
         generation: 5,
         ..base
     };
-    commit(write(&base_metadata, RunValuesWrite::Base)).await?;
+    write(base_metadata.clone(), RunValuesWrite::Base).await?;
     let read = rows().await?;
     ensure!(
         read == [("memory".to_owned(), base_metadata, None)],
         "base metadata must keep the body absent: {read:?}"
     );
-    commit(write(&first, RunValuesWrite::Body(first_body.clone()))).await?;
+    write(first.clone(), RunValuesWrite::Body(first_body.clone())).await?;
     let read = rows().await?;
     ensure!(
         read == [("memory".to_owned(), first.clone(), Some(first_body.clone()))],
@@ -153,7 +158,7 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
         read.is_empty(),
         "the cancelled run's rows outlived it: {read:?}"
     );
-    match commit(write(&first, RunValuesWrite::Body(first_body.clone()))).await {
+    match (write(first.clone(), RunValuesWrite::Body(first_body.clone()))).await {
         Err(DurableError::Domain(DomainRefusal::TurnNotOpen { .. })) => {}
         other => {
             return Err(LawBroken(format!(

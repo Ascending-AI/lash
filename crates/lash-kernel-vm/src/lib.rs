@@ -28,6 +28,7 @@ mod heap;
 mod interface;
 mod machine;
 pub mod observe;
+mod whole;
 
 #[cfg(test)]
 mod laws;
@@ -35,6 +36,7 @@ mod laws;
 pub use compile::{Layout, PreparedLibrary};
 pub use functions::{MachineFunctions, register_machine_functions};
 pub use machine::KernelMachine;
+pub use whole::{TerminalError, WholeExportError, WholeImportError, terminal_end, terminal_whole};
 
 pub use interface::{
     Bindings, Bound, BoundExceeded, Bounds, DeliverError, Delivered, EffectRequest, End,

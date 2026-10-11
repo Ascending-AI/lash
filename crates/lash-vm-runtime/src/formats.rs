@@ -49,13 +49,13 @@ pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 2;
 
 const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == KernelVersion::NEWEST.number());
 
-/// A parked run: the machine's state in the document's terms, sealed under
-/// its owner, the kernel version and the document's identity. The broker
-/// stamps the snapshot row that holds it with the kernel version.
+/// A parked run: the machine's state as a KernelWhole graph root, sealed
+/// under its owner, the kernel version and the document's identity. The
+/// execution root that holds it states the kernel version as its format.
 ///
 /// version_guard(
-///     shapes(path = "crates/lash-kernel-state/src/*.rs", cover(ParkedRun)),
-///     shapes(path = "crates/lash-vm-protocol/src/state.rs", cover(OpaqueVmState)),
+///     shapes(path = "crates/lash-kernel-state/src/*.rs", cover(KernelWhole)),
+///     shapes(path = "crates/lash-vm-protocol/src/graph_state.rs", cover(SealedGraphState)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// format_manifest = "KernelParkedState"

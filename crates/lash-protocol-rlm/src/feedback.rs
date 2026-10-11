@@ -456,11 +456,20 @@ mod tests {
             else {
                 panic!("the guard must end the run");
             };
-            let end = lash_vm_broker::kernel::RecordedEnd::of(&end).expect("recorded");
-            let end: lash_vm_broker::kernel::RecordedEnd =
-                serde_json::from_str(&serde_json::to_string(&end).expect("encoded"))
-                    .expect("decoded");
-            let End::Error(error) = end.into_end() else {
+            let state = lash_vm_broker::kernel::state::export_end_state(
+                &end,
+                lash_kernel_doc::KERNEL_VERSION,
+                u64::MAX,
+            )
+            .expect("staged")
+            .expect("recorded");
+            let end = lash_vm_broker::kernel::state::read_end_in(
+                &state.nodes,
+                state.root,
+                lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 24),
+            )
+            .expect("read back");
+            let End::Error(error) = end else {
                 panic!("bound error");
             };
             let observation = CellObservation::of_run_error(error, &BTreeMap::new());

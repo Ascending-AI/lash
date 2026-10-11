@@ -3,91 +3,8 @@
 //! over a SQLite durable store.
 
 mod finish_value;
+mod graph;
 mod python;
-
-/// V14: a parked call cannot override its boundary's control fact or copy
-/// a cancellation fact independently of its completed outcome.
-#[test]
-fn cell_ledger_refuses_copied_control_and_cancellation_facts() {
-    let host = serde_json::json!({
-        "calls": [{"call_id": lash_core::ToolCallId::fixture("call"), "operation": "tools.work", "control": true, "record": null}],
-        "tool_call_limit": null, "call_cancelled": true
-    });
-    assert!(serde_json::from_value::<super::host::CellHostLedgers>(host).is_err());
-}
-
-/// V14: completion owns identity and cancellation; the recorded boundary
-/// owns control, including after encoding and restoring the envelope.
-#[test]
-fn cell_ledger_derives_completed_facts_from_their_owners() {
-    use super::host::{CellHostLedgers, LedgerCall, LedgerCallState};
-    let record = lash_core::ToolCallRecord {
-        call_id: lash_core::ToolCallId::fixture("call"),
-        provider_call_id: None,
-        tool: "work".to_owned(),
-        args: serde_json::Value::Null,
-        output: lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
-            "cancelled",
-        )),
-    };
-    let call = LedgerCall {
-        operation: lash_kernel_doc::EffectName::new("tools.work").unwrap(),
-        state: LedgerCallState::Completed {
-            record: Box::new(record.clone()),
-        },
-    };
-    let host = CellHostLedgers {
-        calls: vec![call],
-        tool_call_limit: None,
-    };
-    let mut state = serde_json::json!({
-        "cell": {"code": "code", "dialect": "typescript", "document": "{}", "annotations": "{}",
-            "effects": {"tools.work": {"tool": "work", "signature": {"params": [], "result": "null"}, "controls": {}}},
-            "grants": {}, "projected": []},
-        "prints": [], "host": host, "started_process_ids": []
-    });
-    let mut restored: super::envelope::CellSegmentState =
-        serde_json::from_value(state.clone()).unwrap();
-    assert!(restored.host.call_cancelled());
-    assert_eq!(restored.host.tool_call_records()[0].call_id, record.call_id);
-    let bytes = restored.encode().unwrap();
-    assert_eq!(
-        String::from_utf8(bytes)
-            .unwrap()
-            .matches(record.call_id.as_str())
-            .count(),
-        1
-    );
-    state["cell"]["effects"] = serde_json::json!({});
-    assert!(serde_json::from_value::<super::envelope::CellSegmentState>(state).is_err());
-    restored.host.calls[0].state = LedgerCallState::Completed {
-        record: Box::new(lash_core::ToolCallRecord {
-            output: lash_core::ToolCallOutput::finish(lash_core::ToolValue::untrusted_json(
-                serde_json::Value::Null,
-            )),
-            ..record
-        }),
-    };
-    assert!(!restored.host.call_cancelled());
-    assert!(
-        restored
-            .host
-            .settled_control(&restored.cell.boundary().unwrap())
-            .is_none()
-    );
-    restored
-        .cell
-        .effects
-        .get_mut(&lash_kernel_doc::EffectName::new("tools.work").unwrap())
-        .unwrap()
-        .controls = lash_core::TurnControls::finish(lash_core::JsonSchema::any());
-    assert!(
-        restored
-            .host
-            .settled_control(&restored.cell.boundary().unwrap())
-            .is_some()
-    );
-}
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -196,25 +113,24 @@ await control.finish(winner);"#,
     assert_eq!(finish_of(&response), serde_json::json!("fast"));
 }
 
-/// FIG-5764: a corrupt fragment refuses the whole restore, and the host's
-/// error retains the typed hash mismatch and the binding it names.
+/// FIG-5764: a corrupt node refuses the whole restore, and the host's
+/// error retains the typed graph refusal naming the node.
 #[tokio::test]
-async fn a_corrupt_fragment_reports_its_binding_as_a_typed_restore_cause() {
+async fn a_corrupt_node_refuses_the_restore_with_a_typed_cause() {
     use std::collections::BTreeSet;
     use std::error::Error as _;
 
+    use lash_core_store::checkpoint_graph::GraphRefusal;
+
     use super::snapshot::CodeModeSnapshotError;
 
-    let fleet = lash_core::FleetFormat::current();
     let mut state = typescript_state();
     state
         .patch_globals(
             &lash_rlm_types::RlmGlobalsPatchPluginBody {
                 set_default: serde_json::Map::from_iter([(
                     "notes".to_string(),
-                    serde_json::json!(
-                        "x".repeat(lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES)
-                    ),
+                    serde_json::json!("x".repeat(1_000)),
                 )]),
             },
             &BTreeSet::new(),
@@ -222,33 +138,40 @@ async fn a_corrupt_fragment_reports_its_binding_as_a_typed_restore_cause() {
         .await
         .expect("bind a value stored as a leaf");
     let mut saved = state
-        .hydrated_execution_state(fleet)
+        .hydrated_execution_graph()
         .await
         .expect("capture the bindings");
-    let (component, body) = saved.components.first_key_value().expect("the notes leaf");
-    let component = component.clone();
-    let mut corrupt = body.to_vec();
+    let named = saved
+        .nodes
+        .values()
+        .find(|node| {
+            node.envelope().is_ok_and(|envelope| {
+                envelope.kind == lash_core_store::checkpoint_graph::NodeKind::TEXT_LEAF
+            })
+        })
+        .map(|node| node.id)
+        .expect("the notes leaf");
+    let leaf = saved.nodes.get_mut(&named).expect("the notes leaf");
+    let mut corrupt = leaf.bytes.to_vec();
     corrupt.push(b' ');
-    saved.components.insert(component.clone(), corrupt.into());
+    leaf.bytes = corrupt.into();
 
     let mut restored = typescript_state();
     let error = restored
-        .restore_execution_state(&saved, fleet)
-        .await
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Final)
         .map_err(lash_core::SessionError::from)
-        .expect_err("a corrupt fragment refuses the restore");
+        .expect_err("a corrupt node refuses the restore");
     let cause = error
         .source()
         .and_then(|source| source.downcast_ref::<CodeModeSnapshotError>())
         .expect("the public restore error retains its typed cause");
-    assert!(matches!(
-        cause,
-        CodeModeSnapshotError::LeafHashMismatch {
-            logical_key,
-            component: expected,
-            actual_component,
-        } if logical_key == "notes" && expected == &component && actual_component != expected
-    ));
+    assert!(
+        matches!(
+            cause,
+            CodeModeSnapshotError::Graph(GraphRefusal::HashMismatch(id)) if *id == named
+        ),
+        "{cause}"
+    );
     assert!(restored.bindings().names().is_empty());
 }
 
@@ -440,20 +363,18 @@ async fn session_bindings_are_carried_between_cells_and_across_a_reload() {
         "the second cell reads the first cell's bindings, and `alias` is still `rows`"
     );
 
-    let fleet = lash_core::FleetFormat::current();
     state
-        .snapshot_execution_state(fleet)
-        .await
+        .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
         .expect("capture the session's bindings");
     state.acknowledge_execution_state_capture();
     let saved = state
-        .hydrated_execution_state(fleet)
+        .hydrated_execution_graph()
         .await
         .expect("the saved session state");
+    host.install(&saved).await;
     let mut reloaded = typescript_state();
     reloaded
-        .restore_execution_state(&saved, fleet)
-        .await
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Final)
         .expect("load the session's bindings");
 
     let after = run_cell(

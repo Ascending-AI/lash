@@ -82,6 +82,8 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+#[path = "turn_phases/head_commits.rs"]
+mod head_commits;
 #[path = "turn_phases/parks.rs"]
 mod parks;
 #[path = "turn_phases/slots.rs"]
@@ -113,6 +115,7 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
+use lash_durable::domain::graph::{OWNER_READ_LIMITS, RootOwner};
 use lash_durable::domain::{
     MailAnswer, MailDomainWrite, ModelCallId, PromptCallKey, PromptWrite, TurnCancelAnswer,
     TurnWrite,
@@ -637,18 +640,30 @@ impl TurnDrive for L3Drive {
         let second = rendered.contains(AGAIN_MARKER);
         let composed = Composition::of(&request);
         // What the rows admitted when this attempt is sent.
-        let admitted =
-            cx.durable_reads()?
-                .turn(&session())
-                .await?
-                .and_then(|row| match &row.phase {
-                    UnfinishedPhase::Model { pin, checkpoint } => Some((
-                        pin.call,
-                        composed
-                            .is_some_and(|composed| checkpoint.contains(&composed.instructions())),
-                    )),
-                    UnfinishedPhase::Admitted | UnfinishedPhase::Tools { .. } => None,
+        let reads = cx.durable_reads()?;
+        let admitted = match reads.turn(&session()).await? {
+            Some(TurnRow {
+                phase: UnfinishedPhase::Model { pin, checkpoint },
+                ..
+            }) => {
+                // The phase root's text holds the composed instructions
+                // inline or in its text leaves.
+                let owner = RootOwner::TurnPhase {
+                    session: session(),
+                    run: self.run.clone(),
+                };
+                let graph = reads
+                    .hydrate(owner, Some(checkpoint), OWNER_READ_LIMITS)
+                    .await?;
+                let held = composed.is_some_and(|composed| {
+                    let text = composed.instructions();
+                    let mut nodes = graph.nodes.values();
+                    nodes.any(|node| node.bytes.windows(text.len()).any(|w| w == text.as_bytes()))
                 });
+                Some((pin.call, held))
+            }
+            Some(_) | None => None,
+        };
         let stored = match admitted {
             Some((ordinal, _)) => {
                 let key = PromptCallKey {
@@ -859,8 +874,8 @@ impl TurnDrive for L3Drive {
             .push(format!("{:?}", done.outcome));
         let commit = head.commit(&self.run, done, commit_budget()).await?;
         match self.services.mode {
-            Mode::CollidingCommit => colliding(commit),
-            Mode::OutsideWriterRange => outside_writer_range(commit),
+            Mode::CollidingCommit => head_commits::colliding(commit),
+            Mode::OutsideWriterRange => head_commits::outside_writer_range(commit),
             _ => Ok(commit),
         }
     }
@@ -870,77 +885,6 @@ impl TurnDrive for L3Drive {
 
     /// Nothing is held for the commit.
     async fn committed(&mut self) {}
-}
-
-/// [`Mode::CollidingCommit`]'s head commit: `commit` with its last two
-/// appended nodes replaced by two opens of one frame. Each derives the
-/// frame's node id, so the commit passes the store's derivation check and is
-/// refused for the collision.
-fn colliding(commit: TurnCommit) -> Result<TurnCommit, TurnError> {
-    let store = |error: lash_core_store::store::StoreError| TurnError::Exec(error.to_string());
-    let mut runtime =
-        lash_core_store::store::decode_session_commit(&commit.commit_json).map_err(store)?;
-    let frame_key = lash_core::FrameKey::from_caller_material("l3-collide")
-        .map_err(|error| TurnError::Exec(error.to_string()))?;
-    let frame = lash_core::NodeId::from(lash_core_store::session_graph::frame_node_id(
-        &session(),
-        frame_key.as_str(),
-    ));
-    let nodes = runtime.graph.nodes_mut();
-    let [.., first, second] = nodes else {
-        return Err(TurnError::Exec(format!(
-            "the turn's commit appends {} nodes, not the two it collides",
-            nodes.len()
-        )));
-    };
-    for node in [&mut *first, &mut *second] {
-        node.node_id = frame.clone();
-        node.payload = lash_core::SessionNodePayload::FrameOpen {
-            frame_key: frame_key.clone(),
-            reason: lash_core::AgentFrameReason::default(),
-            assignment: lash_core::AgentFrameAssignment::unconfigured(
-                lash_core::SessionPolicy::new(
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(16),
-                    lash_core::NoProgressBudget::bounded(12),
-                ),
-            ),
-        };
-    }
-    second.parent_node_id = Some(frame);
-    Ok(TurnCommit {
-        expected_head: commit.expected_head,
-        commit_json: lash_core_store::store::encode_session_commit(&runtime).map_err(store)?,
-    })
-}
-
-/// The plugin [`Mode::OutsideWriterRange`]'s head commit stamps.
-const WRITER_PLUGIN: &str = "l3-plugin";
-
-/// [`Mode::OutsideWriterRange`]'s head commit: `commit` recording
-/// [`WRITER_PLUGIN`]'s config at its first format, run under that plugin's
-/// config at format 2. The first stamp provisions the plugin's range
-/// `[1, 1]`, so the store refuses the second as outside it.
-fn outside_writer_range(commit: TurnCommit) -> Result<TurnCommit, TurnError> {
-    let store = |error: lash_core_store::store::StoreError| TurnError::Exec(error.to_string());
-    let mut runtime =
-        lash_core_store::store::decode_session_commit(&commit.commit_json).map_err(store)?;
-    let mut execution = runtime.config.clone();
-    runtime.config.plugin_config.insert_versioned(
-        WRITER_PLUGIN,
-        lash_core_ids::FormatVersion::ONE,
-        serde_json::json!({}),
-    );
-    execution.plugin_config.insert_versioned(
-        WRITER_PLUGIN,
-        lash_core_ids::FormatVersion::new(2).expect("2 is a format version"),
-        serde_json::json!({}),
-    );
-    runtime.execution_config = Some(Box::new(execution));
-    Ok(TurnCommit {
-        expected_head: commit.expected_head,
-        commit_json: lash_core_store::store::encode_session_commit(&runtime).map_err(store)?,
-    })
 }
 
 /// The L3 scenario's catalog: its protocol never calls a tool.
@@ -2079,7 +2023,7 @@ async fn move_head(backend: &Backend, run: &str, messages: Vec<Message>) -> u64 
     let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
     catalog
         .commit_runtime_state(
-            lash_core_store::store::decode_session_commit(&commit.commit_json)
+            lash_core_store::store::decode_session_commit(&commit.commit.json)
                 .expect("the head commit decodes"),
         )
         .await
@@ -2094,7 +2038,7 @@ async fn move_head(backend: &Backend, run: &str, messages: Vec<Message>) -> u64 
 /// re-delivered byte-identical.
 async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<String>) {
     let keep = Mutex::default();
-    let (stores, _database) =
+    let (stores, database) =
         dialect::open(dialect, postgres_url.as_deref(), SimClock::new(), &keep).await;
     let backend = Backend::for_testing(stores);
     let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
@@ -2140,13 +2084,12 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
             _ => {}
         }
     };
-    let checkpoint = serde_json::to_string(&PhaseCheckpoint {
+    let checkpoint = PhaseCheckpoint {
         saved: machine.checkpoint(),
         delivered: Vec::new(),
         before_turn: Vec::new(),
         trace: None,
-    })
-    .expect("checkpoint encodes");
+    };
 
     // The head moves past the pinned revision while the turn is open.
     let mut later = earlier;
@@ -2165,32 +2108,39 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         head.revision()
     );
 
-    let row = TurnRow {
+    // The turn is admitted and its model phase commits the checkpoint.
+    let epoch = claim_and_admit(&backend, database.as_ref(), &session(), &run()).await;
+    let mut tx = database
+        .begin(&actor(), epoch)
+        .await
+        .expect("the owner begins");
+    let checkpoint = checkpoint
+        .stage_for_test(&mut tx)
+        .expect("the checkpoint stages");
+    let pin = ModelPin {
+        call: 1,
+        attempt: 1,
+        request_ref: "pinned".to_owned(),
+        deadline: lash_durable::DurableInstant(i64::MAX),
+        stream_from: "pinned-stream".to_owned(),
+    };
+    let phase = UnfinishedPhase::Model { pin, checkpoint };
+    let advance = TurnWrite::Advance {
         session: session(),
         run: run(),
-        admission: RunAdmissionRecord::Turn {
-            took: AdmittedTurnRows::Inputs {
-                ids: AdmittedInputIds::one(lash_sansio::InputId::from("l3-batch")),
-            },
-            trace: None,
-        },
-        phase: UnfinishedPhase::Model {
-            pin: lash_durable::domain::ModelPin {
-                call: 1,
-                attempt: 1,
-                request_ref: "pinned".to_owned(),
-                deadline: lash_durable::DurableInstant(i64::MAX),
-                stream_from: "pinned-stream".to_owned(),
-            },
-            checkpoint,
-        },
+        phase,
         iteration: 0,
-        model_calls: 1,
-        turn_deadline: None,
-        written_epoch: lash_durable::Epoch(1),
-        cancel: None,
-        trace_exported: false,
     };
+    tx.write(DomainWrite::Turn(advance));
+    database
+        .commit(tx, CommitLabel::MODEL_START)
+        .await
+        .expect("the model phase commits");
+    let row = database
+        .turn(&session())
+        .await
+        .expect("the turn reads")
+        .expect("the turn is open");
     let cx = ActorContext::detached(backend.clone());
     let mut heads = HeadCache::default();
     let restored = TurnRestore::new(&cx, &row, &mut heads)
@@ -2285,9 +2235,20 @@ async fn admit_running_turn(
     session: &SessionId,
     run: &TurnId,
 ) -> lash_durable::Epoch {
-    use lash_core_execution::{PendingTurnInputDraft, TurnInput, TurnInputIngress};
     let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
     lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, session).await;
+    claim_and_admit(backend, database, session, run).await
+}
+
+/// [`admit_running_turn`] for a session already admitted.
+async fn claim_and_admit(
+    backend: &Backend,
+    database: &dyn DurableStore,
+    session: &SessionId,
+    run: &TurnId,
+) -> lash_durable::Epoch {
+    use lash_core_execution::{PendingTurnInputDraft, TurnInput, TurnInputIngress};
+    let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
     let first = catalog
         .enqueue_pending_turn_input(
             PendingTurnInputDraft::new(

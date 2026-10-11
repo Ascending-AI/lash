@@ -205,16 +205,19 @@ fn settled_reads_the_host_native_turn_outcome() {
 }
 
 /// What the store holds for turn `run`: its unfinished row's phase, its run
-/// records and its end, read by the controller over the store itself.
+/// facts and its end, read by the controller over the store itself.
 pub async fn turn_facts(case: &Case, run: &str) -> Result<Value> {
     use lash::durable::domain::OwnerKey;
     let stores = case.open_store().await?;
     let durable = stores.durable_store();
     let session = lash::SessionId::parse(session(case))?;
     let turn = lash::TurnId::parse(run)?;
+    // Each fact's record is a content-addressed node: equal records name
+    // the same node.
     let records = durable
-        .run_records(&OwnerKey::Turn(session.clone(), turn.clone()))
+        .run_facts(&OwnerKey::Turn(session.clone(), turn.clone()))
         .await?
+        .rows
         .into_iter()
         .map(|row| {
             json!({
@@ -223,7 +226,7 @@ pub async fn turn_facts(case: &Case, run: &str) -> Result<Value> {
                 "kind": row.kind.as_str(),
                 "call": row.call.map(|call| call.to_string()),
                 "epoch": row.written_epoch.0,
-                "record": serde_json::from_str::<Value>(&row.record_json).unwrap_or(Value::String(row.record_json)),
+                "record": row.record.to_hex(),
             })
         })
         .collect::<Vec<_>>();

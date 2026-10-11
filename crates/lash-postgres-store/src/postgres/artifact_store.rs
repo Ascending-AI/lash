@@ -23,8 +23,8 @@ lash_store_sql::statements! {
 
 lash_store_sql::statements! {
     pub(crate) struct LashVmArtifactStatements @ "lash_vm_artifact" {
-        insert_bytes = "INSERT INTO lash_vm_artifacts (namespace, artifact_ref, artifact_bytes)
-             VALUES (?1, ?2, ?3) ON CONFLICT (namespace, artifact_ref) DO NOTHING";
+        insert_bytes = "INSERT INTO lash_vm_artifacts (namespace, artifact_ref, storage_kind, artifact_bytes)
+             VALUES (?1, ?2, 0, ?3) ON CONFLICT (namespace, artifact_ref) DO NOTHING";
         select_bytes = "SELECT artifact_bytes FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2";
         exists = "SELECT EXISTS (SELECT 1 FROM lash_vm_artifacts

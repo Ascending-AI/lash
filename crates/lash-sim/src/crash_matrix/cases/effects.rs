@@ -103,7 +103,7 @@ async fn outcomes(
     let owner = OwnerKey::Turn(session.clone(), run_of(session));
     let rows = nodes
         .database()
-        .run_records(&owner)
+        .run_facts(&owner)
         .await
         .map_err(|error| format!("the round's records do not read: {error}"))?;
     let waits = PinnedWaits::read(nodes.database().as_ref(), &rows)

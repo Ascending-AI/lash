@@ -72,16 +72,16 @@ pub use crate::kernel_migration::{
     KERNEL_MIGRATION_SWEEP, KernelMigrationSweep, survey_kernel_migration, sweep_kernel_migration,
 };
 pub use lash_sansio::worker_limit::WorkerFrameKind;
+#[cfg(feature = "codemode")]
+pub use lash_vm_client::StateDigest;
 pub use lash_vm_client::{
     BootstrapFault, CodecRefusal, DecodeLimits, Detail, Exchange, ExecutionClass, ExecutionLease,
-    ExecutionReceipt, FrameEpoch, HeaderRefusal, HostReadKind, InfrastructureOutcome,
-    OpaqueStateRefusal, OpaqueVmState, OwnerEpoch, PayloadKind, PoolCounters, PoolError, PoolFault,
-    PoolMeasurements, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds, RunInput,
-    RunMeters, RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence, VmOwner,
+    ExecutionReceipt, FrameEpoch, GraphStateRefusal, HeaderRefusal, HostReadKind,
+    InfrastructureOutcome, KernelRestoreRefusal, OwnerEpoch, PayloadKind, PoolCounters, PoolError,
+    PoolFault, PoolMeasurements, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds,
+    RunInput, RunMeters, RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence, VmOwner,
     WorkerDeploymentFault, WorkerLimit,
 };
-#[cfg(feature = "codemode")]
-pub use lash_vm_client::{StateDigest, StateExpectation};
 /// Why lash's shipped library did not assemble: a defect of the build.
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::LibraryError;

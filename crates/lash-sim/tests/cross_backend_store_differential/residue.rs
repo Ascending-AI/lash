@@ -71,33 +71,38 @@ impl ResidueDigest {
 /// SQLite table name is what the read covers, so the catalog walk skips it.
 /// `?1`/`$1` is the session id.
 const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
+    // The graph edges reachable from this session's head manifest. Nodes
+    // and edges are content-addressed and shared by every session, so only
+    // the reachable rows are read.
     (
-        "checkpoint_blob_refs",
-        "checkpoint_blob_refs",
-        "SELECT * FROM checkpoint_blob_refs
-         WHERE checkpoint_ref IN (SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1)",
-        "SELECT to_jsonb(t)::text FROM lash_checkpoint_blob_refs t
-         WHERE checkpoint_ref IN (SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1)",
+        "checkpoint_blob_edges",
+        "blob_edges",
+        "WITH RECURSIVE reach(hash) AS (
+             SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision)
+             WHERE session_id = ?1 AND checkpoint_ref IS NOT NULL
+             UNION SELECT e.child_hash FROM blob_edges e JOIN reach r ON e.parent_hash = r.hash)
+         SELECT parent_hash, child_hash FROM blob_edges WHERE parent_hash IN (SELECT hash FROM reach)",
+        "WITH RECURSIVE reach(hash) AS (
+             SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
+             WHERE session_id = $1 AND checkpoint_ref IS NOT NULL
+             UNION SELECT e.child_hash FROM lash_blob_edges e JOIN reach r ON e.parent_hash = r.hash)
+         SELECT parent_hash || ':' || child_hash FROM lash_blob_edges WHERE parent_hash IN (SELECT hash FROM reach)",
     ),
-    // Checkpoint manifest and component bytes reachable from this session's
-    // head. Blobs are content-addressed and shared by every session, so only
-    // the reachable rows are read; a corrupted body is visible here and
-    // nowhere else.
+    // The checkpoint manifest and every node it reaches from this session's
+    // head: a corrupted body is visible here and nowhere else.
     (
         "checkpoint_blobs",
         "blobs",
-        "SELECT hash, hex(content) FROM blobs
-         WHERE hash IN (SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1)
-            OR hash IN (
-                SELECT blob_ref FROM checkpoint_blob_refs
-                WHERE checkpoint_ref IN
-                    (SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1))",
-        "SELECT hash || ':' || encode(content, 'hex') FROM lash_blobs
-         WHERE hash IN (SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1)
-            OR hash IN (
-                SELECT blob_ref FROM lash_checkpoint_blob_refs
-                WHERE checkpoint_ref IN
-                    (SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1))",
+        "WITH RECURSIVE reach(hash) AS (
+             SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision)
+             WHERE session_id = ?1 AND checkpoint_ref IS NOT NULL
+             UNION SELECT e.child_hash FROM blob_edges e JOIN reach r ON e.parent_hash = r.hash)
+         SELECT hash, hex(content), encoding FROM blobs WHERE hash IN (SELECT hash FROM reach)",
+        "WITH RECURSIVE reach(hash) AS (
+             SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
+             WHERE session_id = $1 AND checkpoint_ref IS NOT NULL
+             UNION SELECT e.child_hash FROM lash_blob_edges e JOIN reach r ON e.parent_hash = r.hash)
+         SELECT hash || ':' || encode(content, 'hex') || ':' || encoding FROM lash_blobs WHERE hash IN (SELECT hash FROM reach)",
     ),
 ];
 

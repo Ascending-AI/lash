@@ -779,25 +779,21 @@ impl DialectSession {
         self.state.execution_state_dirty()
     }
 
-    pub(crate) async fn snapshot_execution_state(
+    pub(crate) fn capture_execution_graph(
         &mut self,
-        fleet_format: lash_core::FleetFormat,
-    ) -> Result<lash_core::plugin::ExecutionStateCapture, SessionError> {
-        self.state.snapshot_execution_state(fleet_format).await
+        purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
+    ) -> Result<lash_core_store::execution_state::ExecutionGraphCapture, SessionError> {
+        self.state.capture_execution_graph(purpose)
     }
 
-    pub(crate) async fn probe_execution_state_capture(
-        &mut self,
-        fleet_format: lash_core::FleetFormat,
-    ) -> Result<(), SessionError> {
-        self.state.probe_execution_state_capture(fleet_format).await
+    pub(crate) async fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
+        self.state.probe_execution_state_capture().await
     }
 
-    pub(crate) async fn hydrated_execution_state(
+    pub(crate) async fn hydrated_execution_graph(
         &self,
-        fleet_format: lash_core::FleetFormat,
-    ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-        self.state.hydrated_execution_state(fleet_format).await
+    ) -> Result<lash_core::plugin::HydratedExecutionGraph, SessionError> {
+        self.state.hydrated_execution_graph().await
     }
 
     pub(crate) fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
@@ -829,14 +825,13 @@ impl DialectSession {
         Ok(())
     }
 
-    pub(crate) async fn restore_execution_state(
+    pub(crate) fn restore_execution_graph(
         &mut self,
-        state: &lash_core::plugin::HydratedExecutionState,
-        fleet_format: lash_core::FleetFormat,
+        graph: &lash_core_store::execution_state::HydratedExecutionGraph,
+        purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
     ) -> Result<(), SessionError> {
         self.state
-            .restore_execution_state(state, fleet_format)
-            .await
+            .restore_execution_graph(graph, purpose)
             .map_err(SessionError::from)
     }
 

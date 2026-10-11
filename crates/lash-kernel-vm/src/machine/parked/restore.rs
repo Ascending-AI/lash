@@ -781,6 +781,9 @@ pub(in crate::machine) fn import(
         .filter(|task| !matches!(task.state, TaskState::Ended(_)))
         .count();
     let next_join = joins.keys().next_back().map_or(0, |last| last + 1);
+    // The tasks were read in task order; the park hands requests out in the
+    // order they were made, which is their wait numbers' (K-TASK-024).
+    requests.sort_unstable();
 
     let mut machine = KernelMachine {
         program,

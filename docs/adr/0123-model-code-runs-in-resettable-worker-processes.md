@@ -92,13 +92,14 @@ model, not host policy.
 
 ### 5. The parent never decodes machine state
 
-At the broker boundary a parked run is `lash_vm_protocol::OpaqueVmState`:
+At the broker boundary a parked run is `lash_vm_protocol::SealedGraphState`:
 the owner, the kernel version, the identity of the document it runs, a
-BLAKE3 digest and the bytes. The parent checks those structurally against the
-run it expects (`StateExpectation`): the owner, the document and an admitted
-kernel version. Only the worker imports the bytes into a machine, which
-refuses state written under another document. The protocol crate depends on
-nothing that could decode them.
+KernelWhole graph root with the nodes staged for it, and a seal over all of
+them (FIG-5887). The parent checks those structurally against the run it
+expects (`GraphStateExpectation`): the owner, the document, an admitted
+kernel version, the root's kind and the node bounds. Only the worker imports
+the graph into a machine, which refuses state written under another document.
+The protocol crate depends on nothing that could decode the machine's state.
 
 ### 6. The protocol
 
@@ -106,7 +107,7 @@ nothing that could decode them.
 transport or pool:
 
 - **Messages.** Parent to worker: `Start` (the owner, the admitted document's
-  encoding, a fresh start or opaque parked state, and the run's bounds),
+  encoding, a fresh start or sealed parked graph state, and the run's bounds),
   `Prepare` (pure work with no parent authority: lowering source to a
   document, printing a document as source), `Run`, `Deliver`, `HostAnswer`,
   `Export`, `Cancel`, `Reset`, `Shutdown`. Worker to parent: `Ready`,
@@ -308,14 +309,14 @@ run to completion (FIG-4776).
 
 ## Consequences
 
-Opaque parked state lets the broker store and fence a run without restoring
-guest values. A reset drops all guest-derived state by construction.
+Sealed parked graph state lets the broker store and fence a run without
+restoring guest values. A reset drops all guest-derived state by construction.
 Field-by-field cleanup could miss a newly added state owner; keeping grants
 in returned guest state would let that state replace parent-owned bindings.
 
 Code mode cells, durable process bodies, process creation and dialect lowering and
 printing run through the shared worker service. Parent adapters retain
-opaque parked state and the document identities it names.
+sealed parked graph state and the document identities it names.
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host
 events, routing and scheduling.

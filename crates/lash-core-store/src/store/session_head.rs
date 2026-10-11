@@ -67,6 +67,12 @@ impl BlobRef {
         ))
     }
 
+    /// The raw 32-byte digest whose lowercase hex [`for_content`](Self::for_content)
+    /// spells: one hash domain for blobs and checkpoint graph nodes.
+    pub fn digest_for_content(content: &[u8]) -> [u8; 32] {
+        lash_sansio::core_support::blake3_domain_hash(LASH_BLOB_DOMAIN_VERSION, content)
+    }
+
     /// Exposes the opaque durable blob reference to store implementors for backend round-tripping
     /// without imposing path or URL semantics.
     pub fn as_str(&self) -> &str {

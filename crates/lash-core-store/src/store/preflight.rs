@@ -538,8 +538,9 @@ impl DurableSurface {
 pub enum DurablePayload {
     /// UTF-8 JSON text.
     Json(String),
-    /// MessagePack bytes.
-    MessagePack(Vec<u8>),
+    /// One checkpoint graph node's encoded bytes: its envelope, as the
+    /// store installed it (FIG-5887 §3).
+    GraphNode(Vec<u8>),
     /// The item exists and is named, but its bytes could not be fetched.
     ///
     /// First-class rather than an error, for the same reason

@@ -85,7 +85,7 @@ use lash_core_execution::{ActorContext, Backend, StoreSet};
 use lash_core_store::tool_run::{
     CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
-use lash_durable::domain::{AdmittedId, OwnerKey, RunRecordKind, RunSeq};
+use lash_durable::domain::{AdmittedId, OwnerKey, RunFactKind, RunSeq};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
@@ -1051,9 +1051,9 @@ impl Scenario for L4 {
             violations.push(format!("NR-4: the turn was restored {restores} times"));
         }
 
-        let rows = match database.run_records(&owner()).await {
+        let rows = match database.run_facts(&owner()).await {
             Ok(rows) => rows,
-            Err(error) => return vec![format!("the run records do not read: {error}")],
+            Err(error) => return vec![format!("the run facts do not read: {error}")],
         };
         let waits = match round::PinnedWaits::read(database.as_ref(), &rows).await {
             Ok(waits) => waits,
@@ -1068,8 +1068,9 @@ impl Scenario for L4 {
         // x_start that committed, and every first x_start committed with
         // the turn's model.done.
         let committed_starts: BTreeSet<AdmittedId> = rows
+            .rows
             .iter()
-            .filter(|row| row.kind == RunRecordKind::XStart)
+            .filter(|row| row.kind == RunFactKind::XStart)
             .map(|row| AdmittedId {
                 owner: row.owner.clone(),
                 run: row.run,
@@ -1083,7 +1084,7 @@ impl Scenario for L4 {
                 ));
             }
         }
-        if !rows.is_empty() && committed(CommitLabel::MODEL_DONE) != 1 {
+        if !rows.rows.is_empty() && committed(CommitLabel::MODEL_DONE) != 1 {
             violations.push(format!(
                 "the round was admitted in {} model.done commits",
                 committed(CommitLabel::MODEL_DONE)
@@ -1768,7 +1769,7 @@ fn approval(scenario: &L4) -> (ToolCallId, String) {
 
 /// The run records' one round's only member, folded.
 async fn only_member(nodes: &SimNodes) -> round::RoundMember {
-    let rows = nodes.database().run_records(&owner()).await.unwrap();
+    let rows = nodes.database().run_facts(&owner()).await.unwrap();
     let waits = round::PinnedWaits::read(nodes.database().as_ref(), &rows)
         .await
         .unwrap();

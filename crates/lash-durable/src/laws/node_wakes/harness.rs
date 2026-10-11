@@ -386,26 +386,32 @@ impl DurableReads for CountingStore {
         self.inner.turn_end(session, run).await
     }
 
-    async fn run_records(
-        &self,
-        owner: &domain::OwnerKey,
-    ) -> Result<Vec<domain::RunRecordRow>, DurableError> {
-        self.inner.run_records(owner).await
+    async fn run_facts(&self, owner: &domain::OwnerKey) -> Result<domain::RunFacts, DurableError> {
+        self.inner.run_facts(owner).await
     }
 
-    async fn snapshot(
+    async fn exec_root(
         &self,
         exec: &domain::ExecKey,
-    ) -> Result<Option<domain::SnapshotRow>, DurableError> {
-        self.inner.snapshot(exec).await
+    ) -> Result<Option<domain::ExecRootRow>, DurableError> {
+        self.inner.exec_root(exec).await
     }
 
-    async fn cell_snapshots(
+    async fn cell_roots(
         &self,
         session: &SessionId,
         run: &TurnId,
-    ) -> Result<Vec<domain::SnapshotRow>, DurableError> {
-        self.inner.cell_snapshots(session, run).await
+    ) -> Result<Vec<domain::ExecRootRow>, DurableError> {
+        self.inner.cell_roots(session, run).await
+    }
+
+    async fn hydrate(
+        &self,
+        owner: domain::RootOwner,
+        expected: Option<domain::checkpoint_graph::NodeId>,
+        limits: domain::checkpoint_graph::DecodeLimits,
+    ) -> Result<domain::HydratedGraph, DurableError> {
+        self.inner.hydrate(owner, expected, limits).await
     }
 
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<domain::WaitRow>, DurableError> {

@@ -325,7 +325,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             .expect("build distinctive fixture tool state"),
     ));
     loaded.set_plugin_state(Some(fixture_plugin_state()));
-    loaded.set_execution_state_snapshot(Some(vec![0x46, 0x49, 0x47, 0x38, 0x38, 0x37].into()));
+    loaded.set_execution_graph(fixture_execution());
     let legacy_operation = OperationId::new(
         ExecutionScope::runtime_operation("durable-read-legacy-commit"),
         "commit",
@@ -620,10 +620,17 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         serde_json::to_value(fixture_plugin_state()).expect("encode expected plugin snapshot"),
         "durable fixture semantic drift: plugin snapshot content changed"
     );
+    let lash_core::plugin::ExecutionGraphCapture::Replace { root, nodes } = fixture_execution()
+    else {
+        unreachable!("the fixture stages a root")
+    };
     assert_eq!(
-        checkpoint.component_body(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
-        Some(&[0x46, 0x49, 0x47, 0x38, 0x38, 0x37][..]),
-        "durable fixture semantic drift: execution-state component changed"
+        checkpoint
+            .execution
+            .as_ref()
+            .map(|execution| (execution.root, &execution.nodes)),
+        Some((root, &nodes)),
+        "durable fixture semantic drift: execution state changed"
     );
 
     assert_eq!(
@@ -1061,6 +1068,12 @@ fn fixture_session_request(session_id: &SessionId) -> SessionStoreCreateRequest 
         head: SessionCreationHead::Config,
         retention: lash_core::Retention::UntilGc,
     }
+}
+
+/// The fixture session's execution state: a SessionExecution root over
+/// one large value.
+fn fixture_execution() -> lash_core::plugin::ExecutionGraphCapture {
+    lash_core::testing::store_fixtures::execution_graph(&format!("FIG887 {}", "8".repeat(512)))
 }
 
 fn fixture_plugin_state() -> PluginState {

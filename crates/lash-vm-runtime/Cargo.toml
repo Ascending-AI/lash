@@ -36,8 +36,11 @@ workspace = true
 
 [dependencies]
 lash-vm-client = { workspace = true }
+lash-vm-protocol = { workspace = true }
+lash-core-store = { workspace = true }
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
+base64 = { workspace = true }
 lash-core = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-vm-broker = { workspace = true }
@@ -46,6 +49,7 @@ lash-kernel-vm = { workspace = true }
 lash-kernel-migrate = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-vm-library = { workspace = true }
+lash-vm-releases = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-dialect-typescript = { workspace = true, optional = true }

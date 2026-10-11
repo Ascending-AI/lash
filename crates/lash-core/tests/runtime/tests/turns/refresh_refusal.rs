@@ -77,8 +77,17 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
         .refresh_session_graph_from_store()
         .await
         .expect("adopt the recorded initial frame");
+    let old_frame_globals = lash_core::testing::store_fixtures::execution_graph("old-frame-root");
+    let lash_core::plugin::ExecutionGraphCapture::Replace {
+        root: old_frame_root,
+        ..
+    } = &old_frame_globals
+    else {
+        unreachable!("the fixture stages a root")
+    };
+    let old_frame_root = *old_frame_root;
     runtime.edit_resident_state_for_test(|state| {
-        state.set_execution_state_snapshot(Some(b"old-frame-root".to_vec().into()));
+        state.set_execution_graph(old_frame_globals);
     });
     let old_frame = runtime.state().current_frame_node_id.clone();
     assert!(old_frame.is_some(), "the old head has a recorded frame");
@@ -167,8 +176,8 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
                 .state()
                 .execution_state_hydration()
                 .unwrap()
-                .map(|state| state.root.to_vec()),
-            Some(b"old-frame-root".to_vec()),
+                .map(|state| state.root),
+            Some(old_frame_root),
             "the old head keeps its own execution state"
         );
     }

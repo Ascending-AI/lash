@@ -31,11 +31,12 @@ workspace = true
 perf-witness = ["lash-core-execution/perf-witness"]
 # Test/performance-only seams. Production builds cannot bypass the schema gate.
 testing = ["lash-core-execution/testing"]
-synthetic-next = ["lash-core-execution/synthetic-next"]
+synthetic-next = ["lash-core-store/synthetic-next", "lash-core-execution/synthetic-next"]
 
 [dependencies]
 futures-util.workspace = true
 lash-store-sql = { workspace = true }
+lash-core-store = { workspace = true }
 lash-durable = { workspace = true }
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }

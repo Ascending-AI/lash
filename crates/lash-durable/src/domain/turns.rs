@@ -6,6 +6,7 @@
 //! unfinished.
 
 use crate::ids::{DurableInstant, Epoch};
+use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::store::{RunAdmissionRecord, RunTerminalCause, RunTerminalKind};
 use lash_sansio::{InputId, SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId};
 
@@ -22,17 +23,15 @@ pub enum UnfinishedPhase {
     Model {
         /// The pinned call.
         pin: ModelPin,
-        /// The checkpoint that re-delivers the call, encoded inline by its
-        /// owner.
-        checkpoint: String,
+        /// The PhaseRoot that re-delivers the call.
+        checkpoint: NodeId,
     },
     /// A tool round or a code cell is admitted and its bodies may run.
     Tools {
         /// The round's run.
         run: RunSeq,
-        /// The checkpoint that re-delivers the round, encoded inline by its
-        /// owner.
-        checkpoint: String,
+        /// The PhaseRoot that re-delivers the round.
+        checkpoint: NodeId,
     },
 }
 
@@ -50,10 +49,10 @@ impl UnfinishedPhase {
 
     /// The checkpoint a restore resumes from; `None` while admitted.
     #[must_use]
-    pub fn checkpoint(&self) -> Option<&str> {
+    pub fn checkpoint(&self) -> Option<NodeId> {
         match self {
             Self::Admitted => None,
-            Self::Model { checkpoint, .. } | Self::Tools { checkpoint, .. } => Some(checkpoint),
+            Self::Model { checkpoint, .. } | Self::Tools { checkpoint, .. } => Some(*checkpoint),
         }
     }
 
@@ -74,7 +73,7 @@ impl UnfinishedPhase {
     pub fn parse(
         stored: &str,
         argument: Option<u64>,
-        checkpoint: Option<String>,
+        checkpoint: Option<NodeId>,
         pin: Option<(String, DurableInstant, String)>,
         model_calls: u32,
     ) -> Option<Self> {
@@ -158,6 +157,10 @@ pub struct TurnRow {
     pub admission: RunAdmissionRecord,
     /// The phase, with what a restore resumes it from.
     pub phase: UnfinishedPhase,
+    /// The complete post-cell SessionExecution of the turn's last
+    /// successful cell, while the turn has one: rooted until the next
+    /// successful cell replaces it or the turn's commit transfers it.
+    pub working: Option<NodeId>,
     /// The protocol iteration.
     pub iteration: u32,
     /// How many model calls the turn admitted: the latest call's ordinal,
@@ -231,7 +234,23 @@ pub enum TurnWrite {
         /// The run.
         run: TurnId,
         /// The namespaces, by plugin.
-        namespaces: Vec<TurnNamespaceWrite>,
+        namespaces: Vec<StoredNamespaceWrite>,
+    },
+    /// Replace the unfinished turn's working SessionExecution `expected`
+    /// with `working`, or retire it (none) at the final session transfer.
+    /// Refused with
+    /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
+    /// it is not the session's unfinished turn or its working state is not
+    /// `expected`.
+    Working {
+        /// The session.
+        session: SessionId,
+        /// The run.
+        run: TurnId,
+        /// The working state replaced.
+        expected: Option<NodeId>,
+        /// The working state from this commit on.
+        working: Option<NodeId>,
     },
     /// End the turn and drop its phase row and its run's namespace rows,
     /// whether its commit promoted them or a cancel discards them. Refused with
@@ -292,6 +311,29 @@ pub struct TurnNamespaceWrite {
     pub entry: lash_core_store::plugin_state::NamespaceEntry,
     /// Whether to use the base, retain the row's body, or replace it.
     pub values: RunValuesWrite,
+}
+
+/// Where a stored run namespace write's values are: the graph form of a
+/// [`RunValuesWrite`], its body a NamespaceValue node the commit stages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StoredValues {
+    /// Use the run's base values and clear any earlier root.
+    Base,
+    /// Retain the row's current values root for a metadata-only write.
+    Held,
+    /// Replace the row's values with this NamespaceValue.
+    Root(NodeId),
+}
+
+/// A plugin namespace write for an unfinished run, as its commit stores it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredNamespaceWrite {
+    /// The plugin that owns the namespace.
+    pub plugin: String,
+    /// Its entry: its values by content address and its metadata.
+    pub entry: lash_core_store::plugin_state::NamespaceEntry,
+    /// Its values.
+    pub values: StoredValues,
 }
 
 /// A session's head commit from its own actor (V0, then L3; FIG-5230): the

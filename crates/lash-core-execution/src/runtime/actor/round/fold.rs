@@ -6,12 +6,11 @@ use std::sync::Arc;
 
 use lash_core_store::tool_run::{CompletionSource, StateResolution};
 use lash_durable::DurableInstant;
-use lash_durable::domain::{AdmittedId, Ordinal, OwnerKey, RunRecordKind, RunRecordRow, RunSeq};
-
-use super::records::{
-    ADMIT_ORDINAL, AdmitBody, DecideBody, OutcomeBody, PresentBody, RetryBody, StartBody,
-    first_start,
+use lash_durable::domain::{
+    AdmittedId, Ordinal, OwnerKey, RunFactKind, RunFactRow, RunFacts, RunSeq,
 };
+
+use super::records::{self, ADMIT_ORDINAL, DecideBody, Record, first_start};
 use super::{
     AdmittedExecution, ExecutionDraft, FoldRefusal, Material, PinnedWaits, PolicyView, Recovery,
     RunCursor, RunFold, SettledOutput,
@@ -284,19 +283,15 @@ impl RoundView {
     }
 }
 
-fn undecodable(row: &RunRecordRow, error: &serde_json::Error) -> FoldRefusal {
-    FoldRefusal::Undecodable {
+fn decode(facts: &RunFacts, row: &RunFactRow) -> Result<Record, FoldRefusal> {
+    records::read(facts, row).map_err(|reason| FoldRefusal::Undecodable {
         run: row.run,
         ordinal: row.ordinal,
-        reason: error.to_string(),
-    }
+        reason,
+    })
 }
 
-fn decode<T: serde::de::DeserializeOwned>(row: &RunRecordRow) -> Result<T, FoldRefusal> {
-    serde_json::from_str(&row.record_json).map_err(|error| undecodable(row, &error))
-}
-
-fn out_of_order(row: &RunRecordRow) -> FoldRefusal {
+fn out_of_order(row: &RunFactRow) -> FoldRefusal {
     FoldRefusal::OutOfOrder {
         run: row.run,
         ordinal: row.ordinal,
@@ -318,12 +313,12 @@ fn out_of_order(row: &RunRecordRow) -> FoldRefusal {
 /// [`FoldRefusal`] when the rows are inconsistent, or an admission's pinned
 /// wait is missing from `waits` or is not its call's.
 pub fn fold(
-    rows: &[RunRecordRow],
+    facts: &RunFacts,
     current: &PolicyView,
     waits: &PinnedWaits,
 ) -> Result<RunFold, FoldRefusal> {
-    let mut runs: BTreeMap<RunSeq, Vec<&RunRecordRow>> = BTreeMap::new();
-    for row in rows {
+    let mut runs: BTreeMap<RunSeq, Vec<&RunFactRow>> = BTreeMap::new();
+    for row in &facts.rows {
         runs.entry(row.run).or_default().push(row);
     }
     let mut folded = RunFold::default();
@@ -337,7 +332,15 @@ pub fn fold(
                 });
             }
         }
-        let view = fold_run(run, &records, waits)?;
+        if records
+            .first()
+            .is_some_and(|row| row.kind == RunFactKind::CellReport)
+        {
+            let report = fold_report(facts, &records)?;
+            folded.reports.insert(run, report);
+            continue;
+        }
+        let view = fold_run(facts, run, &records, waits)?;
         for member in &view.members {
             folded
                 .recoveries
@@ -348,21 +351,44 @@ pub fn fold(
     Ok(folded)
 }
 
+/// A cell's report: its run's one fact.
+fn fold_report(
+    facts: &RunFacts,
+    records: &[&RunFactRow],
+) -> Result<lash_core_store::checkpoint_graph::NodeId, FoldRefusal> {
+    let [row] = records else {
+        return Err(out_of_order(records[1]));
+    };
+    let Record::CellReport(report) = decode(facts, row)? else {
+        return Err(out_of_order(row));
+    };
+    super::cell_report(facts, report)
+        .map(|_| report)
+        .map_err(|refusal| FoldRefusal::Undecodable {
+            run: row.run,
+            ordinal: row.ordinal,
+            reason: refusal.to_string(),
+        })
+}
+
 fn fold_run(
+    facts: &RunFacts,
     run: RunSeq,
-    records: &[&RunRecordRow],
+    records: &[&RunFactRow],
     waits: &PinnedWaits,
 ) -> Result<RoundView, FoldRefusal> {
     let Some(admit) = records
         .first()
-        .filter(|row| row.ordinal == ADMIT_ORDINAL && row.kind == RunRecordKind::Admit)
+        .filter(|row| row.ordinal == ADMIT_ORDINAL && row.kind == RunFactKind::Admit)
     else {
         return Err(FoldRefusal::OrdinalGap {
             run,
             missing: ADMIT_ORDINAL,
         });
     };
-    let body: AdmitBody = decode(admit)?;
+    let Record::Admit(body) = decode(facts, admit)? else {
+        return Err(out_of_order(admit));
+    };
     let mut members: Vec<Option<RoundMember>> = Vec::new();
     members.resize_with(body.members.len(), || None);
     let drafts: Vec<ExecutionDraft> = body
@@ -378,10 +404,9 @@ fn fold_run(
     let mut presented = false;
     let mut trace_exported = false;
     for row in &records[1..] {
-        match row.kind {
-            RunRecordKind::Admit => return Err(out_of_order(row)),
-            RunRecordKind::XStart => {
-                let start: StartBody = decode(row)?;
+        match decode(facts, row)? {
+            Record::Admit(_) | Record::CellReport(_) => return Err(out_of_order(row)),
+            Record::Start(start) => {
                 let index = usize::try_from(start.member)
                     .ok()
                     .filter(|index| *index < drafts.len())
@@ -420,8 +445,7 @@ fn fold_run(
                     Some(_) | None => return Err(out_of_order(row)),
                 }
             }
-            RunRecordKind::XWait => {
-                let parked: OutcomeBody = decode(row)?;
+            Record::Wait(parked) => {
                 let SettledOutput::Waiting(source) = parked.output else {
                     return Err(out_of_order(row));
                 };
@@ -436,8 +460,7 @@ fn fold_run(
                     source,
                 };
             }
-            RunRecordKind::XOutcome => {
-                let settled: OutcomeBody = decode(row)?;
+            Record::Outcome(settled) => {
                 if matches!(settled.output, SettledOutput::Waiting(_)) {
                     return Err(out_of_order(row));
                 }
@@ -452,8 +475,7 @@ fn fold_run(
                 };
                 member.committed_state = settled.state;
             }
-            RunRecordKind::Retry => {
-                let retry: RetryBody = decode(row)?;
+            Record::Retry(retry) => {
                 let member = open_attempt(&mut members, row, retry.start)?;
                 let MemberState::Started { attempt, .. } = member.state else {
                     return Err(out_of_order(row));
@@ -479,8 +501,7 @@ fn fold_run(
                     due: DurableInstant(retry.due_at_ms),
                 };
             }
-            RunRecordKind::Present => {
-                let _: PresentBody = decode(row)?;
+            Record::Present => {
                 if presented
                     || row.call.is_some()
                     || members.iter().any(|member| {
@@ -495,9 +516,7 @@ fn fold_run(
             }
             // A coordinator decision is the tool round's to fold; the
             // primitive's recoveries do not depend on it.
-            RunRecordKind::Decide => match decode(row)? {
-                DecideBody::TraceExported => trace_exported = true,
-            },
+            Record::Decide(DecideBody::TraceExported) => trace_exported = true,
         }
     }
     // The admission commits every member's first start with it, so a
@@ -525,7 +544,7 @@ fn fold_run(
 /// call: the one an outcome or a retry settles.
 fn open_attempt<'m>(
     members: &'m mut [Option<RoundMember>],
-    row: &RunRecordRow,
+    row: &RunFactRow,
     start: u64,
 ) -> Result<&'m mut RoundMember, FoldRefusal> {
     let call = row.call.as_ref().ok_or_else(|| out_of_order(row))?;
@@ -535,20 +554,20 @@ fn open_attempt<'m>(
         .find(|member| member.call() == call)
         .ok_or_else(|| out_of_order(row))?;
     match member.state {
-        MemberState::Final { .. } if row.kind == RunRecordKind::XOutcome => {
+        MemberState::Final { .. } if row.kind == RunFactKind::XOutcome => {
             Err(FoldRefusal::SecondFinal(call.clone()))
         }
         MemberState::Started { start: open, .. } if open.0 == start => Ok(member),
         // A call whose retry is due may end without its next attempt: a
         // cancel or a veto settles it at the attempt that failed.
         MemberState::RetryDue { start: failed, .. }
-            if failed.0 == start && row.kind == RunRecordKind::XOutcome =>
+            if failed.0 == start && row.kind == RunFactKind::XOutcome =>
         {
             Ok(member)
         }
         // A parked call ends at the attempt that parked it.
         MemberState::Waiting { start: parked, .. }
-            if parked.0 == start && row.kind == RunRecordKind::XOutcome =>
+            if parked.0 == start && row.kind == RunFactKind::XOutcome =>
         {
             Ok(member)
         }

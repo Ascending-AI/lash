@@ -441,7 +441,7 @@ pub async fn read_process_tool_call(
     };
     let reads = host.durable_reads()?;
     let rows = reads
-        .run_records(&OwnerKey::Process(process_id.clone()))
+        .run_facts(&OwnerKey::Process(process_id.clone()))
         .await?;
     let waits = round::PinnedWaits::read(reads, &rows).await?;
     let fold = round::fold(&rows, &PolicyView::new([]), &waits)

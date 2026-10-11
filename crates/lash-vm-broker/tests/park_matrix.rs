@@ -1,7 +1,7 @@
 //! A kernel run's parks on the durable store (kernel spec §2.3, §5; ADR
 //! 0132 §8): three tasks each perform one effect, then `main` performs one
-//! over their results. The run's parks commit to `lash_exec_snapshots` and
-//! `lash_run_records` on SQLite in memory and isolated PostgreSQL databases.
+//! over their results. The run's parks commit its execution root and run
+//! facts on SQLite in memory and isolated PostgreSQL databases.
 //!
 //! Crash laws, with every labelled commit cut under every fault and the run
 //! resumed on another node (before the park commits, after it commits and
@@ -16,8 +16,7 @@
 //!   call, whichever activation admits it.
 //! - **P4, answered from records:** each result the run ends with is what
 //!   one of that effect's bodies answered, or its interruption.
-//! - **P5, the end names nothing:** the last checkpoint records the end,
-//!   with a ledger that admitted two parks and stands on nothing.
+//! - **P5, the end names nothing:** the last root records the end.
 //!
 //! Delivery law: the same committed outcomes, delivered to two machines
 //! resumed from one saved state in opposite orders, leave both machines at
@@ -40,8 +39,11 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::{ActorContext, AdmittedScope, Backend};
+use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
+use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
 use lash_core_store::tool_run::{CompletionSource, MaterialOwner, MaterialRole};
-use lash_durable::domain::{CellId, ExecKey, RunRecordKind, RunSeq};
+use lash_durable::domain::graph::{OWNER_READ_LIMITS, RootOwner};
+use lash_durable::domain::{CellId, ExecKey, HydratedGraph, RunFactKind, RunSeq};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, MailTx, Release,
@@ -51,20 +53,21 @@ use lash_kernel_doc::{
     Datum, EffectIdentity, ErrorDatum, FunctionRegistry, Handle, Integer, Name, NumberPolicy,
     NumberToken, Site, SpawnIdentity, TaskIdentity, Timestamp, Unit, parse_document,
 };
-use lash_kernel_state::ParkedRun;
 use lash_kernel_vm::{
-    Bindings, Bounds, EffectRequest, End, Host, KernelMachine, Machine, Outcome, Program, Request,
-    Start, Step, Target,
+    Bindings, Bounds, EffectRequest, End, Host, Outcome, Program, Request, Start, Step, Target,
 };
 use lash_sansio::{SessionId, ToolCallId, ToolId, TurnId};
+use lash_vm_broker::kernel::graph::{
+    ArgumentProjection, Disposition, EffectMembership, FrozenRequest, Projections,
+};
 use lash_vm_broker::kernel::{
-    AdmitAs, EFFECT_INTERRUPTED, EffectAdmission, EffectLedger, InProcess, KernelBroker,
-    KernelCeilings, KernelEffects, KernelEnd, ParkSave, ParkedCheckpoint, Settled, datum_to_json,
+    AdmitAs, DrivenMachine as _, EFFECT_INTERRUPTED, EffectAdmission, EffectLedger, EndSave,
+    InProcess, KernelBroker, KernelCeilings, KernelEffects, KernelEnd, Machines as _, ParkSave,
+    ParkedState, SessionGraph, Settled, datum_to_json,
 };
 use lash_vm_broker::{
     CodeCallIdentities, Driven, DurableSnapshotStore, MemberDraft, OperationId, ParentFault,
 };
-use lash_vm_protocol::EncodedPayload;
 use tokio_util::sync::CancellationToken;
 
 #[path = "support/park_store.rs"]
@@ -177,6 +180,68 @@ fn sum_identity() -> EffectIdentity {
         occurrence: 0,
         loops: Vec::new(),
     }
+}
+
+/// The law's one argument projection: a perform's arguments as the JSON
+/// list they spell.
+const LAW_ARGS: &str = "park-law/v1";
+
+struct LawArgs;
+
+impl ArgumentProjection for LawArgs {
+    fn id(&self) -> &str {
+        LAW_ARGS
+    }
+
+    fn project(&self, args: &[Datum]) -> Result<serde_json::Value, String> {
+        let text = datum_to_json(&Datum::List(args.to_vec())).map_err(|error| error.to_string())?;
+        serde_json::from_str(&text).map_err(|error| error.to_string())
+    }
+}
+
+impl Projections for LawArgs {
+    fn project(&self, projection: &str, args: &[Datum]) -> Result<serde_json::Value, String> {
+        if projection != LAW_ARGS {
+            return Err(format!("no projection `{projection}`"));
+        }
+        ArgumentProjection::project(self, args)
+    }
+}
+
+/// The execution's latest root, read whole: its body and the graph beneath.
+async fn stored_root(database: &dyn DurableStore) -> Option<(ExecRoot, HydratedGraph)> {
+    let row = database.exec_root(&exec()).await.ok()??;
+    let graph = database
+        .hydrate(RootOwner::Exec(exec()), Some(row.root), OWNER_READ_LIMITS)
+        .await
+        .ok()?;
+    let root = GraphDecoder::new(&graph, OWNER_READ_LIMITS)
+        .decode(row.root, NodeKind::EXEC_ROOT)
+        .ok()?;
+    Some((root, graph))
+}
+
+/// Whether the latest root's membership names `operation`'s admission: the
+/// root and the admission commit in one transaction, so a root that names
+/// it means its admission stood.
+async fn admitted_in_root(database: &dyn DurableStore, operation: OperationId) -> bool {
+    let Some((root, graph)) = stored_root(database).await else {
+        return false;
+    };
+    let Some(membership) = root.effect_membership else {
+        return false;
+    };
+    let mut decoder = GraphDecoder::new(&graph, OWNER_READ_LIMITS);
+    EffectMembership::load(&mut decoder, membership, &exec(), &LawArgs).is_ok_and(
+        |(_, resolved)| {
+            resolved.values().any(|resolved| {
+                matches!(
+                    resolved.admission.disposition,
+                    Disposition::Execution { operation: admitted, .. } if admitted == operation
+                )
+            })
+        },
+    )
 }
 
 struct NoReads;
@@ -382,23 +447,12 @@ impl Scenario for ParkScenario {
                 ));
             }
         }
-        match nodes.database().snapshot(&exec()).await {
-            Ok(Some(row)) => {
-                match serde_json::from_str::<ParkedCheckpoint<ParkedRun>>(&row.snapshot_ref) {
-                    Ok(checkpoint) => {
-                        if !matches!(
-                            checkpoint.phase,
-                            lash_vm_broker::kernel::CheckpointPhase::Ended { .. }
-                        ) {
-                            violations.push("P5: the last checkpoint is not ended".to_owned());
-                        }
-                    }
-                    Err(error) => {
-                        violations.push(format!("P5: the checkpoint does not decode: {error}"));
-                    }
-                }
+        match stored_root(nodes.database().as_ref()).await {
+            Some((root, _)) if root.status == ExecStatus::Ended => {}
+            Some((root, _)) => {
+                violations.push(format!("P5: the last root is {:?}, not ended", root.status));
             }
-            other => violations.push(format!("P5: no last checkpoint: {other:?}")),
+            None => violations.push("P5: no last root reads".to_owned()),
         }
         violations
     }
@@ -480,17 +534,37 @@ impl Activation for ParkActivation {
                 }
                 continue;
             }
-            let machines = InProcess::<KernelMachine, _>::new(
-                self.program.clone(),
-                bounds(),
-                start(),
-                NoReads,
-            )
-            .expect("the document has an identity");
+            let machines = InProcess::new(self.program.clone(), bounds(), start(), NoReads)
+                .expect("the document has an identity");
             let run = broker.run(&machines, &CancellationToken::new()).await;
             match run {
-                Ok(KernelEnd::Ended(End::Finished(finished))) => {
-                    self.shared.ends.lock().expect("ends").push(finished.result);
+                Ok(KernelEnd::Ended {
+                    end: End::Finished(finished),
+                    owed,
+                }) => {
+                    let result = finished.result.clone();
+                    // A run that parked commits its end over its last root.
+                    if let Some(ledger) = owed
+                        && let Err(failure) = store
+                            .commit_run_end(
+                                EndSave {
+                                    document: machines.document(),
+                                    ledger: *ledger,
+                                    end: End::Finished(finished),
+                                    session: law_session(),
+                                    with: Vec::new(),
+                                },
+                                &host,
+                            )
+                            .await
+                    {
+                        self.stop(&failure);
+                        if lost(&owned).await {
+                            return Exit::Released;
+                        }
+                        continue;
+                    }
+                    self.shared.ends.lock().expect("ends").push(result);
                     let Ok(mut tx) = owned.begin().await else {
                         return Exit::Released;
                     };
@@ -526,7 +600,7 @@ async fn two_orders(
 ) -> Result<(), String> {
     let refused = |error: &dyn std::fmt::Display| error.to_string();
     if store
-        .latest_park::<ParkedRun>()
+        .latest_root()
         .await
         .map_err(|error| refused(&error))?
         .is_some()
@@ -535,35 +609,44 @@ async fn two_orders(
         // committed, and the broker resumes from it.
         return Ok(());
     }
-    let document = program
-        .document
-        .identity()
+    let machines = InProcess::new(program.clone(), bounds(), start(), NoReads)
         .map_err(|error| refused(&error))?;
-    let mut machine = KernelMachine::start(program.clone(), bounds(), start())
-        .map_err(|error| refused(&error))?;
+    let document = machines.document();
+    let releases = machines.releases().map_err(|error| refused(&error))?;
+    let binding = lash_vm_broker::kernel::graph::owner_binding(&exec());
+    let mut machine = machines.start().await.map_err(|error| refused(&error))?;
     let Step::Parked(park) = machine
-        .run(&mut NoReads, u64::MAX)
+        .run(u64::MAX, false)
+        .await
         .map_err(|error| refused(&error))?
     else {
         return Err("the run parks first".into());
     };
-    let committed = store
-        .commit_park(ParkSave {
-            document,
-            state: machine.export().map_err(|error| refused(&error))?,
-            ledger: EffectLedger::new(),
-            admit: admissions(host, 0, park.requests).await?,
-            host: None,
-            with: Vec::new(),
-        })
+    let state = machine
+        .export(&binding)
         .await
         .map_err(|error| refused(&error))?;
-    let lash_vm_broker::kernel::CheckpointPhase::Parked {
-        state,
-        ledger: saved_ledger,
-    } = committed.checkpoint.phase
-    else {
-        return Err("a park saves its state".into());
+    let committed = store
+        .commit_park(
+            ParkSave {
+                document,
+                state: state.clone(),
+                releases,
+                ledger: EffectLedger::new(),
+                admit: admissions(host, 0, park.requests).await?,
+                with: Vec::new(),
+            },
+            host,
+        )
+        .await
+        .map_err(|error| refused(&error))?;
+    let saved_ledger = committed.ledger;
+    let parked_state = ParkedState {
+        whole: state,
+        document: document.to_string(),
+        admissions: store
+            .admitted_waits(&saved_ledger)
+            .map_err(|error| refused(&error))?,
     };
     // Every outcome of the park, as the records hold them.
     let mut waiting = saved_ledger.clone();
@@ -607,17 +690,20 @@ async fn two_orders(
     }
     let mut parked = Vec::new();
     for order in [[0_usize, 1, 2], [2, 1, 0]] {
-        let mut machine = KernelMachine::import(program.clone(), bounds(), state.clone())
+        let mut machine = machines
+            .resume(&parked_state)
+            .await
             .map_err(|error| refused(&error))?;
         let mut ledger = saved_ledger.clone();
         for index in order {
             let outcome = settled[index].clone();
             machine
                 .deliver(outcome.wait, outcome.outcome)
+                .await
                 .map_err(|error| refused(&error))?;
             ledger.consume(&outcome.identity);
         }
-        match machine.run(&mut NoReads, u64::MAX) {
+        match machine.run(u64::MAX, false).await {
             Ok(Step::Parked(park)) => parked.push((machine, ledger, park)),
             other => shared.violation(format!(
                 "delivery: after order {order:?} the machine did not park: {other:?}"
@@ -637,16 +723,22 @@ async fn two_orders(
     let Some((mut machine, ledger, park)) = parked.pop() else {
         return Err("both delivery orders park".into());
     };
-    let state = machine.export().map_err(|error| refused(&error))?;
+    let state = machine
+        .export(&binding)
+        .await
+        .map_err(|error| refused(&error))?;
     store
-        .commit_park(ParkSave {
-            document,
-            state,
-            admit: admissions(host, ledger.next_park(), park.requests).await?,
-            ledger,
-            host: None,
-            with: Vec::new(),
-        })
+        .commit_park(
+            ParkSave {
+                document,
+                state,
+                releases,
+                admit: admissions(host, ledger.next_park(), park.requests).await?,
+                ledger,
+                with: Vec::new(),
+            },
+            host,
+        )
         .await
         .map_err(|error| refused(&error))?;
     let sum = shared
@@ -744,16 +836,7 @@ impl MemberBodies for LawBodies {
                 // The state and the admission commit in one transaction, so
                 // a stored ledger that names the execution means its
                 // admission stood.
-                let admitted_first = match database.snapshot(&exec()).await {
-                    Ok(Some(row)) => {
-                        serde_json::from_str::<ParkedCheckpoint<ParkedRun>>(&row.snapshot_ref)
-                            .is_ok_and(|checkpoint| {
-                                matches!(checkpoint.phase, lash_vm_broker::kernel::CheckpointPhase::Parked { ledger, .. }
-                                    if ledger.executions().any(|admitted| admitted.operation == operation))
-                            })
-                    }
-                    _ => false,
-                };
+                let admitted_first = admitted_in_root(database.as_ref(), operation).await;
                 let token = shared.tokens.fetch_add(1, Ordering::SeqCst) as u64;
                 shared.bodies.lock().expect("bodies").push(Body {
                     operation,
@@ -763,13 +846,15 @@ impl MemberBodies for LawBodies {
                 });
                 while let Some(index) = worker {
                     let outcomes = database
-                        .run_records(&exec().owner())
+                        .run_facts(&exec().owner())
                         .await
-                        .map_or(0, |rows| {
-                            rows.iter()
+                        .map_or(0, |facts| {
+                            facts
+                                .rows
+                                .iter()
                                 .filter(|row| {
                                     row.run == RunSeq(operation.run)
-                                        && row.kind == RunRecordKind::XOutcome
+                                        && row.kind == RunFactKind::XOutcome
                                 })
                                 .count() as u64
                         });
@@ -808,6 +893,22 @@ struct LawHost {
     store: Arc<DurableSnapshotStore>,
 }
 
+impl Projections for LawHost {
+    fn project(&self, projection: &str, args: &[Datum]) -> Result<serde_json::Value, String> {
+        Projections::project(&LawArgs, projection, args)
+    }
+}
+
+/// The session state the law's cell leaves: one bare SessionExecution.
+fn law_session() -> SessionGraph {
+    let lash_core_execution::plugin::ExecutionGraphCapture::Replace { root, nodes } =
+        lash_core_execution::testing::store_fixtures::execution_graph("park-law")
+    else {
+        unreachable!("the fixture stages a root")
+    };
+    SessionGraph { root, nodes }
+}
+
 #[async_trait::async_trait]
 impl KernelEffects for LawHost {
     async fn admit(
@@ -831,11 +932,28 @@ impl KernelEffects for LawHost {
             call.clone(),
             text.clone(),
         ));
-        let tool = request.effect.as_str().trim_start_matches("tools.");
+        let tool = ToolId::new(format!(
+            "tool:{}",
+            request.effect.as_str().trim_start_matches("tools.")
+        ));
+        let args = ArgumentProjection::project(&LawArgs, &request.args).map_err(ParentFault)?;
+        let frozen = FrozenRequest::tool(
+            lash_core_execution::tool_dispatch::CellCall {
+                id: call.clone(),
+                tool_id: tool.clone(),
+                args,
+                execution_grant: None,
+                recorded_binding: None,
+                issuing_language_node_id: None,
+            },
+            request.args.clone(),
+            &LawArgs,
+        )
+        .map_err(|refusal| ParentFault(refusal.to_string()))?;
         MemberDraft::new(
             call,
-            ToolId::new(format!("tool:{tool}")),
-            EncodedPayload(text.into_bytes()),
+            tool,
+            frozen,
             identities().opener(),
             (
                 lash_sansio::ExecutionPolicy::Once,
@@ -848,6 +966,45 @@ impl KernelEffects for LawHost {
             None,
         )
         .map(Ok)
+    }
+
+    /// The law's cell names a host state and an envelope of its own, which
+    /// its end requires: the broker checks their kinds, and their bodies are
+    /// the host's.
+    fn stage_host(
+        &self,
+        staging: &mut lash_core_store::checkpoint_graph::GraphStaging,
+        _reads: &mut std::collections::BTreeSet<lash_core_store::checkpoint_graph::NodeId>,
+        _admitted: &[lash_vm_broker::kernel::AdmittedCall],
+    ) -> Result<lash_vm_broker::kernel::HostParts, ParentFault> {
+        let stage = |staging: &mut lash_core_store::checkpoint_graph::GraphStaging, kind, part| {
+            staging
+                .encode_value(kind, &LawHostPart(part))
+                .map_err(|refusal| ParentFault(refusal.to_string()))
+        };
+        Ok(lash_vm_broker::kernel::HostParts {
+            host: Some(stage(staging, NodeKind::HOST_ROOT, "park-law host")?),
+            envelope: Some(stage(
+                staging,
+                NodeKind::CELL_ENVELOPE,
+                "park-law envelope",
+            )?),
+        })
+    }
+}
+
+/// A host part of the law's cell: one text.
+struct LawHostPart(&'static str);
+
+impl lash_core_store::checkpoint_graph::TokenCodec for LawHostPart {
+    fn encode(&self, out: &mut lash_core_store::checkpoint_graph::TokenWriter) {
+        out.text(self.0);
+    }
+
+    fn decode(
+        _input: &mut lash_core_store::checkpoint_graph::TokenReader<'_>,
+    ) -> Result<Self, lash_core_store::checkpoint_graph::TokenError> {
+        unreachable!("the law never reads its host parts back")
     }
 }
 

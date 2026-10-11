@@ -20,8 +20,11 @@
 //! The crate stores nothing and commits nothing: it produces and consumes
 //! bytes. It depends on `lash-kernel-doc` and on no other lash crate.
 
+mod codec_variants;
 mod fragments;
 mod schema;
+mod terminal;
+mod whole;
 
 #[cfg(test)]
 mod tests;
@@ -31,4 +34,9 @@ pub use schema::{
     Binding, Bound, Call, EffectOutcome, Ended, Entered, Finally, Fragment, Header, Held, Incoming,
     ListJoin, Loop, Occurrence, Owned, ParkedCall, ParkedRun, ParkedTask, Pause, Perform,
     PerformState, ReadyQueue, Request, Root, RootState, Run, SleepOutcome, Task, TaskState, WaitId,
+};
+pub use terminal::{TerminalBound, TerminalEnd, TerminalWhole};
+pub use whole::{
+    AdmittedRequest, AdmittedWait, CommittedOutcome, KernelWhole, WaitKind, WaitState, WholeError,
+    WholeTask, WholeTaskState, WholeWait,
 };

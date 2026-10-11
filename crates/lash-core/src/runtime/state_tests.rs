@@ -65,9 +65,6 @@ impl crate::ToolProvider for DynamicSnapshotTools {
 async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency() {
     use crate::store::SessionCommitStore as _;
 
-    const LEAF_A: &str = "execution_state/leaf-a";
-    const LEAF_B: &str = "execution_state/leaf-b";
-
     let store = crate::testing::unbound_recording_store().await;
     let mut generation_a = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
@@ -80,29 +77,10 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
     )
     .await
     .expect("admit the session");
-    let mut snapshot_a = crate::plugin::ExecutionStateCapture::replace(
-        br#"{"generation":"a","leaves":["execution_state/leaf-a","execution_state/leaf-b"]}"#
-            .as_slice()
-            .into(),
-    );
-    snapshot_a
-        .leaves_mut()
-        .expect("replacement capture")
-        .insert(
-            crate::plugin::ExecutionLeafName::parse(LEAF_A).expect("execution leaf key"),
-            crate::plugin::LeafChange::Changed((b"generation-a leaf-a".as_slice()).into()),
-        );
-    snapshot_a
-        .leaves_mut()
-        .expect("replacement capture")
-        .insert(
-            crate::plugin::ExecutionLeafName::parse(LEAF_B).expect("execution leaf key"),
-            crate::plugin::LeafChange::Changed((b"generation-a leaf-b".as_slice()).into()),
-        );
-    generation_a
-        .set_execution_state_components(snapshot_a)
-        .expect("stage valid generation-A two-leaf execution state");
-
+    generation_a.set_execution_graph(crate::testing::store_fixtures::execution_graph(&format!(
+        "generation-a {}",
+        "a".repeat(1024)
+    )));
     let result_a = store
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &generation_a,
@@ -112,82 +90,42 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
 
     let mut generation_b = generation_a.clone();
     generation_b.apply_persisted_commit_result(result_a.clone());
-    let mut snapshot_b = crate::plugin::ExecutionStateCapture::replace(
-        br#"{"generation":"b","leaves":["execution_state/leaf-a","execution_state/leaf-b"]}"#
-            .as_slice()
-            .into(),
-    );
-    snapshot_b
-        .leaves_mut()
-        .expect("replacement capture")
-        .insert(
-            crate::plugin::ExecutionLeafName::parse(LEAF_A).expect("execution leaf key"),
-            crate::plugin::LeafChange::Unchanged,
-        );
-    snapshot_b
-        .leaves_mut()
-        .expect("replacement capture")
-        .insert(
-            crate::plugin::ExecutionLeafName::parse(LEAF_B).expect("execution leaf key"),
-            crate::plugin::LeafChange::Unchanged,
-        );
-    generation_b
-        .set_execution_state_components(snapshot_b)
-        .expect("stage valid generation-B root over unchanged leaves");
+    generation_b.set_execution_graph(crate::testing::store_fixtures::execution_graph(&format!(
+        "generation-b {}",
+        "b".repeat(1024)
+    )));
     let result_b = store
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &generation_b,
         ))
         .await
         .expect("persist valid generation-B state");
-
     let generation_b_root = result_b
         .manifest
-        .components
-        .get(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
-        .expect("generation-B root descriptor")
-        .clone();
-    let generation_a_leaf_b = result_a
-        .manifest
-        .components
-        .get(LEAF_B)
-        .expect("generation-A leaf-b descriptor")
-        .clone();
+        .execution_ref
+        .clone()
+        .expect("generation-B root");
 
     let cases = [
         (
-            "leaf ref absent from store",
+            "root absent from store",
             Box::new(|result: &mut crate::store::RuntimeCommitReceipt| {
-                result
-                    .manifest
-                    .components
-                    .get_mut(LEAF_A)
-                    .expect("leaf-a descriptor")
-                    .blob_ref = "execution-state-missing-leaf".to_string().into();
+                result.manifest.execution_ref = Some(crate::store::BlobRef(
+                    crate::durable_port::domain::checkpoint_graph::NodeId::of_envelope(b"absent")
+                        .to_hex(),
+                ));
             }) as Box<dyn Fn(&mut crate::store::RuntimeCommitReceipt)>,
         ),
         (
-            "leaf ref hashes different bytes",
+            "another generation's committed root",
             Box::new(move |result: &mut crate::store::RuntimeCommitReceipt| {
-                result
-                    .manifest
-                    .components
-                    .insert(LEAF_A.to_string(), generation_a_leaf_b.clone());
+                result.manifest.execution_ref = Some(generation_b_root.clone());
             }),
         ),
         (
-            "generation-B root with generation-A leaves",
-            Box::new(move |result: &mut crate::store::RuntimeCommitReceipt| {
-                result.manifest.components.insert(
-                    crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
-                    generation_b_root.clone(),
-                );
-            }),
-        ),
-        (
-            "manifest omits leaf-b still listed by root",
+            "manifest omits the staged root",
             Box::new(|result: &mut crate::store::RuntimeCommitReceipt| {
-                result.manifest.components.remove(LEAF_B);
+                result.manifest.execution_ref = None;
             }),
         ),
     ];

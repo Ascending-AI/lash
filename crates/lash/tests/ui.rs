@@ -53,7 +53,6 @@ fn facade_compile_time_contracts() {
         t.compile_fail("tests/ui/rlm_protocol_event_decode_is_not_public.rs");
     }
     register_facade_contracts(&t);
-    t.compile_fail("tests/ui/execution_capture_cannot_have_leaves_without_a_root.rs");
     register_store_seam_contracts(&t);
     register_rlm_config_builder_contracts(&t);
 }

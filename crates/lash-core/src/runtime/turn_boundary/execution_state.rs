@@ -9,7 +9,7 @@ use super::RuntimeSessionState;
 #[derive(Debug, PartialEq, Eq)]
 pub(in crate::runtime) enum ExecutionStateUpdate {
     Clean,
-    Replace(crate::plugin::ExecutionStateCapture),
+    Replace(crate::plugin::ExecutionGraphCapture),
     /// The execution state is wiped. On a committed frame switch `carries`
     /// names the artifacts the switch hands to the successor frame
     /// (ADR 0113 §3.1); every other clear carries none.
@@ -25,8 +25,10 @@ impl ExecutionStateUpdate {
     ) -> Result<(), StoreError> {
         match self {
             Self::Clean => {}
-            Self::Replace(snapshot) => state.set_execution_state_components(snapshot)?,
-            Self::Clear { .. } => state.set_execution_state_snapshot(None),
+            Self::Replace(capture) => state.set_execution_graph(capture),
+            Self::Clear { .. } => {
+                state.set_execution_graph(crate::plugin::ExecutionGraphCapture::Clear);
+            }
         }
         Ok(())
     }
@@ -174,17 +176,17 @@ pub(in crate::runtime) async fn capture_execution_state_update(
         return Ok(ExecutionStateUpdate::Clean);
     }
     let session_id = session.session_id().clone();
-    let snapshot = code_executor
-        .snapshot_execution_state(crate::plugin::ProtocolSessionContext::new(
-            &session_id,
-            session.fleet_format(),
-        ))
+    let capture = code_executor
+        .capture_execution_graph(
+            crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
+            crate::plugin::ExecutionGraphPurpose::Final,
+        )
         .await?;
-    Ok(match snapshot {
-        capture @ crate::plugin::ExecutionStateCapture::Replace { .. } => {
+    Ok(match capture {
+        capture @ crate::plugin::ExecutionGraphCapture::Replace { .. } => {
             ExecutionStateUpdate::Replace(capture)
         }
-        crate::plugin::ExecutionStateCapture::Clear => ExecutionStateUpdate::Clear {
+        crate::plugin::ExecutionGraphCapture::Clear => ExecutionStateUpdate::Clear {
             carries: SeedCarries::none(),
         },
     })

@@ -46,6 +46,14 @@ impl CheckpointContentRef {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// A digest as a store recorded it: what
+    /// [`TurnCheckpointContent::insert_stored`] checks the blob it names
+    /// against.
+    #[must_use]
+    pub fn stored(digest: String) -> Self {
+        Self(digest)
+    }
 }
 
 impl std::fmt::Display for CheckpointContentRef {

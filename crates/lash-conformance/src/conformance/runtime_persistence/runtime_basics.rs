@@ -49,7 +49,16 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
     state.agent_frames = state
         .session_graph
         .agent_frame_records(&SessionId::from("root"));
-    state.set_execution_state_snapshot(Some(b"frame-vm".to_vec().into()));
+    let execution = lash_core::testing::store_fixtures::execution_graph("frame-vm");
+    let crate::plugin::ExecutionGraphCapture::Replace {
+        root: execution_root,
+        ..
+    } = &execution
+    else {
+        unreachable!("the fixture stages a root")
+    };
+    let execution_root = *execution_root;
+    state.set_execution_graph(execution);
 
     let commit = RuntimeCommit::persisted_state_for_test(&state);
     assert!(
@@ -105,10 +114,11 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
         "the anchor names the frame the window's base continues"
     );
     assert_eq!(
-        read.checkpoint.as_ref().and_then(|checkpoint| {
-            checkpoint.component_body(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
-        }),
-        Some(&b"frame-vm"[..])
+        read.checkpoint
+            .as_ref()
+            .and_then(|checkpoint| checkpoint.execution.as_ref())
+            .map(|execution| execution.root),
+        Some(execution_root)
     );
 }
 

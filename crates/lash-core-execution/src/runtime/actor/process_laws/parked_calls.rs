@@ -49,7 +49,7 @@ pub async fn a_parked_call_is_reopened_from_its_completion_wait_after_a_restart_
 
     let restarted = law_backend(backend)?;
     let owner = OwnerKey::Process(process.clone());
-    let rows = restarted.durable().run_records(&owner).await?;
+    let rows = restarted.durable().run_facts(&owner).await?;
     let stored = PinnedWaits::read(restarted.durable().as_ref(), &rows).await?;
     let fold_with = |waits: &PinnedWaits| round::fold(&rows, &PolicyView::default(), waits);
     let fold = fold_with(&stored).map_err(|refusal| LawBroken(refusal.to_string()))?;

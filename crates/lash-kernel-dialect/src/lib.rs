@@ -28,8 +28,9 @@ pub use dialect::{
 };
 pub use library::{Library, LibraryError, NamedLibrary};
 pub use saved::{
-    CaptureRefusal, Constant, Kept, Left, NotSaved, SavedFunction, Token, Unusable, WRITTEN,
-    Written, closure_of, function_reference, install, save, token_of,
+    Bundle, BundleBody, BundleRefusal, CaptureRefusal, Constant, DOCUMENT_NODE_KIND,
+    FUNCTION_BUNDLE_NODE_KIND, Kept, Left, MemberBody, NotSaved, SavedFunction, Token, Unusable,
+    WRITTEN, Written, closure_of, function_reference, install, save, token_of,
 };
 pub use source::{SourceError, define_functions};
 

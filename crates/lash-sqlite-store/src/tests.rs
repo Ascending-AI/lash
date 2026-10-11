@@ -417,6 +417,7 @@ fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> Hydrate
                 )
             })
             .collect(),
+        execution: None,
     }
 }
 

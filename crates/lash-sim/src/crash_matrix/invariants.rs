@@ -158,7 +158,7 @@ async fn once(
         .flat_map(|write| &write.starts)
         .collect();
     for owner in owners {
-        let rows = match nodes.database().run_records(&owner).await {
+        let rows = match nodes.database().run_facts(&owner).await {
             Ok(rows) => rows,
             Err(error) => {
                 violations.push(format!("fold: {owner:?}'s records do not read: {error}"));

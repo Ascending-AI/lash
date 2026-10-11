@@ -34,6 +34,9 @@ pub(super) struct CheckpointObservation {
     pub(super) checkpoint_ref: Option<BlobRef>,
     pub(super) turn_state: serde_json::Value,
     pub(super) components: BTreeMap<String, (lash_core::CheckpointComponentDescriptor, Vec<u8>)>,
+    /// The SessionExecution graph's root and the bytes of every node it
+    /// reaches.
+    pub(super) execution: Option<(String, BTreeMap<String, Vec<u8>>)>,
 }
 
 #[expect(
@@ -66,11 +69,22 @@ pub(super) fn checkpoint_observation(
             (key, (descriptor, body))
         })
         .collect();
+    let execution = checkpoint.execution.as_ref().map(|execution| {
+        (
+            execution.root.to_hex(),
+            execution
+                .nodes
+                .iter()
+                .map(|(id, node)| (id.to_hex(), node.bytes.to_vec()))
+                .collect(),
+        )
+    });
     CheckpointObservation {
         checkpoint_ref,
         turn_state: serde_json::to_value(&checkpoint.turn_state)
             .expect("encode checkpoint turn state"),
         components,
+        execution,
     }
 }
 
@@ -101,46 +115,12 @@ pub(super) async fn read_postgres_checkpoint_observation(
     raw_checkpoint_ref: Option<BlobRef>,
 ) -> Option<CheckpointObservation> {
     let raw_checkpoint_ref = raw_checkpoint_ref?;
-    let manifest_bytes: Vec<u8> =
-        sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
-            .bind(raw_checkpoint_ref.as_str())
-            .fetch_one(pool)
+    let checkpoint =
+        lash_postgres_store::testing::raw_checkpoint_for_testing(pool, &raw_checkpoint_ref)
             .await
-            .expect("read PostgreSQL checkpoint manifest blob");
-    let manifest: lash_core::store::SessionCheckpoint =
-        rmp_serde::from_slice(&manifest_bytes).expect("decode PostgreSQL checkpoint manifest");
-    assert_eq!(
-        manifest.schema_version,
-        lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
-        "PostgreSQL checkpoint manifest schema version"
-    );
-    manifest
-        .validate_component_encoding_versions()
-        .expect("validate PostgreSQL checkpoint component versions");
-    let mut components = std::collections::BTreeMap::new();
-    for (key, descriptor) in &manifest.components {
-        let bytes: Vec<u8> = sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
-            .bind(descriptor.blob_ref.as_str())
-            .fetch_one(pool)
-            .await
-            .unwrap_or_else(|error| {
-                panic!(
-                    "read PostgreSQL {key} blob `{}`: {error}",
-                    descriptor.blob_ref
-                )
-            });
-        components.insert(
-            key.clone(),
-            lash_core::HydratedCheckpointComponent::hydrated(descriptor.clone(), bytes),
-        );
-    }
-    Some(checkpoint_observation(
-        Some(raw_checkpoint_ref),
-        HydratedSessionCheckpoint {
-            turn_state: manifest.turn_state,
-            components,
-        },
-    ))
+            .expect("decode PostgreSQL checkpoint through raw durable reader")
+            .expect("checkpoint ref must address a PostgreSQL checkpoint manifest");
+    Some(checkpoint_observation(Some(raw_checkpoint_ref), checkpoint))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

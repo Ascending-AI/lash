@@ -20,9 +20,9 @@
 //! **Why it never decodes.** Every payload here is returned as bytes or text and never parsed
 //! into the type it represents.
 //! The one place this module looks *inside* bytes is the checkpoint manifest, and even there
-//! it reads a single blob reference out of a schemaless [`serde_json::Value`] rather than
-//! calling the crate's validating decoder, precisely so a manifest written by another build is
-//! walked past rather than raised as an error.
+//! it reads the one node reference its body names rather than calling the crate's validating
+//! load, precisely so a manifest written by another build is walked past rather than raised
+//! as an error.
 //!
 //! The framing a walk *does* unwrap is storage bookkeeping rather than durable
 //! payload format: the [`StoredBlobEnvelope`](crate::StoredBlobEnvelope) wrapper
@@ -277,8 +277,17 @@ fn read_session_checkpoints(
         let session_id: SessionId = crate::codec::sql_identity(row.get::<_, String>(0)?)?;
         let checkpoint_ref: String = row.get(1)?;
         let stored: Option<Vec<u8>> = row.get(2)?;
+        let encoding: Option<i64> = row.get(3)?;
         let payload = match stored {
-            Some(stored) => logical_payload(stored),
+            // The manifest is a SessionManifest graph node, stored as its
+            // encoded bytes with no blob envelope to unwrap.
+            Some(stored) if encoding == Some(1) => DurablePayload::GraphNode(stored),
+            Some(_) => DurablePayload::Missing {
+                reason: format!(
+                    "session `{session_id}` names checkpoint manifest `{checkpoint_ref}`, \
+                     which is stored as an opaque blob, not a SessionManifest node"
+                ),
+            },
             None => DurablePayload::Missing {
                 reason: format!(
                     "session `{session_id}` names checkpoint manifest `{checkpoint_ref}`, \
@@ -299,19 +308,19 @@ fn read_session_checkpoints(
     collect_page(rows, limit)
 }
 
-/// The protocol execution-state component of each session's checkpoint.
+/// The protocol execution state of each session's checkpoint: its
+/// SessionExecution root node.
 ///
-/// Deliberately one blob deep. The manifest names the component's blob and this
-/// walk reads exactly that blob; it does not descend into whatever leaf layout
-/// the component's own encoding uses, because a preflight that walked a
-/// component's internal tree would cost an unbounded number of reads per session
-/// to answer a question one read already answers.
+/// Deliberately one node deep. The manifest names the root and this walk reads
+/// exactly that node; it does not descend into the graph beneath it, because a
+/// preflight that walked the graph would cost an unbounded number of reads per
+/// session to answer a question one read already answers.
 ///
 /// Two shapes of session contribute nothing here rather than an item. A manifest
 /// that will not decode is a manifest this build cannot name a component in —
 /// and its unreadability is already reported against
 /// [`DurableSurface::SessionCheckpoint`], where the manifest itself is the item.
-/// A manifest with no `execution_state` component genuinely has no execution
+/// A manifest that names no SessionExecution root genuinely has no execution
 /// state to park. Reporting either as `Missing` here would double-count one
 /// defect and invent a second.
 ///
@@ -348,15 +357,14 @@ fn read_session_execution_state(
         let Some(stored_manifest) = stored_manifest else {
             continue;
         };
-        let Some(manifest) = logical_bytes(stored_manifest).ok() else {
-            continue;
-        };
-        let Some(blob_ref) = execution_state_blob_ref(&manifest) else {
+        let Some(blob_ref) = execution_state_blob_ref(&stored_manifest) else {
             continue;
         };
 
         let payload = match load_blob(conn, &blob_ref)? {
-            Some(stored) => logical_payload(stored),
+            // A graph node is stored as its encoded bytes, with no blob
+            // envelope to unwrap.
+            Some(stored) => DurablePayload::GraphNode(stored),
             // The manifest decoded and named this blob, so unlike the cases
             // above there is a component here and it is gone. That is a finding
             // an operator has to see.
@@ -380,40 +388,22 @@ fn read_session_execution_state(
     Ok((items, next_cursor(last, scanned_rows, limit)))
 }
 
-/// Deliberately *not* the crate's `decode_checkpoint`: that helper validates the
-/// record's schema version and errors on drift, which is correct for a load path
-/// and exactly wrong here. A preflight that refused to describe a checkpoint
-/// written by another build would fail on the deployments it exists to
-/// describe.
-///
-/// Deliberately not a `serde_json::Value` tree either, for the reason the
-/// PostgreSQL walk records: JSON has no MessagePack binary type, so one
-/// byte-carrying field anywhere in the manifest, present now or added later,
-/// would fail the whole decode and silently drop a session that does have
-/// execution state. The struct below names only what is navigated and lets
-/// serde ignore everything else, whatever type it is.
+/// Deliberately *not* the crate's validating manifest load: that reads every
+/// child and refuses drift, which is correct for a load path and exactly wrong
+/// here. A preflight that refused to describe a checkpoint written by another
+/// build would fail on the deployments it exists to describe. This reads the
+/// SessionExecution root the manifest's body names, and nothing else.
 ///
 /// Every step is fallible and every failure means the same thing: this session
-/// names no execution-state blob a walk can follow.
+/// names no execution state a walk can follow.
 fn execution_state_blob_ref(manifest: &[u8]) -> Option<String> {
-    let probe: ManifestProbe = rmp_serde::from_slice(manifest).ok()?;
-    probe
-        .components
-        .get(lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
-        .map(|component| component.blob_ref.clone())
-}
-
-/// The narrowest possible view of a checkpoint manifest: the one map, and the
-/// one field of the one entry, that navigation needs.
-#[derive(serde::Deserialize)]
-struct ManifestProbe {
-    #[serde(default)]
-    components: std::collections::BTreeMap<String, ManifestComponentProbe>,
-}
-
-#[derive(serde::Deserialize)]
-struct ManifestComponentProbe {
-    blob_ref: String,
+    let node = lash_core_store::checkpoint_graph::EncodedNode {
+        id: lash_core_store::checkpoint_graph::NodeId::of_envelope(manifest),
+        bytes: std::sync::Arc::from(manifest),
+    };
+    lash_core_execution::store::SessionCheckpoint::named(&node)?
+        .execution
+        .map(|root| root.to_hex())
 }
 
 fn load_blob(conn: &Connection, blob_ref: &str) -> rusqlite::Result<Option<Vec<u8>>> {
@@ -436,13 +426,6 @@ fn load_blob(conn: &Connection, blob_ref: &str) -> rusqlite::Result<Option<Vec<u
 /// An envelope that will not inflate is a finding about one blob. Returning it
 /// as `Missing` rather than an error is what lets the rest of the page — very
 /// possibly the healthy majority of it — still reach the operator.
-fn logical_payload(stored: Vec<u8>) -> DurablePayload {
-    match logical_bytes(stored) {
-        Ok(logical) => DurablePayload::MessagePack(logical),
-        Err(reason) => DurablePayload::Missing { reason },
-    }
-}
-
 fn logical_json_payload(stored: Vec<u8>) -> DurablePayload {
     match logical_bytes(stored) {
         Ok(bytes) => match String::from_utf8(bytes) {

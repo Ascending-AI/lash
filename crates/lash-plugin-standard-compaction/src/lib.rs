@@ -526,7 +526,7 @@ pub(crate) fn prepare_compaction_request(
     );
     snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
     strip_all_attachments(&mut prefix_messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
-    snapshot.set_execution_state_snapshot(None);
+    snapshot.set_execution_graph(lash_core::plugin::ExecutionGraphCapture::Clear);
     snapshot.last_prompt_usage = None;
     let previous_summary = extract_previous_summary(&prefix_messages);
     snapshot.replace_active_read_state(&prefix_messages);

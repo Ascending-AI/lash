@@ -652,10 +652,6 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
             lash_core::HydratedCheckpointComponent::changed(namespace_body.bytes.to_vec()),
         ),
         (
-            lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
-            lash_core::HydratedCheckpointComponent::changed(vec![9, 8, 7, 6]),
-        ),
-        (
             "arbitrary/differential".to_string(),
             lash_core::HydratedCheckpointComponent::changed(b"arbitrary-component-body".to_vec()),
         ),
@@ -675,7 +671,18 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
             ..Default::default()
         },
         components,
+        execution: Some(differential_execution()),
     }
+}
+
+/// The execution graph the body commit stages: one SessionExecution root.
+fn differential_execution() -> lash_core::store::CheckpointExecution {
+    let lash_core::plugin::ExecutionGraphCapture::Replace { root, nodes } =
+        lash_core::testing::store_fixtures::execution_graph("differential-execution")
+    else {
+        unreachable!("the fixture stages a root")
+    };
+    lash_core::store::CheckpointExecution { root, nodes }
 }
 
 #[expect(
@@ -701,9 +708,14 @@ fn checkpoint_from_spec(
                     )
                 })
                 .collect();
+            // The execution root the body commit installed, named again.
             HydratedSessionCheckpoint {
                 turn_state: checkpoint_bodies().turn_state,
                 components,
+                execution: Some(lash_core::store::CheckpointExecution {
+                    root: differential_execution().root,
+                    nodes: std::collections::BTreeMap::new(),
+                }),
             }
         }
         CheckpointSpec::ClearedComponents => {
@@ -711,9 +723,6 @@ fn checkpoint_from_spec(
             let components = refs
                 .components
                 .iter()
-                .filter(|(key, _)| {
-                    key.as_str() != lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
-                })
                 .map(|(key, descriptor)| {
                     (
                         key.clone(),
@@ -724,23 +733,17 @@ fn checkpoint_from_spec(
             HydratedSessionCheckpoint {
                 turn_state: checkpoint_bodies().turn_state,
                 components,
+                execution: None,
             }
         }
         CheckpointSpec::MissingExecutionStateRef => HydratedSessionCheckpoint {
-            components: [(
-                lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
-                lash_core::HydratedCheckpointComponent::Unchanged {
-                    descriptor: lash_core::CheckpointComponentDescriptor {
-                        blob_ref: BlobRef(
-                            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-                                .to_string(),
-                        ),
-                        encoding_version: lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
-                    },
-                },
-            )]
-            .into_iter()
-            .collect(),
+            execution: Some(lash_core::store::CheckpointExecution {
+                root: lash_core::durable_port::domain::checkpoint_graph::NodeId::from_hex(
+                    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                )
+                .expect("a node reference"),
+                nodes: std::collections::BTreeMap::new(),
+            }),
             ..Default::default()
         },
     }
@@ -856,7 +859,7 @@ struct BackendRunner {
     current_frame_node_id: Option<lash_core::FrameNodeId>,
     current_leaf_node_id: Option<String>,
     checkpoint_component_refs: Option<CheckpointComponentRefs>,
-    expected_execution_state: Option<Vec<u8>>,
+    expected_execution_state: Option<lash_core::durable_port::domain::checkpoint_graph::NodeId>,
     surface: SurfaceScratch,
 }
 
@@ -1016,9 +1019,7 @@ impl BackendRunner {
                 }
                 match checkpoint {
                     CheckpointSpec::Bodies => {
-                        self.expected_execution_state = checkpoint_bodies()
-                            .component_body(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
-                            .map(ToOwned::to_owned);
+                        self.expected_execution_state = Some(differential_execution().root);
                     }
                     CheckpointSpec::PriorRefs => {}
                     CheckpointSpec::Empty | CheckpointSpec::ClearedComponents => {
@@ -1281,9 +1282,11 @@ impl BackendRunner {
                 );
                 assert_eq!(
                     checkpoint
-                        .component_body(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
-                    self.expected_execution_state.as_deref(),
-                    "{} cold reopen must rehydrate the execution-state body",
+                        .execution
+                        .as_ref()
+                        .map(|execution| execution.root),
+                    self.expected_execution_state,
+                    "{} cold reopen must rehydrate the execution graph",
                     self.name
                 );
                 Ok(None)

@@ -14,7 +14,7 @@ use lash_sansio::SessionId;
 struct AdminReads {
     tool_state: crate::admin::SessionToolState,
     manifests: Vec<ToolManifest>,
-    execution: Option<lash_core::plugin::HydratedExecutionState>,
+    execution: Option<lash_core::plugin::HydratedExecutionGraph>,
     observed_tool_state: Option<ToolState>,
 }
 
@@ -130,7 +130,7 @@ async fn every_admin_read_answers_from_durable_state_without_an_activated_runtim
         let execution = reads
             .execution
             .expect("the head records the run's execution state");
-        assert!(!execution.root.is_empty());
+        assert!(execution.nodes.contains_key(&execution.root));
         Ok(())
     }
 }

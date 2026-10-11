@@ -26,6 +26,7 @@ use lash_kernel_doc::{
 };
 use lash_kernel_vm::PreparedLibrary;
 use lash_vm_client::WorkerTuning;
+use lash_vm_client::graph::ReleaseGraph;
 use lash_vm_library::{HELPER_RELEASE, HelperReleaseIndex};
 use lash_vm_releases::{HELPER_RELEASE_INDEX, RETAINED_FUNCTIONS, TYPESCRIPT_HELPERS};
 
@@ -76,6 +77,10 @@ pub struct Embedding {
         HelperReleaseIndex,
         OnceLock<Result<NamedLibrary, EmbedError>>,
     )>,
+    /// The manifests of the helper releases the build holds, by graph
+    /// reference: what a parked run pins (FIG-5887 §3), staged when first
+    /// asked for.
+    manifests: OnceLock<Result<ReleaseGraph, EmbedError>>,
 }
 
 impl Embedding {
@@ -88,6 +93,20 @@ impl Embedding {
     /// The helper release the embedding's own names are.
     pub fn helper_release(&self) -> u32 {
         self.writes
+    }
+
+    /// The manifests of the helper releases the build holds: a parked run
+    /// resumes only on the exact one it pins.
+    ///
+    /// # Errors
+    ///
+    /// [`EmbedError::Registry`] when the build's releases do not stage: a
+    /// defect of the build.
+    pub(crate) fn release_manifests(&self) -> Result<&ReleaseGraph, EmbedError> {
+        cached(&self.manifests, || {
+            lash_vm_client::graph::release_manifests()
+                .map_err(|error| EmbedError::Registry(error.to_string()))
+        })
     }
 
     /// The released helper sets the embedding holds besides its own
@@ -334,6 +353,7 @@ impl Embedder {
                 .into_iter()
                 .map(|release| (release, OnceLock::new()))
                 .collect(),
+            manifests: OnceLock::new(),
         })
     }
 }

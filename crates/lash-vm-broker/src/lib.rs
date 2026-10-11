@@ -23,6 +23,8 @@ pub mod snapshot;
 pub use effects::{MemberDraft, ParentFault};
 pub use identity::CodeCallIdentities;
 pub use lash_core_execution::runtime::actor::round::ExecutionDraft;
+#[doc(hidden)]
+pub use lash_core_execution::runtime::actor::round::graph as round_graph;
 pub use lash_core_execution::runtime::actor::waits::{PinnedKey, WaitRef, WaitSpec};
 pub use lash_durable::DurableInstant;
 pub use lash_durable::domain::{CellId, ExecKey, SnapshotRev};

@@ -270,7 +270,7 @@ impl CheckpointBindingFixture {
 
     pub(super) async fn capture(
         &self,
-    ) -> Result<lash_core::plugin::ExecutionStateCapture, lash_core::SessionError> {
+    ) -> Result<lash_core::plugin::ExecutionGraphCapture, lash_core::SessionError> {
         self.fixture.lock().await.capture().await
     }
 
@@ -319,20 +319,18 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 measure_runtime_perf_async_phase("checkpoint_state.initial_capture", async {
                     fixture.capture().await.map_err(anyhow::Error::from)
                 }).await?;
-            if initial_snapshot.root().is_none() {
-                anyhow::bail!("checkpoint-state fixture omitted its root");
-            }
-            let initial_component_count =
-                changed_execution_state_components(&initial_snapshot)?.len();
-            if initial_component_count != CHECKPOINT_STATE_BINDINGS {
+            let (initial_component_count, initial_bytes) = staged_nodes(&initial_snapshot)?;
+            // Every binding's value is captured once: none was installed
+            // before.
+            if initial_component_count != CHECKPOINT_STATE_BINDINGS
+                || initial_bytes < CHECKPOINT_STATE_BINDINGS * CHECKPOINT_STATE_BODY_BYTES
+            {
                 anyhow::bail!(
-                    "checkpoint-state fixture captured {initial_component_count} components, expected {CHECKPOINT_STATE_BINDINGS}"
+                    "checkpoint-state fixture captured {initial_component_count} value leaves of {initial_bytes} bytes, \
+                     expected {CHECKPOINT_STATE_BINDINGS} of {CHECKPOINT_STATE_BODY_BYTES} bytes"
                 );
             }
-            lash_core::testing::stage_execution_state_components(
-                &mut runtime_state,
-                initial_snapshot.clone(),
-            )?;
+            lash_core::testing::stage_execution_graph(&mut runtime_state, initial_snapshot.clone());
             let initial_commit = RuntimeCommit::persisted_state_for_test_with_budget(
                 &runtime_state,
                 lash_core::CommitBudget::bounded(8 * 1024 * 1024, 2_048),
@@ -366,24 +364,17 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             }).await?;
         phase_profile.insert(phase.0, phase.1);
         fixture.acknowledge_capture().await;
-        if snapshot.root().is_none() {
-            anyhow::bail!("incremental checkpoint capture omitted its root");
-        }
-        last_changed_components = snapshot.leaves()
-            .values()
-            .filter(|component| {
-                matches!(
-                    component,
-                    lash_core::plugin::LeafChange::Changed(_)
-                )
-            })
-            .count() as u64;
-        if last_changed_components != 1 {
+        // One binding was reassigned: the capture stages its value, and
+        // every other binding's value stays where an earlier commit
+        // installed it (PC-LARGE-ONCE).
+        let (new_leaves, _) = staged_nodes(&snapshot)?;
+        last_changed_components = new_leaves as u64;
+        if new_leaves != 1 {
             anyhow::bail!(
-                "incremental checkpoint captured {last_changed_components} changed components, expected 1"
+                "incremental checkpoint staged {new_leaves} value leaves, expected its one reassigned binding's"
             );
         }
-        lash_core::testing::stage_execution_state_components(&mut runtime_state, snapshot)?;
+        lash_core::testing::stage_execution_graph(&mut runtime_state, snapshot);
         let commit = RuntimeCommit::persisted_state_for_test_with_budget(
             &runtime_state,
             lash_core::CommitBudget::bounded(8 * 1024 * 1024, 2_048),
@@ -426,12 +417,11 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             })
             .await?;
         phase_profile.insert(phase.0, phase.1);
-        last_hydrated_bytes = (loaded_execution_state.root.len()
-            + loaded_execution_state
-                .components
-                .values()
-                .map(|v| v.len())
-                .sum::<usize>()) as u64;
+        last_hydrated_bytes = loaded_execution_state
+            .nodes
+            .values()
+            .map(|node| node.bytes.len())
+            .sum::<usize>() as u64;
 
         let (_, phase) = measure_runtime_perf_async_phase("checkpoint_state.execution_restore", async {
             lash_protocol_rlm::CodeModeCheckpointPerfFixture::restore(&lash_protocol_rlm::CellDialect::typescript(), &loaded_execution_state).await
@@ -462,11 +452,11 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
         CHECKPOINT_STATE_BINDINGS as u64,
     );
     extra_counters.insert(
-        "execution_state_components".to_string(),
+        "execution_state_value_leaves".to_string(),
         initial_component_count as u64,
     );
     extra_counters.insert(
-        "incremental_changed_components".to_string(),
+        "incremental_value_leaves".to_string(),
         last_changed_components,
     );
     extra_counters.insert("checkpoint_bytes".to_string(), last_checkpoint_bytes);
@@ -481,40 +471,36 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
     }))
 }
 
-fn changed_execution_state_components(
-    snapshot: &lash_core::plugin::ExecutionStateCapture,
-) -> anyhow::Result<BTreeMap<lash_core::plugin::ExecutionLeafName, Arc<[u8]>>> {
-    snapshot
-        .leaves()
-        .iter()
-        .map(|(key, component)| match component {
-            lash_core::plugin::LeafChange::Changed(body) => Ok((key.clone(), body.clone())),
-            lash_core::plugin::LeafChange::Unchanged => {
-                anyhow::bail!("initial checkpoint-state component `{key}` was unchanged")
-            }
-        })
-        .collect()
+/// The text leaves `capture` stages, and their encoded bytes: each binding's
+/// large value is one leaf, and a leaf an earlier commit installed is never
+/// staged again.
+fn staged_nodes(
+    capture: &lash_core::plugin::ExecutionGraphCapture,
+) -> anyhow::Result<(usize, usize)> {
+    let lash_core::plugin::ExecutionGraphCapture::Replace { nodes, .. } = capture else {
+        anyhow::bail!("checkpoint-state capture omitted its root");
+    };
+    let mut leaves = (0, 0);
+    for node in nodes.values() {
+        if node.envelope()?.kind == lash_core_store::checkpoint_graph::NodeKind::TEXT_LEAF {
+            leaves.0 += 1;
+            leaves.1 += node.bytes.len();
+        }
+    }
+    Ok(leaves)
 }
 
 fn execution_state_from_checkpoint(
     checkpoint: &lash_core::HydratedSessionCheckpoint,
-) -> anyhow::Result<lash_core::plugin::HydratedExecutionState> {
-    let root = checkpoint
-        .component(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
-        .and_then(lash_core::HydratedCheckpointComponent::body_arc)
-        .ok_or_else(|| anyhow::anyhow!("hydrated checkpoint omitted execution-state root"))?;
-    let mut components = BTreeMap::new();
-    for key in checkpoint.components.keys() {
-        let Some(leaf) = lash_core::plugin::ExecutionLeafName::parse(key) else {
-            continue;
-        };
-        let body = checkpoint
-            .component(key)
-            .and_then(lash_core::HydratedCheckpointComponent::body_arc)
-            .ok_or_else(|| anyhow::anyhow!("hydrated checkpoint omitted body for `{key}`"))?;
-        components.insert(leaf, body);
-    }
-    Ok(lash_core::plugin::HydratedExecutionState { root, components })
+) -> anyhow::Result<lash_core::plugin::HydratedExecutionGraph> {
+    let execution = checkpoint
+        .execution
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("hydrated checkpoint omitted its execution state"))?;
+    Ok(lash_core::plugin::HydratedExecutionGraph {
+        root: execution.root,
+        nodes: execution.nodes.clone(),
+    })
 }
 
 struct CheckpointConfigs {

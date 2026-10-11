@@ -25,10 +25,10 @@ use lash_kernel_doc::{
     KernelVersion, Site, Unit, validate_document,
 };
 use lash_kernel_migrate::{ParkedRefusal, Rewritten};
-use lash_kernel_state::ParkedRun;
-use lash_vm_client::OpaqueVmState;
+use lash_kernel_state::AdmittedWait;
+use lash_vm_broker::kernel::state::{OpenedRun, WholeState, capture_whole};
 
-use super::state::{KernelEngineState, KernelProcessInput, Phase, Wait};
+use super::state::{KernelEngineState, KernelProcessInput, Phase, SealedRun, Wait};
 use super::{DocumentStoreError, KernelDocuments, KernelMigrationSurveyError, advance};
 
 /// The functions a build stops holding when it stops retaining a helper
@@ -93,7 +93,7 @@ pub enum HelperAdoptionRefusal {
 pub struct AdoptedRun {
     pub from: DocumentId,
     pub rewritten: Rewritten,
-    pub parked: Option<OpaqueVmState>,
+    pub parked: Option<WholeState>,
 }
 
 /// The functions of `retired` that `listed`, the library functions a
@@ -120,8 +120,10 @@ pub fn retired_functions_reached(
     reached
 }
 
-/// `document`, and `parked`, a run of it, adopted onto the counterparts of
-/// the `retired` functions it reaches; `None` when it reaches none.
+/// `document`, and `parked`, a run of it with the admission of each wait it
+/// holds, adopted onto the counterparts of the `retired` functions it
+/// reaches and pinning the build's helper release; `None` when it reaches
+/// none.
 /// `functions` is the build's library, the retired functions and their
 /// counterparts among them.
 ///
@@ -130,7 +132,7 @@ pub fn retired_functions_reached(
 /// The typed refusal of a document or run that is not adopted.
 pub fn plan_helper_adoption(
     document: &Document,
-    parked: Option<&OpaqueVmState>,
+    parked: Option<(&WholeState, &[AdmittedWait])>,
     functions: &FunctionRegistry,
     retired: &RetiredHelpers,
 ) -> Result<Option<AdoptedRun>, HelperAdoptionRefusal> {
@@ -166,7 +168,9 @@ pub fn plan_helper_adoption(
         }
     })?;
     let parked = parked
-        .map(|parked| adopt_run(parked, document, from, &rewritten, &replacements))
+        .map(|(parked, admitted)| {
+            adopt_run(parked, admitted, document, from, &rewritten, &replacements)
+        })
         .transpose()?;
     Ok(Some(AdoptedRun {
         from,
@@ -176,25 +180,25 @@ pub fn plan_helper_adoption(
 }
 
 /// `parked`, a run of `base`, carried onto `rewritten` under its own kernel
-/// version and owner.
+/// version and owner, pinning the build's helper release.
 fn adopt_run(
-    parked: &OpaqueVmState,
+    parked: &WholeState,
+    admitted: &[AdmittedWait],
     base: &Document,
     from: DocumentId,
     rewritten: &Rewritten,
     replacements: &BTreeMap<FunctionId, FunctionId>,
-) -> Result<OpaqueVmState, HelperAdoptionRefusal> {
+) -> Result<WholeState, HelperAdoptionRefusal> {
     let state = |message: String| HelperAdoptionRefusal::State { message };
-    super::check_sealed_kernel(parked).map_err(|refusal| state(refusal.to_string()))?;
-    let version = KernelVersion::of(parked.kernel()).ok_or_else(|| {
+    let version = KernelVersion::of(parked.kernel).ok_or_else(|| {
         state(format!(
             "kernel version {} is not interpreted",
-            parked.kernel()
+            parked.kernel
         ))
     })?;
-    let run = ParkedRun::from_json(parked.bytes()).map_err(|error| state(error.to_string()))?;
+    let opened = super::migrate::open_run(parked, admitted, base).map_err(state)?;
     let carried =
-        lash_kernel_migrate::carry(&run, base, rewritten, version).map_err(|refusal| {
+        lash_kernel_migrate::carry(&opened.run, base, rewritten, version).map_err(|refusal| {
             let inside = match &refusal {
                 ParkedRefusal::SiteNotCarried { site, .. } => match &site.unit {
                     Unit::Library(function) if replacements.contains_key(function) => {
@@ -214,15 +218,15 @@ fn adopt_run(
                 },
             }
         })?;
-    let bytes = carried
-        .to_json()
-        .map_err(|error| state(error.to_string()))?;
-    Ok(OpaqueVmState::seal(
-        parked.owner().clone(),
-        parked.kernel(),
-        rewritten.identity().to_string(),
-        bytes,
-    ))
+    capture_whole(
+        &OpenedRun {
+            run: carried,
+            release: super::migrate::current_release().map_err(state)?,
+            binding: opened.binding,
+        },
+        u64::MAX,
+    )
+    .map_err(|failure| state(failure.to_string()))
 }
 
 /// A stored state adopted, before its document is published.
@@ -268,8 +272,24 @@ pub(crate) async fn adopt_state(
                 document: input.document,
             },
         ))?;
-    let Some(adopted) = plan_helper_adoption(&base, state.parked.as_ref(), functions, retired)
-        .map_err(AdoptError::Refused)?
+    let whole = state
+        .parked
+        .as_ref()
+        .map(super::migrate::unsealed)
+        .transpose()
+        .map_err(undecodable)?;
+    let admitted: Vec<AdmittedWait> = state
+        .admissions
+        .values()
+        .map(|admission| admission.0.clone())
+        .collect();
+    let Some(adopted) = plan_helper_adoption(
+        &base,
+        whole.as_ref().map(|whole| (whole, admitted.as_slice())),
+        functions,
+        retired,
+    )
+    .map_err(AdoptError::Refused)?
     else {
         return Ok(None);
     };
@@ -292,7 +312,16 @@ pub(crate) async fn adopt_state(
     for delivery in &mut state.settled {
         identify(&mut delivery.identity)?;
     }
-    state.parked = adopted.parked;
+    for admission in state.admissions.values_mut() {
+        identify(&mut admission.0.identity)?;
+    }
+    let owner = state.parked.as_ref().map(|parked| parked.0.owner().clone());
+    state.parked = match (adopted.parked, owner) {
+        (Some(carried), Some(owner)) => Some(SealedRun(
+            carried.sealed(owner, &adopted.rewritten.identity().to_string()),
+        )),
+        _ => None,
+    };
     Ok(Some(Adopted {
         state,
         input,
@@ -391,8 +420,24 @@ pub async fn survey_helper_processes(
             if reached.is_empty() {
                 continue;
             }
-            let parked = decoded.as_ref().and_then(|state| state.parked.as_ref());
-            let refused = plan_helper_adoption(&document, parked, functions, retired).err();
+            let parked = decoded.as_ref().and_then(|state| {
+                let admitted: Vec<AdmittedWait> = state
+                    .admissions
+                    .values()
+                    .map(|admission| admission.0.clone())
+                    .collect();
+                Some((super::migrate::unsealed(state.parked.as_ref()?), admitted))
+            });
+            let refused = match &parked {
+                Some((Err(message), _)) => Some(HelperAdoptionRefusal::State {
+                    message: message.clone(),
+                }),
+                Some((Ok(whole), admitted)) => {
+                    plan_helper_adoption(&document, Some((whole, admitted)), functions, retired)
+                        .err()
+                }
+                None => plan_helper_adoption(&document, None, functions, retired).err(),
+            };
             dependents.push(HelperDependentProcess {
                 process: record.id,
                 functions: reached,

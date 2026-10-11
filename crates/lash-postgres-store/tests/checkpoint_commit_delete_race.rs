@@ -195,12 +195,30 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         .execute(&mut *deleting)
         .await
         .expect("sever victim head inside controlled delete");
+    // The victim's revision goes first, as a reclaimer releases it: its
+    // checkpoint root is restricted while a revision names it.
+    sqlx::query("DELETE FROM lash_session_revisions WHERE session_id = 'commit-delete-victim'")
+        .execute(&mut *deleting)
+        .await
+        .expect("release victim revision inside controlled delete");
     sqlx::query("DELETE FROM lash_blobs WHERE hash = $1")
         .bind(victim_receipt.checkpoint_ref.as_str())
         .execute(&mut *deleting)
         .await
         .expect("delete victim checkpoint root");
     if !matches!(branch, ReuseBranch::ExistingRoot) {
+        // The root named the component through its OpaqueLeaf, which only
+        // the root reached: it goes before the component it names.
+        sqlx::query(
+            "DELETE FROM lash_blobs AS leaf WHERE EXISTS (
+                 SELECT 1 FROM lash_blob_edges
+                 WHERE parent_hash = leaf.hash AND child_hash = $1
+             )",
+        )
+        .bind(shared.blob_ref.as_str())
+        .execute(&mut *deleting)
+        .await
+        .expect("delete the shared component's leaf");
         sqlx::query("DELETE FROM lash_blobs WHERE hash = $1")
             .bind(shared.blob_ref.as_str())
             .execute(&mut *deleting)

@@ -1,12 +1,13 @@
 //! The ledger of one kernel run: the set of waits the machine stands on,
-//! keyed by the machine's effect identity (`K-EFF-008`), and the checkpoint
-//! that commits it with the saved state it matches.
+//! keyed by the machine's effect identity (`K-EFF-008`).
 //!
 //! A run is a set of tasks, so it waits on a set of effects. Each entry is
 //! one wait the saved state holds, in the standing its park gave it: an
 //! admitted execution, a sleep with the deadline it was admitted with, or a
 //! refusal. Whether an admitted effect's outcome has committed is read from
 //! its run records, never stored here: the records are the one authority.
+//! A park stores the ledger as its root's effect membership, each entry by
+//! the one admission that holds its request ([`super::graph`]).
 //!
 //! # What stays reachable
 //!
@@ -22,30 +23,22 @@
 use std::collections::BTreeMap;
 
 use lash_durable::DurableInstant;
-use lash_kernel_doc::{
-    Datum, EffectIdentity, EffectName, ErrorDatum, FunctionId, FunctionName, Name, Object,
-    ObjectId, TaskIdentity, Value,
-};
-use lash_kernel_vm::{Bindings, Bound, BoundExceeded, End, Finished, RunError, WaitId};
-use lash_vm_protocol::EncodedPayload;
-use serde::{Deserialize, Serialize};
+use lash_kernel_doc::{EffectIdentity, EffectName, ErrorDatum};
+use lash_kernel_vm::WaitId;
 
 use crate::snapshot::OperationId;
 
-/// An admitted execution the ledger keeps until it settles: its identity,
-/// its call, and the request its body is built from again on any owner.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// An admitted execution the ledger keeps until it settles: its identity
+/// and its call. Its request is its admission's.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdmittedEffect {
     /// Minted when its park committed: the park and its ordinal there.
     pub operation: OperationId,
     pub call: lash_sansio::ToolCallId,
-    pub request: EncodedPayload,
 }
 
 /// How a wait stands once its park committed.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Standing {
     /// An admitted execution, run through the admitted-execution lifecycle.
     Admitted(AdmittedEffect),
@@ -57,8 +50,7 @@ pub enum Standing {
 }
 
 /// One wait the saved state stands on.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PendingEffect {
     /// The machine's number for the wait, which its outcome is delivered
     /// to.
@@ -75,11 +67,9 @@ impl PendingEffect {
 }
 
 /// The broker's state that commits with a run's saved state.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "DecodedLedger")]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct EffectLedger {
     /// The waits the state stands on, by effect identity.
-    #[serde(with = "entries")]
     pending: BTreeMap<EffectIdentity, PendingEffect>,
     /// Admitted executions the run no longer waits on (their task was
     /// cancelled) that are not known to have settled. They stay live under
@@ -87,15 +77,6 @@ pub struct EffectLedger {
     /// each one.
     released: Vec<AdmittedEffect>,
     /// The number the next park that admits takes.
-    next_park: u64,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DecodedLedger {
-    #[serde(with = "entries")]
-    pending: BTreeMap<EffectIdentity, PendingEffect>,
-    released: Vec<AdmittedEffect>,
     next_park: u64,
 }
 
@@ -110,14 +91,28 @@ pub enum LedgerRefusal {
     SharedExecution { operation: OperationId },
 }
 
-impl TryFrom<DecodedLedger> for EffectLedger {
-    type Error = LedgerRefusal;
+impl EffectLedger {
+    /// The ledger of a run that has parked nowhere.
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-    fn try_from(decoded: DecodedLedger) -> Result<Self, Self::Error> {
+    /// The ledger a stored membership names: refused when it names one
+    /// wait twice, one execution twice, or an execution no park of its run
+    /// admitted.
+    ///
+    /// # Errors
+    ///
+    /// [`LedgerRefusal`].
+    pub fn restored(
+        pending: BTreeMap<EffectIdentity, PendingEffect>,
+        released: Vec<AdmittedEffect>,
+        next_park: u64,
+    ) -> Result<Self, LedgerRefusal> {
         let ledger = Self {
-            pending: decoded.pending,
-            released: decoded.released,
-            next_park: decoded.next_park,
+            pending,
+            released,
+            next_park,
         };
         let mut waits: Vec<u64> = ledger.pending.values().map(|entry| entry.wait).collect();
         waits.sort_unstable();
@@ -136,45 +131,6 @@ impl TryFrom<DecodedLedger> for EffectLedger {
             });
         }
         Ok(ledger)
-    }
-}
-
-/// The pending map as a list of entries: its keys are not strings, so a
-/// JSON checkpoint carries it as pairs.
-mod entries {
-    use std::collections::BTreeMap;
-
-    use lash_kernel_doc::EffectIdentity;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    use super::PendingEffect;
-
-    pub(super) fn serialize<S: Serializer>(
-        pending: &BTreeMap<EffectIdentity, PendingEffect>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        pending.iter().collect::<Vec<_>>().serialize(serializer)
-    }
-
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<BTreeMap<EffectIdentity, PendingEffect>, D::Error> {
-        let pairs = Vec::<(EffectIdentity, PendingEffect)>::deserialize(deserializer)?;
-        let count = pairs.len();
-        let pending: BTreeMap<_, _> = pairs.into_iter().collect();
-        if pending.len() != count {
-            return Err(serde::de::Error::custom(
-                "two pending effects share an identity",
-            ));
-        }
-        Ok(pending)
-    }
-}
-
-impl EffectLedger {
-    /// The ledger of a run that has parked nowhere.
-    pub fn new() -> Self {
-        Self::default()
     }
 
     /// This ledger with each wait identified by `identify`: what a
@@ -321,243 +277,31 @@ impl EffectLedger {
     }
 }
 
-/// How a run ended, as its last checkpoint records it: a restore answers it
-/// without starting a machine.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum RecordedEnd {
-    Finished {
-        result: Datum,
-        /// Whether a `finish` ended the run.
-        finish: bool,
-        variables: BTreeMap<Name, Value>,
-        objects: Vec<(ObjectId, Object)>,
-        not_carried: Vec<Name>,
-        /// The not-carried bindings that reach no task, with the objects
-        /// they reach, closures among them.
-        closure_variables: BTreeMap<Name, Value>,
-        closure_objects: Vec<(ObjectId, Object)>,
-    },
-    Failed {
-        reason: Datum,
-    },
-    Uncaught {
-        error: Datum,
-    },
-    TasksOutstanding {
-        unfinished: Vec<TaskIdentity>,
-        unobserved: Vec<TaskIdentity>,
-    },
-    Deadlock {
-        waiting: Vec<TaskIdentity>,
-    },
-    Bound {
-        bound: RecordedBound,
-        limit: u64,
-        function: Option<FunctionName>,
-    },
-}
-
-/// Which bound a recorded end passed.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum RecordedBound {
-    Charge,
-    Memory,
-    CallDepth,
-    LiveTasks,
-    RequestsPerPark,
-    JoinMembers,
-    Guard { function: FunctionId },
-}
-
-impl RecordedEnd {
-    /// `end` as a checkpoint records it; `None` for a cancelled run, which
-    /// records no end.
-    pub fn of(end: &End) -> Option<Self> {
-        Some(match end {
-            End::Finished(finished) => Self::Finished {
-                result: finished.result.clone(),
-                finish: finished.finish,
-                variables: finished.bindings.variables.clone(),
-                objects: finished
-                    .bindings
-                    .objects
-                    .iter()
-                    .map(|(id, object)| (*id, object.clone()))
-                    .collect(),
-                not_carried: finished.not_carried.clone(),
-                closure_variables: finished.closures.variables.clone(),
-                closure_objects: finished
-                    .closures
-                    .objects
-                    .iter()
-                    .map(|(id, object)| (*id, object.clone()))
-                    .collect(),
-            },
-            End::Failed(reason) => Self::Failed {
-                reason: reason.clone(),
-            },
-            End::Error(RunError::Uncaught(error)) => Self::Uncaught {
-                error: error.clone(),
-            },
-            End::Error(RunError::TasksOutstanding {
-                unfinished,
-                unobserved,
-            }) => Self::TasksOutstanding {
-                unfinished: unfinished.clone(),
-                unobserved: unobserved.clone(),
-            },
-            End::Error(RunError::Deadlock { waiting }) => Self::Deadlock {
-                waiting: waiting.clone(),
-            },
-            End::Error(RunError::Bound(exceeded)) => Self::Bound {
-                bound: match &exceeded.bound {
-                    Bound::Charge => RecordedBound::Charge,
-                    Bound::Memory => RecordedBound::Memory,
-                    Bound::CallDepth => RecordedBound::CallDepth,
-                    Bound::LiveTasks => RecordedBound::LiveTasks,
-                    Bound::RequestsPerPark => RecordedBound::RequestsPerPark,
-                    Bound::JoinMembers => RecordedBound::JoinMembers,
-                    Bound::Guard { function } => RecordedBound::Guard {
-                        function: *function,
-                    },
-                },
-                limit: exceeded.limit,
-                function: exceeded.function.clone(),
-            },
-            End::Cancelled => return None,
-        })
-    }
-
-    /// The end the machine reported.
-    pub fn into_end(self) -> End {
-        match self {
-            Self::Finished {
-                result,
-                finish,
-                variables,
-                objects,
-                not_carried,
-                closure_variables,
-                closure_objects,
-            } => End::Finished(Finished {
-                result,
-                finish,
-                bindings: Bindings {
-                    variables,
-                    objects: objects.into_iter().collect(),
-                },
-                not_carried,
-                closures: Bindings {
-                    variables: closure_variables,
-                    objects: closure_objects.into_iter().collect(),
-                },
-            }),
-            Self::Failed { reason } => End::Failed(reason),
-            Self::Uncaught { error } => End::Error(RunError::Uncaught(error)),
-            Self::TasksOutstanding {
-                unfinished,
-                unobserved,
-            } => End::Error(RunError::TasksOutstanding {
-                unfinished,
-                unobserved,
-            }),
-            Self::Deadlock { waiting } => End::Error(RunError::Deadlock { waiting }),
-            Self::Bound {
-                bound,
-                limit,
-                function,
-            } => End::Error(RunError::Bound(BoundExceeded {
-                bound: match bound {
-                    RecordedBound::Charge => Bound::Charge,
-                    RecordedBound::Memory => Bound::Memory,
-                    RecordedBound::CallDepth => Bound::CallDepth,
-                    RecordedBound::LiveTasks => Bound::LiveTasks,
-                    RecordedBound::RequestsPerPark => Bound::RequestsPerPark,
-                    RecordedBound::JoinMembers => Bound::JoinMembers,
-                    RecordedBound::Guard { function } => Bound::Guard { function },
-                },
-                limit,
-                function,
-            })),
-        }
-    }
-}
-
-/// A run's saved state, the ledger that matches it and the host's own
-/// state for the run: committed together or not at all.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ParkedCheckpoint<P> {
-    pub phase: CheckpointPhase<P>,
-    /// The host's own state for the run at this save, opaque to the broker.
-    pub host: Option<EncodedPayload>,
-}
-
-/// Only a parked run owns a machine and its live effect ledger.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum CheckpointPhase<P> {
-    Parked { state: P, ledger: EffectLedger },
-    Ended { end: RecordedEnd },
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use lash_kernel_doc::{Site, Unit};
+    use lash_kernel_doc::{Datum, Site, TaskIdentity, Unit};
+    use lash_kernel_vm::{End, RunError};
 
     use super::*;
 
     /// `K-ERR-003`, ADR 0132 §8: restoring a recorded end returns the
-    /// original thrown value, including a value that is not an error.
+    /// original thrown value, including a value that is not an error: the
+    /// end's TerminalWhole reads back as the end it records.
     #[test]
     fn a_recorded_uncaught_end_keeps_the_thrown_value() {
         let end = End::Error(RunError::Uncaught(Datum::Int(7.into())));
-        let recorded = RecordedEnd::of(&end).expect("an uncaught end is recorded");
-        let stored = serde_json::to_value(&recorded).expect("the end encodes");
-        assert_eq!(
-            stored,
-            serde_json::json!({"uncaught": {"error": {"int": "7"}}})
-        );
-        let restored: RecordedEnd = serde_json::from_value(stored).expect("the end decodes");
-        assert_eq!(restored.into_end(), end);
-    }
-
-    /// V10: a checkpoint owns exactly one live or terminal phase.
-    #[test]
-    fn a_checkpoint_has_exactly_one_phase() {
-        let ledger = serde_json::to_value(EffectLedger::new()).expect("ledger encodes");
-        let end = serde_json::to_value(RecordedEnd::Failed {
-            reason: Datum::Null,
-        })
-        .expect("end encodes");
-        let parked = serde_json::json!({"parked": {"state": true, "ledger": ledger}});
-        let ended = serde_json::json!({"ended": {"end": end}});
-        for phase in [&parked, &ended] {
-            let encoded = serde_json::json!({"phase": phase, "host": null});
-            let decoded: ParkedCheckpoint<bool> =
-                serde_json::from_value(encoded.clone()).expect("one phase decodes");
-            assert_eq!(
-                serde_json::to_value(decoded).expect("phase encodes"),
-                encoded
-            );
-        }
-        let mut both = parked.clone();
-        both["ended"] = ended["ended"].clone();
-        let mut terminal_ledger = ended;
-        terminal_ledger["ended"]["ledger"] = ledger;
-        for phase in [
-            serde_json::json!({}),
-            serde_json::json!({"parked": {}}),
-            both,
-            terminal_ledger,
-        ] {
-            let invalid = serde_json::json!({"phase": phase, "host": null});
-            assert!(serde_json::from_value::<ParkedCheckpoint<bool>>(invalid).is_err());
-        }
+        let state = crate::kernel::state::export_end_state(&end, 1, u64::MAX)
+            .expect("an uncaught end stages")
+            .expect("an uncaught end is recorded");
+        let restored = crate::kernel::state::read_end_in(
+            &state.nodes,
+            state.root,
+            lash_core_store::checkpoint_graph::DecodeLimits::within_total(u64::MAX),
+        )
+        .expect("the end reads back");
+        assert_eq!(restored, end);
     }
 
     fn identity(occurrence: u64) -> EffectIdentity {
@@ -580,7 +324,6 @@ mod tests {
                 "cell",
             )
             .child_call_id(run, ordinal),
-            request: EncodedPayload(Vec::new()),
         }
     }
 
@@ -631,26 +374,52 @@ mod tests {
     }
 
     /// A stored ledger that names an execution no park of its run admitted,
-    /// or one wait twice, is refused when it is read.
+    /// one wait twice or one execution twice, is refused when it is read.
     #[test]
     fn a_stored_ledger_that_names_what_was_never_admitted_is_refused() {
-        let mut ledger = EffectLedger::new();
-        ledger.take_park();
-        ledger.stand(identity(0), standing(0, Standing::Admitted(admitted(0, 0))));
-        let stored = serde_json::to_value(&ledger).expect("a ledger encodes");
+        let pending = |entries: Vec<(u64, u64, Standing)>| {
+            entries
+                .into_iter()
+                .map(|(occurrence, wait, standing)| {
+                    (identity(occurrence), self::standing(wait, standing))
+                })
+                .collect::<BTreeMap<_, _>>()
+        };
+        let read = EffectLedger::restored(
+            pending(vec![(0, 0, Standing::Admitted(admitted(0, 0)))]),
+            Vec::new(),
+            1,
+        )
+        .expect("an issued ledger reads back");
+        assert_eq!(read.oldest_reachable(), 0);
         assert_eq!(
-            serde_json::from_value::<EffectLedger>(stored.clone()).expect("it reads back"),
-            ledger
+            EffectLedger::restored(
+                pending(vec![(0, 0, Standing::Admitted(admitted(0, 0)))]),
+                Vec::new(),
+                0,
+            ),
+            Err(LedgerRefusal::UnissuedPark { park: 0, parks: 0 })
         );
-        let mut unissued = stored.clone();
-        unissued["next_park"] = 0.into();
-        assert!(serde_json::from_value::<EffectLedger>(unissued).is_err());
-        let mut shared = stored;
-        let entry = shared["pending"][0].clone();
-        shared["pending"]
-            .as_array_mut()
-            .expect("entries")
-            .push(serde_json::json!([identity(1), entry[1]]));
-        assert!(serde_json::from_value::<EffectLedger>(shared).is_err());
+        assert_eq!(
+            EffectLedger::restored(
+                pending(vec![
+                    (0, 0, Standing::Admitted(admitted(0, 0))),
+                    (1, 0, Standing::Sleeping { until_ms: 5 }),
+                ]),
+                Vec::new(),
+                1,
+            ),
+            Err(LedgerRefusal::SharedWait { wait: 0 })
+        );
+        assert_eq!(
+            EffectLedger::restored(
+                pending(vec![(0, 0, Standing::Admitted(admitted(0, 0)))]),
+                vec![admitted(0, 0)],
+                1,
+            ),
+            Err(LedgerRefusal::SharedExecution {
+                operation: OperationId { run: 0, ordinal: 0 }
+            })
+        );
     }
 }

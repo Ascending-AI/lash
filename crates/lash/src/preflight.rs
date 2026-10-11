@@ -49,7 +49,6 @@
 //! list is part of the answer rather than a footnote to it.
 
 mod extract;
-mod msgpack;
 mod report;
 
 use std::collections::BTreeMap;

@@ -76,52 +76,52 @@ pub(crate) fn checkpoint_curve_points(config: &CheckpointCurveConfig) -> Vec<Che
         .collect()
 }
 
+/// What a capture stages, and what its commit carries: the execution
+/// nodes no earlier commit installed, and among them the text leaves that
+/// hold the bindings' large values.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct CheckpointArtifactShape {
-    manifest_count: u64,
-    changed_body_count: u64,
-    changed_body_bytes: u64,
+    staged_node_count: u64,
+    staged_node_bytes: u64,
+    staged_leaf_bytes: u64,
 }
 
 impl CheckpointArtifactShape {
-    fn from_snapshot(snapshot: &lash_core::plugin::ExecutionStateCapture) -> Self {
-        let root = snapshot.root();
-        let changed_bodies = snapshot
-            .leaves()
-            .values()
-            .filter_map(|component| match component {
-                lash_core::plugin::LeafChange::Changed(body) => Some(body),
-                lash_core::plugin::LeafChange::Unchanged => None,
-            })
-            .collect::<Vec<_>>();
-        Self {
-            manifest_count: snapshot.leaves().len() as u64 + u64::from(root.is_some()),
-            changed_body_count: changed_bodies.len() as u64 + u64::from(root.is_some()),
-            changed_body_bytes: changed_bodies
-                .iter()
-                .map(|body| body.len() as u64)
-                .sum::<u64>()
-                + root.map_or(0, |body| body.len() as u64),
+    fn of<'a>(
+        nodes: impl Iterator<Item = &'a lash_core_store::checkpoint_graph::EncodedNode>,
+    ) -> anyhow::Result<Self> {
+        let mut shape = Self::default();
+        for node in nodes {
+            shape.staged_node_count += 1;
+            shape.staged_node_bytes += node.bytes.len() as u64;
+            if node.envelope()?.kind == lash_core_store::checkpoint_graph::NodeKind::TEXT_LEAF {
+                shape.staged_leaf_bytes += node.bytes.len() as u64;
+            }
+        }
+        Ok(shape)
+    }
+
+    fn from_snapshot(snapshot: &lash_core::plugin::ExecutionGraphCapture) -> anyhow::Result<Self> {
+        match snapshot {
+            lash_core::plugin::ExecutionGraphCapture::Replace { nodes, .. } => {
+                Self::of(nodes.values())
+            }
+            lash_core::plugin::ExecutionGraphCapture::Clear => {
+                anyhow::bail!("checkpoint curve capture omitted its root")
+            }
         }
     }
 
-    fn from_commit(commit: &RuntimeCommit) -> Self {
-        let changed = commit
-            .checkpoint
-            .components
-            .values()
-            .filter_map(lash_core::HydratedCheckpointComponent::body)
-            .collect::<Vec<_>>();
-        Self {
-            manifest_count: commit.checkpoint.components.len() as u64,
-            changed_body_count: changed.len() as u64,
-            changed_body_bytes: changed.iter().map(|body| body.len() as u64).sum(),
-        }
+    fn from_commit(commit: &RuntimeCommit) -> anyhow::Result<Self> {
+        Self::of(
+            commit
+                .checkpoint
+                .execution
+                .iter()
+                .flat_map(|execution| execution.nodes.values()),
+        )
     }
 }
-
-#[cfg(test)]
-pub(crate) const CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY: u64 = 1;
 
 struct DurableCheckpointCurveFixture {
     point: CheckpointCurvePoint,
@@ -199,13 +199,17 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
         )
         .await?;
         let initial_snapshot = fixture.capture().await?;
-        let initial_shape = CheckpointArtifactShape::from_snapshot(&initial_snapshot);
-        if initial_shape.manifest_count != point.component_count as u64 + 1 {
+        // Every binding's large value is staged by the first capture, each
+        // in its own leaves.
+        let initial_shape = CheckpointArtifactShape::from_snapshot(&initial_snapshot)?;
+        if initial_shape.staged_leaf_bytes < (point.component_count * point.transcript_bytes) as u64
+        {
             anyhow::bail!(
-                "{} seeded manifest count {}, expected {}",
+                "{} seeded {} leaf bytes, fewer than its {} bindings of {} bytes",
                 point.prefix(),
-                initial_shape.manifest_count,
-                point.component_count + 1
+                initial_shape.staged_leaf_bytes,
+                point.component_count,
+                point.transcript_bytes
             );
         }
         let mut runtime_state = RuntimeSessionState {
@@ -216,7 +220,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 lash_core::NoProgressBudget::bounded(12),
             ))
         };
-        lash_core::testing::stage_execution_state_components(&mut runtime_state, initial_snapshot)?;
+        lash_core::testing::stage_execution_graph(&mut runtime_state, initial_snapshot);
         let seed_commit = RuntimeCommit::persisted_state_for_test_with_budget(
             &runtime_state,
             lash_core::CommitBudget::bounded(
@@ -257,14 +261,20 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 async { fixture.fixture.capture().await.map_err(anyhow::Error::from) },
             ))
             .await?;
-            let snapshot_shape = CheckpointArtifactShape::from_snapshot(&snapshot);
+            let snapshot_shape = CheckpointArtifactShape::from_snapshot(&snapshot)?;
+            // The reassigned binding keeps its large value: what an earlier
+            // commit installed is never staged again (PC-LARGE-ONCE).
+            if snapshot_shape.staged_leaf_bytes >= fixture.point.transcript_bytes as u64 {
+                anyhow::bail!(
+                    "{prefix} restaged {} leaf bytes, as much as a binding's {}-byte value",
+                    snapshot_shape.staged_leaf_bytes,
+                    fixture.point.transcript_bytes
+                );
+            }
             let (serialized, serialize_phase) = measure_runtime_perf_phase(
                 "checkpoint_curve.serialize",
                 || {
-                    lash_core::testing::stage_execution_state_components(
-                        &mut fixture.runtime_state,
-                        snapshot,
-                    )?;
+                    lash_core::testing::stage_execution_graph(&mut fixture.runtime_state, snapshot);
                     let commit = RuntimeCommit::persisted_state_for_test_with_budget(
                         &fixture.runtime_state,
                         lash_core::CommitBudget::bounded(
@@ -272,7 +282,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                             CHECKPOINT_CURVE_COMMIT_ROWS,
                         ),
                     );
-                    let commit_shape = CheckpointArtifactShape::from_commit(&commit);
+                    let commit_shape = CheckpointArtifactShape::from_commit(&commit)?;
                     if commit_shape != snapshot_shape {
                         anyhow::bail!(
                             "{prefix} snapshot/commit shape diverged: {snapshot_shape:?} versus {commit_shape:?}"
@@ -300,7 +310,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 })
                 .await?;
             fixture.fixture.acknowledge_capture().await;
-            let (loaded_state, load_phase) =
+            let ((loaded_state, reachable), load_phase) =
                 measure_runtime_perf_async_phase("checkpoint_curve.load", async {
                     let loaded_state = lash::persistence::load_session_window_state(
                         &lash::persistence::SessionStore::new(
@@ -321,7 +331,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                     )
                     .await
                     .map_err(anyhow::Error::from)?;
-                    Ok(loaded_state)
+                    Ok((loaded_state, execution_state.nodes.len() as u64))
                 })
                 .await?;
             fixture.runtime_state = loaded_state;
@@ -341,9 +351,10 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 phase_profile.insert(format!("{prefix}.{name}"), phase);
             }
             let counts = [
-                ("manifest_count", shape.manifest_count),
-                ("changed_body_count", shape.changed_body_count),
-                ("changed_body_bytes", shape.changed_body_bytes),
+                ("reachable_node_count", reachable),
+                ("staged_node_count", shape.staged_node_count),
+                ("staged_node_bytes", shape.staged_node_bytes),
+                ("staged_leaf_bytes", shape.staged_leaf_bytes),
                 ("runtime_hash_count", work.hash_passes),
                 ("runtime_hash_bytes", work.hashed_bytes),
             ];

@@ -9,43 +9,54 @@
 //! requests nothing saves nothing: a save is owed only before effects are
 //! admitted.
 //!
-//! A run that has a checkpoint resumes from it: the state is imported, and
-//! the first delivery answers, from their records, every effect whose
-//! outcome committed and the saved state had not consumed. Whatever ran
-//! after that save runs again; no committed effect does.
+//! A run that has a checkpoint resumes from it: the state is imported with
+//! each wait's request from its admission, and the first delivery answers,
+//! from their records, every effect whose outcome committed and the saved
+//! state had not consumed. Whatever ran after that save runs again; no
+//! committed effect does.
 //!
 //! The broker does not know where the machine lives. It drives a
 //! [`DrivenMachine`] that a [`Machines`] starts or resumes: lash's is a
 //! machine in a resettable worker process (kernel spec §9 rule 5), and
 //! [`InProcess`] is one in this process.
 
+use std::collections::BTreeSet;
+use std::sync::OnceLock;
+
+use lash_core_store::checkpoint_graph::bodies::OwnerBinding;
+use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
 use lash_durable::DurableInstant;
+use lash_kernel_doc::graph_tokens::ChildRef;
 use lash_kernel_doc::{DocumentId, EncodeError, ErrorDatum};
 use lash_kernel_vm::{
     Bound, BoundExceeded, Bounds, DeliverError, Delivered, EffectRequest, End, ExportError, Host,
-    ImportError, Machine, MachineError, Outcome, Program, Request, RunError, Start, StartError,
-    Step, WaitId,
+    ImportError, KernelMachine, Machine, MachineError, Outcome, Program, Request, RunError, Start,
+    StartError, Step, WaitId,
 };
-use lash_vm_protocol::{EncodedPayload, InfrastructureOutcome};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use lash_vm_protocol::InfrastructureOutcome;
 use tokio_util::sync::CancellationToken;
 
-use super::ledger::{AdmittedEffect, EffectLedger, RecordedEnd};
-use super::store::{AdmitAs, EffectAdmission, EndSave, ParkSave};
+use super::graph::{FrozenRequest, Projections};
+use super::ledger::{AdmittedEffect, EffectLedger};
+use super::state::{GraphStateFailure, ReleaseGraph, WholeState};
+use super::store::{
+    AdmitAs, AdmittedCall, Checkpoint, EffectAdmission, HostParts, ParkSave, ParkedState,
+};
 use crate::effects::{MemberDraft, ParentFault};
 use crate::identity::CodeCallIdentities;
 use crate::members::Driven;
 use crate::snapshot::{DurableSnapshotStore, QuietPointRefusal};
 use lash_core_execution::runtime::actor::round::SettledOutput;
 
-/// The parent's half of a kernel run: how each effect is admitted.
+/// The parent's half of a kernel run: how each effect is admitted, how a
+/// committed outcome answers it, and the host's own state each save
+/// publishes. Its projections read back the tool requests it froze.
 #[async_trait::async_trait]
-pub trait KernelEffects: Send + Sync {
+pub trait KernelEffects: Projections + Send + Sync {
     /// The execution `request` is admitted as, under `call`, the identity
-    /// the parent derived for it: its tool, request, policy, limit and
-    /// completion wait. `Err` refuses the effect: the `perform` raises that
-    /// error, which the guest may catch, and nothing is dispatched.
+    /// the parent derived for it: its tool, frozen request, policy, limit
+    /// and completion wait. `Err` refuses the effect: the `perform` raises
+    /// that error, which the guest may catch, and nothing is dispatched.
     /// `outstanding` names the tasks that would make the run's end an
     /// error at this park ([`Park::outstanding`](lash_kernel_vm::Park)):
     /// `live` also names passed list-join members that have not ended
@@ -76,19 +87,42 @@ pub trait KernelEffects: Send + Sync {
         false
     }
 
-    /// The host's own state for the run at this save, opaque to the broker.
-    fn host_state(&self) -> Result<Option<EncodedPayload>, ParentFault> {
-        Ok(None)
+    /// The run resumed from its latest park: each execution its ledger
+    /// names, awaited or released, with the request its admission froze.
+    ///
+    /// # Errors
+    ///
+    /// [`ParentFault`] for an execution this host cannot run.
+    fn resumed(&self, executions: &[(AdmittedEffect, FrozenRequest)]) -> Result<(), ParentFault> {
+        let _ = executions;
+        Ok(())
     }
+
+    /// Stages the host's own state for a save, which admitted `admitted`:
+    /// its HostRoot and CellEnvelope, each when it keeps one. Nodes an
+    /// earlier root installed and this one reuses go in `reads`.
+    ///
+    /// # Errors
+    ///
+    /// [`ParentFault`] when the host's state does not stage.
+    fn stage_host(
+        &self,
+        staging: &mut GraphStaging,
+        reads: &mut BTreeSet<NodeId>,
+        admitted: &[AdmittedCall],
+    ) -> Result<HostParts, ParentFault> {
+        let _ = (staging, reads, admitted);
+        Ok(HostParts::default())
+    }
+
+    /// The save that staged the host's state committed.
+    fn host_committed(&self) {}
 }
 
 /// One run's machine, wherever it executes. Between calls the run is at a
 /// safe point.
 #[async_trait::async_trait]
 pub trait DrivenMachine: Send {
-    /// The parked state it writes and resumes from.
-    type Parked: Serialize + DeserializeOwned + Send;
-
     /// Runs ready tasks until none is ready, the run ends or `slice` charge
     /// units are spent. With `cancel`, the run observes its cancel at its
     /// next safe point and ends [`End::Cancelled`].
@@ -98,8 +132,9 @@ pub trait DrivenMachine: Send {
     async fn deliver(&mut self, wait: WaitId, outcome: Outcome)
     -> Result<Delivered, KernelFailure>;
 
-    /// The run's state as it stands.
-    async fn export(&mut self) -> Result<Self::Parked, KernelFailure>;
+    /// The run's state as it stands at a park: a KernelWhole bound to the
+    /// execution `binding` names.
+    async fn export(&mut self, binding: &OwnerBinding) -> Result<WholeState, KernelFailure>;
 
     /// Gives the machine up at a clean stop: the run ended, or it stays
     /// parked beyond this activation. A machine that is only dropped was
@@ -118,28 +153,43 @@ pub trait Machines: Send + Sync {
     /// The bounds the run is held to.
     fn bounds(&self) -> Bounds;
 
+    /// The helper releases this build holds: a park installs the manifest
+    /// its state pins.
+    ///
+    /// # Errors
+    ///
+    /// [`KernelFailure::State`] when the build's releases do not stage.
+    fn releases(&self) -> Result<&ReleaseGraph, KernelFailure>;
+
     /// A machine that has executed nothing.
     async fn start(&self) -> Result<Self::Machine, KernelFailure>;
 
     /// A machine rebuilt from the run's saved state.
-    async fn resume(
-        &self,
-        parked: <Self::Machine as DrivenMachine>::Parked,
-    ) -> Result<Self::Machine, KernelFailure>;
+    async fn resume(&self, parked: &ParkedState) -> Result<Self::Machine, KernelFailure>;
+}
+
+/// The build's helper releases, staged once.
+fn held_releases(
+    releases: &OnceLock<Result<ReleaseGraph, GraphStateFailure>>,
+) -> Result<&ReleaseGraph, KernelFailure> {
+    releases
+        .get_or_init(super::state::release_manifests)
+        .as_ref()
+        .map_err(|failure| KernelFailure::State(failure.clone()))
 }
 
 /// A run whose machine lives in this process and reads `host`: the kernel
 /// embedder's plain loop, for hosts that choose no isolation and for laws.
-pub struct InProcess<M, H> {
+pub struct InProcess<H> {
     program: Program,
     bounds: Bounds,
     start: Start,
     document: DocumentId,
     host: std::sync::Arc<std::sync::Mutex<H>>,
-    machine: std::marker::PhantomData<fn() -> M>,
+    releases: OnceLock<Result<ReleaseGraph, GraphStateFailure>>,
 }
 
-impl<M, H> InProcess<M, H> {
+impl<H> InProcess<H> {
     /// The run of `program` from `start`, held to `bounds`, reading `host`.
     ///
     /// # Errors
@@ -157,14 +207,15 @@ impl<M, H> InProcess<M, H> {
             bounds,
             start,
             host: std::sync::Arc::new(std::sync::Mutex::new(host)),
-            machine: std::marker::PhantomData,
+            releases: OnceLock::new(),
         })
     }
 }
 
-/// An in-process machine and the host it reads.
-pub struct InProcessMachine<M, H> {
-    machine: M,
+/// An in-process machine, the release it pins and the host it reads.
+pub struct InProcessMachine<H> {
+    machine: KernelMachine,
+    release: ChildRef,
     host: std::sync::Arc<std::sync::Mutex<H>>,
 }
 
@@ -196,14 +247,10 @@ impl<H: Host> Host for Cancelling<'_, H> {
 }
 
 #[async_trait::async_trait]
-impl<M, H> DrivenMachine for InProcessMachine<M, H>
+impl<H> DrivenMachine for InProcessMachine<H>
 where
-    M: Machine + Send,
-    M::Parked: Serialize + DeserializeOwned + Send,
     H: Host + Send,
 {
-    type Parked = M::Parked;
-
     async fn run(&mut self, slice: u64, cancel: bool) -> Result<Step, KernelFailure> {
         let mut host = self
             .host
@@ -226,8 +273,9 @@ where
         Ok(self.machine.deliver(wait, outcome)?)
     }
 
-    async fn export(&mut self) -> Result<Self::Parked, KernelFailure> {
-        Ok(self.machine.export()?)
+    async fn export(&mut self, binding: &OwnerBinding) -> Result<WholeState, KernelFailure> {
+        super::state::export_whole_state(&mut self.machine, binding, self.release, u64::MAX)
+            .map_err(KernelFailure::State)
     }
 
     async fn release(self) -> Result<(), KernelFailure> {
@@ -236,13 +284,11 @@ where
 }
 
 #[async_trait::async_trait]
-impl<M, H> Machines for InProcess<M, H>
+impl<H> Machines for InProcess<H>
 where
-    M: Machine + Send,
-    M::Parked: Serialize + DeserializeOwned + Send,
     H: Host + Send,
 {
-    type Machine = InProcessMachine<M, H>;
+    type Machine = InProcessMachine<H>;
 
     fn document(&self) -> DocumentId {
         self.document
@@ -252,16 +298,39 @@ where
         self.bounds
     }
 
+    fn releases(&self) -> Result<&ReleaseGraph, KernelFailure> {
+        held_releases(&self.releases)
+    }
+
     async fn start(&self) -> Result<Self::Machine, KernelFailure> {
+        let release = self.releases()?.manifests.current().ok_or_else(|| {
+            KernelFailure::State(GraphStateFailure::Unwritable(
+                "the build holds no helper release".to_owned(),
+            ))
+        })?;
         Ok(InProcessMachine {
-            machine: M::start(self.program.clone(), self.bounds, self.start.clone())?,
+            machine: KernelMachine::start(self.program.clone(), self.bounds, self.start.clone())?,
+            release,
             host: self.host.clone(),
         })
     }
 
-    async fn resume(&self, parked: M::Parked) -> Result<Self::Machine, KernelFailure> {
+    async fn resume(&self, parked: &ParkedState) -> Result<Self::Machine, KernelFailure> {
+        let registry = std::sync::Arc::clone(self.program.library.registry());
+        let (machine, release) = super::state::import_whole_state(
+            self.program.clone(),
+            self.bounds,
+            parked.whole.root,
+            &parked.whole.nodes,
+            parked.admissions.clone(),
+            self.releases()?,
+            &registry,
+            crate::snapshot::READ_LIMITS,
+        )
+        .map_err(KernelFailure::State)?;
         Ok(InProcessMachine {
-            machine: M::import(self.program.clone(), self.bounds, parked)?,
+            machine,
+            release,
             host: self.host.clone(),
         })
     }
@@ -316,9 +385,15 @@ pub fn park_bound(bounds: &Bounds, requests: usize) -> Option<BoundExceeded> {
 /// How a driven run stopped.
 #[derive(Clone, Debug, PartialEq)]
 pub enum KernelEnd {
-    /// The run ended. Its end is committed, unless it was cancelled or
-    /// never parked.
-    Ended(End),
+    /// The run ended. `owed` is the ledger its end commits over when the
+    /// run has a parked root (see [`DurableSnapshotStore::commit_run_end`]):
+    /// none for an end already recorded, a cancelled run, or one that never
+    /// parked, whose stretch admitted nothing and runs again from its
+    /// start.
+    Ended {
+        end: End,
+        owed: Option<Box<EffectLedger>>,
+    },
     /// The run is parked on waits that outlive this activation; its
     /// checkpoint resumes it.
     Suspended,
@@ -339,6 +414,8 @@ pub enum KernelFailure {
     Start(#[from] StartError),
     #[error("the run's saved state is refused: {0}")]
     Import(#[from] ImportError),
+    #[error("the run's graph state was refused: {0}")]
+    State(GraphStateFailure),
     #[error("the saved checkpoint records neither a state nor an end")]
     EmptyCheckpoint,
     #[error(transparent)]
@@ -389,37 +466,32 @@ impl KernelBroker<'_> {
         let bounds = machines.bounds();
         self.ceilings.check(&bounds)?;
         let document = machines.document();
+        let binding = super::graph::owner_binding(self.store.exec());
         // A run with a checkpoint commits its end over it; one that never
         // parked commits nothing, and runs again from its start.
         let mut saved = false;
-        let (machine, mut ledger) = match self
-            .store
-            .latest_park::<<S::Machine as DrivenMachine>::Parked>()
-            .await?
-        {
-            Some((_, checkpoint)) => {
+        // The saved state the machine stands at exactly, while it does: a
+        // machine that only waits gives its worker back and is rebuilt
+        // from this.
+        let mut resting: Option<ParkedState> = None;
+        let (machine, mut ledger) = match self.store.checkpoint(&document, self.effects).await? {
+            Some(Checkpoint::Ended { end, .. }) => {
+                return Ok(KernelEnd::Ended { end, owed: None });
+            }
+            Some(Checkpoint::Parked { state, ledger, .. }) => {
                 saved = true;
-                match checkpoint.phase {
-                    super::CheckpointPhase::Ended { end } => {
-                        return Ok(KernelEnd::Ended(end.into_end()));
-                    }
-                    super::CheckpointPhase::Parked { state, ledger } => {
-                        (machines.resume(state).await?, ledger)
-                    }
-                }
+                self.effects.resumed(&self.store.open_requests(&ledger))?;
+                let machine = machines.resume(&state).await?;
+                (machine, ledger)
             }
             None => (machines.start().await?, EffectLedger::new()),
         };
         let mut machine = Some(machine);
-        // The saved state the machine stands at exactly, while it does: a
-        // machine that only waits gives its worker back and is rebuilt
-        // from this.
-        let mut resting: Option<<S::Machine as DrivenMachine>::Parked> = None;
         loop {
             let running = match &mut machine {
                 Some(running) => running,
                 None => {
-                    let state = resting.take().ok_or(KernelFailure::EmptyCheckpoint)?;
+                    let state = resting.as_ref().ok_or(KernelFailure::EmptyCheckpoint)?;
                     machine.insert(machines.resume(state).await?)
                 }
             };
@@ -429,7 +501,7 @@ impl KernelBroker<'_> {
                     if let Some(ended) = machine.take() {
                         ended.release().await?;
                     }
-                    return self.ended(&document, ledger, end, saved).await;
+                    return Ok(Self::ended(ledger, end, saved));
                 }
                 Step::Parked(park) => park,
             };
@@ -448,33 +520,35 @@ impl KernelBroker<'_> {
                     refused.release().await?;
                 }
                 let end = End::Error(RunError::Bound(exceeded));
-                return self.ended(&document, ledger, end, saved).await;
+                return Ok(Self::ended(ledger, end, saved));
             }
             if !requests.is_empty() {
                 let admit = self
                     .admissions(&ledger, requests, &outstanding, &live)
                     .await?;
+                let state = running.export(&binding).await?;
                 let committed = self
                     .store
-                    .commit_park(ParkSave {
-                        document,
-                        state: running.export().await?,
-                        ledger,
-                        admit,
-                        host: self.effects.host_state()?,
-                        with: Vec::new(),
-                    })
+                    .commit_park(
+                        ParkSave {
+                            document,
+                            state: state.clone(),
+                            releases: machines.releases()?,
+                            ledger,
+                            admit,
+                            with: Vec::new(),
+                        },
+                        self.effects,
+                    )
                     .await?;
                 saved = true;
-                let super::CheckpointPhase::Parked {
-                    state,
-                    ledger: saved_ledger,
-                } = committed.checkpoint.phase
-                else {
-                    return Err(KernelFailure::EmptyCheckpoint);
-                };
-                ledger = saved_ledger;
-                resting = Some(state);
+                ledger = committed.ledger;
+                let book = self.store.admitted_waits(&ledger)?;
+                resting = Some(ParkedState {
+                    whole: state,
+                    document: document.to_string(),
+                    admissions: book,
+                });
             }
             if ledger.pending().next().is_none() {
                 return Err(KernelFailure::Stalled);
@@ -515,7 +589,7 @@ impl KernelBroker<'_> {
                 if let Some(stopped) = machine.take() {
                     stopped.release().await?;
                 }
-                return self.ended(&document, ledger, End::Cancelled, saved).await;
+                return Ok(Self::ended(ledger, End::Cancelled, saved));
             }
             // A machine that gave its worker back is rebuilt from its saved
             // state, and reads these outcomes again once it has parked.
@@ -557,7 +631,10 @@ impl KernelBroker<'_> {
                             executions += 1;
                             AdmitAs::Execution(Box::new(draft))
                         }
-                        Err(refusal) => AdmitAs::Refused(refusal),
+                        Err(error) => AdmitAs::Refused {
+                            error,
+                            args: request.args.clone(),
+                        },
                     };
                     EffectAdmission {
                         identity: request.identity,
@@ -583,6 +660,7 @@ impl KernelBroker<'_> {
                         wait: sleep.wait,
                         effect: None,
                         admit: AdmitAs::Sleep {
+                            duration: sleep.duration,
                             until: DurableInstant(now.0.saturating_add(millis)),
                         },
                     }
@@ -592,28 +670,13 @@ impl KernelBroker<'_> {
         Ok(admit)
     }
 
-    /// Commits `end` over the run's checkpoint. A cancelled run records no
-    /// end, and neither does a run that never parked: its stretch admitted
-    /// nothing, and runs again from its start.
-    async fn ended(
-        &self,
-        document: &DocumentId,
-        ledger: EffectLedger,
-        end: End,
-        saved: bool,
-    ) -> Result<KernelEnd, KernelFailure> {
-        if let (true, Some(recorded)) = (saved, RecordedEnd::of(&end)) {
-            self.store
-                .commit_run_end::<()>(EndSave {
-                    document: *document,
-                    ledger,
-                    end: recorded,
-                    host: self.effects.host_state()?,
-                    with: Vec::new(),
-                })
-                .await?;
-        }
-        Ok(KernelEnd::Ended(end))
+    /// How a run that ended stops: its end owed over its parked root, or
+    /// nothing owed for a cancelled run, which records no end, or one that
+    /// never parked, whose stretch admitted nothing and runs again from its
+    /// start.
+    fn ended(ledger: EffectLedger, end: End, saved: bool) -> KernelEnd {
+        let owed = (saved && !matches!(end, End::Cancelled)).then(|| Box::new(ledger));
+        KernelEnd::Ended { end, owed }
     }
 }
 

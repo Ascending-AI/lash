@@ -44,7 +44,7 @@
 
 use std::future::Future;
 
-use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, SessionCommitWrite, TurnWrite};
+use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, TurnWrite};
 use lash_durable::{CommitLabel, DurableError};
 
 use super::head::HeadCache;
@@ -118,7 +118,7 @@ pub(super) struct StoppedTurn {
     /// The turn's drive, its machine where the turn stopped.
     pub(super) drive: Box<dyn TurnDrive>,
     /// A settled round's presentation the turn has yet to commit.
-    pub(super) present: Option<DomainWrite>,
+    pub(super) present: Option<lash_core_execution::runtime::actor::round::PresentRecord>,
     /// The tool calls of a cell the turn has yet to record: one that
     /// answered, or the one it stopped on (FIG-5330).
     pub(super) cell: Option<AnsweredCell>,
@@ -198,11 +198,11 @@ async fn stopped_cell(
     if RunSeq(id.0) != *run {
         return Ok(None);
     }
-    // A round the turn's rows hold at its phase is a tool round, whose
-    // members are recorded already.
+    // A run the turn's facts hold at its phase is a tool round, whose
+    // members are recorded already, or the cell's report.
     let owner = OwnerKey::Turn(row.session.clone(), row.run.clone());
-    let rows = cx.durable_reads()?.run_records(&owner).await?;
-    if rows.iter().any(|stored| stored.run == *run) {
+    let facts = cx.durable_reads()?.run_facts(&owner).await?;
+    if facts.rows.iter().any(|stored| stored.run == *run) {
         return Ok(None);
     }
     let calls = drive.stopped_cell_calls(cx, id).await?;
@@ -303,9 +303,17 @@ async fn end(
         let commit =
             stop_commit(cx, stopped.as_mut(), evidence.clone(), heads, &row.session).await?;
         if let Some(present) = present {
-            tx.write(present);
+            present.write(&mut tx);
         }
-        super::tool_round::record_answered_cell(cx, &mut tx, row, &mut cell)?;
+        super::tool_round::consume_answered_cell(
+            cx,
+            stopped.as_mut(),
+            &mut tx,
+            row,
+            &mut cell,
+            false,
+        )
+        .await?;
         // The commit settles what the turn's checkpoints delivered: bound
         // to the run first, as the settlement requires.
         if let Some(bind) = super::phases::bind_delivered(stopped.as_ref(), &row.session, &row.run)
@@ -313,11 +321,12 @@ async fn end(
             tx.write(bind);
         }
         head_revision = Some(commit.expected_head.saturating_add(1));
-        tx.write(DomainWrite::SessionCommit(SessionCommitWrite {
-            session: row.session.clone(),
-            expected_head: commit.expected_head,
-            commit_json: commit.commit_json,
-        }));
+        super::head_commit::write_session_commit(
+            &mut tx,
+            &row.session,
+            commit.expected_head,
+            commit.commit,
+        );
         drive = Some(stopped);
     }
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {

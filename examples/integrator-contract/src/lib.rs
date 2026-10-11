@@ -158,10 +158,11 @@ impl CodeExecutorPlugin for Integrator {
     fn executable_generation(&self) -> Option<ExecutableGeneration> {
         unreachable!("external signature witness")
     }
-    async fn snapshot_execution_state(
+    async fn capture_execution_graph(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<ExecutionStateCapture, SessionError> {
+        _purpose: ExecutionGraphPurpose,
+    ) -> Result<ExecutionGraphCapture, SessionError> {
         unreachable!("external signature witness")
     }
     async fn frame_switch_carries(
@@ -178,10 +179,10 @@ impl CodeExecutorPlugin for Integrator {
     ) -> Result<(), SessionError> {
         unreachable!("external signature witness")
     }
-    async fn hydrated_execution_state(
+    async fn hydrated_execution_graph(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<Option<HydratedExecutionState>, SessionError> {
+    ) -> Result<Option<HydratedExecutionGraph>, SessionError> {
         unreachable!("external signature witness")
     }
     async fn acknowledge_execution_state_capture(&self) {
@@ -196,10 +197,11 @@ impl CodeExecutorPlugin for Integrator {
     ) -> Result<(), SessionError> {
         unreachable!("external signature witness")
     }
-    async fn restore_execution_state(
+    async fn restore_execution_graph(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-        _state: &HydratedExecutionState,
+        _graph: &HydratedExecutionGraph,
+        _purpose: ExecutionGraphPurpose,
     ) -> Result<(), SessionError> {
         unreachable!("external signature witness")
     }

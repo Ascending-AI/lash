@@ -3,13 +3,13 @@
 
 use std::collections::BTreeMap;
 
-use lash_durable::domain::{OwnerKey, RunRecordKind, RunRecordRow, WaitPurpose, WaitRow};
+use lash_durable::domain::{OwnerKey, RunFacts, WaitPurpose, WaitRow};
 use lash_durable::{
     ActorKey, DurableError, DurableInstant, DurableReads, StoreFailure, StoreFailureKind,
 };
 
 use super::PinnedWait;
-use super::records::AdmitBody;
+use super::records::{self, Record};
 use crate::runtime::actor::waits::{ParkDeadline, PinnedKey, WaitDeadline, WaitId};
 use crate::{Backend, ProcessId, SessionId, ToolCallId, ToolId};
 
@@ -76,18 +76,19 @@ pub struct PinnedWaits {
 }
 
 impl PinnedWaits {
-    /// The waits the admissions among `rows` pinned, read once each. An
+    /// The waits the admissions among `facts` pinned, read once each. An
     /// admission that does not decode names none: its fold refuses it.
     ///
     /// # Errors
     /// A failed store read.
-    pub async fn read(
-        reads: &dyn DurableReads,
-        rows: &[RunRecordRow],
-    ) -> Result<Self, DurableError> {
+    pub async fn read(reads: &dyn DurableReads, facts: &RunFacts) -> Result<Self, DurableError> {
         let mut waits = Self::default();
-        for row in rows.iter().filter(|row| row.kind == RunRecordKind::Admit) {
-            let Ok(body) = serde_json::from_str::<AdmitBody>(&row.record_json) else {
+        for row in facts
+            .rows
+            .iter()
+            .filter(|row| row.kind == lash_durable::domain::RunFactKind::Admit)
+        {
+            let Ok(Record::Admit(body)) = records::read(facts, row) else {
                 continue;
             };
             for id in body

@@ -220,7 +220,7 @@ impl SessionStateAdmin {
     /// head.
     pub async fn snapshot_execution(
         &self,
-    ) -> Result<Option<lash_core::plugin::HydratedExecutionState>> {
+    ) -> Result<Option<lash_core::plugin::HydratedExecutionGraph>> {
         let store = self.context.head_store()?;
         let Some(loaded) = lash_core::store::load_session_window_state(
             &store,

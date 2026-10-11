@@ -93,12 +93,11 @@ pub use hooks::{
     ToolResultProjectionContext, TurnHookContext, TurnHookReport, TurnResultHookContext,
 };
 pub use protocol::{
-    AssistantProseProjectorPlugin, CarriedCellSnapshot, CheckpointComponentKey,
-    CodeExecutionOutcome, CodeExecutorPlugin, EXECUTION_STATE_LEAF_MIN_BODY_BYTES,
-    ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState, InvalidExecutionLeafName,
-    LeafChange, PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
-    ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
-    ProtocolSessionRestoreView, TranscriptDecoderPlugin,
+    AssistantProseProjectorPlugin, CarriedCell, CheckpointComponentKey, CodeExecutionOutcome,
+    CodeExecutorPlugin, ExecutionGraphCapture, ExecutionGraphPurpose, HydratedExecutionGraph,
+    PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
+    ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView, StoredCell,
+    TranscriptDecoderPlugin,
 };
 pub use registrar::{
     ContextRegistrations, ExecutionRegistrations, OutputRegistrations,

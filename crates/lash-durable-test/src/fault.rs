@@ -12,8 +12,9 @@ use crate::clock::{SimClock, settle};
 use crate::life::NodeLife;
 use crate::script::{Entry, Fault, Shared, Stored, WriteKind};
 use lash_durable::domain::{
-    AdmittedId, ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordKind,
-    RunRecordRow, RunRecordWrite, ScopeKey, SessionCloseRow, SnapshotRow, TurnRow, WaitId, WaitRow,
+    AdmittedId, ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq,
+    ProcessActorRow, RootOwner, RunFactKind, RunFactWrite, RunFacts, ScopeKey, SessionCloseRow,
+    TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DomainWrite, DurableError,
@@ -550,17 +551,17 @@ impl DurableStore for FaultStore {
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().clone();
-        self.script.observe(label, tx.domain());
+        self.script.observe(label, &tx);
         let refusal = self.script.refusal(label, tx.domain());
         let starts = tx
             .domain()
             .iter()
             .filter_map(|write| match write {
-                DomainWrite::RunRecord(RunRecordWrite::Append {
+                DomainWrite::RunFact(RunFactWrite::Append {
                     owner,
                     run,
                     ordinal,
-                    kind: RunRecordKind::XStart,
+                    kind: RunFactKind::XStart,
                     ..
                 }) => Some(AdmittedId {
                     owner: owner.clone(),
@@ -653,20 +654,29 @@ impl DurableReads for FaultStore {
         self.read(self.inner.turn_end(session, run)).await
     }
 
-    async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError> {
-        self.read(self.inner.run_records(owner)).await
+    async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
+        self.read(self.inner.run_facts(owner)).await
     }
 
-    async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
-        self.read(self.inner.snapshot(exec)).await
+    async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
+        self.read(self.inner.exec_root(exec)).await
     }
 
-    async fn cell_snapshots(
+    async fn cell_roots(
         &self,
         session: &lash_sansio::SessionId,
         run: &lash_sansio::TurnId,
-    ) -> Result<Vec<SnapshotRow>, DurableError> {
-        self.read(self.inner.cell_snapshots(session, run)).await
+    ) -> Result<Vec<ExecRootRow>, DurableError> {
+        self.read(self.inner.cell_roots(session, run)).await
+    }
+
+    async fn hydrate(
+        &self,
+        owner: RootOwner,
+        expected: Option<lash_durable::domain::checkpoint_graph::NodeId>,
+        limits: lash_durable::domain::checkpoint_graph::DecodeLimits,
+    ) -> Result<HydratedGraph, DurableError> {
+        self.read(self.inner.hydrate(owner, expected, limits)).await
     }
 
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {

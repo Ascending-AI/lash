@@ -231,13 +231,8 @@ pub(super) async fn fork_at_in_catalog(
                 // The child's drive records its transition before construction.
                 let inherited_admission = checkpoint.components.remove(lash_core_store::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT).is_some();
                 if source_frame_ended {
-                    checkpoint.components.retain(|key, _| {
-                        key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
-                            && !matches!(
-                                lash_core_execution::plugin::CheckpointComponentKey::parse(key),
-                                lash_core_execution::plugin::CheckpointComponentKey::ExecutionLeaf(_)
-                            )
-                    });
+                    // An ended frame's globals end with it (ADR 0113 §3.1).
+                    checkpoint.execution = None;
                 }
                 // Each namespace forks as its plugin declared (FIG-5301).
                 let forked_state = lash_core_execution::store::fork_checkpoint_plugin_state(

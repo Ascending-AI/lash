@@ -117,12 +117,18 @@ impl ProcessTrace {
     pub(super) fn issued(&self, issued: &Issued) {
         match issued {
             Issued::Effect { .. } => {}
-            Issued::Refused { identity, .. } => {
-                self.node(identity, TraceNodeFact::Started { call_id: None });
+            Issued::Refused { admission, .. } => {
+                self.node(
+                    admission.identity(),
+                    TraceNodeFact::Started { call_id: None },
+                );
             }
             Issued::Sleep {
-                identity, until_ms, ..
+                admission,
+                until_ms,
+                ..
             } => {
+                let identity = admission.identity();
                 self.node(identity, TraceNodeFact::Started { call_id: None });
                 self.node(
                     identity,

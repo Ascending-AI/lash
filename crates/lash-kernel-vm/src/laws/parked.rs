@@ -20,14 +20,14 @@ use crate::{
     Program, Request, Start, Step, Target,
 };
 
-type Observed = (End, Vec<Datum>, Vec<Request>, u64);
+pub(super) type Observed = (End, Vec<Datum>, Vec<Request>, u64);
 
 fn int(value: i64) -> Value {
     Value::Int(Integer::from(value))
 }
 
 /// Answers the oldest pending request.
-fn deliver_next(embedder: &mut Embedder) {
+pub(super) fn deliver_next(embedder: &mut Embedder) {
     let next = label(
         embedder
             .pending
@@ -42,7 +42,7 @@ fn deliver_next(embedder: &mut Embedder) {
 /// point: at each park before and after its outcome is delivered, and at
 /// each slice. Every hop takes another layout, and every other hop swaps
 /// which implementation of `pair.twice` runs.
-fn observe(text: &str, slice: u64, relay: bool) -> Observed {
+pub(super) fn observe(text: &str, slice: u64, relay: bool) -> Observed {
     observe_with(
         text,
         Setup {
@@ -85,7 +85,7 @@ fn observe_with(text: &str, setup: Setup, relay: bool) -> Observed {
     )
 }
 
-const EXPRESSIONS: &str = r#"
+pub(super) const EXPRESSIONS: &str = r#"
 main {
   let m = map{"a": [1, (2, 3)], "b": {k: text.concat("x", "y")}}
   let n = num.add(list.len(m["a"]), pair.twice(4))
@@ -97,7 +97,7 @@ main {
 }
 "#;
 
-const HELPER_FROM_TWO_PLACES: &str = r#"
+pub(super) const HELPER_FROM_TWO_PLACES: &str = r#"
 fn fetch(tag) {
   let r = perform echo(tag) as Any
   return (tag, r)
@@ -114,7 +114,7 @@ main {
 }
 "#;
 
-const CALLBACK_IN_MAP: &str = r#"
+pub(super) const CALLBACK_IN_MAP: &str = r#"
 main {
   let seen = 0
   let f = fn(x) {
@@ -130,7 +130,7 @@ main {
 
 /// A cleanup block that waits, entered normally, by a throw of a list no
 /// variable names, and by `continue`.
-const CLEANUP_WITH_A_WAIT: &str = r#"
+pub(super) const CLEANUP_WITH_A_WAIT: &str = r#"
 main {
   let log = []
   for mode in [0, 1, 2] {
@@ -153,7 +153,7 @@ main {
 }
 "#;
 
-const FAN_OUT_WITH_ONE_ENDED: &str = r#"
+pub(super) const FAN_OUT_WITH_ONE_ENDED: &str = r#"
 fn worker(tag) {
   let r = perform echo(tag) as Any
   let s = perform echo(r) as Any
@@ -174,7 +174,7 @@ main {
 }
 "#;
 
-const CANCELLED_MID_CLEANUP: &str = r#"
+pub(super) const CANCELLED_MID_CLEANUP: &str = r#"
 fn guarded(tag) {
   try {
     let r = perform echo(tag) as Any
@@ -193,9 +193,47 @@ main {
 }
 "#;
 
+/// `K-TASK-024`, `K-MACH-008`: requests handed out in request order, though
+/// the task that requested first is numbered after the one that requested
+/// second. A run rebuilt at a slice before the park restores the requests
+/// it has not handed out.
+pub(super) const REQUESTS_OUT_OF_TASK_ORDER: &str = r#"
+fn later(i) { do yield let r = [i, i] return r }
+fn worker(tag) { let r = perform echo(tag) as Any return r }
+main {
+  let l = spawn call later(1)
+  let w = spawn call worker("w0")
+  let mine = perform echo("w1") as Any
+  let theirs = join w
+  let other = join l
+  return (mine, theirs, other)
+}
+"#;
+
+/// `K-BND-003`, `K-MACH-008`: 300 live rows across a park, then a loop that
+/// grows until the memory bound trips. A rebuilt run recounts what is live,
+/// so it trips where the run that never parked does.
+const LIVE_ROWS_THEN_GROWTH: &str = r#"
+main {
+  let rows = []
+  let i = 0
+  while num.lt(i, 300) {
+    set rows[list.len(rows)] = text.concat("row:", "012345678901234567890123456789012345")
+    set i = num.add(i, 1)
+  }
+  let got = perform echo(i) as Any
+  let grow = []
+  while true {
+    set grow[list.len(grow)] = [got, i]
+    set i = num.add(i, 1)
+  }
+  return rows
+}
+"#;
+
 /// `K-ITER-003`, `K-KEY-003`, `K-KEY-005`: removals on both sides of a
 /// live cursor, including removing every entry and then reinserting.
-const TABLE_CHURN: &str = r#"
+pub(super) const TABLE_CHURN: &str = r#"
 main {
   let m = map{1.0: "first", 2: "two", 3: "three", 4: "four"}
   let s = set{1.0, 2, 3, 4}
@@ -246,6 +284,10 @@ fn a_run_rebuilt_at_every_safe_point_runs_the_same() {
         ("a fan-out with one member ended", FAN_OUT_WITH_ONE_ENDED),
         ("a cancelled task mid-cleanup", CANCELLED_MID_CLEANUP),
         ("live map and set iteration through removals", TABLE_CHURN),
+        (
+            "requests made out of task order",
+            REQUESTS_OUT_OF_TASK_ORDER,
+        ),
     ];
     for (name, text) in programs {
         let straight = observe(text, u64::MAX, false);
@@ -259,6 +301,39 @@ fn a_run_rebuilt_at_every_safe_point_runs_the_same() {
         // A slice of 0 returns after every statement.
         assert_eq!(observe(text, 0, true), straight, "{name}, at slices");
     }
+    // The memory a rebuilt run holds is recounted, so its bound trips where
+    // the straight run's does. Twice the straight run's charge bounds the
+    // relayed runs, so one that undercounts ends on its charge instead of
+    // growing for the whole roomy bound.
+    let tight = |slice, charge| Setup {
+        bounds: Bounds {
+            charge,
+            memory: 64 << 10,
+            ..ROOMY
+        },
+        slice,
+        ..Setup::default()
+    };
+    let roomy = observe_with(LIVE_ROWS_THEN_GROWTH, tight(u64::MAX, ROOMY.charge), false);
+    let charge = roomy.3 * 2;
+    let straight = observe_with(LIVE_ROWS_THEN_GROWTH, tight(u64::MAX, charge), false);
+    assert_eq!(straight, roomy, "the growth ends before twice its charge");
+    assert!(
+        matches!(&straight.0, End::Error(crate::RunError::Bound(exceeded)) if exceeded.bound == crate::Bound::Memory),
+        "the growth trips the memory bound: {:?}",
+        straight.0
+    );
+    assert!(!straight.2.is_empty(), "the live rows park");
+    assert_eq!(
+        observe_with(LIVE_ROWS_THEN_GROWTH, tight(u64::MAX, charge), true),
+        straight,
+        "live rows, at parks"
+    );
+    assert_eq!(
+        observe_with(LIVE_ROWS_THEN_GROWTH, tight(0, charge), true),
+        straight,
+        "live rows, at slices"
+    );
 }
 
 /// A `do` whose call completes at once, a block ended after it, and a

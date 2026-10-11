@@ -56,6 +56,11 @@ use crate::support::store_sqlx_error;
 
 #[path = "../durable_admission.rs"]
 mod admission;
+mod graph;
+pub(crate) use graph::{
+    GraphClosure, collect_in as collect_graph_in, graph_closure, install_staged, reachable_from,
+    retire_expired_read_pins_in,
+};
 mod park_events;
 pub(crate) mod processes;
 mod prompts;
@@ -374,6 +379,12 @@ fn corrupt(what: &str, value: &str) -> DurableError {
     })
 }
 
+/// A stored checkpoint graph reference: its node's lowercase hex.
+fn node_ref(stored: &str) -> Result<lash_core_store::checkpoint_graph::NodeId, DurableError> {
+    lash_core_store::checkpoint_graph::NodeId::from_hex(stored)
+        .ok_or_else(|| corrupt("node reference", stored))
+}
+
 fn actor_key(stored: &str) -> Result<ActorKey, DurableError> {
     ActorKey::parse(stored).map_err(|_| corrupt("actor key", stored))
 }
@@ -644,8 +655,8 @@ fn group_members(tx: &ActorTx) -> u64 {
         .filter(|write| {
             matches!(
                 write,
-                DomainWrite::RunRecord(lash_durable::domain::RunRecordWrite::Append {
-                    kind: lash_durable::domain::RunRecordKind::XOutcome,
+                DomainWrite::RunFact(lash_durable::domain::RunFactWrite::Append {
+                    kind: lash_durable::domain::RunFactKind::XOutcome,
                     ..
                 })
             )
@@ -669,6 +680,23 @@ async fn apply_owner(
     let Some(revision) = fence else {
         return Err(fenced(tx, write.actor(), write.epoch()).await?);
     };
+    let publications: Vec<_> = write
+        .domain()
+        .iter()
+        .flat_map(DomainWrite::publications)
+        .collect();
+    if !write.graph().is_empty() || !write.reads().is_empty() || !publications.is_empty() {
+        let checked = lash_durable::domain::graph_commit::check_graph(
+            write.graph(),
+            write.reads(),
+            &publications,
+        )?;
+        if let Some(budget) = write.budget() {
+            lash_durable::domain::graph_commit::measure_owner_commit(write.graph(), write.domain())
+                .and_then(|measured| budget.admit(&measured))?;
+        }
+        graph::install(tx, &checked).await?;
+    }
     let committing = Committing {
         checkpoint_ref_chunk,
         actor: write.actor(),
@@ -851,8 +879,11 @@ async fn apply_domain(
         DomainWrite::SessionCommit(write) => {
             turns::apply_session_commit(tx, committing, write).await
         }
-        DomainWrite::RunRecord(write) => run_records::apply(tx, committing, write).await,
-        DomainWrite::Snapshot(write) => snapshots::apply(tx, committing, write).await,
+        DomainWrite::RunFact(write) => run_records::apply(tx, committing, write).await,
+        DomainWrite::ExecRoot(write) => snapshots::apply(tx, committing, write).await,
+        DomainWrite::EffectAdmission(write) => graph::apply_admission(tx, committing, write).await,
+        DomainWrite::ReadPin(write) => graph::apply_read_pin(tx, write).await,
+        DomainWrite::ReleasePin(write) => graph::apply_release_pin(tx, write).await,
         DomainWrite::Wait(write) => waits::apply(tx, committing, write).await,
         DomainWrite::Process(write) => processes::apply(tx, committing, write).await,
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write).await,
@@ -1532,13 +1563,16 @@ mod constraint_tests {
                 Some("ck_lash_actors_key_kind")
             );
         }
-        for version in [-1_i64, i64::from(u32::MAX) + 1] {
-            let error = sqlx::query("INSERT INTO lash_exec_snapshots VALUES ('p/process', 1, 'snapshot', 'identity', $1, 1)").bind(version).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("format versions are u32");
+        for (rev, commit_id, constraint) in [
+            (0_i64, vec![0_u8; 32], "ck_exec_snapshots_rev"),
+            (1, vec![0; 31], "ck_exec_snapshots_commit_id"),
+        ] {
+            let error = sqlx::query("INSERT INTO lash_exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch) VALUES ('p/process', $1, 'root', $2, 1)").bind(rev).bind(commit_id).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("rev and commit id are checked");
             assert_eq!(
                 error
                     .as_database_error()
                     .and_then(sqlx::error::DatabaseError::constraint),
-                Some("ck_exec_snapshots_format_version")
+                Some(constraint)
             );
         }
     }

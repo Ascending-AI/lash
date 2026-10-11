@@ -7,13 +7,15 @@ use std::time::Instant;
 use crate::PoolError;
 use crate::embedding::Embedding;
 use crate::host::{Wire, WireHost};
+use lash_core_store::checkpoint_graph::bodies::OwnerBinding;
+use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal, NodeKind};
 use lash_kernel_doc::{Datum, Document};
-use lash_kernel_state::ParkedRun;
 use lash_kernel_vm::{Bounds, KernelMachine, Machine, Program, Step};
+use lash_vm_client::graph::{self, GraphStateFailure};
 #[cfg(test)]
 use lash_vm_client::ipc::read_frame;
 use lash_vm_client::ipc::{Bootstrap, FrameSource, write_frame, write_frames};
-use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, RecordedEnd, StartWire};
+use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, StartWire};
 use lash_vm_protocol::*;
 
 /// The one run a worker hosts between resets.
@@ -29,6 +31,9 @@ struct Hosted {
     /// (FIG-4458).
     memory: u64,
     ended: bool,
+    /// The release manifest the run pins, once it resumed from graph state;
+    /// a run started here pins the release the build writes.
+    release: Option<lash_kernel_doc::graph_tokens::ChildRef>,
 }
 
 pub(crate) struct Server<'embedding> {
@@ -274,13 +279,13 @@ impl<'embedding> Server<'embedding> {
                         dropped: delivered == lash_kernel_vm::Delivered::Dropped,
                     })?;
                 }
-                ParentMessage::Export => {
+                ParentMessage::ExportGraph { binding } => {
                     self.progress(WorkerPhase::Computing)?;
-                    let message = match self.export() {
+                    let message = match self.export_graph(&binding) {
                         Err(PoolError::Infrastructure(
                             InfrastructureOutcome::WorkerLimitExceeded { limit },
                         )) => WorkerMessage::LimitExceeded { limit },
-                        result => WorkerMessage::Exported { state: result? },
+                        result => WorkerMessage::ExportedGraph { state: result? },
                     };
                     self.progress(WorkerPhase::Serializing)?;
                     self.respond(message)?;
@@ -402,6 +407,7 @@ impl<'embedding> Server<'embedding> {
             requests_per_park: start.bounds.requests_per_park,
             join_members: start.bounds.join_members,
         };
+        let mut release = None;
         let machine = match start.from {
             StartFrom::Fresh(payload) => {
                 self.codec.check_payload(&payload.0)?;
@@ -413,22 +419,41 @@ impl<'embedding> Server<'embedding> {
                     })
                 })?
             }
-            StartFrom::Parked(state) => {
-                state
-                    .check(&StateExpectation {
+            StartFrom::ParkedGraph(parked) => {
+                parked
+                    .state
+                    .check(&GraphStateExpectation {
                         owner: &start.owner,
                         kernel: lash_vm_client::kernel_reads(),
                         document: Some(&identity),
+                        root_kinds: &[NodeKind::KERNEL_WHOLE.0],
+                        max_nodes: self.bootstrap.state,
                         max_bytes: self.bootstrap.state,
                     })
-                    .map_err(InfrastructureOutcome::input_state)?;
-                let parked: ParkedRun = wire::from_json(PayloadKind::ParkedRun, state.bytes())
-                    .map_err(|error| undecodable(RunInput::ParkedRun, &error))?;
-                KernelMachine::import(program, bounds, parked).map_err(|error| {
-                    PoolError::refused(RunRefusal::Resume {
+                    .map_err(InfrastructureOutcome::input_graph_state)?;
+                let manifests = self.embedding.release_manifests().map_err(|error| {
+                    PoolError::breach(ProtocolBreach::Machine {
                         detail: Detail::new(error),
                     })
-                })?
+                })?;
+                let registry = Arc::clone(program.library.registry());
+                // A large value shared by many references is one leaf but
+                // reads back whole at each: the logical body is bounded by
+                // the state and the run's heap together.
+                let limits = DecodeLimits {
+                    logical_bytes: self.bootstrap.state.saturating_add(bounds.memory),
+                    ..DecodeLimits::within_total(self.bootstrap.state)
+                };
+                let (machine, pinned) =
+                    graph::import_parked(program, bounds, &parked, manifests, &registry, limits)
+                        .map_err(|failure| match failure {
+                            GraphStateFailure::Restore(refusal) => {
+                                PoolError::refused(RunRefusal::Restore { refusal })
+                            }
+                            other => undecodable(RunInput::ParkedRun, &other),
+                        })?;
+                release = Some(pinned);
+                machine
             }
         };
         Ok(Hosted {
@@ -437,6 +462,7 @@ impl<'embedding> Server<'embedding> {
             kernel,
             memory: start.bounds.memory,
             ended: false,
+            release,
         })
     }
     /// Runs the machine one slice and says where the run stands. What it
@@ -478,7 +504,7 @@ impl<'embedding> Server<'embedding> {
             },
             Step::Slice => WorkerMessage::Slice { meters },
             Step::Ended(end) => {
-                let end: EndWire = RecordedEnd::of(&end);
+                let end: EndWire = self.end_state(&end)?;
                 WorkerMessage::Ended {
                     end: self.encode(PayloadKind::End, &end)?,
                     meters,
@@ -546,34 +572,51 @@ impl<'embedding> Server<'embedding> {
         }
         Ok(Some(chunker.finish()))
     }
-    /// The run's state as it stands, sealed under its owner, the kernel
-    /// version and its document.
-    fn export(&mut self) -> Result<OpaqueVmState, PoolError> {
+    /// The run's end as TerminalWhole graph state, sealed under its owner,
+    /// the kernel version and its document; none for a cancelled run.
+    fn end_state(&self, end: &lash_kernel_vm::End) -> Result<EndWire, PoolError> {
         let owner = self
             .owner
             .clone()
             .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?;
         let bound = self.bootstrap.state;
-        let hosted = self.running()?;
-        let parked = hosted.machine.export().map_err(machine_breach)?;
-        let bytes = serde_json::to_vec(&parked)
-            .map_err(|error| PoolError::payload(PayloadKind::ParkedRun, error))?;
-        if bytes.len() as u64 > bound {
-            return Err(InfrastructureOutcome::WorkerLimitExceeded {
-                limit: WorkerLimit::VmState {
-                    size: bytes.len() as u64,
-                    bound,
-                },
-            }
-            .into());
-        }
-        Ok(OpaqueVmState::seal(
-            owner,
-            hosted.kernel,
-            hosted.document.clone(),
-            bytes,
-        ))
+        let hosted = self
+            .hosted
+            .as_ref()
+            .ok_or_else(|| PoolError::breach(SequenceFault::NoRun))?;
+        graph::export_end(end, owner, hosted.kernel, &hosted.document, bound)
+            .map_err(|failure| state_failure(failure, bound))
     }
+    /// The run's state at this park as checkpoint graph state, bound to the
+    /// execution `binding` names and pinning the run's release.
+    fn export_graph(&mut self, binding: &EncodedPayload) -> Result<SealedGraphState, PoolError> {
+        let owner = self
+            .owner
+            .clone()
+            .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?;
+        let binding: OwnerBinding = lash_kernel_doc::graph_tokens::decode_body(&binding.0)
+            .map_err(|error| PoolError::payload(PayloadKind::ParkedRun, error))?;
+        let bound = self.bootstrap.state;
+        let current = self
+            .embedding
+            .release_manifests()
+            .map_err(machine_breach)?
+            .manifests
+            .current()
+            .ok_or_else(|| machine_breach("the build holds no helper release"))?;
+        let hosted = self.running()?;
+        let release = hosted.release.unwrap_or(current);
+        graph::export_parked(
+            &mut hosted.machine,
+            owner,
+            &binding,
+            release,
+            &hosted.document,
+            bound,
+        )
+        .map_err(|failure| state_failure(failure, bound))
+    }
+
     /// Sends the step's answer, and hands its message back.
     fn respond(&mut self, message: WorkerMessage) -> Result<WorkerMessage, PoolError> {
         // Encode while the serialization deadline is active. Reserve the
@@ -640,6 +683,25 @@ pub(crate) fn cpu_nanos() -> Result<u64, PoolError> {
     Ok((time.tv_sec as u64)
         .saturating_mul(1_000_000_000)
         .saturating_add(time.tv_nsec as u64))
+}
+
+/// A state that did not stage: over the state bound, the run's limit, and
+/// otherwise the machine's breach.
+fn state_failure(failure: GraphStateFailure, bound: u64) -> PoolError {
+    match failure {
+        GraphStateFailure::Graph(GraphRefusal::EncodeMemoryLimit) => {
+            InfrastructureOutcome::WorkerLimitExceeded {
+                // The staging stopped at the bound: the state is larger
+                // than it.
+                limit: WorkerLimit::VmState {
+                    size: bound.saturating_add(1),
+                    bound,
+                },
+            }
+            .into()
+        }
+        other => machine_breach(other),
+    }
 }
 
 fn machine_breach(error: impl std::fmt::Display) -> PoolError {

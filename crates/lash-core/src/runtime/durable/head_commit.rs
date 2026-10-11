@@ -46,6 +46,29 @@ impl HeadCommitError {
     }
 }
 
+/// Writes `commit` in `tx` as the session's head commit over
+/// `expected_head`: the execution nodes it carries staged beside it, and its
+/// execution root required when the store already holds it, so the commit
+/// refuses with nothing written when the root is in neither.
+pub(crate) fn write_session_commit(
+    tx: &mut lash_durable::ActorTx,
+    session: &crate::SessionId,
+    expected_head: u64,
+    commit: crate::store::EncodedSessionCommit,
+) {
+    if let Some(root) = commit.execution
+        && !commit.nodes.iter().any(|node| node.id == root)
+    {
+        tx.require(root);
+    }
+    tx.stage(commit.nodes);
+    tx.write(DomainWrite::SessionCommit(SessionCommitWrite {
+        session: session.clone(),
+        expected_head,
+        commit_json: commit.json,
+    }));
+}
+
 /// Commit `commit`, a head commit of the session actor `owner`, on its
 /// fenced transaction under `label`, after admitting it against its commit
 /// budget.
@@ -86,14 +109,14 @@ pub(crate) async fn commit_in(
     ending: Option<&lash_durable::domain::ScopeKey>,
 ) -> Result<(), HeadCommitError> {
     crate::store::admit_runtime_commit_budget(&commit, metrics).map_err(HeadCommitError::Store)?;
-    let write = SessionCommitWrite {
-        session: commit.session_id.clone(),
-        expected_head: commit.expected_head_revision,
-        commit_json: crate::store::encode_session_commit(&commit)
-            .map_err(HeadCommitError::Store)?,
-    };
+    let encoded = crate::store::encode_session_commit(&commit).map_err(HeadCommitError::Store)?;
     let mut tx = owner.begin().await.map_err(HeadCommitError::Owner)?;
-    tx.write(DomainWrite::SessionCommit(write));
+    write_session_commit(
+        &mut tx,
+        &commit.session_id,
+        commit.expected_head_revision,
+        encoded,
+    );
     if let Some(scope) = ending {
         super::turn_scope::end_operation_scope(owner, &mut tx, scope)
             .await

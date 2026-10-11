@@ -1549,7 +1549,7 @@ pub async fn a_transition_in_another_format_commits_no_state(backend: &Backend) 
         ensure!(
             backend
                 .durable()
-                .snapshot(&lash_durable::domain::ExecKey::Process(process.clone()))
+                .exec_root(&lash_durable::domain::ExecKey::Process(process.clone()))
                 .await?
                 .is_none(),
             "invalid format wrote a snapshot"
@@ -1588,7 +1588,7 @@ pub async fn a_repeatable_step_that_fails_retryably_once_succeeds_on_its_second_
         );
         let rows = backend
             .durable()
-            .run_records(&lash_durable::domain::OwnerKey::Process(process.clone()))
+            .run_facts(&lash_durable::domain::OwnerKey::Process(process.clone()))
             .await?;
         let waits = round::PinnedWaits::read(backend.durable().as_ref(), &rows).await?;
         let fold = round::fold(&rows, &PolicyView::default(), &waits)
@@ -1680,7 +1680,7 @@ pub async fn a_step_parked_on_its_wait_settles_when_the_wait_resolves(
         );
         let rows = backend
             .durable()
-            .run_records(&lash_durable::domain::OwnerKey::Process(process.clone()))
+            .run_facts(&lash_durable::domain::OwnerKey::Process(process.clone()))
             .await?;
         let waits = round::PinnedWaits::read(backend.durable().as_ref(), &rows).await?;
         let fold = round::fold(&rows, &PolicyView::default(), &waits)

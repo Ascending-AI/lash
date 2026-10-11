@@ -34,29 +34,7 @@ pub enum MailRefusal {
     ActorTerminal(ActorKey),
 }
 
-/// What kind of store failure a [`StoreFailure`] is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StoreFailureKind {
-    /// Lock contention or a busy database: retrying may succeed.
-    Contended,
-    /// The database could not be reached or the transaction did not finish.
-    /// Whether it committed is unknown.
-    Unavailable,
-    /// A stored row did not decode: a defect or foreign data.
-    Corrupt,
-    /// A newer release finalized the store: this build may not write again.
-    WriterRetired,
-}
-
-/// A failure of the store itself, not a refusal by the port's rules.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("durable store {kind:?}: {message}")]
-pub struct StoreFailure {
-    /// What kind of failure.
-    pub kind: StoreFailureKind,
-    /// The driver's account of it.
-    pub message: String,
-}
+pub use lash_core_store::store_failure::{StoreFailure, StoreFailureKind};
 
 /// Everything a [`DurableStore`](crate::DurableStore) call can refuse with.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -105,6 +83,12 @@ pub enum DurableError {
     /// The store failed.
     #[error(transparent)]
     Store(StoreFailure),
+    /// The commit's checkpoint graph, or a graph read, was refused: a node
+    /// that is not canonical, a reference to a node neither staged nor
+    /// stored, a root over its bound, a commit over its budget, a read past
+    /// its limits. The whole commit rolled back.
+    #[error("checkpoint graph refused: {0}")]
+    Graph(lash_core_store::checkpoint_graph::GraphRefusal),
     /// The node's build no longer decodes format sets that `unmigrated`
     /// actors are still in (ADR 0115 §3.5, drain by release): serving, it
     /// would strand them, so it does not start. `command` is the operator
@@ -135,4 +119,17 @@ pub enum DurableError {
         /// The operator command that lists them.
         command: String,
     },
+}
+
+impl From<lash_core_store::checkpoint_graph::GraphRefusal> for DurableError {
+    /// A graph refusal as the port reports it: a store failure keeps its
+    /// kind, so a transient one stays retryable.
+    fn from(refusal: lash_core_store::checkpoint_graph::GraphRefusal) -> Self {
+        match refusal {
+            lash_core_store::checkpoint_graph::GraphRefusal::Backend(failure) => {
+                Self::Store(failure)
+            }
+            refusal => Self::Graph(refusal),
+        }
+    }
 }

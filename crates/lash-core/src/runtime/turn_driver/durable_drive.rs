@@ -59,6 +59,10 @@ pub(in crate::runtime) struct RuntimeDrive {
     /// The tool calls of the turn's last cell, when `turn.commit` is the
     /// commit that records them: its finish reports them (FIG-5330).
     finishing_cell_calls: Option<CellToolCalls>,
+    /// The turn's working execution state as its row holds it (FIG-5887
+    /// §6), and the one a phase in flight stages in its place.
+    working: Option<lash_core_store::checkpoint_graph::NodeId>,
+    staged_working: Option<lash_core_store::checkpoint_graph::NodeId>,
 }
 
 #[derive(Default)]
@@ -173,18 +177,23 @@ impl RuntimeDrive {
         // The tool surface a sync before the checkpoint recorded: pinned
         // again from the session's live registry.
         driver.reinstall_tool_surface().await?;
+        // The session's state after the turn's last consumed cell is
+        // installed before any model continuation or cell compiles.
+        restore_working(cx, &driver, &row).await?;
         if let Some(crate::Effect::ExecCode { id, .. }) = &pending {
             check_cell_snapshot(cx, &driver, &machine, *id).await?;
         }
+        let mut drive = Self::assemble(
+            driver,
+            machine,
+            before_turn,
+            attachments,
+            trace_scope,
+            parts,
+        );
+        drive.working = row.working;
         Ok(OpenTurn {
-            drive: Box::new(Self::assemble(
-                driver,
-                machine,
-                before_turn,
-                attachments,
-                trace_scope,
-                parts,
-            )),
+            drive: Box::new(drive),
             pending,
             row,
         })
@@ -216,6 +225,8 @@ impl RuntimeDrive {
             commit_phase: None,
             committing: None,
             finishing_cell_calls: None,
+            working: None,
+            staged_working: None,
             driver,
             machine,
             observer,
@@ -261,7 +272,7 @@ async fn check_cell_snapshot(
         driver.turn_id.clone(),
         CellId::new(invocation.effect_replay_key()),
     );
-    let Some(snapshot) = cx.durable_reads()?.snapshot(&exec).await? else {
+    let Some(cell) = stored_cell(cx, exec).await? else {
         return Ok(());
     };
     let undecodable = |reason| TurnError::UndecodableState {
@@ -269,7 +280,7 @@ async fn check_cell_snapshot(
         reason,
     };
     code_executor
-        .check_cell_snapshot(&snapshot.snapshot_ref)
+        .check_cell_snapshot(&cell)
         .await
         .map_err(runtime)?
         .map_err(undecodable)?;
@@ -277,7 +288,7 @@ async fn check_cell_snapshot(
         return Ok(());
     }
     let Some(carried) = code_executor
-        .carried_cell_snapshot(&snapshot.snapshot_ref)
+        .carried_cell_snapshot(&cell)
         .await
         .map_err(runtime)?
         .map_err(undecodable)?
@@ -285,19 +296,78 @@ async fn check_cell_snapshot(
         return Ok(());
     };
     let mut tx = cx.begin().await?;
-    tx.write(lash_durable::DomainWrite::Snapshot(
-        lash_durable::domain::SnapshotWrite::Put {
-            exec,
-            expected: Some(snapshot.rev),
-            snapshot_ref: carried.snapshot,
-            executable_identity: carried.executable_identity,
-            format_version: carried.format_version,
-        },
-    ));
+    tx.stage(carried.nodes.into_values());
+    for write in carried.writes {
+        tx.write(write);
+    }
     tx.stamp_formats(cx.backend().formats().session().clone());
     cx.commit(tx, lash_durable::CommitLabel::CELL_SNAPSHOT)
         .await?;
     Ok(())
+}
+
+/// Install `row`'s working execution state (FIG-5887 §6), if it holds one,
+/// into the session's code executor as the turn's working state.
+async fn restore_working(
+    cx: &ActorContext,
+    driver: &RuntimeTurnDriver<'static>,
+    row: &crate::runtime::durable::session::TurnRow,
+) -> Result<(), TurnError> {
+    let Some(root) = row.working else {
+        return Ok(());
+    };
+    let Some(code_executor) = driver.session.plugins().code_executor() else {
+        return Ok(());
+    };
+    let limits = lash_durable::domain::graph::OWNER_READ_LIMITS;
+    let graph = cx
+        .durable_reads()?
+        .hydrate(
+            lash_durable::domain::graph::RootOwner::WorkingExecution {
+                session: row.session.clone(),
+                run: row.run.clone(),
+            },
+            Some(root),
+            limits,
+        )
+        .await?;
+    let undecodable = |reason: String| TurnError::UndecodableState {
+        state: ParkedTurnState::ExecutionState,
+        reason,
+    };
+    let nodes = lash_core_store::checkpoint_graph::closure(&graph, root, &limits)
+        .map_err(|error| undecodable(error.to_string()))?;
+    code_executor
+        .restore_execution_graph(
+            crate::plugin::ProtocolSessionContext::new(
+                &driver.session_id,
+                driver.session.fleet_format(),
+            ),
+            &crate::plugin::HydratedExecutionGraph { root, nodes },
+            crate::plugin::ExecutionGraphPurpose::Working,
+        )
+        .await
+        .map_err(|error| undecodable(error.to_string()))
+}
+
+/// `exec`'s root, read whole under one protection: its row and every node
+/// it reaches. `None` when the cell has none.
+async fn stored_cell(
+    cx: &ActorContext,
+    exec: lash_durable::domain::ExecKey,
+) -> Result<Option<crate::plugin::StoredCell>, TurnError> {
+    let reads = cx.durable_reads()?;
+    let Some(row) = reads.exec_root(&exec).await? else {
+        return Ok(None);
+    };
+    let graph = reads
+        .hydrate(
+            lash_durable::domain::graph::RootOwner::Exec(exec.clone()),
+            Some(row.root),
+            lash_durable::domain::graph::OWNER_READ_LIMITS,
+        )
+        .await?;
+    Ok(Some(crate::plugin::StoredCell { exec, row, graph }))
 }
 
 /// The machine a prepared turn starts: ended at once when its recorded model
@@ -519,6 +589,96 @@ impl TurnDrive for RuntimeDrive {
         self.driver.session.plugins().run_changes_committed(written);
     }
 
+    async fn consume_cell(
+        &mut self,
+        cx: &ActorContext,
+        tx: &mut lash_durable::ActorTx,
+        id: crate::EffectId,
+        working: bool,
+    ) -> Result<(), TurnError> {
+        use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
+        use lash_durable::domain::{CellId, ExecKey};
+
+        let Some(code_executor) = self.driver.session.plugins().code_executor() else {
+            return Ok(());
+        };
+        let session = self.driver.session_id.clone();
+        if working {
+            let capture = code_executor
+                .capture_execution_graph(
+                    crate::plugin::ProtocolSessionContext::new(
+                        &session,
+                        self.driver.session.fleet_format(),
+                    ),
+                    crate::plugin::ExecutionGraphPurpose::Working,
+                )
+                .await
+                .map_err(|error| TurnError::Exec(error.to_string()))?;
+            let staged = match capture {
+                crate::plugin::ExecutionGraphCapture::Replace { root, nodes } => {
+                    tx.stage(nodes.into_values());
+                    Some(root)
+                }
+                crate::plugin::ExecutionGraphCapture::Clear => None,
+            };
+            if staged != self.working {
+                tx.write(lash_durable::DomainWrite::Turn(
+                    lash_durable::domain::TurnWrite::Working {
+                        session: session.clone(),
+                        run: self.driver.turn_id.clone(),
+                        expected: self.working,
+                        working: staged,
+                    },
+                ));
+            }
+            self.staged_working = staged;
+        }
+        // The cell's ended root is consumed with its answer: the turn holds
+        // its outcome in its report and its state as its working state. A
+        // root still parked belongs to a cell the turn stopped in, which its
+        // end does not consume.
+        let invocation = self
+            .driver
+            .turn_effect_invocation(&self.machine, id, RuntimeEffectKind::ExecCode)
+            .map_err(|error| TurnError::Exec(error.to_string()))?;
+        let exec = ExecKey::Cell(
+            session,
+            self.driver.turn_id.clone(),
+            CellId::new(invocation.effect_replay_key()),
+        );
+        let Some(cell) = stored_cell(cx, exec).await? else {
+            return Ok(());
+        };
+        let body: ExecRoot = lash_core_store::checkpoint_graph::GraphDecoder::new(
+            &cell.graph,
+            lash_durable::domain::graph::OWNER_READ_LIMITS,
+        )
+        .decode(
+            cell.row.root,
+            lash_core_store::checkpoint_graph::NodeKind::EXEC_ROOT,
+        )
+        .map_err(|error| TurnError::Exec(format!("the cell's root does not read: {error}")))?;
+        if body.status == ExecStatus::Ended {
+            tx.write(lash_durable::DomainWrite::ExecRoot(
+                lash_durable::domain::graph::ExecRootWrite::Retire {
+                    exec: cell.exec,
+                    expected: cell.row.root,
+                },
+            ));
+        }
+        Ok(())
+    }
+
+    async fn phase_committed(&mut self) {
+        let Some(staged) = self.staged_working.take() else {
+            return;
+        };
+        self.working = Some(staged);
+        if let Some(code_executor) = self.driver.session.plugins().code_executor() {
+            code_executor.acknowledge_execution_state_capture().await;
+        }
+    }
+
     fn live_stream_cursor(&self) -> String {
         self.live
             .current_cursor(&self.driver.session_id, self.revision)
@@ -649,23 +809,19 @@ impl TurnDrive for RuntimeDrive {
         let run = self.driver.turn_id.clone();
         let reads = cx.durable_reads()?;
         let exec = ExecKey::Cell(session.clone(), run.clone(), cell.clone());
-        let mut records = match reads.snapshot(&exec).await? {
-            Some(snapshot) => code_executor
-                .snapshot_tool_calls(&snapshot.snapshot_ref)
+        let mut records = match stored_cell(cx, exec).await? {
+            Some(stored) => code_executor
+                .snapshot_tool_calls(&stored)
                 .map_err(|error| {
-                    TurnError::Exec(format!(
-                        "the stopped cell's snapshot does not read: {error}"
-                    ))
+                    TurnError::Exec(format!("the stopped cell's root does not read: {error}"))
                 })?,
             None => Vec::new(),
         };
-        // A call that settled after the cell's latest snapshot is in no
-        // ledger yet: its outcome is still among the cell's own records,
-        // which only the next snapshot prunes. A member without a completed
-        // answer never finished, and is not reported.
-        let rows = reads
-            .run_records(&OwnerKey::Cell(session, run, cell))
-            .await?;
+        // A call that settled after the cell's latest root is in no host
+        // state yet: its outcome is still among the cell's own facts, which
+        // only the next park prunes. A member without a completed answer
+        // never finished, and is not reported.
+        let rows = reads.run_facts(&OwnerKey::Cell(session, run, cell)).await?;
         let waits = round::PinnedWaits::read(reads, &rows).await?;
         let fold = round::fold(&rows, &PolicyView::new([]), &waits)
             .map_err(|error| TurnError::Exec(format!("the stopped cell's records: {error}")))?;
@@ -821,7 +977,7 @@ impl TurnDrive for RuntimeDrive {
             .map(|commit| self.published.committing(commit));
         Ok(TurnCommit {
             expected_head: commit.expected_head_revision,
-            commit_json: crate::store::encode_session_commit(&commit)
+            commit: crate::store::encode_session_commit(&commit)
                 .map_err(|error| TurnError::Exec(error.to_string()))?,
         })
     }

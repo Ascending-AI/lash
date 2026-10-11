@@ -124,13 +124,18 @@ fn case(name: &str) -> Result<Case> {
         "prior-10" => (Kind::Resume { prior_turns: 10 }, rounds(1, 1)),
         "prior-100" => (Kind::Resume { prior_turns: 100 }, rounds(1, 1)),
         "prior-300" => (Kind::Resume { prior_turns: 300 }, rounds(1, 1)),
-        "cell-0" | "cell-1024" | "cell-16384" => {
-            let payload = name.trim_start_matches("cell-").parse()?;
+        "cell-0" | "cell-1024" | "cell-16384" | "cell-fresh-16384" => {
+            let fresh = name.starts_with("cell-fresh-");
+            let payload = name
+                .trim_start_matches("cell-fresh-")
+                .trim_start_matches("cell-")
+                .parse()?;
             (
                 Kind::Cell,
                 Script {
                     cell_calls: 10,
                     cell_payload: payload,
+                    cell_fresh: fresh,
                     ..Script::default()
                 },
             )

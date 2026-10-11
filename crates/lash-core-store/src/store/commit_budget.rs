@@ -369,7 +369,16 @@ impl RuntimeCommit {
             .values()
             .filter_map(HydratedCheckpointComponent::body)
             .fold(0usize, |total, body| total.saturating_add(body.len()));
-        let checkpoint_bytes = checkpoint_root_bytes.saturating_add(changed_component_bytes);
+        // The execution graph's nodes the commit carries: a node an earlier
+        // commit installed is referenced, never resent.
+        let execution_bytes = self
+            .checkpoint
+            .execution
+            .as_ref()
+            .map_or(0, super::CheckpointExecution::node_bytes);
+        let checkpoint_bytes = checkpoint_root_bytes
+            .saturating_add(changed_component_bytes)
+            .saturating_add(execution_bytes);
         let attachment_referrer_bytes = self
             .committed_attachment_ids
             .iter()

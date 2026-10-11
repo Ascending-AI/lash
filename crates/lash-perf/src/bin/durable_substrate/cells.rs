@@ -5,7 +5,8 @@
 //!
 //! The model answers a cell session's first call with a TypeScript cell that
 //! awaits `ext_echo` `cell_calls` times, keeping each answer (its padding
-//! included) in its heap, and its second with a text answer.
+//! included) in its heap, and its second with a text answer. A fresh cell's
+//! padding is a new text at each await.
 
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
@@ -121,8 +122,9 @@ fn metadata() -> Result<lash_core::LlmProfileMetadata> {
 fn cell_source(scripts: &Scripts, session: &SessionId) -> String {
     let script = scripts.get(session);
     let pad = "x".repeat(script.cell_payload);
+    let fresh = if script.cell_fresh { " + i" } else { "" };
     format!(
-        "<typescript>\nconst kept = [];\nfor (let i = 0; i < {calls}; i++) {{\n  const answer = await tools.{CELL_TOOL}({{ i: i, pad: \"{pad}\" }});\n  kept.push(answer);\n}}\nconsole.log(kept.length);\n</typescript>",
+        "<typescript>\nconst kept = [];\nfor (let i = 0; i < {calls}; i++) {{\n  const answer = await tools.{CELL_TOOL}({{ i: i, pad: \"{pad}\"{fresh} }});\n  kept.push(answer);\n}}\nconsole.log(kept.length);\n</typescript>",
         calls = script.cell_calls,
     )
 }

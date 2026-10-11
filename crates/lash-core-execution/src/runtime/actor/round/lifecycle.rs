@@ -77,8 +77,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use lash_core_store::tool_run::{AvailableEvidence, CompletionSource, LimitCause};
-use lash_durable::domain::{AdmittedId, DomainRefusal, RunRecordRow, RunRecordWrite, RunSeq};
-use lash_durable::{CommitLabel, DomainWrite, DueSource, DurableError, DurableInstant};
+use lash_durable::domain::{AdmittedId, DomainRefusal, RunFacts, RunSeq};
+use lash_durable::{CommitLabel, DueSource, DurableError, DurableInstant};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument as _;
@@ -237,9 +237,9 @@ pub type Discharge<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 /// What one [`Lifecycle::act`] did.
 #[derive(Debug)]
 pub enum Act {
-    /// It committed one transaction, which appended these rows as the
+    /// It committed one transaction, which appended these facts as the
     /// store holds them: fold again.
-    Committed(Vec<RunRecordRow>),
+    Committed(RunFacts),
     /// Its commit was refused, or its acknowledgement lost: read the rows
     /// again and fold them.
     Refused,
@@ -810,7 +810,7 @@ impl Lifecycle {
         tx: lash_durable::ActorTx,
         label: CommitLabel,
     ) -> Result<Act, RoundError> {
-        let appended = appended_rows(tx.domain(), self.cx.epoch());
+        let appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
         match self.cx.commit(tx, label).await {
             Ok(_) => Ok(Act::Committed(appended)),
             Err(error @ DurableError::OwnershipLost(_)) => Err(error.into()),
@@ -1057,32 +1057,6 @@ fn source_waits(
         ));
     }
     Ok(refs)
-}
-
-/// The run records `writes` append, as the store will hold them.
-fn appended_rows(writes: &[DomainWrite], epoch: lash_durable::Epoch) -> Vec<RunRecordRow> {
-    writes
-        .iter()
-        .filter_map(|write| match write {
-            DomainWrite::RunRecord(RunRecordWrite::Append {
-                owner,
-                run,
-                ordinal,
-                kind,
-                call,
-                record_json,
-            }) => Some(RunRecordRow {
-                owner: owner.clone(),
-                run: *run,
-                ordinal: *ordinal,
-                kind: *kind,
-                call: call.clone(),
-                record_json: record_json.clone(),
-                written_epoch: epoch,
-            }),
-            _ => None,
-        })
-        .collect()
 }
 
 async fn sleep_for(clock: &Arc<dyn crate::Clock>, duration: Option<Duration>) {

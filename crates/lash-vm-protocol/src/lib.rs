@@ -7,11 +7,11 @@
 //!
 //! - [`message`]: the typed messages, each under a [`MessageHeader`] naming its
 //!   execution lease, owner and frame epochs and transport sequence.
-//! - [`state`]: [`OpaqueVmState`], a parked run as the parent sees it. The
-//!   parent checks size, owner, kernel version, document and hash, and
-//!   nothing else: no function here decodes the bytes, and this crate depends
-//!   on nothing that could. Validation, compilation and resumption happen
-//!   only in the worker.
+//! - [`state`]: [`VmOwner`], whose state a worker holds.
+//! - [`graph_state`]: [`SealedGraphState`], a parked run as checkpoint graph
+//!   nodes under a seal binding its root to its structural facts; the parent
+//!   checks the facts and the seal, never a guest frame: validation,
+//!   compilation and resumption happen only in the worker.
 //! - [`codec`]: length-framed encoding and protocol-version admission, with
 //!   bounded decoding that charges frame size, depth, node count and
 //!   cumulative allocation before anything is allocated.
@@ -25,6 +25,7 @@
 
 pub mod bounds;
 pub mod codec;
+pub mod graph_state;
 pub mod message;
 pub mod outcome;
 pub mod state;
@@ -35,17 +36,21 @@ pub use codec::{
     CodecRefusal, DecodeLimits, FRAME_HEADER_BYTES, FRAME_MAGIC, FrameCodec, FrameReader,
     ObservationChunker,
 };
+pub use graph_state::{
+    GraphNodeBytes, GraphRoot, GraphStateExpectation, GraphStateRefusal, KernelRestoreRefusal,
+    SealedGraphState,
+};
 pub use message::{
     EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
-    MessageFence, MessageHeader, OwnerEpoch, ParentFrame, ParentMessage, RunBounds, RunMeters,
-    Start, StartFrom, TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase,
+    MessageFence, MessageHeader, OwnerEpoch, ParentFrame, ParentMessage, ParkedGraph, RunBounds,
+    RunMeters, Start, StartFrom, TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase,
 };
 pub use outcome::{
     BootstrapFault, Detail, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,
     ProtocolBreach, RunInput, RunRefusal, SequenceFault, SupervisorEvidence, WorkerDeploymentFault,
     WorkerFrameKind, WorkerLimit, WorkerRefusal,
 };
-pub use state::{OpaqueStateRefusal, OpaqueVmState, StateDigest, StateExpectation, VmOwner};
+pub use state::{StateDigest, VmOwner};
 pub use version::{
     MIN_SUPPORTED_WORKER_PROTOCOL_VERSION, ProtocolVersionRefusal, WORKER_PROTOCOL_VERSION,
     check_worker_protocol_version,

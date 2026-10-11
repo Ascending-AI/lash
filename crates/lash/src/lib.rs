@@ -661,15 +661,15 @@ pub mod persistence {
         refresh_session_window,
     };
     pub use lash_core::store::{
-        AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
-        HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId, ParkCancelCause,
-        ParkEventColumns, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId,
-        ParkReason, ParkReasonCode, ParkReport, PhysicalTurn, RuntimeCommit, RuntimeCommitReceipt,
-        RuntimeStoreDecorator, RuntimeTurnCommitStamp, SemanticBoundaryOperation,
-        SessionCheckpoint, SessionHeadMeta, SessionHeadPayload, TurnChange, TurnChangeCursor,
-        TurnChangeKind, TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome,
-        TurnProjectionWatermark, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
-        validate_turn_commit_outcome_code,
+        AppendRequestIdentity, CheckpointComponentDescriptor, CheckpointExecution, GraphAppend,
+        HydratedCheckpointComponent, HydratedSessionCheckpoint, NamedManifest, OperationId,
+        ParkCancelCause, ParkEventColumns, ParkEventKind, ParkFeedCursor, ParkFeedEvent,
+        ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkReport, PhysicalTurn, RuntimeCommit,
+        RuntimeCommitReceipt, RuntimeStoreDecorator, RuntimeTurnCommitStamp,
+        SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
+        TurnChange, TurnChangeCursor, TurnChangeKind, TurnChangePage, TurnCommitFailureCause,
+        TurnCommitOutcome, TurnProjectionWatermark, UnparkCause, UnsettledTurnCounts,
+        commit_runtime_state_verified, validate_turn_commit_outcome_code,
     };
     /// A logical run's durable terminal evidence and the store segment that
     /// answers and binds runs (FIG-3600 S7, FIG-3607 item 8), and the
@@ -905,15 +905,15 @@ pub mod plugins {
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
-        AfterTurnDecisions, CarriedCellSnapshot, CheckpointApplication, CheckpointComponentKey,
-        CodeExecutionOutcome, CodeExecutorPlugin, ExecutionLeafName, ExecutionStateCapture,
-        HydratedExecutionState, InvalidExecutionLeafName, LeafChange, NamespaceEntry,
-        NamespaceValues, PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
-        PluginSessionRequest, PluginState, PluginStateEffect, PluginTransitionBase,
-        PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
+        AfterTurnDecisions, CarriedCell, CheckpointApplication, CheckpointComponentKey,
+        CodeExecutionOutcome, CodeExecutorPlugin, ExecutionGraphCapture, ExecutionGraphPurpose,
+        HydratedExecutionGraph, NamespaceEntry, NamespaceValues, PluginAbort, PluginNamespaceState,
+        PluginSessionMaterializationRequest, PluginSessionRequest, PluginState, PluginStateEffect,
+        PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
         ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
         ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
-        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, TurnPreparation,
+        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, StoredCell,
+        TurnPreparation,
     };
     /// The attachment-omission history policy (ADR 0133): a plugin names the
     /// attachments of a turn's projected history its request omits, and core

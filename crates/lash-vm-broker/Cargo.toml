@@ -28,9 +28,11 @@ lash-core-execution = { workspace = true }
 lash-core-store = { workspace = true }
 lash-durable = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-state = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-sansio = { workspace = true }
 lash-vm-protocol = { workspace = true }
+lash-vm-releases = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -44,7 +46,6 @@ tokio-util = { workspace = true }
 # substrate harness at every commit.
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-durable-test = { workspace = true }
-lash-kernel-state = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }
 lash-sqlite-store = { workspace = true }

@@ -47,8 +47,8 @@ use lash_core_store::tool_run::{
     MaterialRole,
 };
 use lash_durable::domain::{
-    CANCEL_MAIL, ExecKey, OwnerKey, ParkEventWrite, ProcessActorRow, ProcessWrite, RunSeq,
-    ScopeKey, SnapshotRev, SnapshotWrite, WaitState, WaitWrite,
+    CANCEL_MAIL, ExecRootRow, OwnerKey, ParkEventWrite, ProcessActorRow, ProcessWrite, RunSeq,
+    ScopeKey, WaitState, WaitWrite,
 };
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
@@ -70,9 +70,7 @@ use crate::runtime::actor::round::{
 use crate::runtime::actor::waits::{
     self, ParkDeadline, Resolution, WaitDeadline, WaitKind, WaitPurpose, WaitSpec,
 };
-use crate::runtime::process::engine_state::{
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, StepRequest,
-};
+use crate::runtime::process::engine_state::{EngineAction, EngineEvent, EngineState, StepRequest};
 use crate::runtime::process::steps::{ProcessSteps, StepRefusal, StepRuntime};
 use crate::{
     ActorContext, AdmittedScope, Backend, CancelOrigin, ProcessEngine, ProcessId, ProcessInput,
@@ -480,7 +478,7 @@ impl ProcessActivation {
             return self.park(owned, tx, &reason).await;
         }
         live.first_pass = false;
-        let (Some(engine), Ok((state, snapshot_rev))) = (engine, loaded) else {
+        let (Some(engine), Ok((state, root))) = (engine, loaded) else {
             let reason = match self.backend.process_engine(kind) {
                 None => ProcessParkReason::UnknownEngine { kind: kind.clone() },
                 Some(engine) => {
@@ -512,7 +510,7 @@ impl ProcessActivation {
                 &driver,
                 engine.as_ref(),
                 &state,
-                snapshot_rev,
+                root.as_ref(),
             )
             .await?
         {
@@ -532,9 +530,7 @@ impl ProcessActivation {
             self.commit_terminal(owned, tx, process).await?;
             return Ok(Pass::Again);
         }
-        let rows = reads
-            .run_records(&OwnerKey::Process(process.clone()))
-            .await?;
+        let rows = reads.run_facts(&OwnerKey::Process(process.clone())).await?;
         let mut policies = Vec::with_capacity(driver.steps.len());
         for step in driver.steps.values() {
             if let Ok(admission) = self.steps.admit(&record, &step.request, millis(now)).await {
@@ -690,13 +686,7 @@ impl ProcessActivation {
             // that leaves the state in another format says so too.
             tx.stamp_formats(formats.clone());
         }
-        tx.write(DomainWrite::Snapshot(SnapshotWrite::Put {
-            exec: ExecKey::Process(process.clone()),
-            expected: snapshot_rev,
-            snapshot_ref: hex_encode(&next.bytes),
-            executable_identity: next.format.kind.clone(),
-            format_version: next.format.version,
-        }));
+        super::state_graph::write_engine_state(&mut tx, process, kind, &next, root.as_ref())?;
         owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
         // The steps this transition admitted run once the next pass folds
         // their rows.
@@ -704,23 +694,24 @@ impl ProcessActivation {
         Ok(Pass::Again)
     }
 
-    /// The engine state committed with `row`'s revision, and the snapshot
-    /// revision it replaces, or why this node cannot decode it.
+    /// The engine state committed with `row`'s revision, and the root row
+    /// it replaces, or why this node cannot decode it.
     async fn load_state(
         &self,
         reads: &dyn DurableReads,
         process: &ProcessId,
         row: &ProcessActorRow,
         engine: &dyn ProcessEngine,
-    ) -> Result<Result<(EngineState, Option<SnapshotRev>), ProcessParkReason>, DurableError> {
+    ) -> Result<Result<(EngineState, Option<ExecRootRow>), ProcessParkReason>, DurableError> {
         let format = engine.state_format();
         let carried = self
             .backend
             .state_migration(&format.kind)
             .map(|migration| migration.carries())
             .unwrap_or_default();
-        let snapshot = reads.snapshot(&ExecKey::Process(process.clone())).await?;
-        let Some(snapshot) = snapshot else {
+        let Some((root, written_by, state)) =
+            super::state_graph::read_engine_state(reads, process).await?
+        else {
             return Ok(if row.state_rev == 0 {
                 Ok((EngineState::empty(format), None))
             } else {
@@ -730,25 +721,19 @@ impl ProcessActivation {
                 })
             });
         };
-        let stored = EngineStateFormat {
-            kind: snapshot.executable_identity,
-            version: snapshot.format_version,
-        };
-        if stored != format && !carried.contains(&stored) {
+        if written_by != engine.kind() {
+            return Err(corrupt(
+                "a process's engine state",
+                format!("engine `{written_by}` wrote it, not `{}`", engine.kind()),
+            ));
+        }
+        if state.format != format && !carried.contains(&state.format) {
             return Ok(Err(ProcessParkReason::UndecodableState {
-                kind: stored.kind,
-                version: stored.version,
+                kind: state.format.kind,
+                version: state.format.version,
             }));
         }
-        let bytes = hex_decode(&snapshot.snapshot_ref)
-            .ok_or_else(|| corrupt("a process's engine state", "it is not lowercase hex"))?;
-        Ok(Ok((
-            EngineState {
-                format: stored,
-                bytes,
-            },
-            Some(snapshot.rev),
-        )))
+        Ok(Ok((state, Some(root))))
     }
 
     pub(super) async fn park(
@@ -1576,31 +1561,4 @@ fn resolution(row: &lash_durable::domain::WaitRow) -> Result<waits::Resolution, 
         return Err(corrupt("a resolved wait", "it holds no resolution"));
     };
     serde_json::from_str(stored).map_err(|error| corrupt("a wait's resolution", error))
-}
-
-/// An engine state's bytes as `snapshot_ref` carries them inline: lowercase
-/// hex.
-pub(super) fn hex_encode(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    let mut text = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = write!(text, "{byte:02x}");
-    }
-    text
-}
-
-pub(super) fn hex_decode(text: &str) -> Option<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
-        return None;
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|at| {
-            let pair = text.get(at..at + 2)?;
-            pair.bytes()
-                .all(|digit| digit.is_ascii_digit() || (b'a'..=b'f').contains(&digit))
-                .then(|| u8::from_str_radix(pair, 16).ok())
-                .flatten()
-        })
-        .collect()
 }

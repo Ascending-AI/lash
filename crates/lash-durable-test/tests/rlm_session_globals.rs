@@ -295,7 +295,7 @@ await control.finish({ answer: answer, counter: counter, n: box.n, later: later,
 /// The durable head's execution state of the session [`SESSION`].
 async fn durable_execution_state(
     world: &World,
-) -> Option<lash_core::plugin::HydratedExecutionState> {
+) -> Option<lash_core::plugin::HydratedExecutionGraph> {
     let view = lash_core_execution::store::SessionStore::new(
         world.backend.stores().session_store_factory(),
         lash::SessionId::try_from(SESSION.to_owned()).expect("a session id"),

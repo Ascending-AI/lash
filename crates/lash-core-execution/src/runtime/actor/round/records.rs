@@ -1,30 +1,28 @@
 //! The run records' bodies and where they go (the layout is in the module
 //! documentation of [`super`]).
 
-use std::time::Duration;
+use lash_core_store::checkpoint_graph::{
+    DecodeLimits, EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId,
+};
+use lash_durable::domain::{
+    Ordinal, OwnerKey, RunFactKind, RunFactRow, RunFactWrite, RunFacts, RunSeq,
+};
+use lash_durable::{ActorTx, DomainWrite};
 
-use lash_core_store::tool_run::MaterialRef;
-use lash_durable::DomainWrite;
-use lash_durable::domain::{Ordinal, OwnerKey, RunRecordKind, RunRecordWrite, RunSeq};
-use lash_sansio::{ExecutionLimit, ExecutionPolicy};
-use serde::{Deserialize, Serialize};
+use super::graph::{self, AdmitMember, Decision, PinnedMember, RoundFact, SettledFact};
+use super::{ExecutionDraft, SettledOutput};
+use crate::ToolCallId;
 
-use super::{ExecutionDraft, PinnedWait, PinnedWaits, SettledOutput};
-use crate::runtime::actor::waits::WaitId;
-use crate::{ToolCallId, ToolId};
-
-/// The format of a run record's body: the admission, start, outcome, retry
-/// and presentation records below. Bodies carry no stamp of their own: the
-/// record's actor carries this version in its format set, so only a node
-/// that decodes them claims it (ADR 0106 §1).
+/// The format of a run record's body: the RoundFact node (kind 21) each
+/// record names, and the admission, start, outcome, retry and presentation
+/// bodies it holds. Bodies carry no stamp of their own: the record's actor
+/// carries this version in its format set, so only a node that decodes them
+/// claims it (ADR 0106 §1).
 ///
 /// version_guard(
 ///     shapes(
-///         path = "crates/lash-core-execution/src/runtime/actor/round/records.rs",
-///         cover(
-///             AdmitBody, AdmittedMember, StartBody, OutcomeBody, RetryBody, PresentBody,
-///             DecideBody,
-///         ),
+///         path = "crates/lash-core-execution/src/runtime/actor/round/graph.rs",
+///         cover(RoundFact, AdmitMember, PinnedMember, SettledFact, MaterialNode, Decision),
 ///     ),
 /// )
 /// version_surface = "drain"
@@ -40,228 +38,304 @@ pub(super) fn first_start(member: u64) -> Ordinal {
     Ordinal(1 + member)
 }
 
-/// The admission record's body.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// The admission record's body: each member's pin, in declared order.
 pub(super) struct AdmitBody {
-    pub(super) members: Vec<AdmittedMember>,
-}
-
-/// One member as its admission pinned it. A member that may park names the
-/// completion wait its round pinned and nothing of that wait's: the park's
-/// deadline is the wait row's alone ([`PinnedWaits`]).
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct AdmittedMember {
-    call: ToolCallId,
-    tool: String,
-    request: MaterialRef,
-    policy: ExecutionPolicy,
-    limit_expires_at_ms: u64,
-    limit_max_slice_ms: u64,
-    /// The completion wait pinned with the admission, by its id's hex.
-    wait_id: Option<String>,
-    /// The call's trace scope the admission retained (FIG-5382).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    trace: Option<lash_trace::DurableTraceScope>,
-    /// The declaration the call settles under, as its tool stated it at
-    /// admission (FIG-5823).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    declaration: Option<crate::ToolDeclaration>,
-}
-
-impl AdmittedMember {
-    fn of(draft: &ExecutionDraft) -> Self {
-        Self {
-            call: draft.call().clone(),
-            tool: draft.tool().as_str().to_owned(),
-            request: draft.request().clone(),
-            policy: draft.policy(),
-            limit_expires_at_ms: draft.limit().expires_at,
-            limit_max_slice_ms: millis(draft.limit().max_slice),
-            wait_id: draft.pinned_wait().map(|pinned| pinned.id.to_hex()),
-            trace: draft.trace().cloned(),
-            declaration: draft.declaration().cloned(),
-        }
-    }
-
-    /// The completion wait the admission pinned, when it names one that
-    /// decodes: what a fold reads the member's park from.
-    pub(super) fn pinned_wait(&self) -> Option<WaitId> {
-        self.wait_id.as_deref().and_then(WaitId::parse_hex)
-    }
-
-    /// The draft `owner`'s admission pinned, exactly: never refreshed. A
-    /// member with a pinned wait parks as that wait's row in `waits` says:
-    /// until its deadline, or until its scope ends when it has none.
-    ///
-    /// # Errors
-    ///
-    /// A pinned wait whose id does not decode, or one `waits` does not bind
-    /// to this owner, call and tool.
-    pub(super) fn draft(
-        &self,
-        owner: &OwnerKey,
-        waits: &PinnedWaits,
-    ) -> Result<ExecutionDraft, &'static str> {
-        let tool = ToolId::new(self.tool.clone());
-        let pinned = self
-            .wait_id
-            .as_deref()
-            .map(|id| {
-                WaitId::parse_hex(id)
-                    .map(|id| PinnedWait { id })
-                    .ok_or("a pinned wait id is not a wait id")
-            })
-            .transpose()?;
-        let park = pinned
-            .map(|pinned| waits.park(owner, &self.call, &tool, pinned))
-            .transpose()?;
-        Ok(ExecutionDraft::new(
-            self.call.clone(),
-            tool,
-            self.request.clone(),
-            self.policy,
-            ExecutionLimit {
-                expires_at: self.limit_expires_at_ms,
-                max_slice: Duration::from_millis(self.limit_max_slice_ms),
-            },
-            park,
-        )
-        .with_pinned_wait(pinned)
-        .with_trace(self.trace.clone())
-        .with_declaration(self.declaration.clone()))
-    }
+    pub(super) members: Vec<PinnedMember>,
+    /// Each member's Admission, when a park admitted them by admission:
+    /// the fact names those and no pin of its own.
+    pub(super) admissions: Vec<NodeId>,
 }
 
 /// An `x_start` record's body: which member, and which attempt of its call.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct StartBody {
     pub(super) member: u64,
     pub(super) attempt: u32,
 }
 
 /// An `x_outcome` or `x_wait` record's body: the call's final output, or
-/// its park, settling the attempt started at `start`. It decodes only with
-/// the payload its outcome names. A completion's plugin-state resolutions
-/// commit in it (ADR 0132 §5); a record that carries none omits them.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// its park, settling the attempt started at `start`. Its material's
+/// payload is a node of its own, read back through the digest check. A
+/// completion's plugin-state resolutions commit in it (ADR 0132 §5).
 pub(super) struct OutcomeBody {
     pub(super) start: u64,
     pub(super) output: SettledOutput,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) state: Vec<lash_core_store::tool_run::StateResolution>,
 }
 
 /// A `retry` record's body: the attempt started at `start` failed in a way
 /// its pinned `Repeatable` contract repeats, and the next attempt is due at
 /// `due_at_ms`.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct RetryBody {
     pub(super) start: u64,
     pub(super) output: SettledOutput,
     pub(super) due_at_ms: i64,
 }
 
-/// A `present` record's marker: admitted membership owns the call order.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct PresentBody {}
-
 /// A `decide` record's body: a decision of the round's coordinator, which
 /// no member's recovery depends on.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DecideBody {
     /// The trace admissions the round's admission retained are exported:
     /// the admission's export obligation is discharged (FIG-5452).
     TraceExported,
 }
 
-fn millis(duration: Duration) -> u64 {
-    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+/// One record's typed body, as its RoundFact holds it.
+pub(super) enum Record {
+    Admit(AdmitBody),
+    Start(StartBody),
+    Wait(OutcomeBody),
+    Outcome(OutcomeBody),
+    Retry(RetryBody),
+    Present,
+    Decide(DecideBody),
+    CellReport(NodeId),
 }
 
-pub(super) fn encode<T: Serialize>(body: &T) -> String {
-    #[expect(
-        clippy::expect_used,
-        reason = "the record bodies are plain data whose encoding cannot fail"
-    )]
-    serde_json::to_string(body).expect("a run record body encodes")
+impl Record {
+    fn kind(&self) -> RunFactKind {
+        match self {
+            Self::Admit(_) => RunFactKind::Admit,
+            Self::Start(_) => RunFactKind::XStart,
+            Self::Wait(_) => RunFactKind::XWait,
+            Self::Outcome(_) => RunFactKind::XOutcome,
+            Self::Retry(_) => RunFactKind::Retry,
+            Self::Present => RunFactKind::Present,
+            Self::Decide(_) => RunFactKind::Decide,
+            Self::CellReport(_) => RunFactKind::CellReport,
+        }
+    }
 }
 
-/// Append one record of `owner`'s run `run` at `ordinal`.
-pub(super) fn append(
-    owner: &OwnerKey,
-    run: RunSeq,
-    ordinal: Ordinal,
-    kind: RunRecordKind,
-    call: Option<&ToolCallId>,
-    record_json: String,
-) -> DomainWrite {
-    DomainWrite::RunRecord(RunRecordWrite::Append {
-        owner: owner.clone(),
-        run,
-        ordinal,
-        kind,
-        call: call.cloned(),
-        record_json,
+/// The limits a run's facts are read within: each was admitted under a
+/// commit budget when it was written, so these bound only corruption.
+const READ_LIMITS: DecodeLimits = lash_durable::domain::graph::OWNER_READ_LIMITS;
+
+fn settled_fact(
+    staging: &mut GraphStaging,
+    output: &SettledOutput,
+) -> Result<SettledFact, GraphRefusal> {
+    Ok(SettledFact {
+        outcome: output.outcome(),
+        material: output
+            .payload()
+            .map(|payload| graph::stage_payload(staging, payload))
+            .transpose()?,
     })
 }
 
-/// The admission record of `drafts`.
+fn settled_output(
+    decoder: &mut GraphDecoder<'_>,
+    fact: SettledFact,
+) -> Result<SettledOutput, String> {
+    let payload = fact
+        .material
+        .map(|material| graph::load_payload(decoder, material))
+        .transpose()
+        .map_err(|refusal| refusal.to_string())?;
+    SettledOutput::new(fact.outcome, payload).map_err(|refusal| refusal.to_string())
+}
+
+/// Stages `record`'s RoundFact and returns its node.
+fn stage(staging: &mut GraphStaging, record: &Record) -> Result<NodeId, GraphRefusal> {
+    let fact = match record {
+        Record::Admit(body) if body.admissions.is_empty() => RoundFact::Admit {
+            members: body
+                .members
+                .iter()
+                .cloned()
+                .map(|member| AdmitMember::Pinned(Box::new(member)))
+                .collect(),
+        },
+        Record::Admit(body) => RoundFact::Admit {
+            members: body
+                .admissions
+                .iter()
+                .copied()
+                .map(AdmitMember::Admission)
+                .collect(),
+        },
+        Record::Start(body) => RoundFact::Start {
+            member: body.member,
+            attempt: body.attempt,
+        },
+        Record::Wait(body) => RoundFact::Wait {
+            start: body.start,
+            output: settled_fact(staging, &body.output)?,
+        },
+        Record::Outcome(body) => RoundFact::Outcome {
+            start: body.start,
+            output: settled_fact(staging, &body.output)?,
+            state: body.state.clone(),
+        },
+        Record::Retry(body) => RoundFact::Retry {
+            start: body.start,
+            output: settled_fact(staging, &body.output)?,
+            due_at_ms: body.due_at_ms,
+        },
+        Record::Present => RoundFact::Present,
+        Record::Decide(DecideBody::TraceExported) => RoundFact::Decide(Decision::TraceExported),
+        Record::CellReport(report) => RoundFact::CellReport { report: *report },
+    };
+    fact.stage(staging)
+}
+
+/// `row`'s body, read from `facts`: refused unless its RoundFact is of the
+/// row's kind and every payload it names hashes to its outcome's digest.
+///
+/// # Errors
+///
+/// Why the record does not decode.
+pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String> {
+    let mut decoder = GraphDecoder::new(facts, READ_LIMITS);
+    let fact = RoundFact::load(&mut decoder, row.record).map_err(|refusal| refusal.to_string())?;
+    if fact.kind() != row.kind {
+        return Err(format!(
+            "a `{}` record holds a `{}` fact",
+            row.kind.as_str(),
+            fact.kind().as_str()
+        ));
+    }
+    Ok(match fact {
+        RoundFact::Admit { members } => {
+            let mut pins = Vec::with_capacity(members.len());
+            let mut admissions = Vec::new();
+            for (index, member) in (0_u64..).zip(members) {
+                match member {
+                    AdmitMember::Pinned(member) if admissions.is_empty() => pins.push(*member),
+                    AdmitMember::Admission(node) if admissions.len() == pins.len() => {
+                        let admitted = graph::admission_pin(&mut decoder, node)
+                            .map_err(|refusal| refusal.to_string())?;
+                        if admitted.run != row.run.0
+                            || admitted.ordinal != super::member_ordinal(index).0
+                        {
+                            return Err(
+                                "an admission names another member than its round's".to_owned()
+                            );
+                        }
+                        pins.push(admitted.pin);
+                        admissions.push(node);
+                    }
+                    _ => {
+                        return Err(
+                            "a round pins its members itself or by admission, not both".to_owned()
+                        );
+                    }
+                }
+            }
+            Record::Admit(AdmitBody {
+                members: pins,
+                admissions,
+            })
+        }
+        RoundFact::Start { member, attempt } => Record::Start(StartBody { member, attempt }),
+        RoundFact::Wait { start, output } => Record::Wait(OutcomeBody {
+            start,
+            output: settled_output(&mut decoder, output)?,
+            state: Vec::new(),
+        }),
+        RoundFact::Outcome {
+            start,
+            output,
+            state,
+        } => Record::Outcome(OutcomeBody {
+            start,
+            output: settled_output(&mut decoder, output)?,
+            state,
+        }),
+        RoundFact::Retry {
+            start,
+            output,
+            due_at_ms,
+        } => Record::Retry(RetryBody {
+            start,
+            output: settled_output(&mut decoder, output)?,
+            due_at_ms,
+        }),
+        RoundFact::Present => Record::Present,
+        RoundFact::Decide(Decision::TraceExported) => Record::Decide(DecideBody::TraceExported),
+        RoundFact::CellReport { report } => Record::CellReport(report),
+    })
+}
+
+/// Append `record` to `owner`'s run `run` at `ordinal` in `tx`: its fact's
+/// nodes staged, its row written.
+pub(super) fn append(
+    tx: &mut ActorTx,
+    owner: &OwnerKey,
+    run: RunSeq,
+    ordinal: Ordinal,
+    call: Option<&ToolCallId>,
+    record: &Record,
+) {
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    #[expect(
+        clippy::expect_used,
+        reason = "a fact's typed body always encodes, and an unbounded staging area places \
+                  every value it holds"
+    )]
+    let node = stage(&mut staging, record).expect("a run fact stages");
+    tx.stage_all(staging);
+    tx.write(DomainWrite::RunFact(RunFactWrite::Append {
+        owner: owner.clone(),
+        run,
+        ordinal,
+        kind: record.kind(),
+        call: call.cloned(),
+        record: node,
+    }));
+}
+
+/// Append the admission record of `drafts`, naming each by its Admission
+/// in `admissions` when it is not empty.
 pub(super) fn admit_record(
+    tx: &mut ActorTx,
     owner: &OwnerKey,
     run: RunSeq,
     drafts: &[ExecutionDraft],
-) -> DomainWrite {
+    admissions: Vec<NodeId>,
+) {
     append(
+        tx,
         owner,
         run,
         ADMIT_ORDINAL,
-        RunRecordKind::Admit,
         None,
-        encode(&AdmitBody {
-            members: drafts.iter().map(AdmittedMember::of).collect(),
+        &Record::Admit(AdmitBody {
+            members: drafts.iter().map(PinnedMember::of).collect(),
+            admissions,
         }),
-    )
+    );
 }
 
-/// The `x_start` of `draft`, member `member`, for `attempt`.
+/// Append the `x_start` of `draft`, member `member`, for `attempt`.
 pub(super) fn start_record(
+    tx: &mut ActorTx,
     owner: &OwnerKey,
     run: RunSeq,
     ordinal: Ordinal,
     draft: &ExecutionDraft,
     member: u64,
     attempt: u32,
-) -> DomainWrite {
+) {
     append(
+        tx,
         owner,
         run,
         ordinal,
-        RunRecordKind::XStart,
         Some(draft.call()),
-        encode(&StartBody { member, attempt }),
-    )
+        &Record::Start(StartBody { member, attempt }),
+    );
 }
 
-/// The `decide` record of `decision`, at `ordinal` of `owner`'s run `run`.
+/// Append the `decide` record of `decision`, at `ordinal` of `owner`'s run
+/// `run`.
 pub(super) fn decide_record(
+    tx: &mut ActorTx,
     owner: &OwnerKey,
     run: RunSeq,
     ordinal: Ordinal,
-    decision: &DecideBody,
-) -> DomainWrite {
-    append(
-        owner,
-        run,
-        ordinal,
-        RunRecordKind::Decide,
-        None,
-        encode(decision),
-    )
+    decision: DecideBody,
+) {
+    append(tx, owner, run, ordinal, None, &Record::Decide(decision));
 }

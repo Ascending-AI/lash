@@ -9,7 +9,7 @@
 //! since the last snapshot and new waits commit in one
 //! `cell.snapshot+admit` transaction; bodies start only after it.
 
-pub use lash_durable::domain::{CellId, ExecKey, SnapshotRev, SnapshotRow};
+pub use lash_durable::domain::{CellId, ExecKey, ExecRootRow, SnapshotRev};
 
 use super::ActorContext;
 

@@ -80,6 +80,12 @@ fn teardown_artifact() -> String {
                 .next()
                 .expect("a CREATE SEQUENCE line must name its sequence");
             drops.push(format!("DROP SEQUENCE IF EXISTS {sequence} CASCADE;"));
+        } else if let Some(rest) = line.strip_prefix("CREATE OR REPLACE VIEW ") {
+            let view = rest
+                .split_whitespace()
+                .next()
+                .expect("a CREATE VIEW line must name its view");
+            drops.push(format!("DROP VIEW IF EXISTS {view} CASCADE;"));
         } else if line.starts_with("CREATE ") {
             // Indexes ride on their tables and need no drop. Any other kind —
             // a type, a function — must teach the generator how to drop it
@@ -103,8 +109,8 @@ fn teardown_artifact() -> String {
          -- `PostgresStorage::teardown_ddl()` returns this file verbatim. Every\n\
          -- statement is idempotent (`IF EXISTS`), and `CASCADE` releases the intra-lash\n\
          -- foreign keys so table order carries no meaning. Indexes, constraints, and\n\
-         -- seed rows die with their tables; each sequence schema.sql declares is\n\
-         -- dropped by name, and it declares no types or functions.\n\
+         -- seed rows die with their tables; each sequence and view schema.sql\n\
+         -- declares is dropped by name, and it declares no types or functions.\n\
          --\n\
          -- Like schema.sql, nothing here is schema-qualified: the file tears down\n\
          -- whichever schema the session's `search_path` resolves. Regenerate it with\n\

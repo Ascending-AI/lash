@@ -67,8 +67,8 @@ impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
                 .expect("open SQLite checkpoint-edge probe")
                 .query_row(
                     "SELECT EXISTS(
-                         SELECT 1 FROM checkpoint_blob_refs
-                         WHERE checkpoint_ref = ?1 AND blob_ref = ?2
+                         SELECT 1 FROM blob_edges
+                         WHERE parent_hash = ?1 AND child_hash = ?2
                      )",
                     rusqlite::params![checkpoint_ref.as_str(), blob_ref.as_str()],
                     |row| row.get(0),

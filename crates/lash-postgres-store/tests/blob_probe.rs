@@ -72,8 +72,8 @@ impl lash_conformance::SessionDeleteBlobProbe for PostgresBlobProbe {
         Some(
             sqlx::query_scalar(
                 "SELECT EXISTS(
-                     SELECT 1 FROM lash_checkpoint_blob_refs
-                     WHERE checkpoint_ref = $1 AND blob_ref = $2
+                     SELECT 1 FROM lash_blob_edges
+                     WHERE parent_hash = $1 AND child_hash = $2
                  )",
             )
             .bind(checkpoint_ref.as_str())

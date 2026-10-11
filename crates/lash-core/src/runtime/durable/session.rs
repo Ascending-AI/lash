@@ -326,6 +326,31 @@ pub trait TurnDrive: Send {
     /// [`run_changes`](Self::run_changes) named.
     fn run_changes_committed(&self, _written: &[lash_durable::domain::TurnNamespaceWrite]) {}
 
+    /// Write into `tx`, the transaction that consumes cell `id`'s answer,
+    /// the cell's handoff (FIG-5887 §6): with `working`, the session's
+    /// complete execution state after the cell as the turn's working state,
+    /// and the retirement of the cell's ended root. A drive whose session
+    /// holds no code executor writes nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the state does not capture or the cell's root does
+    /// not read.
+    async fn consume_cell(
+        &mut self,
+        _cx: &ActorContext,
+        _tx: &mut ActorTx,
+        _id: EffectId,
+        _working: bool,
+    ) -> Result<(), TurnError> {
+        Ok(())
+    }
+
+    /// Record that the phase whose transaction carried the last
+    /// [`consume_cell`](Self::consume_cell) committed: its working capture
+    /// is installed.
+    async fn phase_committed(&mut self) {}
+
     /// Where the session's live replay stands now, encoded for a model
     /// pin: a fresh call pins it before its first attempt streams, and a
     /// re-send reads back what the earlier attempts streamed after it
@@ -566,7 +591,7 @@ pub struct TurnCommit {
     pub expected_head: u64,
     /// The session head's commit, encoded by
     /// [`encode_session_commit`](crate::store::encode_session_commit).
-    pub commit_json: String,
+    pub commit: crate::store::EncodedSessionCommit,
 }
 
 /// The session actor's activation: claim, drain mail, admit and run phases,
@@ -950,8 +975,7 @@ impl Activation for SessionActivation {
                 drain_release(&cx).await
             } else {
                 self.services.announce_head(&cx, &session).await;
-                self.pass(&cx, &session, release, &mut heads, &mut carry_checked)
-                    .await
+                Box::pin(self.pass(&cx, &session, release, &mut heads, &mut carry_checked)).await
             };
             if pass.is_ok() {
                 failed_passes = 0;
@@ -1071,27 +1095,55 @@ pub struct ComposedCall {
 /// run, and the turn's before-turn decisions and retained trace scope, which
 /// a resume serves. It carries no plugin state: the run's changed namespaces
 /// are rows of their own (FIG-5301). Encoded by the phase runner, its
-/// owner.
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+/// owner, as its PhaseRoot.
 pub struct PhaseCheckpoint {
     /// The machine's checkpoint with the content it names.
     pub saved: SavedTurn<HostTurnProtocol>,
     /// The steering input the turn's checkpoints delivered, with its
     /// application evidence ([`TurnDrive::delivered_inputs`]).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub delivered: Vec<crate::AdmittedTurnInputs>,
     /// The turn's before-turn callback decisions
     /// ([`TurnDrive::before_turn`]), which a resume serves instead of
     /// running the callbacks again.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub before_turn: Vec<crate::plugin::RecordedTurnContribution>,
     /// The trace scope the turn's admission retained
     /// ([`TurnDrive::trace_scope`]), which a resume reads back (FIG-5363);
     /// before the first phase commit, the turn's admission record holds it
     /// (FIG-5395).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace: Option<lash_trace::DurableTraceScope>,
+}
+
+impl PhaseCheckpoint {
+    /// Stages this checkpoint in `tx` as a phase advance does, and returns
+    /// the PhaseRoot a row's phase names.
+    ///
+    /// # Errors
+    ///
+    /// The account of a checkpoint that does not encode.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn stage_for_test(
+        &self,
+        tx: &mut lash_durable::ActorTx,
+    ) -> Result<lash_durable::domain::checkpoint_graph::NodeId, String> {
+        Ok(super::phase_root::StagedPhase::of(self)?.staged_in(tx))
+    }
+
+    /// Stages in `tx` the PhaseRoot `root` of `graph` with its checkpoint
+    /// text made `edit` of it, as another build would have written it, and
+    /// returns the new root.
+    ///
+    /// # Errors
+    ///
+    /// The account of a root that does not read.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn restage_text_for_test(
+        graph: &lash_durable::domain::HydratedGraph,
+        root: lash_durable::domain::checkpoint_graph::NodeId,
+        edit: fn(&str) -> String,
+        tx: &mut lash_durable::ActorTx,
+    ) -> Result<lash_durable::domain::checkpoint_graph::NodeId, String> {
+        super::phase_root::restaged_text(graph, root, edit, tx)
+    }
 }
 
 /// What a resumed turn's preparation serves from its checkpoint instead of
@@ -1277,6 +1329,7 @@ pub async fn admit_turn(
         iteration: 0,
         model_calls: 0,
         turn_deadline: None,
+        working: None,
         written_epoch: cx.epoch(),
         cancel: None,
         trace_exported: false,
@@ -1298,6 +1351,8 @@ pub struct TurnRestore<'a> {
     cx: &'a ActorContext,
     row: &'a TurnRow,
     heads: &'a mut HeadCache,
+    /// The phase checkpoint, once read.
+    phase: Option<PhaseCheckpoint>,
 }
 
 impl<'a> TurnRestore<'a> {
@@ -1306,7 +1361,46 @@ impl<'a> TurnRestore<'a> {
     /// turn over.
     #[must_use]
     pub fn new(cx: &'a ActorContext, row: &'a TurnRow, heads: &'a mut HeadCache) -> Self {
-        Self { cx, row, heads }
+        Self {
+            cx,
+            row,
+            heads,
+            phase: None,
+        }
+    }
+
+    /// The turn's phase checkpoint, read from its PhaseRoot under one
+    /// protection the first time it is asked for.
+    async fn phase(&mut self) -> Result<&PhaseCheckpoint, TurnRestoreError> {
+        let phase = match self.phase.take() {
+            Some(phase) => phase,
+            None => {
+                let row = self.row;
+                let root = row
+                    .phase
+                    .checkpoint()
+                    .ok_or_else(|| TurnRestoreError::NoCheckpoint(row.run.clone()))?;
+                let graph = self
+                    .cx
+                    .durable_reads()?
+                    .hydrate(
+                        lash_durable::domain::graph::RootOwner::TurnPhase {
+                            session: row.session.clone(),
+                            run: row.run.clone(),
+                        },
+                        Some(root),
+                        lash_durable::domain::graph::OWNER_READ_LIMITS,
+                    )
+                    .await?;
+                super::phase_root::load(&graph, root).map_err(|reason| {
+                    TurnRestoreError::Undecodable {
+                        run: row.run.clone(),
+                        reason,
+                    }
+                })?
+            }
+        };
+        Ok(self.phase.insert(phase))
     }
 
     /// The turn's row.
@@ -1324,29 +1418,12 @@ impl<'a> TurnRestore<'a> {
     ///
     /// [`TurnRestoreError`] when the row holds no checkpoint or it does not
     /// decode.
-    pub fn recorded_preparation(&self) -> Result<RecordedPreparation, TurnRestoreError> {
-        /// The checkpoint's preparation, the rest left undecoded.
-        #[derive(serde::Deserialize)]
-        struct Preparation {
-            #[serde(default)]
-            before_turn: Vec<crate::plugin::RecordedTurnContribution>,
-            #[serde(default)]
-            trace: Option<lash_trace::DurableTraceScope>,
-        }
-        let row = self.row;
-        let stored = row
-            .phase
-            .checkpoint()
-            .ok_or_else(|| TurnRestoreError::NoCheckpoint(row.run.clone()))?;
-        serde_json::from_str::<Preparation>(stored)
-            .map(|checkpoint| RecordedPreparation {
-                before_turn: checkpoint.before_turn,
-                trace: checkpoint.trace,
-            })
-            .map_err(|error| TurnRestoreError::Undecodable {
-                run: row.run.clone(),
-                reason: error.to_string(),
-            })
+    pub async fn recorded_preparation(&mut self) -> Result<RecordedPreparation, TurnRestoreError> {
+        let phase = self.phase().await?;
+        Ok(RecordedPreparation {
+            before_turn: phase.before_turn.clone(),
+            trace: phase.trace.clone(),
+        })
     }
 
     /// Restore the turn's machine under `config`, the configuration it was
@@ -1359,23 +1436,17 @@ impl<'a> TurnRestore<'a> {
     ///
     /// [`TurnRestoreError`].
     pub async fn restore(
-        self,
+        mut self,
         config: TurnMachineConfig,
     ) -> Result<RestoredTurn, TurnRestoreError> {
         let row = self.row;
-        let stored = row
-            .phase
-            .checkpoint()
-            .ok_or_else(|| TurnRestoreError::NoCheckpoint(row.run.clone()))?;
-        let PhaseCheckpoint {
-            saved,
-            delivered,
-            before_turn: _,
-            trace: _,
-        } = serde_json::from_str(stored).map_err(|error| TurnRestoreError::Undecodable {
-            run: row.run.clone(),
-            reason: error.to_string(),
-        })?;
+        self.phase().await?;
+        let Some(PhaseCheckpoint {
+            saved, delivered, ..
+        }) = self.phase.take()
+        else {
+            return Err(TurnRestoreError::NoCheckpoint(row.run.clone()));
+        };
         let window = match saved.checkpoint.window_pin() {
             Some(pin) => Some(
                 self.heads

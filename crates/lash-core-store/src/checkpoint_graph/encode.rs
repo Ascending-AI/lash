@@ -1,0 +1,528 @@
+//! Encoding: placement, chunking, streaming and staging (FIG-5887 §2, §3).
+//!
+//! A typed codec writes a **logical** body: canonical tokens whose child
+//! references are raw digests, and whose text and bytes are written in full
+//! whatever their length. [`GraphStaging::encode`] turns it into nodes:
+//!
+//! 1. **Placement.** In an enveloped kind, a text or bytes token longer than
+//!    [`INLINE_TOKEN_MAX`] bytes, tag and length included, becomes a child
+//!    reference to a TextLeaf or BytesLeaf, or to the index over its chunks.
+//!    Chunks hold at most [`LEAF_PAYLOAD_MAX`] bytes; a text chunk ends at
+//!    the last UTF-8 boundary at or below that. Equal text anywhere makes
+//!    equal leaves, so it is stored once.
+//! 2. **Indexing.** Leaves group 32 at a time, bottom up, into index nodes
+//!    that record the total length and each child's length; the last group
+//!    of a level may be short, and the single node of the top level is the
+//!    value's root.
+//! 3. **Inline or stream.** An enveloped body is `Inline(tokens)` when the
+//!    whole node fits its bound and `Stream(ref<WholeStream>)` otherwise:
+//!    the logical tokens are cut into StructureBlocks, each the longest
+//!    run of whole token events whose envelope fits [`MAX_NODE_BYTES`],
+//!    indexed 32 at a time by StreamIndex nodes.
+//! 4. **Slots.** Each node's children are its referenced digests, sorted and
+//!    unique; each reference becomes its child's slot.
+//!
+//! Every node made is staged until the commit that installs it is known to
+//! have succeeded, and every new staged byte is charged to the encoder's
+//! memory lease first.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+
+use lash_kernel_doc::graph_tokens::{
+    CanonicalFault, ChildRef, TokenCodec, TokenEvent, TokenReader, TokenWriter, encode_body,
+    varint_len,
+};
+
+use super::commit::EncodeBudget;
+use super::node::{
+    EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, LEAF_PAYLOAD_MAX, MAX_NODE_BYTES, NodeId,
+    envelope_len, parse_envelope, write_envelope,
+};
+use super::refusal::GraphRefusal;
+use super::registry::{BodyShape, NodeKind};
+
+/// A logical body: one typed value's canonical tokens, references as
+/// digests, values unplaced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TypedBody<'a>(&'a [u8]);
+
+impl<'a> TypedBody<'a> {
+    #[must_use]
+    pub const fn logical(tokens: &'a [u8]) -> Self {
+        Self(tokens)
+    }
+
+    #[must_use]
+    pub const fn as_bytes(&self) -> &'a [u8] {
+        self.0
+    }
+}
+
+/// The nodes an encoder made and has not yet seen installed.
+#[derive(Clone, Debug)]
+pub struct GraphStaging {
+    nodes: BTreeMap<NodeId, EncodedNode>,
+    budget: EncodeBudget,
+}
+
+/// Encodes one node of `kind` into `staging` and returns it. Placed leaves,
+/// indexes and stream blocks it needs are staged beside it.
+///
+/// # Errors
+///
+/// As [`GraphStaging::encode`].
+pub fn encode_node(
+    kind: NodeKind,
+    body: TypedBody<'_>,
+    staging: &mut GraphStaging,
+) -> Result<EncodedNode, GraphRefusal> {
+    let id = staging.encode(kind, body)?;
+    staging
+        .get(&id)
+        .cloned()
+        .ok_or(GraphRefusal::MissingNode(id))
+}
+
+/// The length of a text or bytes token holding `len` bytes.
+pub(crate) fn token_len(len: usize) -> u64 {
+    1 + varint_len(len as u64) as u64 + len as u64
+}
+
+impl GraphStaging {
+    #[must_use]
+    pub fn new(budget: EncodeBudget) -> Self {
+        Self {
+            nodes: BTreeMap::new(),
+            budget,
+        }
+    }
+
+    /// Encodes one node of `kind` from its logical body and returns its
+    /// identity.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphRefusal::UnsupportedKind`] for a kind 1.0 does not register;
+    /// a token refusal for a malformed body; [`CanonicalFault::NotOneToken`]
+    /// for a body that is not exactly one token (a structure block's
+    /// excepted); [`GraphRefusal::EncodedNodeTooLarge`] or
+    /// [`GraphRefusal::RootTooLarge`] for a direct body over its bound;
+    /// [`GraphRefusal::EncodeMemoryLimit`] past the lease.
+    pub fn encode(&mut self, kind: NodeKind, body: TypedBody<'_>) -> Result<NodeId, GraphRefusal> {
+        let spec = kind.spec().ok_or(GraphRefusal::UnsupportedKind(kind.0))?;
+        let logical = body.as_bytes();
+        match spec.shape {
+            BodyShape::Direct => {
+                if kind != NodeKind::STRUCTURE_BLOCK {
+                    one_token(logical, kind)?;
+                }
+                let (children, physical) = to_physical(logical, kind)?;
+                self.insert(kind, &children, physical)
+            }
+            BodyShape::Enveloped => {
+                let placed = self.place(logical, kind)?;
+                one_token(&placed, kind)?;
+                let (children, physical) = to_physical(&placed, kind)?;
+                let mut inline = Vec::with_capacity(physical.len() + 3);
+                inline.extend_from_slice(&[0x0c, 0x00, 0x01]);
+                inline.extend_from_slice(&physical);
+                if envelope_len(kind, children.len(), inline.len()) as u64 <= spec.bound.bytes() {
+                    return self.insert(kind, &children, inline);
+                }
+                let stream = self.stream(kind, &placed)?;
+                self.insert(kind, &[stream.0], vec![0x0c, 0x01, 0x01, 0x0b, 0x00])
+            }
+        }
+    }
+
+    /// Encodes `value` as one node of `kind`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::encode`].
+    pub fn encode_value<T: TokenCodec>(
+        &mut self,
+        kind: NodeKind,
+        value: &T,
+    ) -> Result<NodeId, GraphRefusal> {
+        let logical = encode_body(value);
+        self.encode(kind, TypedBody::logical(&logical))
+    }
+
+    /// Stages a node another encoder made (a worker's, say) after checking
+    /// it hashes to its identity and is well formed.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphRefusal::HashMismatch`], any refusal of the envelope, or
+    /// [`GraphRefusal::EncodeMemoryLimit`].
+    pub fn adopt(&mut self, node: EncodedNode) -> Result<(), GraphRefusal> {
+        if NodeId::of_envelope(&node.bytes) != node.id {
+            return Err(GraphRefusal::HashMismatch(node.id));
+        }
+        if node.len() > MAX_NODE_BYTES {
+            return Err(GraphRefusal::EncodedNodeTooLarge {
+                bytes: node.len(),
+                limit: MAX_NODE_BYTES,
+            });
+        }
+        parse_envelope(&node.bytes, Some(node.id))?;
+        if !self.nodes.contains_key(&node.id) {
+            self.budget.charge(node.len())?;
+            self.nodes.insert(node.id, node);
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn get(&self, id: &NodeId) -> Option<&EncodedNode> {
+        self.nodes.get(id)
+    }
+
+    #[must_use]
+    pub fn nodes(&self) -> &BTreeMap<NodeId, EncodedNode> {
+        &self.nodes
+    }
+
+    #[must_use]
+    pub fn into_nodes(self) -> BTreeMap<NodeId, EncodedNode> {
+        self.nodes
+    }
+
+    #[must_use]
+    pub fn budget(&self) -> &EncodeBudget {
+        &self.budget
+    }
+
+    /// Envelope bytes of every staged node.
+    #[must_use]
+    pub fn staged_bytes(&self) -> u64 {
+        self.nodes.values().map(EncodedNode::len).sum()
+    }
+
+    fn insert(
+        &mut self,
+        kind: NodeKind,
+        children: &[[u8; 32]],
+        body: Vec<u8>,
+    ) -> Result<NodeId, GraphRefusal> {
+        let bound = kind
+            .spec()
+            .map_or(MAX_NODE_BYTES, |spec| spec.bound.bytes());
+        let len = envelope_len(kind, children.len(), body.len()) as u64;
+        if len > bound {
+            return Err(if bound < MAX_NODE_BYTES {
+                GraphRefusal::RootTooLarge {
+                    bytes: len,
+                    limit: bound,
+                }
+            } else {
+                GraphRefusal::EncodedNodeTooLarge {
+                    bytes: len,
+                    limit: bound,
+                }
+            });
+        }
+        let bytes = write_envelope(kind, children, &body);
+        let id = NodeId::of_envelope(&bytes);
+        if !self.nodes.contains_key(&id) {
+            self.budget.charge(len)?;
+            self.nodes.insert(
+                id,
+                EncodedNode {
+                    id,
+                    bytes: Arc::from(bytes),
+                },
+            );
+        }
+        Ok(id)
+    }
+
+    /// Replaces every text and bytes token over the inline bound with a
+    /// reference to its placed value.
+    fn place(&mut self, logical: &[u8], kind: NodeKind) -> Result<Vec<u8>, GraphRefusal> {
+        let mut reader = TokenReader::new(logical);
+        let mut out = TokenWriter::with_capacity(logical.len().min(MAX_NODE_BYTES as usize));
+        while !reader.is_empty() {
+            let start = reader.position();
+            let event = reader
+                .next_event()
+                .map_err(|error| GraphRefusal::from_token(error, None, Some(kind.0)))?;
+            match event {
+                TokenEvent::Text(text) if token_len(text.len()) > INLINE_TOKEN_MAX => {
+                    let root = self.place_text(text)?;
+                    out.child(root.child_ref());
+                }
+                TokenEvent::Bytes(bytes) if token_len(bytes.len()) > INLINE_TOKEN_MAX => {
+                    let root = self.place_bytes(bytes)?;
+                    out.child(root.child_ref());
+                }
+                _ => out.raw(&logical[start..reader.position()]),
+            }
+        }
+        Ok(out.into_bytes())
+    }
+
+    /// Stages `text`'s leaves and index and returns its root, whatever its
+    /// length: the caller has decided it is placed.
+    pub(crate) fn place_text(&mut self, text: &str) -> Result<NodeId, GraphRefusal> {
+        let mut leaves = Vec::new();
+        let mut rest = text;
+        while !rest.is_empty() {
+            let mut end = rest.len().min(LEAF_PAYLOAD_MAX);
+            while !rest.is_char_boundary(end) {
+                end -= 1;
+            }
+            let (chunk, tail) = rest.split_at(end);
+            let mut body = TokenWriter::new();
+            body.text(chunk);
+            let leaf = self.insert(NodeKind::TEXT_LEAF, &[], body.into_bytes())?;
+            leaves.push((leaf, chunk.len() as u64));
+            rest = tail;
+        }
+        self.value_index(NodeKind::TEXT_INDEX, leaves)
+    }
+
+    /// Stages `bytes`' leaves and index and returns its root.
+    pub(crate) fn place_bytes(&mut self, bytes: &[u8]) -> Result<NodeId, GraphRefusal> {
+        let mut leaves = Vec::new();
+        for chunk in bytes.chunks(LEAF_PAYLOAD_MAX) {
+            let mut body = TokenWriter::new();
+            body.bytes(chunk);
+            let leaf = self.insert(NodeKind::BYTES_LEAF, &[], body.into_bytes())?;
+            leaves.push((leaf, chunk.len() as u64));
+        }
+        self.value_index(NodeKind::BYTES_INDEX, leaves)
+    }
+
+    /// Groups a placed value's leaves 32 at a time, level by level, until
+    /// one node remains. An empty value has no leaves and is never placed.
+    fn value_index(
+        &mut self,
+        kind: NodeKind,
+        mut level: Vec<(NodeId, u64)>,
+    ) -> Result<NodeId, GraphRefusal> {
+        while level.len() > 1 {
+            let mut next = Vec::with_capacity(level.len().div_ceil(INDEX_FANOUT));
+            for group in level.chunks(INDEX_FANOUT) {
+                let total: u64 = group.iter().map(|(_, len)| len).sum();
+                let mut body = TokenWriter::new();
+                body.seq(2);
+                body.unsigned(total);
+                body.seq(group.len() as u64);
+                for (child, len) in group {
+                    body.seq(2);
+                    body.child(child.child_ref());
+                    body.unsigned(*len);
+                }
+                let logical = body.into_bytes();
+                let (children, physical) = to_physical(&logical, kind)?;
+                next.push((self.insert(kind, &children, physical)?, total));
+            }
+            level = next;
+        }
+        level
+            .first()
+            .map(|(root, _)| *root)
+            .ok_or(GraphRefusal::NonCanonical {
+                node: None,
+                reason: CanonicalFault::InvalidChunking,
+            })
+    }
+
+    /// Streams a placed logical body of `kind` through structure blocks and
+    /// returns its WholeStream.
+    pub(crate) fn stream(&mut self, kind: NodeKind, placed: &[u8]) -> Result<NodeId, GraphRefusal> {
+        let events = scan(placed, kind)?;
+        let mut blocks = Vec::new();
+        let mut start = 0;
+        while start < events.len() {
+            let end = longest_block(&events, start);
+            if end == start {
+                return Err(GraphRefusal::EncodedNodeTooLarge {
+                    bytes: block_len(&events[start..=start]) as u64,
+                    limit: MAX_NODE_BYTES,
+                });
+            }
+            let slice = &events[start..end];
+            let logical = &placed[slice[0].start..slice[slice.len() - 1].end];
+            let (children, physical) = to_physical(logical, NodeKind::STRUCTURE_BLOCK)?;
+            blocks.push((
+                self.insert(NodeKind::STRUCTURE_BLOCK, &children, physical)?,
+                1_u64,
+            ));
+            start = end;
+        }
+        let block_count = blocks.len() as u64;
+        let mut level = blocks;
+        let mut depth = 1_u64;
+        while level.len() > 1 {
+            let mut next = Vec::with_capacity(level.len().div_ceil(INDEX_FANOUT));
+            for group in level.chunks(INDEX_FANOUT) {
+                let count: u64 = group.iter().map(|(_, count)| count).sum();
+                let mut body = TokenWriter::new();
+                body.seq(3);
+                body.unsigned(depth);
+                body.unsigned(count);
+                body.seq(group.len() as u64);
+                for (child, count) in group {
+                    body.seq(2);
+                    body.child(child.child_ref());
+                    body.unsigned(*count);
+                }
+                let logical = body.into_bytes();
+                let (children, physical) = to_physical(&logical, NodeKind::STREAM_INDEX)?;
+                next.push((
+                    self.insert(NodeKind::STREAM_INDEX, &children, physical)?,
+                    count,
+                ));
+            }
+            level = next;
+            depth += 1;
+        }
+        let tree = level
+            .first()
+            .map(|(root, _)| *root)
+            .ok_or(GraphRefusal::NonCanonical {
+                node: None,
+                reason: CanonicalFault::NotOneToken,
+            })?;
+        let mut body = TokenWriter::new();
+        body.seq(4);
+        body.unsigned(u64::from(kind.0));
+        body.unsigned(placed.len() as u64);
+        body.child(tree.child_ref());
+        body.unsigned(block_count);
+        let logical = body.into_bytes();
+        let (children, physical) = to_physical(&logical, NodeKind::WHOLE_STREAM)?;
+        self.insert(NodeKind::WHOLE_STREAM, &children, physical)
+    }
+}
+
+/// Refuses a logical body that is not exactly one token tree.
+fn one_token(logical: &[u8], kind: NodeKind) -> Result<(), GraphRefusal> {
+    let mut reader = TokenReader::new(logical);
+    reader
+        .skip_tree()
+        .map_err(|error| GraphRefusal::from_token(error, None, Some(kind.0)))?;
+    if reader.is_empty() {
+        Ok(())
+    } else {
+        Err(GraphRefusal::NonCanonical {
+            node: None,
+            reason: CanonicalFault::NotOneToken,
+        })
+    }
+}
+
+/// A logical body's sorted, unique children and its physical form.
+pub(crate) fn to_physical(
+    logical: &[u8],
+    kind: NodeKind,
+) -> Result<(Vec<[u8; 32]>, Vec<u8>), GraphRefusal> {
+    let refuse = |error| GraphRefusal::from_token(error, None, Some(kind.0));
+    let mut children = BTreeSet::new();
+    let mut reader = TokenReader::new(logical);
+    while !reader.is_empty() {
+        if let TokenEvent::Child(ChildRef(digest)) = reader.next_event().map_err(refuse)? {
+            children.insert(digest);
+        }
+    }
+    let children: Vec<[u8; 32]> = children.into_iter().collect();
+    let mut out = TokenWriter::with_capacity(logical.len());
+    let mut reader = TokenReader::new(logical);
+    while !reader.is_empty() {
+        let start = reader.position();
+        match reader.next_event().map_err(refuse)? {
+            TokenEvent::Child(ChildRef(digest)) => {
+                let slot =
+                    children
+                        .binary_search(&digest)
+                        .map_err(|_| GraphRefusal::NonCanonical {
+                            node: None,
+                            reason: CanonicalFault::ChildSlotOutOfRange(0),
+                        })?;
+                out.slot(slot as u64);
+            }
+            _ => out.raw(&logical[start..reader.position()]),
+        }
+    }
+    Ok((children, out.into_bytes()))
+}
+
+/// One token event of a logical body: its byte range and, for a
+/// reference, its child.
+#[derive(Clone, Copy, Debug)]
+struct Event {
+    start: usize,
+    end: usize,
+    child: Option<[u8; 32]>,
+}
+
+fn scan(logical: &[u8], kind: NodeKind) -> Result<Vec<Event>, GraphRefusal> {
+    let mut events = Vec::new();
+    let mut reader = TokenReader::new(logical);
+    while !reader.is_empty() {
+        let start = reader.position();
+        let event = reader
+            .next_event()
+            .map_err(|error| GraphRefusal::from_token(error, None, Some(kind.0)))?;
+        events.push(Event {
+            start,
+            end: reader.position(),
+            child: match event {
+                TokenEvent::Child(ChildRef(digest)) => Some(digest),
+                _ => None,
+            },
+        });
+    }
+    Ok(events)
+}
+
+/// The envelope length of one structure block holding `events`.
+fn block_len(events: &[Event]) -> usize {
+    let children: BTreeSet<[u8; 32]> = events.iter().filter_map(|event| event.child).collect();
+    let children: Vec<[u8; 32]> = children.into_iter().collect();
+    let body: usize = events
+        .iter()
+        .map(|event| match event.child {
+            Some(digest) => {
+                let slot = children.binary_search(&digest).unwrap_or(0);
+                1 + varint_len(slot as u64)
+            }
+            None => event.end - event.start,
+        })
+        .sum();
+    envelope_len(NodeKind::STRUCTURE_BLOCK, children.len(), body)
+}
+
+/// The end of the longest run of whole events from `start` whose block fits
+/// [`MAX_NODE_BYTES`]. A block's length never shrinks as it grows, so the
+/// boundary is bracketed by doubling and then found by bisection.
+fn longest_block(events: &[Event], start: usize) -> usize {
+    let fits = |end: usize| block_len(&events[start..end]) as u64 <= MAX_NODE_BYTES;
+    // Invariant: `low` fits (or is `start`, the empty run); `high` does not,
+    // or is one past the last event.
+    let (mut low, mut step) = (start, 1_usize);
+    let mut high = loop {
+        let probe = start.saturating_add(step).min(events.len());
+        if !fits(probe) {
+            break probe;
+        }
+        low = probe;
+        if probe == events.len() {
+            return probe;
+        }
+        step = step.saturating_mul(2);
+    };
+    while high - low > 1 {
+        let middle = low + (high - low) / 2;
+        if fits(middle) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    low
+}

@@ -113,6 +113,9 @@ pub enum ParkedTurnState {
     /// A plugin namespace its run committed beside its checkpoint, which a
     /// resume reinstalls.
     PluginState,
+    /// The working execution state its last consumed cell left, which a
+    /// resume installs before the turn continues (FIG-5887 §6).
+    ExecutionState,
 }
 
 /// The park of a pass that failed on a state its turn resumes from and this

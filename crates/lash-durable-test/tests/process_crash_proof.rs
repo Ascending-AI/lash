@@ -65,7 +65,7 @@ use lash_core_execution::{
     ToolCancellation,
 };
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
-use lash_durable::domain::{OwnerKey, RunRecordKind};
+use lash_durable::domain::{OwnerKey, RunFactKind};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
@@ -354,9 +354,14 @@ impl ProcessSteps for ProofSteps {
                         lash_core_ids::clock::Clock::sleep(&*clock, staggered(&tool, entry)).await;
                     }
                     let admitted = database
-                        .run_records(&OwnerKey::Process(process.clone()))
+                        .run_facts(&OwnerKey::Process(process.clone()))
                         .await
-                        .is_ok_and(|rows| rows.iter().any(|row| row.call.as_ref() == Some(&call)));
+                        .is_ok_and(|facts| {
+                            facts
+                                .rows
+                                .iter()
+                                .any(|row| row.call.as_ref() == Some(&call))
+                        });
                     if !admitted {
                         world.unadmitted.lock_recover().push((call.clone(), tool));
                     }
@@ -723,7 +728,7 @@ impl Proof {
     ) -> Vec<String> {
         let mut violations = Vec::new();
         let rows = database
-            .run_records(&OwnerKey::Process(root.clone()))
+            .run_facts(&OwnerKey::Process(root.clone()))
             .await
             .unwrap_or_default();
         let policies = PolicyView::new([
@@ -735,7 +740,7 @@ impl Proof {
             .unwrap_or_default();
         let fold = match round::fold(&rows, &policies, &waits) {
             Ok(fold) => fold,
-            Err(refusal) => return vec![format!("R's run records do not fold: {refusal}")],
+            Err(refusal) => return vec![format!("R's run facts do not fold: {refusal}")],
         };
         let counts = self.tripwire.counts();
         let tools: BTreeMap<&ToolCallId, &str> = entries
@@ -751,9 +756,10 @@ impl Proof {
         for (id, recovery) in fold.recoveries() {
             let runs = counts.bodies.get(id).copied().unwrap_or(0);
             let tool = rows
+                .rows
                 .iter()
                 .find(|row| {
-                    row.kind == RunRecordKind::XStart
+                    row.kind == RunFactKind::XStart
                         && row.run == id.run
                         && row.ordinal == id.ordinal
                 })

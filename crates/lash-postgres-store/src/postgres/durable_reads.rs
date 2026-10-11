@@ -1,11 +1,11 @@
 //! The PostgreSQL durable domain read port.
 use super::{
-    PostgresDurableStore, park_events, processes, prompts, run_records, session_close,
-    session_mail, snapshots, turns, waits,
+    PostgresDurableStore, park_events, processes, prompts, session_close, session_mail, snapshots,
+    turns, waits,
 };
 use lash_durable::domain::{
-    ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
-    SessionCloseRow, SnapshotRow, TurnRow, WaitId, WaitRow,
+    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow,
+    RootOwner, RunFacts, ScopeKey, SessionCloseRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{ActorKey, CommitCapacity, DurableError, DurableReads};
 
@@ -43,25 +43,31 @@ impl DurableReads for PostgresDurableStore {
         .await
     }
 
-    async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            run_records::read(&mut *self.reader().await?, owner).await
-        })
-        .await
+    async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
+        self.read_run_facts(owner).await
     }
 
-    async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
+    async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         self.within(CommitCapacity::Work, async {
             snapshots::read(&mut *self.reader().await?, exec).await
         })
         .await
     }
 
-    async fn cell_snapshots(
+    async fn hydrate(
+        &self,
+        owner: RootOwner,
+        expected: Option<lash_core_store::checkpoint_graph::NodeId>,
+        limits: lash_core_store::checkpoint_graph::DecodeLimits,
+    ) -> Result<HydratedGraph, DurableError> {
+        self.hydrate_owner(owner, expected, limits).await
+    }
+
+    async fn cell_roots(
         &self,
         session: &lash_sansio::SessionId,
         run: &lash_sansio::TurnId,
-    ) -> Result<Vec<SnapshotRow>, DurableError> {
+    ) -> Result<Vec<ExecRootRow>, DurableError> {
         let prefix = ExecKey::turn_cells(session, run);
         self.within(CommitCapacity::Work, async {
             snapshots::under(&mut *self.reader().await?, &prefix).await

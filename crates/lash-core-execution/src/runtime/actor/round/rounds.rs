@@ -3,15 +3,13 @@
 
 use std::sync::Arc;
 
-use lash_durable::domain::{AdmittedId, RunRecordKind};
-use lash_durable::{ActorTx, DomainWrite, DurableInstant};
+use lash_durable::domain::AdmittedId;
+use lash_durable::{ActorTx, DurableInstant};
 
-use super::records::{
-    DecideBody, PresentBody, RetryBody, append, decide_record, encode, start_record,
-};
+use super::records::{DecideBody, Record, RetryBody, append, decide_record, start_record};
 use super::{
     AdmissionRefusal, AdmittedExecution, AdmittedRound, PinnedWait, Presentation, RoundDraft,
-    RunFold, SettleRefusal, SettledOutput, admit, check_drafts,
+    RunFold, SettleRefusal, SettledOutput, check_drafts,
 };
 use crate::runtime::actor::waits::{self, WaitDeadline, WaitPurpose, WaitSpec};
 
@@ -32,6 +30,64 @@ pub fn admit_round(
     scope: &lash_durable::domain::ScopeKey,
     round: RoundDraft,
 ) -> Result<AdmittedRound, AdmissionRefusal> {
+    pin_round(tx, scope, round)?.admit(tx, Vec::new())
+}
+
+/// A round whose members' completion waits are pinned in a transaction,
+/// before its admission record: what a park that admits each member under
+/// an Admission node of its own reads the pins from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PinnedRound {
+    owner: lash_durable::domain::OwnerKey,
+    run: lash_durable::domain::RunSeq,
+    members: Vec<super::ExecutionDraft>,
+}
+
+impl PinnedRound {
+    /// Each member's ordinal, as its [`AdmittedId`](lash_durable::domain::AdmittedId)
+    /// takes it, and the pin its admission records.
+    #[must_use]
+    pub fn pins(&self) -> Vec<(lash_durable::domain::Ordinal, super::graph::PinnedMember)> {
+        (0_u64..)
+            .zip(&self.members)
+            .map(|(member, draft)| {
+                (
+                    super::member_ordinal(member),
+                    super::graph::PinnedMember::of(draft),
+                )
+            })
+            .collect()
+    }
+
+    /// Records the round's admission and its members' `x_start` rows in
+    /// `tx`, naming each member by its Admission in `admissions` (or
+    /// pinning it inline when that is empty).
+    ///
+    /// # Errors
+    ///
+    /// [`AdmissionRefusal::Admissions`] for a count that is not the
+    /// members'.
+    pub fn admit(
+        self,
+        tx: &mut ActorTx,
+        admissions: Vec<lash_core_store::checkpoint_graph::NodeId>,
+    ) -> Result<AdmittedRound, AdmissionRefusal> {
+        let members = super::admit_by(tx, &self.owner, self.run, self.members, admissions)?;
+        Ok(AdmittedRound::admitted(self.run, members))
+    }
+}
+
+/// Pins `round`'s completion waits in `tx`; its admission is recorded by
+/// [`PinnedRound::admit`].
+///
+/// # Errors
+///
+/// [`AdmissionRefusal`] for an empty round or one call twice.
+pub fn pin_round(
+    tx: &mut ActorTx,
+    scope: &lash_durable::domain::ScopeKey,
+    round: RoundDraft,
+) -> Result<PinnedRound, AdmissionRefusal> {
     check_drafts(&round.members)?;
     let mut members = Vec::with_capacity(round.members.len());
     for draft in round.members {
@@ -54,8 +110,11 @@ pub fn admit_round(
         };
         members.push(draft.with_pinned_wait(pinned));
     }
-    let members = admit(tx, &round.owner, round.run, members)?;
-    Ok(AdmittedRound::admitted(round.run, members))
+    Ok(PinnedRound {
+        owner: round.owner,
+        run: round.run,
+        members,
+    })
 }
 
 /// Record that the trace admissions `round`'s admission retained are
@@ -69,12 +128,13 @@ pub fn record_trace_exported(tx: &mut ActorTx, round: &AdmittedRound) {
         return;
     };
     let id = first.id();
-    tx.write(decide_record(
+    decide_record(
+        tx,
         &id.owner,
         id.run,
         first.cursor().take(),
-        &DecideBody::TraceExported,
-    ));
+        DecideBody::TraceExported,
+    );
 }
 
 /// Record a round's presentation inside the `round.present+model.start`
@@ -88,9 +148,32 @@ pub fn record_trace_exported(tx: &mut ActorTx, round: &AdmittedRound) {
 pub fn present(tx: &mut ActorTx, round: &AdmittedRound, fold: &RunFold) -> Presentation {
     let (presentation, record) = presentation(round, fold);
     if let Some(record) = record {
-        tx.write(record);
+        record.write(tx);
     }
     presentation
+}
+
+/// A round's `present` record, to commit with the transaction that hands
+/// its presentation on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PresentRecord {
+    owner: lash_durable::domain::OwnerKey,
+    run: lash_durable::domain::RunSeq,
+    ordinal: lash_durable::domain::Ordinal,
+}
+
+impl PresentRecord {
+    /// Writes the record into `tx`.
+    pub fn write(&self, tx: &mut ActorTx) {
+        append(
+            tx,
+            &self.owner,
+            self.run,
+            self.ordinal,
+            None,
+            &Record::Present,
+        );
+    }
 }
 
 /// A round's presentation from its committed records, in declared order,
@@ -99,7 +182,10 @@ pub fn present(tx: &mut ActorTx, round: &AdmittedRound, fold: &RunFold) -> Prese
 /// What [`present`] writes; a phase runner that commits the record with a
 /// later transaction of its own takes it from here.
 #[must_use]
-pub fn presentation(round: &AdmittedRound, fold: &RunFold) -> (Presentation, Option<DomainWrite>) {
+pub fn presentation(
+    round: &AdmittedRound,
+    fold: &RunFold,
+) -> (Presentation, Option<PresentRecord>) {
     let Some(view) = fold.round(round.run()) else {
         return (
             Presentation::of(
@@ -117,15 +203,10 @@ pub fn presentation(round: &AdmittedRound, fold: &RunFold) -> (Presentation, Opt
         .iter()
         .map(|member| (member.call().clone(), member.outcome().cloned()))
         .collect();
-    let record = (view.presented().is_none() && view.settled()).then(|| {
-        append(
-            view.owner(),
-            view.run(),
-            view.cursor().take(),
-            RunRecordKind::Present,
-            None,
-            encode(&PresentBody {}),
-        )
+    let record = (view.presented().is_none() && view.settled()).then(|| PresentRecord {
+        owner: view.owner().clone(),
+        run: view.run(),
+        ordinal: view.cursor().take(),
     });
     (Presentation::of(entries), record)
 }
@@ -154,18 +235,18 @@ pub fn settle_retry(
         return Err(SettleRefusal::NotRetryable(failed.call().clone()));
     }
     let id = failed.id();
-    tx.write(append(
+    append(
+        tx,
         &id.owner,
         id.run,
         failed.cursor().take(),
-        RunRecordKind::Retry,
         Some(failed.call()),
-        encode(&RetryBody {
+        &Record::Retry(RetryBody {
             start: id.ordinal.0,
             output,
             due_at_ms: due.0,
         }),
-    ));
+    );
     Ok(())
 }
 
@@ -176,14 +257,15 @@ pub fn start_retry(tx: &mut ActorTx, failed: &AdmittedExecution) -> AdmittedExec
     let id = failed.id();
     let ordinal = failed.cursor().take();
     let attempt = failed.attempt() + 1;
-    tx.write(start_record(
+    start_record(
+        tx,
         &id.owner,
         id.run,
         ordinal,
         failed.draft(),
         failed.member(),
         attempt,
-    ));
+    );
     AdmittedExecution::admitted(
         AdmittedId {
             owner: id.owner.clone(),

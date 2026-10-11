@@ -372,14 +372,3 @@ impl lash_core_execution::AttachmentRootSet for SqliteStore {
         store.recover_abandoned_attachment_write(id).await
     }
 }
-
-pub(crate) fn retained_artifact_refs(checkpoint: &SessionCheckpoint) -> Vec<RetainedArtifactRef> {
-    checkpoint
-        .components
-        .values()
-        .map(|descriptor| RetainedArtifactRef {
-            blob_ref: descriptor.blob_ref.clone(),
-            kind: PersistedArtifactKind::CheckpointComponent,
-        })
-        .collect()
-}

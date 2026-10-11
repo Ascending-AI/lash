@@ -24,9 +24,12 @@
 use std::sync::{Arc, LazyLock};
 
 use lash_core_execution::Clock;
+use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal};
+use lash_durable::domain::graph::OWNER_READ_LIMITS;
+use lash_durable::domain::graph_commit::{check_graph, measure_owner_commit};
 use lash_durable::domain::{
-    ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
-    SessionCloseRow, SnapshotRow, TurnRow, WaitId, WaitRow,
+    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow,
+    RootOwner, RunFacts, ScopeKey, SessionCloseRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause, Claimed,
@@ -44,6 +47,7 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::conn::{FencedTx, SqliteConnection, TxOutcome, cached_execute};
 use crate::liveness_locks::{LivenessLocks, Probed};
 
+mod graph;
 mod park_events;
 pub(crate) mod processes;
 mod prompts;
@@ -64,6 +68,12 @@ pub(crate) use node_wakes::TABLES as NODE_WAKES_TABLES;
 
 // The domain tables I0 creates in the durable core database (FIG-5194);
 // each domain's own lane adds its tables beside them.
+pub(crate) use graph::TABLES as GRAPH_TABLES;
+pub(crate) use graph::{
+    GraphClosure, collect_in as collect_graph_in, graph_closure, install_staged, reachable_from,
+    reclaim_candidates, retire_expired_read_pins_in,
+};
+pub(crate) use lash_durable::domain::graph_commit::CollectionLimits;
 pub(crate) use park_events::TABLES as PARK_EVENTS_TABLES;
 pub(crate) use prompts::TABLES as PROMPT_SNAPSHOTS_TABLES;
 pub(crate) use prompts::release as release_prompt_snapshots;
@@ -423,6 +433,12 @@ fn corrupt(what: &str, value: &str) -> DurableError {
     })
 }
 
+/// A stored checkpoint graph reference: its node's lowercase hex.
+fn node_ref(stored: &str) -> Result<lash_core_store::checkpoint_graph::NodeId, DurableError> {
+    lash_core_store::checkpoint_graph::NodeId::from_hex(stored)
+        .ok_or_else(|| corrupt("node reference", stored))
+}
+
 fn actor_key(stored: &str) -> Result<ActorKey, DurableError> {
     ActorKey::parse(stored).map_err(|_| corrupt("actor key", stored))
 }
@@ -513,6 +529,27 @@ fn apply_owner(
     let Some(revision) = fence else {
         return refuse(fenced(tx, write.actor(), write.epoch())?);
     };
+    let publications: Vec<_> = write
+        .domain()
+        .iter()
+        .flat_map(DomainWrite::publications)
+        .collect();
+    if !write.graph().is_empty() || !write.reads().is_empty() || !publications.is_empty() {
+        let checked = match check_graph(write.graph(), write.reads(), &publications) {
+            Ok(checked) => checked,
+            Err(refusal) => return refuse(DurableError::from(refusal)),
+        };
+        if let Some(budget) = write.budget() {
+            let admitted = measure_owner_commit(write.graph(), write.domain())
+                .and_then(|measured| budget.admit(&measured));
+            if let Err(refusal) = admitted {
+                return refuse(DurableError::from(refusal));
+            }
+        }
+        if let Err(refusal) = graph::install(tx, &checked)? {
+            return refuse(DurableError::from(refusal));
+        }
+    }
     let committing = Committing {
         actor: write.actor(),
         epoch: write.epoch(),
@@ -711,8 +748,11 @@ fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWr
     match write {
         DomainWrite::Turn(write) => turns::apply(tx, committing, write),
         DomainWrite::SessionCommit(write) => turns::apply_session_commit(tx, committing, write),
-        DomainWrite::RunRecord(write) => run_records::apply(tx, committing, write),
-        DomainWrite::Snapshot(write) => snapshots::apply(tx, committing, write),
+        DomainWrite::RunFact(write) => run_records::apply(tx, committing, write),
+        DomainWrite::ExecRoot(write) => snapshots::apply(tx, committing, write),
+        DomainWrite::EffectAdmission(write) => graph::apply_admission(tx, committing, write),
+        DomainWrite::ReadPin(write) => graph::apply_read_pin(tx, write),
+        DomainWrite::ReleasePin(write) => graph::apply_release_pin(tx, write),
         DomainWrite::Wait(write) => waits::apply(tx, committing, write),
         DomainWrite::Process(write) => processes::apply(tx, committing, write),
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write),
@@ -1306,23 +1346,53 @@ impl DurableReads for SqliteDurableStore {
             .await
     }
 
-    async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError> {
+    async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
         let owner = owner.clone();
-        self.read(move |tx| run_records::read(tx, &owner)).await
+        self.read(move |tx| {
+            let rows = match run_records::read(tx, &owner)? {
+                Ok(rows) => rows,
+                Err(error) => return Ok(Err(error)),
+            };
+            let mut nodes = std::collections::BTreeMap::new();
+            for row in &rows {
+                if nodes.contains_key(&row.record) {
+                    continue;
+                }
+                match graph::walk(tx, row.record, &OWNER_READ_LIMITS)? {
+                    Ok(reached) => nodes.extend(reached),
+                    Err(refusal) => return Ok(Err(DurableError::from(refusal))),
+                }
+            }
+            Ok(Ok(RunFacts { rows, nodes }))
+        })
+        .await
     }
 
-    async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
+    async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         let exec = exec.clone();
         self.read(move |tx| snapshots::read(tx, &exec)).await
     }
 
-    async fn cell_snapshots(
+    async fn cell_roots(
         &self,
         session: &lash_sansio::SessionId,
         run: &lash_sansio::TurnId,
-    ) -> Result<Vec<SnapshotRow>, DurableError> {
+    ) -> Result<Vec<ExecRootRow>, DurableError> {
         let prefix = ExecKey::turn_cells(session, run);
         self.read(move |tx| snapshots::under(tx, &prefix)).await
+    }
+
+    async fn hydrate(
+        &self,
+        owner: RootOwner,
+        expected: Option<lash_core_store::checkpoint_graph::NodeId>,
+        limits: DecodeLimits,
+    ) -> Result<HydratedGraph, DurableError> {
+        self.read(move |tx| {
+            Ok(graph::hydrate_in(tx, owner, expected, &limits)?
+                .map_err(|refusal: GraphRefusal| DurableError::from(refusal)))
+        })
+        .await
     }
 
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {
@@ -1419,6 +1489,10 @@ impl DurableReads for SqliteDurableStore {
 #[cfg(test)]
 #[path = "../durable_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../graph_store_tests.rs"]
+mod graph_store_tests;
 
 #[cfg(test)]
 #[path = "../wait_law_tests.rs"]

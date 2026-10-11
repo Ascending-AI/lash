@@ -88,6 +88,22 @@ impl DurableHost {
         lash_core::testing::TestExecutionPorts::lent(&self.backend, self.context())
     }
 
+    /// Installs `graph`'s nodes, as the turn commit that captured it
+    /// would have: a law restores a session from a graph a deployment
+    /// hydrates from its store, and its next cell's end names the nodes
+    /// it holds without sending them again.
+    pub(crate) async fn install(
+        &self,
+        graph: &lash_core_store::execution_state::HydratedExecutionGraph,
+    ) {
+        let mut tx = self.context.begin().await.expect("open the install");
+        tx.stage(graph.nodes.values().cloned());
+        self.context
+            .commit(tx, CommitLabel::new("law.install"))
+            .await
+            .expect("install the restored graph");
+    }
+
     /// The node serving the actor dies without releasing it, and another
     /// node claims it: the dead boot's epoch is fenced, and the new context
     /// sees only what committed.

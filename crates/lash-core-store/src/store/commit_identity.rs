@@ -1081,6 +1081,8 @@ impl<'a> From<&'a crate::SessionNodeRecord> for SessionNodeIntent<'a> {
 struct CheckpointIntent<'a> {
     turn_state: &'a crate::PersistedTurnState,
     components: Vec<CheckpointComponentIntent<'a>>,
+    /// The SessionExecution root: the graph's identity is its root's.
+    execution: Option<BlobRef>,
 }
 
 /// A checkpoint component as intent: its key and the content hash of its
@@ -1117,6 +1119,10 @@ impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
                     CheckpointComponentIntent { key, blob_ref }
                 })
                 .collect(),
+            execution: checkpoint
+                .execution
+                .as_ref()
+                .map(super::CheckpointExecution::root_ref),
         }
     }
 }

@@ -4,9 +4,10 @@
 //! §4, ADR 0113 §3.1).
 //!
 //! The core's protocol carries a scripted code executor: its state is a
-//! byte string the turn's commit captures when it is dirty, and every
-//! runtime the node opens restores it from the head, or a fresh frame's
-//! state when the head holds none.
+//! byte string, held as the text of a SessionExecution root, that the
+//! turn's commit captures when it is dirty, and every runtime the node
+//! opens restores it from the head, or a fresh frame's state when the head
+//! holds none.
 //!
 //! - **Capture failure:** a capture that fails at the turn's commit commits
 //!   nothing; the pass retries from the turn's last commit, re-sending its
@@ -67,10 +68,11 @@ impl lash_core::plugin::CodeExecutorPlugin for Executor {
         self.dirty.load(Ordering::SeqCst)
     }
 
-    async fn snapshot_execution_state(
+    async fn capture_execution_graph(
         &self,
         _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
-    ) -> Result<lash_core::plugin::ExecutionStateCapture, lash_core::SessionError> {
+        _purpose: lash_core::plugin::ExecutionGraphPurpose,
+    ) -> Result<lash_core::plugin::ExecutionGraphCapture, lash_core::SessionError> {
         if self
             .fail_captures
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
@@ -82,19 +84,43 @@ impl lash_core::plugin::CodeExecutorPlugin for Executor {
                 "injected execution-state capture failure".to_owned(),
             ));
         }
-        Ok(lash_core::plugin::ExecutionStateCapture::replace(
-            self.snapshot.lock().unwrap().clone().into(),
-        ))
+        Ok(graph_of(&self.snapshot.lock().unwrap()))
     }
 
-    async fn restore_execution_state(
+    async fn restore_execution_graph(
         &self,
         _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
-        state: &lash_core::plugin::HydratedExecutionState,
+        graph: &lash_core::plugin::HydratedExecutionGraph,
+        _purpose: lash_core::plugin::ExecutionGraphPurpose,
     ) -> Result<(), lash_core::SessionError> {
-        self.restored.lock().unwrap().push(state.root.to_vec());
+        self.restored
+            .lock()
+            .unwrap()
+            .push(state_of(graph.root, &graph.nodes));
         Ok(())
     }
+}
+
+/// The executor's state `state` as a SessionExecution root over its text.
+fn graph_of(state: &[u8]) -> lash_core::plugin::ExecutionGraphCapture {
+    lash_core::testing::store_fixtures::execution_graph(
+        std::str::from_utf8(state).expect("the law's states are text"),
+    )
+}
+
+/// The state root `root` holds, read back from `nodes`.
+fn state_of(
+    root: lash_core::durable_port::domain::checkpoint_graph::NodeId,
+    nodes: &std::collections::BTreeMap<
+        lash_core::durable_port::domain::checkpoint_graph::NodeId,
+        lash_core::durable_port::domain::checkpoint_graph::EncodedNode,
+    >,
+) -> Vec<u8> {
+    use lash_core::durable_port::domain::checkpoint_graph::{DecodeLimits, GraphDecoder, NodeKind};
+    GraphDecoder::new(nodes, DecodeLimits::within_total(1 << 20))
+        .decode::<String>(root, NodeKind::SESSION_EXECUTION)
+        .expect("the law's root holds its state's text")
+        .into_bytes()
 }
 
 /// The protocol session: it restores the executor from the head's state,
@@ -114,12 +140,21 @@ impl lash_core::plugin::ProtocolSessionPlugin for Restores {
                 context: "hydrate the law's execution state".to_owned(),
                 source,
             })?
-            .unwrap_or_else(|| lash_core::plugin::HydratedExecutionState {
-                root: FRESH.into(),
-                components: std::collections::BTreeMap::new(),
+            .unwrap_or_else(|| {
+                let lash_core::plugin::ExecutionGraphCapture::Replace { root, nodes } =
+                    graph_of(FRESH)
+                else {
+                    unreachable!("a state stages a root")
+                };
+                lash_core::plugin::HydratedExecutionGraph { root, nodes }
             });
-        lash_core::plugin::CodeExecutorPlugin::restore_execution_state(self.0.as_ref(), ctx, &state)
-            .await
+        lash_core::plugin::CodeExecutorPlugin::restore_execution_graph(
+            self.0.as_ref(),
+            ctx,
+            &state,
+            lash_core::plugin::ExecutionGraphPurpose::Final,
+        )
+        .await
     }
 }
 
@@ -188,9 +223,9 @@ async fn head_state(world: &World, session: &lash::DurableSession) -> Option<Vec
         .unwrap()
         .expect("the session has a head")
         .state
-        .execution_state_snapshot()
-        .as_deref()
-        .map(<[u8]>::to_vec)
+        .execution_state_hydration()
+        .unwrap()
+        .map(|graph| state_of(graph.root, &graph.nodes))
 }
 
 /// Wait until `session` has committed `count` turns.

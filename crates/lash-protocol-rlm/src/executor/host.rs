@@ -13,28 +13,33 @@
 //! - the clock, the random source and reads through projection handles are
 //!   answered by the run's [`lash_vm_runtime::ParentHost`].
 //!
-//! What the host holds of the cell is plain data: the calls it admitted
-//! with the records of those that settled, and its prints. Every park
-//! commits it beside the machine's state ([`CellHost::host_state`]), so the
-//! activation that resumes the cell carries on with all of it.
+//! What the host holds of the cell is the calls it admitted with the
+//! records of those that settled, and its prints. Every park commits it
+//! beside the machine's state as the cell's HostRoot and CellEnvelope
+//! ([`KernelEffects::stage_host`]): each settled call's CallOutcome is
+//! installed once, and a park installs only the summary pages it changed,
+//! so the activation that resumes the cell carries on with all of it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use lash_core::facade_support::ToolInvocation;
 use lash_core::tool_dispatch::{CellCall, CellMember, CellMembers};
 use lash_core::{RuntimeExecutionContext, ToolExecutionGrant};
-use lash_kernel_doc::{Datum, ErrorDatum};
+use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
+use lash_kernel_doc::{Datum, EffectIdentity, EffectName, ErrorDatum};
 use lash_kernel_vm::{EffectRequest, Outcome};
 use lash_sansio::sync::MutexExt;
+use lash_vm_broker::kernel::graph::{FrozenRequest, Projections};
 use lash_vm_broker::kernel::{
-    AdmittedEffect, EFFECT_CANCELLED, KernelEffects, datum_from_json, datum_to_json, outcome_of,
+    AdmittedCall, AdmittedEffect, EFFECT_CANCELLED, HostParts, KernelEffects, datum_from_json,
+    datum_to_json, outcome_of,
 };
 use lash_vm_broker::{MemberDraft, ParentFault};
-use lash_vm_protocol::EncodedPayload;
 use lash_vm_runtime::HostBoundary;
 
 use super::envelope::CellEnvelope;
+use super::host_graph::{HostState, PrintEvent, ProcessEvent};
 
 /// The error kind of a tool call that reported a failure of its own. Its
 /// `data` is the tool's typed failure.
@@ -54,17 +59,17 @@ pub const UNKNOWN_EFFECT: &str = "unknown_effect";
 
 /// One tool call the cell admitted, in admission order, with the host
 /// record of its outcome once that committed.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug)]
 pub(super) struct LedgerCall {
     /// The effect the cell performed, as its source names it.
-    pub operation: lash_kernel_doc::EffectName,
+    pub operation: EffectName,
+    /// Where the cell performed it.
+    pub effect: EffectIdentity,
     pub state: LedgerCallState,
 }
 
 /// The call identity belongs to its pending admission or completed record.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug)]
 pub(super) enum LedgerCallState {
     Pending {
         call_id: lash_core::ToolCallId,
@@ -97,8 +102,7 @@ impl LedgerCall {
 }
 
 /// What the host holds of a cell beside its prints.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Default)]
 pub(super) struct CellHostLedgers {
     /// Every tool call the cell's parks admitted: what it counts against
     /// `max_tool_calls`.
@@ -191,6 +195,25 @@ pub(super) struct CellHost<'run> {
     pub sites: Mutex<BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectIdentity>>,
     /// What every park commits of the cell beside the ledgers and prints.
     pub envelope: CellEnvelope,
+    /// The cell's host state as graph nodes, as its last park left it.
+    pub graph: Mutex<HostGraph>,
+}
+
+/// A cell host's state as the graph its parks install: what an
+/// acknowledged park installed, and what the park in flight staged.
+#[derive(Debug, Default)]
+pub(super) struct HostGraph {
+    pub state: HostState,
+    /// Each admitted call's Admission, by call.
+    pub admissions: BTreeMap<lash_core::ToolCallId, NodeId>,
+    /// Each settled call's CallOutcome, by call.
+    pub outcomes: BTreeMap<lash_core::ToolCallId, NodeId>,
+    /// The CellEnvelope, once a park staged it.
+    pub envelope: Option<NodeId>,
+    /// The nodes an acknowledged park installed beside the summary pages.
+    pub installed: BTreeSet<NodeId>,
+    /// What the park in flight staged, until its commit is acknowledged.
+    pub staged: Option<BTreeSet<NodeId>>,
 }
 
 fn refused(kind: &str, message: impl Into<String>) -> ErrorDatum {
@@ -230,57 +253,43 @@ impl CellHost<'_> {
         self.ledgers.lock_recover().clone()
     }
 
-    /// The tool call `request` makes under `call`, or the error its
-    /// `perform` raises.
+    /// The tool call `request` makes under `call`, frozen from the
+    /// guest's own arguments, or the error its `perform` raises.
     fn tool_call(
         &self,
         request: &EffectRequest,
         call: lash_core::ToolCallId,
-    ) -> Result<ToolInvocation, ErrorDatum> {
+    ) -> Result<(ToolInvocation, FrozenRequest), ErrorDatum> {
         let effect = self.boundary.effect(&request.effect).ok_or_else(|| {
             refused(
                 UNKNOWN_EFFECT,
                 format!("this session offers no `{}`", request.effect),
             )
         })?;
-        // A tool takes its input as one record (`HostBoundary::offer_tool`).
-        let args = match request.args.as_slice() {
-            [] => serde_json::Value::Object(serde_json::Map::new()),
-            [input] => self
-                .entries
-                .leaving(input)
-                .and_then(|input| datum_to_json(&input).map_err(|error| error.to_string()))
-                .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
-                .map(crate::projection::plain_json_for_transport)
-                // A finish value leaves the cell as a cell's value always
-                // has: a whole number is an integer, in either dialect.
-                .map(|args| match effect.controls.finish_declaration() {
-                    Some(_) => crate::cell_value::whole_numbers_as_integers(args),
-                    // An attachment the cell read from history or a tool
-                    // reaches the tool as the attachment it is.
-                    None => crate::cell_value::attachments_as_written(args),
-                })
-                .map_err(|problem| {
-                    refused(
-                        TOOL_ARGUMENTS,
-                        format!(
-                            "`{}` takes JSON arguments, and these are not JSON: {problem}",
-                            request.effect
-                        ),
-                    )
-                })?,
-            more => {
-                return Err(refused(
-                    TOOL_ARGUMENTS,
-                    format!(
-                        "`{}` takes one input record and is performed with {} arguments",
-                        request.effect,
-                        more.len()
-                    ),
-                ));
-            }
+        let projection = CellArgs {
+            entries: &self.entries,
+            finish: effect.controls.finish_declaration().is_some(),
         };
-        Ok(self.invocation(request, call, effect.tool.clone(), args))
+        let args = projection.args(&request.args).map_err(|refusal| {
+            refused(
+                TOOL_ARGUMENTS,
+                match refusal {
+                    ArgsRefusal::NotJson(problem) => format!(
+                        "`{}` takes JSON arguments, and these are not JSON: {problem}",
+                        request.effect
+                    ),
+                    ArgsRefusal::Arity(count) => format!(
+                        "`{}` takes one input record and is performed with {count} arguments",
+                        request.effect
+                    ),
+                },
+            )
+        })?;
+        let invocation = self.invocation(request, call, effect.tool.clone(), args);
+        let frozen =
+            FrozenRequest::tool(CellCall::of(&invocation), request.args.clone(), &projection)
+                .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
+        Ok((invocation, frozen))
     }
 
     /// The invocation of `tool` under `call`, with the grant a tool outside
@@ -303,6 +312,83 @@ impl CellHost<'_> {
             invocation = invocation.with_execution_grant(grant.clone());
         }
         invocation
+    }
+}
+
+/// Why a cell's arguments make no tool call.
+enum ArgsRefusal {
+    NotJson(String),
+    Arity(usize),
+}
+
+/// How a cell's arguments become a tool call's JSON: the guest's one input
+/// record, leaving the cell as a cell's value always has. A finish value's
+/// whole numbers are integers, in either dialect; any other call's
+/// attachments reach the tool as the attachments they are. A frozen request
+/// holds the guest's arguments under this projection's identity, never the
+/// JSON it makes (FIG-5887 §3).
+pub(super) struct CellArgs<'h> {
+    pub entries: &'h super::processes::CellEntries,
+    pub finish: bool,
+}
+
+/// The projection identity of a finish call's arguments.
+pub(super) const FINISH_ARGS: &str = "lash-cell-args/finish/v1";
+/// The projection identity of any other call's arguments.
+pub(super) const CALL_ARGS: &str = "lash-cell-args/v1";
+
+impl<'h> CellArgs<'h> {
+    /// The projection named `id`, over `entries`.
+    pub(super) fn named(
+        id: &str,
+        entries: &'h super::processes::CellEntries,
+    ) -> Result<Self, String> {
+        match id {
+            FINISH_ARGS => Ok(Self {
+                entries,
+                finish: true,
+            }),
+            CALL_ARGS => Ok(Self {
+                entries,
+                finish: false,
+            }),
+            other => Err(format!("no argument projection `{other}`")),
+        }
+    }
+
+    fn args(&self, args: &[Datum]) -> Result<serde_json::Value, ArgsRefusal> {
+        // A tool takes its input as one record (`HostBoundary::offer_tool`).
+        match args {
+            [] => Ok(serde_json::Value::Object(serde_json::Map::new())),
+            [input] => self
+                .entries
+                .leaving(input)
+                .and_then(|input| datum_to_json(&input).map_err(|error| error.to_string()))
+                .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
+                .map(crate::projection::plain_json_for_transport)
+                .map(|args| {
+                    if self.finish {
+                        crate::cell_value::whole_numbers_as_integers(args)
+                    } else {
+                        crate::cell_value::attachments_as_written(args)
+                    }
+                })
+                .map_err(ArgsRefusal::NotJson),
+            more => Err(ArgsRefusal::Arity(more.len())),
+        }
+    }
+}
+
+impl lash_vm_broker::kernel::graph::ArgumentProjection for CellArgs<'_> {
+    fn id(&self) -> &str {
+        if self.finish { FINISH_ARGS } else { CALL_ARGS }
+    }
+
+    fn project(&self, args: &[Datum]) -> Result<serde_json::Value, String> {
+        self.args(args).map_err(|refusal| match refusal {
+            ArgsRefusal::NotJson(problem) => problem,
+            ArgsRefusal::Arity(count) => format!("{count} arguments, not one input record"),
+        })
     }
 }
 
@@ -332,8 +418,8 @@ impl KernelEffects for CellHost<'_> {
         outstanding: &[lash_kernel_doc::TaskIdentity],
         live: &[lash_kernel_doc::TaskIdentity],
     ) -> Result<Result<MemberDraft, ErrorDatum>, ParentFault> {
-        let invocation = match self.tool_call(request, call) {
-            Ok(invocation) => invocation,
+        let (invocation, frozen) = match self.tool_call(request, call) {
+            Ok(called) => called,
             Err(refusal) => return Ok(Err(refusal)),
         };
         // A call to a tool that declares a turn control ends the turn when
@@ -398,6 +484,7 @@ impl KernelEffects for CellHost<'_> {
             }
             ledgers.calls.push(LedgerCall {
                 operation: request.effect.clone(),
+                effect: request.identity.clone(),
                 state: LedgerCallState::Pending {
                     call_id: invocation.id.clone(),
                 },
@@ -426,8 +513,7 @@ impl KernelEffects for CellHost<'_> {
             return Err(fault);
         }
         let pin = self.members.pin(&member, now_ms);
-        let payload = EncodedPayload(member.encode().map_err(ParentFault)?);
-        let draft = MemberDraft::pinned(member.id().clone(), payload, &self.opener, pin)?;
+        let draft = MemberDraft::pinned(member.id().clone(), frozen, &self.opener, pin)?;
         // The cell's admission retains the call's trace scope, which every
         // attempt and every owner traces it under.
         let trace = self.members.propose_trace(&member, now_ms);
@@ -449,14 +535,13 @@ impl KernelEffects for CellHost<'_> {
     ) -> Option<Outcome> {
         // `None` while the record is not final.
         outcome_of(output)?;
-        let Ok(member) = CellMember::decode(&effect.request.0) else {
+        let Some(reply) = self.members.reply_to(&effect.call, output) else {
             return outcome_of(output);
         };
-        let reply = self.members.reply(&member, output);
         if let Some(trace) = &self.trace
-            && let Some(at) = self.sites.lock_recover().get(member.id())
+            && let Some(at) = self.sites.lock_recover().get(&effect.call)
         {
-            trace.call_ended(at, member.id(), &reply.output.outcome);
+            trace.call_ended(at, &effect.call, &reply.output.outcome);
         }
         let outcome = match &reply.output.outcome {
             lash_core::ToolCallOutcome::Success(_) => {
@@ -483,7 +568,7 @@ impl KernelEffects for CellHost<'_> {
             if let Some(call) = ledgers
                 .calls
                 .iter_mut()
-                .find(|call| call.call_id() == member.id())
+                .find(|call| call.call_id() == &effect.call)
                 && call.record().is_none()
             {
                 call.state = LedgerCallState::Completed {
@@ -503,11 +588,151 @@ impl KernelEffects for CellHost<'_> {
             .any(|call| call.output.tool_panic_stop().is_some())
     }
 
-    fn host_state(&self) -> Result<Option<EncodedPayload>, ParentFault> {
-        self.envelope
-            .at_park(&self.ctx, self.ledgers(), &self.prints.lock_recover())
-            .encode()
-            .map(|bytes| Some(EncodedPayload(bytes)))
-            .map_err(ParentFault)
+    fn resumed(&self, executions: &[(AdmittedEffect, FrozenRequest)]) -> Result<(), ParentFault> {
+        for (_, request) in executions {
+            let FrozenRequest::Tool { call, .. } = request else {
+                continue;
+            };
+            let member = CellMember::Tool(call.clone());
+            // An open call this node cannot run is not taken up: the cell
+            // stops unrecorded, and its turn waits for a node that can.
+            if let Err(error) = self.members.require_capable(&member) {
+                let fault = ParentFault(error.to_string());
+                self.ctx.record_nested_runtime_effect_error(error);
+                return Err(fault);
+            }
+            self.members.register(member);
+        }
+        Ok(())
+    }
+
+    fn stage_host(
+        &self,
+        staging: &mut GraphStaging,
+        reads: &mut BTreeSet<NodeId>,
+        admitted: &[AdmittedCall],
+    ) -> Result<HostParts, ParentFault> {
+        let fault =
+            |error: lash_core_store::checkpoint_graph::GraphRefusal| ParentFault(error.to_string());
+        let ledgers = self.ledgers();
+        let prints = self.prints.lock_recover().clone();
+        let mut graph = self.graph.lock_recover();
+        // A park whose commit was not acknowledged staged nothing the store
+        // holds: this one stages it again.
+        if graph.staged.take().is_some() {
+            graph.state.unstaged();
+        }
+        let mut staged = BTreeSet::new();
+        for call in admitted {
+            graph.admissions.insert(call.call.clone(), call.admission);
+        }
+        for call in ledgers
+            .calls
+            .iter()
+            .skip(usize::try_from(graph.state.calls.len()).unwrap_or(usize::MAX))
+        {
+            let Some(admission) = graph.admissions.get(call.call_id()).copied() else {
+                break;
+            };
+            let control = call.control(&self.boundary);
+            graph.state.admit(
+                call.effect.clone(),
+                call.operation.clone(),
+                call.call_id().clone(),
+                admission,
+                control,
+            );
+        }
+        for call in &ledgers.calls {
+            let Some(record) = call.record() else {
+                continue;
+            };
+            if graph.outcomes.contains_key(&record.call_id) {
+                continue;
+            }
+            let Some(admission) = graph.admissions.get(&record.call_id).copied() else {
+                continue;
+            };
+            let outcome = call_outcome(record, admission)
+                .stage(staging)
+                .map_err(fault)?;
+            staged.insert(outcome);
+            graph.outcomes.insert(record.call_id.clone(), outcome);
+            graph.state.settle(&record.call_id, outcome, &record.output);
+        }
+        graph.state.tool_call_limit = ledgers.tool_call_limit;
+        for value in prints
+            .iter()
+            .skip(usize::try_from(graph.state.prints.len()).unwrap_or(usize::MAX))
+        {
+            graph.state.prints.push(PrintEvent(value.clone()));
+        }
+        for process in self
+            .ctx
+            .started_process_ids()
+            .into_iter()
+            .skip(usize::try_from(graph.state.processes.len()).unwrap_or(usize::MAX))
+        {
+            graph.state.processes.push(ProcessEvent(process));
+        }
+        let envelope = match graph.envelope {
+            Some(envelope) if graph.installed.contains(&envelope) => {
+                reads.insert(envelope);
+                envelope
+            }
+            _ => {
+                let release = super::envelope::cell_release().map_err(ParentFault)?;
+                let envelope = self.envelope.stage(staging, release).map_err(fault)?;
+                staged.insert(envelope);
+                graph.envelope = Some(envelope);
+                envelope
+            }
+        };
+        let host = graph.state.stage(staging, reads).map_err(fault)?;
+        graph.staged = Some(staged);
+        Ok(HostParts {
+            host: Some(host),
+            envelope: Some(envelope),
+        })
+    }
+
+    fn host_committed(&self) {
+        let mut graph = self.graph.lock_recover();
+        if let Some(staged) = graph.staged.take() {
+            graph.installed.extend(staged);
+        }
+    }
+}
+
+impl Projections for CellHost<'_> {
+    fn project(&self, projection: &str, args: &[Datum]) -> Result<serde_json::Value, String> {
+        use lash_vm_broker::kernel::graph::ArgumentProjection as _;
+        CellArgs::named(projection, &self.entries)?.project(args)
+    }
+}
+
+/// The CallOutcome `record`, a settled call's host record under
+/// `admission`, is installed as: its output and its presentation, once.
+/// The host answers from the call's final record, not the attempt that
+/// made it, so no attempt is named.
+pub(super) fn call_outcome(
+    record: &lash_core::ToolCallRecord,
+    admission: NodeId,
+) -> lash_vm_broker::round_graph::CallOutcome {
+    let model_return =
+        lash_sansio::ModelToolReturn::from_output(record.tool.clone(), &record.output);
+    lash_vm_broker::round_graph::CallOutcome {
+        call_id: record.call_id.clone(),
+        admission: Some(admission),
+        attempt: 0,
+        tool_name: record.tool.clone(),
+        output: record.output.clone(),
+        provider_call_id: record.provider_call_id.clone(),
+        replay: None,
+        intent_outcomes: Vec::new(),
+        presentation: lash_sansio::tool_output::graph::PresentationRecipe::of(
+            &model_return,
+            &record.output,
+        ),
     }
 }

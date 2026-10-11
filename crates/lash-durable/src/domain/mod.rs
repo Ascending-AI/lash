@@ -26,7 +26,13 @@
 //!   its domain file is I0's and stays as it is; a lane adds fields and
 //!   variants to its own domain's types only.
 
+/// The checkpoint graph (FIG-5887): rows, root owners and the graph commit
+/// contract.
+pub mod graph;
+/// A graph commit's canonical encoding: digest, measurement and receipt.
+pub mod graph_commit;
 mod keys;
+pub mod namespace_value;
 pub mod park_events;
 pub mod processes;
 pub mod prompts;
@@ -37,23 +43,31 @@ pub mod snapshots;
 pub mod turns;
 pub mod waits;
 
+pub use graph::{
+    AdmissionMember, EffectAdmissionRow, EffectAdmissionWrite, EffectKey, ExecRootRow,
+    ExecRootWrite, HydratedGraph, HydratedNode, ReadPinWrite, ReleasePinWrite, RootChange,
+    RootOwner, RunFactKind, RunFactRow, RunFactWrite, RunFacts,
+};
 pub use keys::{CellId, ExecKey, Ordinal, OwnerKey, RunSeq, ScopeKey, StoredKeyError};
+/// The checkpoint graph format the domain's graph rows name.
+pub use lash_core_store::checkpoint_graph;
 pub use park_events::{ParkEventKind, ParkEventRow, ParkEventSeq, ParkEventWrite};
 pub use processes::{
     CancelAnswer, CancelRequest, ProcessActorRow, ProcessStartRows, ProcessWrite, RedriveAnswer,
     RedriveRequest,
 };
 pub use prompts::{ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite};
-pub use run_records::{AdmittedId, RunRecordKind, RunRecordRow, RunRecordWrite};
+pub use run_records::AdmittedId;
 pub use session_close::{SessionCloseRow, SessionCloseStep, SessionCloseWrite};
 pub use session_mail::{
     MailBatch, MailBatchKind, MailInput, OperationCancelAnswer, OperationCancelRequest,
     SESSION_ACTOR_FORMATS, SessionMailWrite, SessionMailbox, queued_input_run,
 };
-pub use snapshots::{SnapshotRev, SnapshotRow, SnapshotWrite};
+pub use snapshots::SnapshotRev;
 pub use turns::{
-    ModelPin, RunValuesWrite, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd,
-    TurnNamespace, TurnNamespaceWrite, TurnRow, TurnWrite, UnfinishedPhase,
+    ModelPin, RunValuesWrite, SessionCommitWrite, StoredNamespaceWrite, StoredValues,
+    TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnNamespace, TurnNamespaceWrite, TurnRow,
+    TurnWrite, UnfinishedPhase,
 };
 pub use waits::{
     CANCEL_MAIL, ResolveAnswer, TIMER_DIGEST, WAIT_ROW_FORMAT_VERSION, WaitId, WaitKind,
@@ -62,25 +76,37 @@ pub use waits::{
 
 use crate::error::DurableError;
 use crate::ids::ActorKey;
+use lash_core_store::checkpoint_graph::{DecodeLimits, NodeId};
 use lash_sansio::{BatchId, ProcessId, SessionId, ToolCallId, TurnId};
 
 /// One owner-state write inside a fenced [`ActorTx`](crate::ActorTx) commit.
 ///
-/// Applied in order, after the fence and before the acknowledgement and the
+/// Applied in order, after the fence and the installation of the
+/// transaction's staged graph nodes, and before the acknowledgement and the
 /// release. Each variant is applied by its domain's file in each dialect.
+/// A write that owns a checkpoint graph root publishes it
+/// ([`DomainWrite::publications`]): the root must be staged with it or
+/// already stored.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DomainWrite {
-    /// V0, then L3: the turn's phase row, checkpoint ref, model pin and
-    /// terminal.
+    /// V0, then L3: the turn's phase row, its PhaseRoot, working
+    /// SessionExecution, model pin, run namespaces and terminal.
     Turn(TurnWrite),
     /// V0, then L3: the session head compare-and-set,
     /// `lash_runtime_turn_commits` and pruning of the turn's phase rows.
     SessionCommit(SessionCommitWrite),
-    /// V0, then L4: run records (admit, `x_start`, `x_outcome`, decide,
-    /// present, retry).
-    RunRecord(RunRecordWrite),
-    /// V0, then L7: a VM snapshot, compare-and-set on its revision.
-    Snapshot(SnapshotWrite),
+    /// L4: run facts (admit, `x_start`, `x_outcome`, `x_wait`, decide,
+    /// present, retry, `cell_report`), each a RoundFact node.
+    RunFact(RunFactWrite),
+    /// L7: an execution's root, compare-and-set on its revision.
+    ExecRoot(ExecRootWrite),
+    /// An admitted effect's lookup row: its Admission node, while a live
+    /// kernel or a released member needs it.
+    EffectAdmission(EffectAdmissionWrite),
+    /// A streaming reader's pin on one root.
+    ReadPin(ReadPinWrite),
+    /// A deliberately installed release manifest.
+    ReleasePin(ReleasePinWrite),
     /// L5: wait pinning, timeout, scope revocation and process-terminal
     /// resolution.
     Wait(WaitWrite),
@@ -436,20 +462,33 @@ pub trait DurableReads: Send + Sync {
         run: &TurnId,
     ) -> Result<Option<TurnEnd>, DurableError>;
 
-    /// V0, then L4: every run record of `owner`, ordered by run and ordinal.
-    async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError>;
+    /// L4: every run fact of `owner`, ordered by run and ordinal, with every
+    /// node they reach, in one protected read.
+    async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError>;
 
-    /// V0, then L7: the latest snapshot of `exec`.
-    async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError>;
+    /// L7: the root of `exec`.
+    async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError>;
 
-    /// FIG-5787: the latest snapshot of each cell of `session`'s `run`, by
-    /// execution key: what an operator's survey reads of a turn stopped in
-    /// a cell.
-    async fn cell_snapshots(
+    /// FIG-5787: the root of each cell of `session`'s `run`, by execution
+    /// key: what an operator's survey reads of a turn stopped in a cell.
+    async fn cell_roots(
         &self,
         session: &SessionId,
         run: &TurnId,
-    ) -> Result<Vec<SnapshotRow>, DurableError>;
+    ) -> Result<Vec<ExecRootRow>, DurableError>;
+
+    /// FIG-5887: `owner`'s complete root graph, read under one protection:
+    /// every node reachable from its root, checked, within `limits`. With
+    /// `expected`, a root that is not it is refused
+    /// ([`GraphRefusal::RevisionConflict`](lash_core_store::checkpoint_graph::GraphRefusal::RevisionConflict));
+    /// an owner with no root is refused
+    /// ([`GraphRefusal::RootRetired`](lash_core_store::checkpoint_graph::GraphRefusal::RootRetired)).
+    async fn hydrate(
+        &self,
+        owner: RootOwner,
+        expected: Option<NodeId>,
+        limits: DecodeLimits,
+    ) -> Result<HydratedGraph, DurableError>;
 
     /// L5: every pending wait `owner` owns.
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError>;

@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::codec::CodecRefusal;
+use crate::graph_state::{GraphStateRefusal, KernelRestoreRefusal};
 use crate::message::HeaderRefusal;
-use crate::state::OpaqueStateRefusal;
 use crate::version::ProtocolVersionRefusal;
 
 /// What the supervisor observed of a worker's end. Evidence, never testimony:
@@ -245,9 +245,9 @@ pub enum ProtocolBreach {
         payload: PayloadKind,
         detail: Detail,
     },
-    /// State the worker itself produced fails the parent's structural check.
-    #[error("the worker's state is refused: {refusal}")]
-    State { refusal: OpaqueStateRefusal },
+    /// Graph state the worker itself produced fails the parent's check.
+    #[error("the worker's graph state is refused: {refusal}")]
+    GraphState { refusal: GraphStateRefusal },
     #[error("the machine refused a step the protocol drove: {detail}")]
     Machine { detail: Detail },
     #[error("{fault}")]
@@ -288,7 +288,11 @@ pub enum RunRefusal {
         source: Box<lash_sansio::SchemaAdmissionError>,
     },
     #[error("{refusal}")]
-    State { refusal: OpaqueStateRefusal },
+    GraphState { refusal: GraphStateRefusal },
+    /// The worker will not resume the parked graph state: its pinned
+    /// release, a function or native it needs, or a wait's admission.
+    #[error("{refusal}")]
+    Restore { refusal: KernelRestoreRefusal },
     #[error("the run's {input} does not decode: {detail}")]
     Undecodable { input: RunInput, detail: Detail },
     #[error("a payload of {size} bytes exceeds the {limit}-byte bound")]
@@ -369,28 +373,21 @@ impl InfrastructureOutcome {
         }
     }
 
-    /// State a run was handed fails its structural check. It is one of the
-    /// run's inputs: over its bound it is the run's limit, and any other
-    /// refusal is the run's, on every path that reads it.
-    pub fn input_state(refusal: OpaqueStateRefusal) -> Self {
+    /// Parked graph state the parent holds fails the structural check
+    /// before a worker is handed it.
+    pub fn input_graph_state(refusal: GraphStateRefusal) -> Self {
         match refusal {
-            OpaqueStateRefusal::TooLarge { limit, len } => Self::state_limit(limit, len),
-            refusal @ (OpaqueStateRefusal::WrongOwner { .. }
-            | OpaqueStateRefusal::KernelOutsideReadRange { .. }
-            | OpaqueStateRefusal::WrongDocument { .. }
-            | OpaqueStateRefusal::HashMismatch) => RunRefusal::State { refusal }.into(),
+            GraphStateRefusal::TooLarge { limit, len } => Self::state_limit(limit, len),
+            refusal => RunRefusal::GraphState { refusal }.into(),
         }
     }
 
-    /// State a worker produced fails the parent's structural check. Its size
-    /// is the run's limit; anything else is the worker's breach.
-    pub fn output_state(refusal: OpaqueStateRefusal) -> Self {
+    /// Graph state a worker produced fails the parent's structural check.
+    /// Its size is the run's limit; anything else is the worker's breach.
+    pub fn output_graph_state(refusal: GraphStateRefusal) -> Self {
         match refusal {
-            OpaqueStateRefusal::TooLarge { limit, len } => Self::state_limit(limit, len),
-            refusal @ (OpaqueStateRefusal::WrongOwner { .. }
-            | OpaqueStateRefusal::KernelOutsideReadRange { .. }
-            | OpaqueStateRefusal::WrongDocument { .. }
-            | OpaqueStateRefusal::HashMismatch) => ProtocolBreach::State { refusal }.into(),
+            GraphStateRefusal::TooLarge { limit, len } => Self::state_limit(limit, len),
+            refusal => ProtocolBreach::GraphState { refusal }.into(),
         }
     }
 
@@ -504,27 +501,27 @@ mod tests {
     #[test]
     fn a_refused_input_state_is_terminal_and_a_broken_frame_is_retryable() {
         for refusal in [
-            OpaqueStateRefusal::WrongDocument {
+            GraphStateRefusal::WrongDocument {
                 expected: "a".into(),
                 found: "b".into(),
             },
-            OpaqueStateRefusal::WrongOwner {
+            GraphStateRefusal::WrongOwner {
                 expected: VmOwner::new("a"),
                 found: VmOwner::new("b"),
             },
-            OpaqueStateRefusal::HashMismatch,
+            GraphStateRefusal::SealMismatch,
         ] {
-            let outcome = InfrastructureOutcome::input_state(refusal.clone());
+            let outcome = InfrastructureOutcome::input_graph_state(refusal.clone());
             assert_eq!(
                 outcome,
                 InfrastructureOutcome::RunRefused {
-                    refusal: RunRefusal::State {
+                    refusal: RunRefusal::GraphState {
                         refusal: refusal.clone()
                     }
                 }
             );
             assert!(!outcome.is_retryable());
-            assert!(InfrastructureOutcome::output_state(refusal).is_retryable());
+            assert!(InfrastructureOutcome::output_graph_state(refusal).is_retryable());
         }
         assert!(
             !InfrastructureOutcome::from(CodecRefusal::FrameTooLarge {

@@ -76,7 +76,7 @@ async fn conformance_resets_and_reopens_stay_in_the_laws_database() {
     ];
     assert_ne!(databases[0], databases[1]);
     for (storage, body) in [(&first, vec![1_u8]), (&second, vec![2_u8])] {
-        sqlx::query("INSERT INTO lash_blobs (hash, content) VALUES ($1, $2)")
+        sqlx::query("INSERT INTO lash_blobs (hash, content, encoding) VALUES ($1, $2, 0)")
             .bind("same-law-fixture-key")
             .bind(body)
             .execute(storage.pool())

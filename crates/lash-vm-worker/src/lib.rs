@@ -6,6 +6,8 @@
 //! Pool failures fence the checkout and never retry guest execution locally.
 
 mod embedding;
+#[cfg(all(test, unix))]
+mod graph_laws;
 #[cfg(feature = "dhat-heap")]
 mod heap_profile;
 /// The library functions lash ships, as `lash-vm-releases`' build defines

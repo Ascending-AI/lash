@@ -237,20 +237,6 @@ pub(crate) fn encode_json<T: serde::Serialize>(value: &T) -> Result<String, Stor
     })
 }
 
-fn encode_msgpack<T: serde::Serialize>(
-    value: &T,
-    record_kind: &str,
-) -> Result<Vec<u8>, StoreError> {
-    let mut buf = Vec::with_capacity(1024);
-    rmp_serde::encode::write_named(&mut buf, value).map_err(|error| {
-        StoreError::RecordEncodingFailed {
-            record_kind: record_kind.to_string(),
-            message: error.to_string(),
-        }
-    })?;
-    Ok(buf)
-}
-
 async fn put_checkpoint_blobs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blobs: &std::collections::BTreeMap<String, std::sync::Arc<[u8]>>,
@@ -274,17 +260,6 @@ async fn put_checkpoint_blobs_tx(
             .map_err(store_sqlx_error)?;
     }
     Ok(())
-}
-
-async fn get_blob_tx(
-    tx: &mut sqlx::PgConnection,
-    blob_ref: &BlobRef,
-) -> Result<Option<Vec<u8>>, StoreError> {
-    sqlx::query_scalar(crate::blobs::blob_sql().shared.select_content.sql())
-        .bind(blob_ref.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(store_sqlx_error)
 }
 
 pub(crate) async fn lock_checkpoint_blob_tx(
@@ -393,27 +368,23 @@ pub(crate) async fn put_checkpoint_tx(
     chunk_size: usize,
 ) -> Result<(BlobRef, SessionCheckpoint), StoreError> {
     let manifest = checkpoint.manifest(fleet_format)?;
-    let bytes = encode_msgpack(&manifest, "checkpoint root")?;
-    let checkpoint_ref = BlobRef::for_content(&bytes);
 
     // Global PostgreSQL checkpoint lock order:
     // 1. session-history advisory locks, ascending by session id;
-    // 2. manifest-root and component blob rows, ascending by content hash;
-    // 3. checkpoint-owner edges, graph rows, and session heads.
+    // 2. component blob rows, ascending by content hash;
+    // 3. the manifest's graph nodes and edges, then session heads.
     //
     // This transaction bulk-inserts every supplied body in hash order, then acquires the
-    // complete root/component union with one ordered FOR KEY SHARE query.
-    // Concurrent reclaim that wins first is a typed missing-root/component refusal, never a
+    // complete component set with one ordered FOR KEY SHARE query.
+    // Concurrent reclaim that wins first is a typed missing-component refusal, never a
     // resurrection or a later foreign-key error.
     let mut acquisition_order = manifest
         .components
         .iter()
         .map(|(key, descriptor)| (descriptor.blob_ref.as_str().to_string(), Some(key.clone())))
         .collect::<Vec<_>>();
-    acquisition_order.push((checkpoint_ref.as_str().to_string(), None));
     acquisition_order.sort();
     let mut supplied_blobs = std::collections::BTreeMap::new();
-    supplied_blobs.insert(checkpoint_ref.as_str().to_string(), bytes.into());
     for (key, descriptor) in &manifest.components {
         let component =
             checkpoint
@@ -444,18 +415,64 @@ pub(crate) async fn put_checkpoint_tx(
     }
     put_checkpoint_blobs_tx(tx, &supplied_blobs, chunk_size).await?;
     lock_checkpoint_blobs_tx(tx, &acquisition_order, chunk_size).await?;
-    let component_refs = manifest
-        .components
-        .values()
-        .map(|descriptor| descriptor.blob_ref.as_str())
-        .collect::<Vec<_>>();
-    sqlx::query(session_sql().checkpoint_edges.insert_batch.sql())
-        .bind(checkpoint_ref.as_str())
-        .bind(component_refs)
-        .execute(crate::observed_sql::executor(&mut **tx))
+    // The manifest is a SessionManifest node over its components' opaque
+    // blobs and its SessionExecution root, staged and installed with its
+    // edges once every component exists, beside the execution nodes no
+    // earlier commit installed: a missing component is refused as one.
+    let (root, mut nodes) = manifest.to_graph().map_err(graph_store_error)?;
+    if let Some(execution) = &checkpoint.execution {
+        nodes.extend(execution.nodes.iter().map(|(id, node)| (*id, node.clone())));
+    }
+    let checkpoint_ref = BlobRef(root.to_hex());
+    crate::durable::install_staged(tx, &nodes)
         .await
-        .map_err(store_sqlx_error)?;
+        .map_err(graph_store_error)?;
+    // An install skips a root that is already stored without locking it:
+    // the root is held like a component, so a reclaim that wins first is a
+    // typed missing root, never a later foreign-key error.
+    lock_checkpoint_blob_tx(tx, checkpoint_ref.as_str(), None).await?;
     Ok((checkpoint_ref, manifest))
+}
+
+/// A checkpoint graph refusal on the session path, as the store reports it.
+pub(crate) fn graph_store_error(
+    refusal: lash_core_store::checkpoint_graph::GraphRefusal,
+) -> StoreError {
+    match refusal {
+        lash_core_store::checkpoint_graph::GraphRefusal::Backend(failure) => {
+            StoreError::Backend(failure.message)
+        }
+        refusal => StoreError::StoredDataCorrupt {
+            record_kind: "SessionCheckpoint",
+            message: refusal.to_string(),
+        },
+    }
+}
+
+/// Session manifest `blob_ref`'s graph, decoded, with every graph node it
+/// reaches: its SessionExecution graph among them.
+async fn checkpoint_graph_tx(
+    tx: &mut sqlx::PgConnection,
+    blob_ref: &BlobRef,
+) -> Result<Option<(SessionCheckpoint, crate::durable::GraphClosure)>, StoreError> {
+    let root = lash_core_store::checkpoint_graph::NodeId::from_hex(blob_ref.as_str()).ok_or_else(
+        || StoreError::StoredDataCorrupt {
+            record_kind: "SessionCheckpoint",
+            message: format!("`{blob_ref}` is not a node reference"),
+        },
+    )?;
+    let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 32);
+    let closure = match crate::durable::graph_closure(tx, root, &limits).await {
+        Ok(closure) => closure,
+        Err(lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(missing))
+            if missing == root =>
+        {
+            return Ok(None);
+        }
+        Err(refusal) => return Err(graph_store_error(refusal)),
+    };
+    let manifest = SessionCheckpoint::load(&closure, root, limits).map_err(graph_store_error)?;
+    Ok(Some((manifest, closure)))
 }
 
 /// `fleet` is the store's recorded `F`: the manifest and its component
@@ -466,20 +483,28 @@ pub(crate) async fn get_checkpoint_tx(
     fleet: lash_core_execution::FleetFormat,
     chunk_size: usize,
 ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
-    let bytes = get_blob_tx(tx, blob_ref).await?;
-    let Some(bytes) = bytes else {
+    let Some((manifest, closure)) = checkpoint_graph_tx(tx, blob_ref).await? else {
         return Ok(None);
     };
-    let manifest: SessionCheckpoint =
-        lash_core_execution::store::decode_versioned_msgpack_record_for_fleet(
-            &bytes,
-            "SessionCheckpoint",
-            lash_core_execution::surface_format!(
-                lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION
-            ),
-            fleet,
-        )?;
     manifest.validate_component_encoding_versions_for_fleet(fleet)?;
+    let execution = manifest
+        .execution_ref
+        .as_ref()
+        .map(|root| {
+            let root = lash_core_store::checkpoint_graph::NodeId::from_hex(root.as_str())
+                .ok_or_else(|| StoreError::StoredDataCorrupt {
+                    record_kind: "SessionCheckpoint",
+                    message: format!("`{root}` is not a node reference"),
+                })?;
+            let nodes = lash_core_store::checkpoint_graph::closure(
+                &closure,
+                root,
+                &lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 32),
+            )
+            .map_err(graph_store_error)?;
+            Ok::<_, StoreError>(lash_core_execution::store::CheckpointExecution { root, nodes })
+        })
+        .transpose()?;
     let bodies = checkpoint_component_bodies_tx(tx, &manifest, chunk_size).await?;
     let mut components = std::collections::BTreeMap::new();
     for (key, descriptor) in &manifest.components {
@@ -500,6 +525,7 @@ pub(crate) async fn get_checkpoint_tx(
     Ok(Some(HydratedSessionCheckpoint {
         turn_state: manifest.turn_state,
         components,
+        execution,
     }))
 }
 

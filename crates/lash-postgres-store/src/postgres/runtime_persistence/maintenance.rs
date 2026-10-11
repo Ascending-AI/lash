@@ -1,6 +1,6 @@
 use super::*;
+use crate::guarded_tx::begin_collecting;
 use crate::session_sql::session_sql;
-use sqlx::Executor;
 
 #[async_trait::async_trait]
 impl StoreMaintenance for PostgresStore {
@@ -13,13 +13,12 @@ impl StoreMaintenance for PostgresStore {
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)
     }
 
-    /// Checkpoint-rooted mark/sweep over `lash_blobs`, mirroring the SQLite
-    /// store's semantics ([`GcReport`] fields match). PostgreSQL stores each
-    /// checkpoint as one manifest plus separately addressed tool, plugin, and
-    /// execution-state components. The Lash VM artifact namespaces live
-    /// in a separate, upsert-in-place table (`lash_lash_vm_artifacts`).
-    /// Those artifact rows are retained service roots, so GC does not touch
-    /// this table.
+    /// Reachability mark/sweep over `lash_blobs` from every root the graph
+    /// root catalog names, mirroring the SQLite store's ([`GcReport`] fields
+    /// match). A missing root or child, a corrupt node or an incomplete
+    /// source fails the collection with nothing swept. Lash VM artifact rows
+    /// (`lash_lash_vm_artifacts`) are not swept: only a bridged artifact's
+    /// graph node is a root.
     async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {
         // One transaction: a failure rolls every delete back, so no work
         // survived to report.
@@ -83,132 +82,36 @@ impl PostgresStore {
     async fn gc_unreachable_blobs(&self) -> Result<GcReport, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         // A host collection is what ends `until_gc`'s hold: release every
-        // revision no head, pin or retention window keeps, in a transaction
-        // of its own. It takes revision and node locks, which a commit takes
-        // before its blob locks, so it must finish before the sweep takes
-        // the table lock below. A crash between the two leaves released
-        // revisions whose bytes the next collection sweeps.
+        // revision no head, pin or retention window keeps, and retire every
+        // expired read pin, in an ordinary guarded transaction of its own
+        // (FIG-5887 §8). A crash between it and the collection leaves
+        // released roots whose bytes the next collection sweeps.
         {
             let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
             crate::revisions::release_unretained_tx(&mut tx, true, None).await?;
-            tx.commit().await.map_err(store_sqlx_error)?;
-        }
-        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
-        // Serialize against concurrent checkpoint-blob writers. Every commit
-        // INSERTs its new manifest into `lash_blobs` (holding a ROW EXCLUSIVE
-        // lock) inside the same transaction that repoints `lash_session_head`, so an
-        // EXCLUSIVE table lock makes the root read and the sweep atomic with
-        // respect to every committer: a commit racing GC either lands fully
-        // before the root read or blocks until GC releases. This is the fenced
-        // transactional discipline the store uses on its other write paths.
-        // Preserve simple-query execution through observation. Preparing this
-        // utility statement caches the query ID that pg_stat_statements clears
-        // on its first execution, hiding subsequent locks from the GC law.
-        crate::observed_sql::executor(&mut **tx)
-            .execute("LOCK TABLE lash_blobs IN EXCLUSIVE MODE")
-            .await
-            .map_err(store_sqlx_error)?;
-        // Roots: every live session's checkpoint manifest, across ALL sessions.
-        // `lash_blobs` is a content-addressed table shared by the whole
-        // database, so a blob shared across sessions must stay reachable while
-        // ANY session references it — scoping roots to one session would delete
-        // another session's live checkpoint.
-        let root_refs =
-            sqlx::query_scalar::<_, String>(session_sql().head.select_checkpoint_roots.sql())
-                .fetch_all(crate::observed_sql::executor(&mut **tx))
+            let now = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
+            crate::durable::retire_expired_read_pins_in(&mut tx, now)
                 .await
                 .map_err(store_sqlx_error)?;
-        use lash_core_execution::store::{
-            EnumerationProgress, PostgresBlobRootSource, ReclamationEnumeration,
-        };
-        let mut enumeration = ReclamationEnumeration::<PostgresBlobRootSource, String>::new();
-        enumeration.page(
-            PostgresBlobRootSource::Checkpoints,
-            0,
-            root_refs.iter().cloned(),
-            EnumerationProgress::Exhausted,
-        )?;
-        let root_count = root_refs.len();
-        let mut retained = std::collections::BTreeSet::<String>::new();
-        for checkpoint_hash in root_refs {
-            if !retained.insert(checkpoint_hash.clone()) {
-                continue;
-            }
-            // A rooted manifest is live.
-            // A present-yet-undecodable manifest is a hard error so GC aborts rather than
-            // dropping a live checkpoint's children; an absent one was already collected on a
-            // prior run.
-            let bytes: Option<Vec<u8>> =
-                sqlx::query_scalar(crate::blobs::blob_sql().shared.select_content.sql())
-                    .bind(&checkpoint_hash)
-                    .fetch_optional(crate::observed_sql::executor(&mut **tx))
-                    .await
-                    .map_err(store_sqlx_error)?;
-            let Some(bytes) = bytes else {
-                continue;
-            };
-            let manifest: SessionCheckpoint =
-                lash_core_execution::store::decode_versioned_msgpack_record_for_fleet(
-                    &bytes,
-                    "SessionCheckpoint",
-                    lash_core_execution::surface_format!(
-                        lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION
-                    ),
-                    self.fence.fleet(),
-                )?;
-            // GC interprets only the root's ref graph, never component bodies.
-            // Retain refs even when a newer writer used an unknown component
-            // codec so an older binary cannot turn incompatibility into loss.
-            for descriptor in manifest.components.values() {
-                retained.insert(descriptor.blob_ref.0.clone());
-            }
+            tx.commit().await.map_err(store_sqlx_error)?;
         }
-        enumeration.page(
-            PostgresBlobRootSource::CheckpointComponents,
-            0,
-            retained,
-            EnumerationProgress::Exhausted,
-        )?;
-        let retained = enumeration.finish()?;
-        let deleted_blob_count = Self::reclaim_unretained_blobs_tx(&mut tx, &retained).await?;
+        // The collection takes the graph gate exclusive ahead of the writer
+        // fence: every writer, hydration and pin fetch holds it shared, so
+        // the root enumeration, the mark and the sweep are one atomic step
+        // against all of them.
+        let mut tx = begin_collecting(&mut *connection, &self.fence).await?;
+        let collection = crate::durable::collect_graph_in(
+            &mut tx,
+            lash_durable::domain::graph_commit::CollectionLimits::UNBOUNDED,
+        )
+        .await
+        .map_err(|refusal| StoreError::Backend(refusal.to_string()))?;
         tx.commit().await.map_err(store_sqlx_error)?;
+        let as_usize = |count: u64| usize::try_from(count).unwrap_or(usize::MAX);
         Ok(GcReport {
-            root_count,
-            retained_blob_count: retained.len(),
-            deleted_blob_count,
+            root_count: as_usize(collection.roots.values().sum()),
+            retained_blob_count: as_usize(collection.marked),
+            deleted_blob_count: as_usize(collection.swept_blobs),
         })
-    }
-    async fn reclaim_unretained_blobs_tx(
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        retained: &lash_core_execution::store::CompleteEnumeration<
-            lash_core_execution::store::PostgresBlobRootSource,
-            String,
-        >,
-    ) -> Result<usize, StoreError> {
-        // Projection edges belong to retained-revision roots. Sever every dead
-        // root's complete outgoing set before the blob sweep: a strict
-        // component FK must never be weakened to accommodate stale ownership
-        // data.
-        sqlx::query(session_sql().checkpoint_edges.delete_unrooted.sql())
-            .execute(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?;
-        // The sweep is one statement whose bind is the retained set, so the
-        // deletion phase's statement count is independent of the dead set's
-        // size and the reported count is the rows PostgreSQL actually
-        // removed. The EXCLUSIVE table lock held since the root read makes
-        // the anti-join exact: no checkpoint commit can INSERT behind it, and
-        // an empty retained set sweeps the whole table.
-        let deleted_blob_count =
-            sqlx::query(crate::blobs::blob_sql().postgres.sweep_unretained.sql())
-                .bind(retained.iter().cloned().collect::<Vec<_>>())
-                .execute(crate::observed_sql::executor(&mut **tx))
-                .await
-                .map_err(store_sqlx_error)?
-                .rows_affected();
-        let deleted_blob_count = usize::try_from(deleted_blob_count).map_err(|_| {
-            StoreError::Backend("gc deleted blob count does not fit usize".to_string())
-        })?;
-        Ok(deleted_blob_count)
     }
 }

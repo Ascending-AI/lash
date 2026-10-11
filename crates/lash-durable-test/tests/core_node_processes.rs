@@ -1744,13 +1744,16 @@ async fn lash_vm_process_runs_to_its_terminal(tier: Tier) {
     let steps = deployment
         .backend
         .durable()
-        .run_records(&lash_durable::domain::OwnerKey::Process(process))
+        .run_facts(&lash_durable::domain::OwnerKey::Process(process))
         .await
-        .expect("the process's run records are read");
+        .expect("the process's run facts are read");
+    // A step's admission names its tool, inline in the fact's node.
+    let step = lash_vm_runtime::KERNEL_RUN_STEP.as_bytes();
     assert!(
         steps
-            .iter()
-            .any(|row| format!("{row:?}").contains(lash_vm_runtime::KERNEL_RUN_STEP)),
+            .nodes
+            .values()
+            .any(|node| node.bytes.windows(step.len()).any(|window| window == step)),
         "the machine ran in its kernel_run steps: {steps:?}"
     );
 }

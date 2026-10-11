@@ -1,6 +1,6 @@
 //! A process's terminal transaction and its parks (ADR 0132 §3, §11).
 
-use lash_durable::domain::{ParkEventWrite, ProcessWrite, ScopeKey, SnapshotWrite};
+use lash_durable::domain::{ExecRootWrite, ParkEventWrite, ProcessWrite, ScopeKey};
 use lash_durable::{ActorTx, DomainWrite, DurableError, StoreFailure, StoreFailureKind};
 
 use crate::runtime::actor::waits;
@@ -146,7 +146,7 @@ pub fn record_terminal(
     }));
     waits::resolve_process_terminal_waits(tx, process, outcome)?;
     waits::revoke_scope(tx, &ScopeKey::Process(process.clone()));
-    tx.write(DomainWrite::Snapshot(SnapshotWrite::Delete {
+    tx.write(DomainWrite::ExecRoot(ExecRootWrite::Clear {
         exec: lash_durable::domain::ExecKey::Process(process.clone()),
     }));
     Ok(())

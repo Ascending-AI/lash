@@ -32,6 +32,7 @@ workspace = true
 [dependencies]
 lash-core-ids = { workspace = true }
 lash-core-llm = { workspace = true }
+lash-kernel-doc = { workspace = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 lash-vm-protocol = { workspace = true }
 lash-trace = { workspace = true }

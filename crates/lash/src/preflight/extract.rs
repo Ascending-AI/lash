@@ -13,9 +13,11 @@
 //! panic and never a silent skip: the probe's whole job is to describe stored
 //! data it may not be able to read.
 
+use lash_core::durable_port::domain::checkpoint_graph::{
+    EncodedNode as GraphNode, NodeId, NodeKind,
+};
 use lash_core::{DurableItem, DurablePayload, DurableSurface};
 
-use super::msgpack;
 use super::{PRIMARY_FORMATS, SurfaceRelation, format_surface};
 use crate::formats::DurableFormat;
 
@@ -79,7 +81,7 @@ pub(super) fn extract(item: &DurableItem) -> Vec<Extraction> {
     let format = primary_format(item.surface);
     let payload = match &item.payload {
         DurablePayload::Json(text) => Payload::Json(text.as_str()),
-        DurablePayload::MessagePack(bytes) => Payload::MessagePack(bytes.as_slice()),
+        DurablePayload::GraphNode(bytes) => Payload::Graph(bytes.as_slice()),
         DurablePayload::Missing { reason } => {
             return vec![Extraction::Undecodable {
                 format,
@@ -126,11 +128,11 @@ fn kernel_document(payload: Payload<'_>) -> Vec<Extraction> {
     }
 }
 
-/// The two framings a walk yields, narrowed to borrowed bytes.
+/// The framings a walk yields, narrowed to borrowed bytes.
 #[derive(Clone, Copy)]
 enum Payload<'a> {
     Json(&'a str),
-    MessagePack(&'a [u8]),
+    Graph(&'a [u8]),
 }
 
 impl<'a> Payload<'a> {
@@ -142,20 +144,35 @@ impl<'a> Payload<'a> {
                     reason: format!("payload is not JSON: {error}"),
                 })
             }
-            Payload::MessagePack(_) => Err(Extraction::Undecodable {
+            Payload::Graph(_) => Err(Extraction::Undecodable {
                 format,
-                reason: "payload is MessagePack where this format is JSON".to_string(),
+                reason: format!("payload is {} where this format is JSON", self.framing()),
             }),
         }
     }
 
-    fn messagepack(self, format: DurableFormat) -> Result<&'a [u8], Extraction> {
+    /// The checkpoint graph node the payload's bytes encode, identified by
+    /// their hash.
+    fn graph(self, format: DurableFormat) -> Result<GraphNode, Extraction> {
         match self {
-            Payload::MessagePack(bytes) => Ok(bytes),
+            Payload::Graph(bytes) => Ok(GraphNode {
+                id: NodeId::of_envelope(bytes),
+                bytes: std::sync::Arc::from(bytes),
+            }),
             Payload::Json(_) => Err(Extraction::Undecodable {
                 format,
-                reason: "payload is JSON where this format is MessagePack".to_string(),
+                reason: format!(
+                    "payload is {} where this format is a checkpoint graph node",
+                    self.framing()
+                ),
             }),
+        }
+    }
+
+    fn framing(self) -> &'static str {
+        match self {
+            Payload::Json(_) => "JSON",
+            Payload::Graph(_) => "a checkpoint graph node",
         }
     }
 }
@@ -229,66 +246,77 @@ fn start_generation(_record: &serde_json::Value, _stamp: Option<&str>) -> Option
 /// it names — the component encodings are stored in the manifest, not in the
 /// component bodies, so one blob read decides both formats.
 fn session_checkpoint(payload: Payload<'_>) -> Vec<Extraction> {
-    let manifest = DurableFormat::SessionCheckpointManifest;
-    let bytes = match payload.messagepack(manifest) {
-        Ok(bytes) => bytes,
+    let format = DurableFormat::SessionCheckpointManifest;
+    let node = match payload.graph(format) {
+        Ok(node) => node,
         Err(extraction) => return vec![extraction],
     };
-    let root = msgpack::Value::root(bytes);
-    let mut found = Vec::new();
-    match root
-        .field("schema_version")
-        .and_then(msgpack::Value::as_u32)
-    {
-        Some(version) => found.push(Extraction::Found {
-            format: manifest,
-            version,
-        }),
-        None => found.push(Extraction::Undecodable {
-            format: manifest,
-            reason: "checkpoint root carries no readable `schema_version`".to_string(),
-        }),
-    }
-    let encoding = DurableFormat::CheckpointComponentEncoding;
-    // An absent `components` map is a checkpoint with no components, which the
-    // manifest omits rather than encodes as empty. Nothing to report is not the
-    // same as nothing readable.
-    if let Some(components) = root.field("components").and_then(msgpack::Value::entries) {
-        for (key, descriptor) in components {
-            match descriptor
-                .field("encoding_version")
-                .and_then(msgpack::Value::as_u32)
-            {
-                Some(version) => found.push(Extraction::Found {
-                    format: encoding,
-                    version,
-                }),
-                None => found.push(Extraction::Undecodable {
-                    format: encoding,
-                    reason: format!("component `{key}` carries no readable `encoding_version`"),
-                }),
-            }
-        }
-    }
-    found
+    let Some(manifest) = lash_core::store::SessionCheckpoint::named(&node) else {
+        return vec![Extraction::Undecodable {
+            format,
+            reason: "checkpoint root is not a readable SessionManifest node".to_string(),
+        }];
+    };
+    // A checkpoint with no components names none, which is nothing to
+    // report rather than nothing readable.
+    std::iter::once(Extraction::Found {
+        format,
+        version: manifest.schema_version,
+    })
+    .chain(
+        manifest
+            .components
+            .into_iter()
+            .map(|(_, version)| Extraction::Found {
+                format: DurableFormat::CheckpointComponentEncoding,
+                version,
+            }),
+    )
+    .collect()
 }
 
+/// A session's execution state is a SessionExecution graph node, which
+/// carries no version of its own: the 1.0 node registry is frozen, and a
+/// later shape is a new kind (FIG-5887 §14). A root of the registered kind
+/// is this build's surface version; any other node is not readable as one.
 fn session_execution_state(payload: Payload<'_>) -> Vec<Extraction> {
     let format = DurableFormat::CodeModeSnapshotEnvelope;
-    let bytes = match payload.messagepack(format) {
-        Ok(bytes) => bytes,
+    let node = match payload.graph(format) {
+        Ok(node) => node,
         Err(extraction) => return vec![extraction],
     };
-    match msgpack::Value::root(bytes)
-        .field("version")
-        .and_then(msgpack::Value::as_u32)
-    {
-        Some(version) => vec![Extraction::Found { format, version }],
-        None => vec![Extraction::Undecodable {
+    match node.envelope() {
+        Ok(envelope) if envelope.kind == NodeKind::SESSION_EXECUTION => execution_surface(format),
+        Ok(envelope) => vec![Extraction::Undecodable {
             format,
-            reason: "execution-state root carries no readable `version`".to_string(),
+            reason: format!(
+                "execution-state root is a node of kind {}, not a SessionExecution",
+                envelope.kind.0
+            ),
+        }],
+        Err(refusal) => vec![Extraction::Undecodable {
+            format,
+            reason: format!("execution-state root is not a readable graph node: {refusal}"),
         }],
     }
+}
+
+#[cfg(feature = "rlm")]
+fn execution_surface(format: DurableFormat) -> Vec<Extraction> {
+    vec![Extraction::Found {
+        format,
+        version: crate::formats::CODEMODE_SNAPSHOT_VERSION,
+    }]
+}
+
+/// A build without a code mode executor reads no session execution state.
+#[cfg(not(feature = "rlm"))]
+fn execution_surface(format: DurableFormat) -> Vec<Extraction> {
+    vec![Extraction::Undecodable {
+        format,
+        reason: "this build holds no code mode executor to read session execution state"
+            .to_string(),
+    }]
 }
 
 #[cfg(test)]
@@ -370,32 +398,39 @@ mod tests {
         assert!(reasons[0].contains("`kernel` version"), "{reasons:?}");
     }
 
+    /// A SessionManifest node's bytes stamped `schema_version`, naming one
+    /// component per encoding version in `encodings`.
     fn checkpoint_root(schema_version: u32, encodings: &[u32]) -> Vec<u8> {
-        let components: serde_json::Map<String, serde_json::Value> = encodings
-            .iter()
-            .enumerate()
-            .map(|(index, encoding)| {
-                (
-                    format!("component-{index}"),
-                    serde_json::json!({"blob_ref": "sha256:abc", "encoding_version": encoding}),
-                )
-            })
-            .collect();
-        rmp_serde::to_vec_named(&serde_json::json!({
-            "schema_version": schema_version,
-            "turn_state": {"anything": [1, 2, 3]},
-            "components": components,
-        }))
-        .expect("the fixture encodes")
+        let blob = NodeId::of_envelope(b"component body").to_hex();
+        let manifest = lash_core::store::SessionCheckpoint {
+            schema_version,
+            turn_state: lash_core::PersistedTurnState::default(),
+            components: encodings
+                .iter()
+                .enumerate()
+                .map(|(index, encoding)| {
+                    (
+                        format!("component-{index}"),
+                        lash_core::store::CheckpointComponentDescriptor {
+                            blob_ref: lash_core::store::BlobRef(blob.clone()),
+                            encoding_version: *encoding,
+                        },
+                    )
+                })
+                .collect(),
+            execution_ref: None,
+        };
+        let (root, nodes) = manifest.to_graph().expect("the fixture stages");
+        nodes[&root].bytes.to_vec()
     }
 
     #[tokio::test]
     async fn a_checkpoint_answers_for_its_manifest_and_every_component_encoding() {
-        // One blob read decides two formats, because the component encodings
+        // One node read decides two formats, because the component encodings
         // live in the manifest rather than in the component bodies.
         let extractions = extract(&item(
             DurableSurface::SessionCheckpoint,
-            DurablePayload::MessagePack(checkpoint_root(2, &[2, 2, 3])),
+            DurablePayload::GraphNode(checkpoint_root(2, &[2, 2, 3])),
         ))
         .await;
         assert_eq!(
@@ -410,11 +445,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_checkpoint_with_no_components_reports_nothing_rather_than_undecodable() {
-        let bytes = rmp_serde::to_vec_named(&serde_json::json!({"schema_version": 2}))
-            .expect("the fixture encodes");
         let extractions = extract(&item(
             DurableSurface::SessionCheckpoint,
-            DurablePayload::MessagePack(bytes),
+            DurablePayload::GraphNode(checkpoint_root(2, &[])),
         ))
         .await;
         assert_eq!(

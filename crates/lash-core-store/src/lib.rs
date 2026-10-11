@@ -22,7 +22,9 @@ pub mod admitted_scope;
 pub mod artifact_referrer;
 pub mod attachments;
 pub mod await_event_identity;
+pub mod checkpoint_graph;
 pub mod chronological;
+mod codec_variants;
 pub mod compat;
 pub mod config_transaction;
 pub mod effect_identity;
@@ -61,6 +63,7 @@ pub mod session_state;
 pub mod session_store_factory_types;
 mod snapshot_index;
 pub mod store;
+pub mod store_failure;
 pub mod tool_run;
 pub mod tool_state;
 pub mod turn_control_vocabulary;
@@ -121,10 +124,7 @@ pub(crate) use store::{
 pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlement};
 
 pub(crate) use config_transaction::{ConfigTransactionOutcome, ConfigTransactionRecord};
-pub(crate) use execution_state::{
-    AdmittedPluginConfig, CheckpointComponentKey, ExecutionLeafName, ExecutionStateCapture,
-    HydratedExecutionState, LeafChange, PluginConfig,
-};
+pub(crate) use execution_state::{AdmittedPluginConfig, CheckpointComponentKey, PluginConfig};
 pub(crate) use lash_sansio::{
     TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence,
 };
@@ -253,10 +253,8 @@ pub(crate) use turn_input_vocabulary::{TurnInputAdmissionMode, ingress_message_i
 
 /// Path shim: the durable half of what `lash-core` exposes as `crate::plugin`.
 pub(crate) mod plugin {
-    pub(crate) use crate::{
-        CheckpointComponentKey, ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState,
-        LeafChange,
-    };
+    pub(crate) use crate::CheckpointComponentKey;
+    pub(crate) use crate::execution_state::{ExecutionGraphCapture, HydratedExecutionGraph};
 }
 
 pub(crate) use runtime_error::RuntimeErrorCause;

@@ -15,14 +15,14 @@
 //! build's helpers (FIG-5799). A state it does not adopt goes on as
 //! written.
 
-use lash_durable::domain::{ExecKey, ProcessActorRow, ProcessWrite, SnapshotRev, SnapshotWrite};
+use lash_durable::domain::{ExecRootRow, ProcessActorRow, ProcessWrite};
 use lash_durable::runner::Owned;
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableReads, FormatSet, StoreFailure,
     StoreFailureKind,
 };
 
-use super::activation::{Pass, ProcessActivation, corrupt, hex_decode, hex_encode};
+use super::activation::{Pass, ProcessActivation};
 use super::driver::Driver;
 use super::terminal::ProcessParkReason;
 use crate::runtime::process::engine_state::{EngineState, EngineStateFormat};
@@ -53,7 +53,7 @@ impl ProcessActivation {
         driver: &Driver,
         engine: &dyn ProcessEngine,
         state: &EngineState,
-        snapshot_rev: Option<SnapshotRev>,
+        root: Option<&ExecRootRow>,
     ) -> Result<Carry, DurableError> {
         let written = state.format.clone();
         let declared = engine.state_format();
@@ -89,13 +89,7 @@ impl ProcessActivation {
                     driver_json: driver.encode(),
                 }));
                 tx.stamp_formats(newer);
-                tx.write(DomainWrite::Snapshot(SnapshotWrite::Put {
-                    exec: ExecKey::Process(process.clone()),
-                    expected: snapshot_rev,
-                    snapshot_ref: hex_encode(&carried.bytes),
-                    executable_identity: carried.format.kind.clone(),
-                    format_version: carried.format.version,
-                }));
+                super::state_graph::write_engine_state(&mut tx, process, kind, &carried, root)?;
                 owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
                 return Ok(Carry::Ended(Pass::Again));
             }
@@ -167,21 +161,13 @@ impl ProcessActivation {
 ///
 /// # Errors
 ///
-/// The store's, and a stored state that is not lowercase hex.
+/// The store's, and a stored root that does not load as the process's
+/// state.
 pub async fn stored_engine_state(
     reads: &dyn DurableReads,
     process: &ProcessId,
 ) -> Result<Option<EngineState>, DurableError> {
-    let Some(snapshot) = reads.snapshot(&ExecKey::Process(process.clone())).await? else {
-        return Ok(None);
-    };
-    let bytes = hex_decode(&snapshot.snapshot_ref)
-        .ok_or_else(|| corrupt("a process's engine state", "it is not lowercase hex"))?;
-    Ok(Some(EngineState {
-        format: EngineStateFormat {
-            kind: snapshot.executable_identity,
-            version: snapshot.format_version,
-        },
-        bytes,
-    }))
+    Ok(super::state_graph::read_engine_state(reads, process)
+        .await?
+        .map(|(_, _, state)| state))
 }

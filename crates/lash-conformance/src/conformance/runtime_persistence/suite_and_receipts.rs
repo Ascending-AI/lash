@@ -213,13 +213,10 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
         lash_core::NoProgressBudget::bounded(12),
     ));
     state.session_id = SessionId::from("execution-state-replace-then-clear");
-    lash_core::testing::stage_execution_state_components(
+    lash_core::testing::stage_execution_graph(
         &mut state,
-        lash_core::plugin::ExecutionStateCapture::replace(
-            b"initial-execution-state".to_vec().into(),
-        ),
-    )
-    .expect("stage initial capture");
+        lash_core::testing::store_fixtures::execution_graph("initial-execution-state"),
+    );
 
     let initial = commit_runtime_state_for_test(
         &store,
@@ -230,13 +227,10 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     .expect("commit initial execution state");
     state.apply_persisted_commit_result(initial);
 
-    lash_core::testing::stage_execution_state_components(
+    lash_core::testing::stage_execution_graph(
         &mut state,
-        lash_core::plugin::ExecutionStateCapture::replace(
-            b"replacement-execution-state".to_vec().into(),
-        ),
-    )
-    .expect("stage replacement capture");
+        lash_core::testing::store_fixtures::execution_graph("replacement-execution-state"),
+    );
     let replacement = commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&state),
@@ -244,19 +238,13 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     )
     .await
     .expect("replace execution state");
-    assert!(
-        replacement
-            .manifest
-            .component_ref(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
-            .is_some()
-    );
+    assert!(replacement.manifest.execution_ref.is_some());
     state.apply_persisted_commit_result(replacement);
 
-    lash_core::testing::stage_execution_state_components(
+    lash_core::testing::stage_execution_graph(
         &mut state,
-        lash_core::plugin::ExecutionStateCapture::Clear,
-    )
-    .expect("stage clear capture");
+        lash_core::plugin::ExecutionGraphCapture::Clear,
+    );
     let cleared = commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&state),
@@ -264,12 +252,7 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     )
     .await
     .expect("clear replacement execution state");
-    assert!(
-        cleared
-            .manifest
-            .component_ref(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
-            .is_none()
-    );
+    assert!(cleared.manifest.execution_ref.is_none());
 
     let durable = store
         .load_session_window(
@@ -282,11 +265,7 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     let checkpoint = durable
         .checkpoint
         .expect("replace-then-clear session has a checkpoint");
-    assert!(
-        checkpoint
-            .component_ref(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
-            .is_none()
-    );
+    assert!(checkpoint.execution.is_none());
 }
 
 #[expect(
@@ -351,7 +330,7 @@ pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn Runtim
     );
     let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
     commit.checkpoint.components.insert(
-        crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
+        "arbitrary/oversized".to_string(),
         crate::HydratedCheckpointComponent::changed(vec![0; CONFIGURED_BYTE_LIMIT * 2]),
     );
 

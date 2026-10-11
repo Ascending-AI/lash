@@ -4,7 +4,7 @@
 //! it through the machine's own interface: [`ParentMessage::Start`] compiles
 //! the document, [`ParentMessage::Run`] runs ready tasks until the run parks,
 //! spends its slice or ends, [`ParentMessage::Deliver`] hands it one
-//! committed outcome and [`ParentMessage::Export`] asks for its state. While
+//! committed outcome and [`ParentMessage::ExportGraph`] asks for its state. While
 //! a slice runs the worker asks the parent what the machine reads from its
 //! host ([`WorkerMessage::HostRead`]) and hands over what it prints
 //! ([`WorkerMessage::Printed`]). Every message travels under a
@@ -18,7 +18,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::state::{OpaqueVmState, VmOwner};
+use crate::graph_state::SealedGraphState;
+use crate::state::VmOwner;
 
 /// The lease one checkout of a worker runs under. The parent mints it and
 /// fences it when the worker is lost, so a late message under an old lease is
@@ -240,8 +241,23 @@ pub enum StartFrom {
     /// A new run: its target, arguments and session bindings, in the
     /// kernel's encoding.
     Fresh(EncodedPayload),
-    /// A parked run, as the worker that exported it sealed it.
-    Parked(OpaqueVmState),
+    /// A parked run as checkpoint graph state, with the admission of every
+    /// wait it holds.
+    ParkedGraph(ParkedGraph),
+}
+
+/// A parked run as the parent hands it back: the graph state a worker
+/// exported (a KernelWhole root and the nodes it needs), and, for every wait
+/// the run holds, the request the parent's admission froze when the park
+/// handed the wait out. The state holds a wait as its effect identity
+/// alone, so a worker resumes it only from these (FIG-5887 §3).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParkedGraph {
+    pub state: SealedGraphState,
+    /// Each an admitted wait in the kernel's binary encoding
+    /// (`lash_kernel_state::AdmittedWait`); the protocol does not read it.
+    pub admissions: Vec<EncodedPayload>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -309,9 +325,12 @@ pub enum ParentMessage {
         id: HostReadId,
         answer: EncodedPayload,
     },
-    /// Write the run's state as it stands. Legal between runs: every task
-    /// is between statements.
-    Export,
+    /// Write the run's state at a park as checkpoint graph state, bound to
+    /// the execution `binding` names (an OwnerBinding body in the graph's
+    /// token encoding).
+    ExportGraph {
+        binding: EncodedPayload,
+    },
     /// Physical cancellation: drop the machine where it stands.
     Cancel,
     /// Drop the machine and everything guest-derived. Sent only after a
@@ -374,8 +393,8 @@ pub enum WorkerMessage {
     Delivered {
         dropped: bool,
     },
-    Exported {
-        state: OpaqueVmState,
+    ExportedGraph {
+        state: SealedGraphState,
     },
     Cancelled,
     ResetDone {
@@ -402,7 +421,7 @@ impl WorkerMessage {
             Self::Slice { .. } => WorkerFrameKind::Slice,
             Self::Ended { .. } => WorkerFrameKind::Ended,
             Self::Delivered { .. } => WorkerFrameKind::Delivered,
-            Self::Exported { .. } => WorkerFrameKind::Exported,
+            Self::ExportedGraph { .. } => WorkerFrameKind::Exported,
             Self::Cancelled => WorkerFrameKind::Cancelled,
             Self::ResetDone { .. } => WorkerFrameKind::ResetDone,
             Self::Prepared { .. } => WorkerFrameKind::Prepared,

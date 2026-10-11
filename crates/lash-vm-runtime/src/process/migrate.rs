@@ -12,8 +12,9 @@
 //! state in this build's format, before any transition.
 //!
 //! The parked run is read here as data, in the parent, as
-//! `lash-kernel-state` lets any host read one: under the state's byte bound
-//! and the schema's nesting bound. Nothing is compiled or run.
+//! `lash-kernel-state` lets any host read one: its KernelWhole restored to
+//! the kernel's parked structure with each wait's admission, carried, and
+//! captured as a whole state again. Nothing is compiled or run.
 //!
 //! [`plan_migration`] and [`migrate_run`] are that carrying without a
 //! store, which `lashctl` runs over a deployment before an upgrade to list
@@ -22,12 +23,14 @@
 use std::sync::Arc;
 
 use lash_core::{EngineState, EngineStateFormat, EngineStateRefusal, ProcessId};
+use lash_core_store::checkpoint_graph::DecodeLimits;
+use lash_kernel_doc::graph_tokens::ChildRef;
 use lash_kernel_doc::{Document, DocumentId, FunctionRegistry, KernelVersion, validate_document};
 use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal, Rewritten, migration_from};
-use lash_kernel_state::ParkedRun;
-use lash_vm_client::OpaqueVmState;
+use lash_kernel_state::AdmittedWait;
+use lash_vm_broker::kernel::state::{OpenedRun, WholeState, capture_whole, open_whole};
 
-use super::state::{KernelEngineState, KernelProcessInput, Phase, Wait};
+use super::state::{KernelEngineState, KernelProcessInput, Phase, SealedRun, Wait};
 use super::{DocumentStoreError, KernelDocuments, KernelProcessEngine, advance};
 
 /// Why a kernel process is not carried to the next kernel version.
@@ -114,38 +117,6 @@ pub fn plan_migration(
     }))
 }
 
-/// A parked run whose bytes do not state the kernel version it is sealed
-/// under: the seal is what a holder reads the version from, so such a run
-/// would be resumed, or carried, as a version it was not parked under.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum SealedKernelRefusal {
-    #[error(
-        "the parked run is sealed under kernel version {sealed}, and its bytes state kernel version {parked}"
-    )]
-    Mismatch { sealed: u32, parked: u32 },
-    #[error("the parked run's bytes state no kernel version: {message}")]
-    Unreadable { message: String },
-}
-
-/// Checks that `parked`'s bytes state the kernel version of its seal.
-///
-/// # Errors
-///
-/// [`SealedKernelRefusal`].
-pub fn check_sealed_kernel(parked: &OpaqueVmState) -> Result<(), SealedKernelRefusal> {
-    let stated =
-        ParkedRun::kernel_of(parked.bytes()).map_err(|error| SealedKernelRefusal::Unreadable {
-            message: error.to_string(),
-        })?;
-    if stated != parked.kernel() {
-        return Err(SealedKernelRefusal::Mismatch {
-            sealed: parked.kernel(),
-            parked: stated,
-        });
-    }
-    Ok(())
-}
-
 /// `function`, a saved function, carried to kernel version `writes`: its
 /// code rewritten by each migration between the version it is stored in
 /// and that one, or `None` when it is stored in `writes` already. A saved
@@ -191,40 +162,77 @@ pub fn migrate_saved_function(
     }
 }
 
-/// The run `parked` under `base`, carried onto `plan`'s rewrite of it and
-/// sealed under the same owner.
+/// The run `parked` under `base`, each wait's request in `admitted`,
+/// carried onto `plan`'s rewrite of it and pinning `release`, the build's
+/// helper release, which the rewritten document is admitted against.
 ///
 /// # Errors
 ///
 /// The typed refusal of a run that is not carried.
 pub fn migrate_run(
-    parked: &OpaqueVmState,
+    parked: &WholeState,
+    admitted: &[AdmittedWait],
     base: &Document,
     plan: &PlannedMigration,
-) -> Result<OpaqueVmState, KernelMigrationRefusal> {
+    release: ChildRef,
+) -> Result<WholeState, KernelMigrationRefusal> {
     let state = |message: String| KernelMigrationRefusal::State { message };
     let refused = |refusal| KernelMigrationRefusal::Parked {
         document: plan.from,
         refusal,
     };
-    let Some(migration) = KernelVersion::of(parked.kernel()).and_then(migration_from) else {
+    let Some(migration) = KernelVersion::of(parked.kernel).and_then(migration_from) else {
         return Err(refused(ParkedRefusal::Version {
-            found: parked.kernel(),
+            found: parked.kernel,
             from: base.manifest.kernel,
         }));
     };
-    check_sealed_kernel(parked).map_err(|refusal| state(refusal.to_string()))?;
-    let run = ParkedRun::from_json(parked.bytes()).map_err(|error| state(error.to_string()))?;
-    let carried = (migration.parked)(&run, base, &plan.rewritten).map_err(refused)?;
-    let bytes = carried
-        .to_json()
-        .map_err(|error| state(error.to_string()))?;
-    Ok(OpaqueVmState::seal(
-        parked.owner().clone(),
-        plan.to.number(),
-        plan.rewritten.identity().to_string(),
-        bytes,
-    ))
+    let opened = open_run(parked, admitted, base).map_err(state)?;
+    let carried = (migration.parked)(&opened.run, base, &plan.rewritten).map_err(refused)?;
+    capture_whole(
+        &OpenedRun {
+            run: carried,
+            release,
+            binding: opened.binding,
+        },
+        u64::MAX,
+    )
+    .map_err(|failure| state(failure.to_string()))
+}
+
+/// The run `parked` under `base` holds, read as data.
+pub(crate) fn open_run(
+    parked: &WholeState,
+    admitted: &[AdmittedWait],
+    base: &Document,
+) -> Result<OpenedRun, String> {
+    let releases = lash_vm_broker::kernel::state::release_manifests()
+        .map_err(|failure| failure.to_string())?;
+    // The decode reads the release's nodes beside the state's, and a shared
+    // value once per reference: the state's own size bounds neither.
+    open_whole(
+        parked,
+        &releases,
+        admitted,
+        base.manifest.functions.keys().copied().collect(),
+        lash_vm_broker::snapshot::READ_LIMITS,
+    )
+    .map_err(|failure| failure.to_string())
+}
+
+/// The helper release this build pins a carried run to.
+pub(crate) fn current_release() -> Result<ChildRef, String> {
+    lash_vm_broker::kernel::state::release_manifests()
+        .map_err(|failure| failure.to_string())?
+        .manifests
+        .current()
+        .ok_or_else(|| "the build holds no helper release".to_owned())
+}
+
+/// A sealed parked run as a whole state again.
+pub(crate) fn unsealed(parked: &SealedRun) -> Result<WholeState, String> {
+    WholeState::of_sealed(&parked.0, &DecodeLimits::within_total(parked.0.byte_len()))
+        .map_err(|refusal| refusal.to_string())
 }
 
 /// How the kernel process engine carries a process the previous build
@@ -444,6 +452,32 @@ async fn carry(
                 refusal,
             })
     };
+    let at_park = matches!(state.phase, Phase::Parked);
+    if let Some(parked) = state.parked.take() {
+        // A run in flight is checked, so that a survey names one this build
+        // will refuse once it parks, and kept as written.
+        let whole = unsealed(&parked).map_err(undecodable)?;
+        let admitted: Vec<AdmittedWait> = state
+            .admissions
+            .values()
+            .map(|admission| admission.0.clone())
+            .collect();
+        let carried = migrate_run(
+            &whole,
+            &admitted,
+            &base,
+            &plan,
+            current_release().map_err(undecodable)?,
+        )?;
+        state.parked = Some(if at_park {
+            SealedRun(carried.sealed(
+                parked.0.owner().clone(),
+                &plan.rewritten.identity().to_string(),
+            ))
+        } else {
+            parked
+        });
+    }
     for wait in state.waits.values_mut() {
         let (Wait::Step { identity, .. } | Wait::Timer { identity, .. }) = wait;
         identify(identity)?;
@@ -451,12 +485,8 @@ async fn carry(
     for delivery in &mut state.settled {
         identify(&mut delivery.identity)?;
     }
-    let at_park = matches!(state.phase, Phase::Parked);
-    if let Some(parked) = state.parked.take() {
-        // A run in flight is checked, so that a survey names one this build
-        // will refuse once it parks, and kept as written.
-        let carried = migrate_run(&parked, &base, &plan)?;
-        state.parked = Some(if at_park { carried } else { parked });
+    for admission in state.admissions.values_mut() {
+        identify(&mut admission.0.identity)?;
     }
     Ok(Some(Carried {
         at_park: at_park && state.parked.is_some(),

@@ -48,10 +48,10 @@ pub(crate) fn encode(
     written: KernelVersion,
 ) -> Result<EngineState, ProcessInfraError> {
     let kernel = match &state.parked {
-        Some(parked) => KernelVersion::of(parked.kernel()).ok_or_else(|| {
+        Some(parked) => KernelVersion::of(parked.0.kernel()).ok_or_else(|| {
             infra(format!(
                 "the run is parked under kernel version {}, which this build does not interpret",
-                parked.kernel()
+                parked.0.kernel()
             ))
         })?,
         None => written,
@@ -79,10 +79,6 @@ pub(crate) fn decode(
         })?;
     let decoded: KernelEngineState =
         serde_json::from_slice(&state.bytes).map_err(|error| infra(error.to_string()))?;
-    if let Some(parked) = &decoded.parked {
-        super::migrate::check_sealed_kernel(parked)
-            .map_err(|refusal| infra(refusal.to_string()))?;
-    }
     Ok((decoded, written))
 }
 
@@ -100,6 +96,7 @@ pub(crate) fn advance(
         let mut state = KernelEngineState {
             payload,
             parked: None,
+            admissions: Default::default(),
             runs: 0,
             effects: 0,
             waits: Default::default(),
@@ -317,15 +314,18 @@ fn run_settled(
             }
             let mut steps = Vec::new();
             for issued in issued {
+                let wait = issued.wait();
+                state.admissions.insert(wait, issued.admission().clone());
                 match issued {
                     Issued::Effect {
                         wait,
-                        identity,
+                        admission,
                         tool,
                         input,
                     } => {
                         let step = StepName(format!("effect.{}", state.effects));
                         state.effects += 1;
+                        let identity = admission.identity().clone();
                         state.waits.insert(
                             wait,
                             Wait::Step {
@@ -342,23 +342,33 @@ fn run_settled(
                     }
                     Issued::Refused {
                         wait,
-                        identity,
+                        admission,
                         kind,
                         message,
                     } => state.settled.push(Delivery {
                         wait,
-                        identity,
+                        identity: admission.identity().clone(),
                         outcome: refused(&kind, message),
                     }),
                     Issued::Sleep {
                         wait,
-                        identity,
+                        admission,
                         until_ms,
                     } => {
+                        let identity = admission.identity().clone();
                         state.waits.insert(wait, Wait::Timer { until_ms, identity });
                     }
                 }
             }
+            // The run consumed every outcome it was handed: a wait the
+            // parked run still holds is open, or settled since.
+            let held: std::collections::BTreeSet<u64> = state
+                .waits
+                .keys()
+                .copied()
+                .chain(state.settled.iter().map(|delivery| delivery.wait))
+                .collect();
+            state.admissions.retain(|wait, _| held.contains(wait));
             if !state.settled.is_empty() {
                 return run(state, steps);
             }
@@ -419,6 +429,7 @@ fn run(
     let input = KernelRunInput {
         payload: state.payload.clone(),
         parked: state.parked.clone(),
+        admissions: state.admissions.values().cloned().collect(),
         deliver: std::mem::take(&mut state.settled),
     };
     state.phase = Phase::Running { step: step.clone() };

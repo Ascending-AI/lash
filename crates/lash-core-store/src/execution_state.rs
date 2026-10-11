@@ -1,64 +1,11 @@
-//! Durable protocol-owned execution state carried in a session checkpoint.
+//! Durable protocol-owned execution state carried in a session checkpoint,
+//! and a session's recorded plugin configuration.
 use crate::plugin_state::{FormatVersion, PluginConfigNamespace};
 use serde::de::DeserializeOwned;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-
-/// A protocol-owned leaf in the checkpoint's execution-state namespace.
-/// The wire spelling is kept intact; construction cannot name a reserved root.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct ExecutionLeafName(String);
-
-impl ExecutionLeafName {
-    const PREFIX: &str = "execution_state/";
-
-    pub fn new(name: impl AsRef<str>) -> Self {
-        Self(format!("{}{}", Self::PREFIX, name.as_ref()))
-    }
-
-    pub fn parse(key: &str) -> Option<Self> {
-        key.strip_prefix(Self::PREFIX).map(Self::new)
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn name(&self) -> &str {
-        &self.0[Self::PREFIX.len()..]
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("checkpoint key `{key}` is not an execution-state leaf")]
-pub struct InvalidExecutionLeafName {
-    pub key: String,
-}
-
-impl TryFrom<String> for ExecutionLeafName {
-    type Error = InvalidExecutionLeafName;
-    fn try_from(key: String) -> Result<Self, Self::Error> {
-        Self::parse(&key).ok_or(InvalidExecutionLeafName { key })
-    }
-}
-impl From<ExecutionLeafName> for String {
-    fn from(key: ExecutionLeafName) -> Self {
-        key.0
-    }
-}
-impl std::fmt::Display for ExecutionLeafName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-impl std::borrow::Borrow<str> for ExecutionLeafName {
-    fn borrow(&self) -> &str {
-        self.as_str()
-    }
-}
 
 /// Interpretation of a stored checkpoint key. Manifests retain their string keys.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,8 +14,6 @@ pub enum CheckpointComponentKey {
     PluginState,
     /// One plugin namespace's values body, by plugin.
     PluginNamespace(String),
-    ExecutionState,
-    ExecutionLeaf(ExecutionLeafName),
     Other(String),
 }
 impl CheckpointComponentKey {
@@ -76,83 +21,54 @@ impl CheckpointComponentKey {
         match key {
             crate::store::TOOL_STATE_CHECKPOINT_COMPONENT => Self::ToolState,
             crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT => Self::PluginState,
-            crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT => Self::ExecutionState,
-            _ => match (
-                ExecutionLeafName::parse(key),
-                crate::plugin_state::namespace_component_plugin(key),
-            ) {
-                (Some(leaf), _) => Self::ExecutionLeaf(leaf),
-                (None, Some(plugin)) => Self::PluginNamespace(plugin.to_owned()),
-                (None, None) => Self::Other(key.to_owned()),
+            _ => match crate::plugin_state::namespace_component_plugin(key) {
+                Some(plugin) => Self::PluginNamespace(plugin.to_owned()),
+                None => Self::Other(key.to_owned()),
             },
         }
     }
 }
 
-/// Complete execution-state update. A replacement always carries its root;
-/// omitted leaves are deleted, and unchanged leaves reuse resident refs.
+/// Which capture of a session's execution state a graph capture is
+/// (FIG-5887 §6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ExecutionGraphPurpose {
+    /// The complete post-cell state a turn phase owns as its
+    /// `working_execution_ref` until the next successful cell or the final
+    /// session transfer. Not a retained session revision.
+    Working,
+    /// The state a turn's final commit publishes with the session revision.
+    Final,
+}
+
+/// A capture of a session's execution state (FIG-5887 §4, §6): a complete
+/// SessionExecution root. Never a delta over an earlier root: the
+/// root owns every adopted binding and function, sharing immutable leaves
+/// and function bundles by reference.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum ExecutionStateCapture {
+pub enum ExecutionGraphCapture {
+    /// The session holds no execution state.
     #[default]
     Clear,
     Replace {
-        root: Arc<[u8]>,
-        leaves: BTreeMap<ExecutionLeafName, LeafChange>,
+        /// A SessionExecution node.
+        root: crate::checkpoint_graph::NodeId,
+        /// Nodes the root needs that no acknowledged root is known to have
+        /// installed. A commit that finds a reference missing refuses, and
+        /// the executor resends the node's retained bytes; staged nodes are
+        /// kept until the capture is acknowledged.
+        nodes: BTreeMap<crate::checkpoint_graph::NodeId, crate::checkpoint_graph::EncodedNode>,
     },
 }
-impl ExecutionStateCapture {
-    pub fn replace(root: Arc<[u8]>) -> Self {
-        Self::Replace {
-            root,
-            leaves: BTreeMap::new(),
-        }
-    }
 
-    pub fn root(&self) -> Option<&Arc<[u8]>> {
-        match self {
-            Self::Clear => None,
-            Self::Replace { root, .. } => Some(root),
-        }
-    }
-
-    pub fn leaves(&self) -> &BTreeMap<ExecutionLeafName, LeafChange> {
-        static EMPTY: BTreeMap<ExecutionLeafName, LeafChange> = BTreeMap::new();
-        match self {
-            Self::Clear => &EMPTY,
-            Self::Replace { leaves, .. } => leaves,
-        }
-    }
-
-    pub fn leaves_mut(&mut self) -> Option<&mut BTreeMap<ExecutionLeafName, LeafChange>> {
-        match self {
-            Self::Clear => None,
-            Self::Replace { leaves, .. } => Some(leaves),
-        }
-    }
-
-    pub fn from_hydrated(state: HydratedExecutionState) -> Self {
-        Self::Replace {
-            root: state.root,
-            leaves: state
-                .components
-                .into_iter()
-                .map(|(key, body)| (key, LeafChange::Changed(body)))
-                .collect(),
-        }
-    }
-}
+/// A session's execution state as a hydrated graph: the SessionExecution root
+/// and every node reachable from it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LeafChange {
-    Changed(Arc<[u8]>),
-    Unchanged,
+pub struct HydratedExecutionGraph {
+    pub root: crate::checkpoint_graph::NodeId,
+    pub nodes: BTreeMap<crate::checkpoint_graph::NodeId, crate::checkpoint_graph::EncodedNode>,
 }
 
-/// Fully hydrated protocol-owned execution state supplied during restore.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HydratedExecutionState {
-    pub root: Arc<[u8]>,
-    pub components: BTreeMap<ExecutionLeafName, Arc<[u8]>>,
-}
 /// A session's recorded plugin configuration (FIG-4379): each installed
 /// owner's canonical namespace, keyed by plugin id, resolved defaults
 /// included, and which of them is the session's protocol plugin.

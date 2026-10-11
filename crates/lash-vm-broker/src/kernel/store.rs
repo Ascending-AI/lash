@@ -3,15 +3,18 @@
 //! # The park transaction
 //!
 //! [`DurableSnapshotStore::commit_park`] commits, in one
-//! `cell.snapshot+admit` transaction: the run's saved state at the next
-//! snapshot revision, the [`EffectLedger`] that matches it, the admission
-//! and `x_start` of every effect requested since the last park (one
-//! admitted execution each, under its own declared policy, limit and
-//! completion wait), the timer wait of every sleep, due at the deadline the
-//! sleep was admitted with (ADR 0132 §6), and the prune of the run records
-//! no saved state can reach again. No effect's body starts before
-//! that commit; each runs through the admitted-execution lifecycle (ADR
-//! 0132 §5) and its outcome commits as `round.outcome`.
+//! `cell.snapshot+admit` transaction, the execution's next root graph
+//! (FIG-5887 §5): the machine's KernelWhole at the next revision, the
+//! effect membership that matches its [`EffectLedger`], one Admission per
+//! effect requested since the last park (holding its one frozen request),
+//! the round admission and `x_start` of every admitted execution (one
+//! each, under its own declared policy, limit and completion wait), the
+//! timer wait of every sleep, due at the deadline the sleep was admitted
+//! with (ADR 0132 §6), the host's own root and envelope, and the prune of
+//! the run records no saved state can reach again. No effect's body starts
+//! before that commit; each runs through the admitted-execution lifecycle
+//! (ADR 0132 §5) and its outcome commits as `round.outcome`. The root
+//! depends on no earlier root: a restore reads it alone.
 //!
 //! # Delivery
 //!
@@ -36,27 +39,37 @@
 //! that records the end. Losing the worker closes nothing; another node
 //! resumes the run from its rows.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use lash_core_execution::runtime::actor::round::{
     self, AdmittedExecution, Recovery, RoundDraft, RunFold, SettledOutput,
 };
 use lash_core_execution::runtime::actor::waits;
-use lash_durable::domain::{ExecKey, RunRecordWrite, RunSeq, SnapshotRev, SnapshotWrite};
+use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
+use lash_core_store::checkpoint_graph::{
+    CommitId, EncodeBudget, EncodedNode, ExplicitLimit, GraphDecoder, GraphStaging, NodeId,
+    NodeKind,
+};
+use lash_durable::domain::graph::{HydratedGraph, ReleasePinWrite, RootOwner};
+use lash_durable::domain::{ExecKey, RunFactWrite, RunSeq, SnapshotRev};
 use lash_durable::{CommitLabel, DomainWrite, DurableInstant};
 use lash_kernel_doc::{Datum, DocumentId, EffectIdentity, EffectName, ErrorDatum, KERNEL_VERSION};
-use lash_kernel_vm::{Outcome, WaitId};
-use lash_vm_protocol::EncodedPayload;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use lash_kernel_vm::{End, Outcome, WaitId};
 use tokio_util::sync::CancellationToken;
 
-use super::ledger::{
-    AdmittedEffect, CheckpointPhase, EffectLedger, ParkedCheckpoint, PendingEffect, RecordedEnd,
-    Standing,
+use super::graph::{
+    CellEnd, Disposition, EffectMembership, FrozenAdmission, FrozenRequest, MemberStatus,
+    Projections, ResolvedAdmission, RootParts, stage_exec_root,
 };
+use super::ledger::{AdmittedEffect, EffectLedger, PendingEffect, Standing};
+use super::run::KernelEffects;
+use super::state::{ReleaseGraph, WholeState};
 use super::value::datum_from_json;
 use crate::effects::MemberDraft;
 use crate::members::{Decide, Driven};
-use crate::snapshot::{DurableSnapshotStore, OperationId, QuietPointRefusal, refused};
+use crate::snapshot::{
+    DurableSnapshotStore, HeldRoot, OperationId, QuietPointRefusal, READ_LIMITS, refused,
+};
 
 /// The error kind of an effect that reported a failure of its own; its
 /// `data` is what the effect reported.
@@ -76,10 +89,14 @@ pub const EFFECT_RESULT: &str = "effect_result";
 pub enum AdmitAs {
     /// As this execution.
     Execution(Box<MemberDraft>),
-    /// As a sleep that is over at `until`.
-    Sleep { until: DurableInstant },
+    /// As a sleep of `duration` that is over at `until`.
+    Sleep {
+        duration: std::time::Duration,
+        until: DurableInstant,
+    },
     /// Not at all: the parent refuses it, and it is answered with `error`.
-    Refused(ErrorDatum),
+    /// The guest's arguments stay with its admission.
+    Refused { error: ErrorDatum, args: Vec<Datum> },
 }
 
 /// One wait a park admits.
@@ -92,21 +109,46 @@ pub struct EffectAdmission {
     pub admit: AdmitAs,
 }
 
+/// One call a save admitted, as the host records it in its own state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdmittedCall {
+    pub effect: EffectIdentity,
+    pub operation: EffectName,
+    pub call: lash_sansio::ToolCallId,
+    /// Its Admission.
+    pub admission: NodeId,
+}
+
+/// The host's nodes a root names beside the machine's state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HostParts {
+    /// A HostRoot.
+    pub host: Option<NodeId>,
+    /// A CellEnvelope.
+    pub envelope: Option<NodeId>,
+}
+
 /// What one park commits.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ParkSave<P> {
+pub struct ParkSave<'a> {
     /// The document the run executes.
     pub document: DocumentId,
     /// The machine's state at this park.
-    pub state: P,
+    pub state: WholeState,
+    /// The helper releases the state may pin.
+    pub releases: &'a ReleaseGraph,
     /// The ledger that matches it, before this park's admissions.
     pub ledger: EffectLedger,
     /// Every wait requested since the last park.
     pub admit: Vec<EffectAdmission>,
-    /// The host's own state for the run at this park.
-    pub host: Option<EncodedPayload>,
     /// The owner's rows that commit with it.
     pub with: Vec<DomainWrite>,
+}
+
+/// A SessionExecution graph: its root and the nodes a capture staged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionGraph {
+    pub root: NodeId,
+    pub nodes: BTreeMap<NodeId, EncodedNode>,
 }
 
 /// What a run's end commits.
@@ -115,19 +157,73 @@ pub struct EndSave {
     pub document: DocumentId,
     /// The ledger as the run left it.
     pub ledger: EffectLedger,
-    pub end: RecordedEnd,
-    pub host: Option<EncodedPayload>,
+    pub end: End,
+    /// The session state the cell leaves, which the turn adopts.
+    pub session: SessionGraph,
     pub with: Vec<DomainWrite>,
 }
 
 /// A committed save.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Saved<P> {
+pub struct Saved {
     /// The new revision.
     pub rev: SnapshotRev,
-    /// The checkpoint as it was stored: its ledger names this park's
-    /// admissions.
-    pub checkpoint: ParkedCheckpoint<P>,
+    /// The root it published.
+    pub root: NodeId,
+    /// The ledger as stored: it names this park's admissions.
+    pub ledger: EffectLedger,
+}
+
+/// A run's state at its latest park, as a machine resumes from it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParkedState {
+    /// The KernelWhole and every node it reaches but its release's.
+    pub whole: WholeState,
+    /// The document it was written under.
+    pub document: String,
+    /// Each wait's request, taken from the one admission that holds it.
+    pub admissions: Vec<lash_kernel_state::AdmittedWait>,
+}
+
+impl ParkedState {
+    /// The state as a worker resumes it, sealed under `owner`.
+    #[must_use]
+    pub fn sealed(&self, owner: lash_vm_protocol::VmOwner) -> lash_vm_protocol::ParkedGraph {
+        lash_vm_protocol::ParkedGraph {
+            state: self.whole.sealed(owner, &self.document),
+            admissions: self
+                .admissions
+                .iter()
+                .map(super::state::admission)
+                .collect(),
+        }
+    }
+}
+
+/// An execution's latest root as read back: its row, its body and every
+/// node it reaches.
+#[derive(Clone, Debug)]
+pub struct RootRead {
+    pub held: HeldRoot,
+    pub body: ExecRoot,
+    pub graph: HydratedGraph,
+}
+
+/// What a run's latest root holds.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Checkpoint {
+    /// A parked state and the ledger its membership names.
+    Parked {
+        rev: SnapshotRev,
+        state: ParkedState,
+        ledger: EffectLedger,
+    },
+    /// The end the run recorded.
+    Ended {
+        rev: SnapshotRev,
+        end: End,
+        cell: CellEnd,
+    },
 }
 
 /// A wait whose outcome is committed and can be delivered.
@@ -250,39 +346,97 @@ fn final_output<'a>(
     }
 }
 
-enum SavePhase<P> {
-    Parked(P),
-    Ended(RecordedEnd),
+enum SavePhase<'a> {
+    Parked {
+        state: WholeState,
+        releases: &'a ReleaseGraph,
+    },
+    Ended {
+        end: End,
+        session: SessionGraph,
+    },
 }
 
-fn encode<P: Serialize>(checkpoint: &ParkedCheckpoint<P>) -> Result<String, QuietPointRefusal> {
-    serde_json::to_string(checkpoint).map_err(refused)
+/// The ledger a stored membership names, from the admissions it resolved.
+fn ledger_of(
+    membership: &EffectMembership,
+    resolved: &BTreeMap<EffectIdentity, ResolvedAdmission>,
+) -> Result<EffectLedger, QuietPointRefusal> {
+    let mut pending = BTreeMap::new();
+    let mut released = Vec::new();
+    for entry in &membership.entries {
+        let admitted = resolved
+            .get(&entry.effect)
+            .ok_or_else(|| refused("a membership entry resolved no admission"))?;
+        let execution = match &admitted.admission.disposition {
+            Disposition::Execution { operation, pin } => Some(AdmittedEffect {
+                operation: *operation,
+                call: pin.call.clone(),
+            }),
+            Disposition::Sleep | Disposition::Refused => None,
+        };
+        let standing = match (entry.status, execution, &admitted.request) {
+            (MemberStatus::Released, Some(execution), _) => {
+                released.push(execution);
+                continue;
+            }
+            (MemberStatus::Pending, Some(execution), _) => Standing::Admitted(execution),
+            (MemberStatus::Pending, None, FrozenRequest::Sleep { until_ms, .. }) => {
+                Standing::Sleeping {
+                    until_ms: *until_ms,
+                }
+            }
+            (MemberStatus::Pending, None, FrozenRequest::Refused { error, .. }) => {
+                Standing::Refused(error.clone())
+            }
+            _ => {
+                return Err(refused(
+                    "a membership entry stands as its admission does not",
+                ));
+            }
+        };
+        pending.insert(
+            entry.effect.clone(),
+            PendingEffect {
+                wait: entry.wait,
+                effect: admitted.admission.effect_name.clone(),
+                standing,
+            },
+        );
+    }
+    EffectLedger::restored(pending, released, membership.next_park).map_err(refused)
+}
+
+fn staging() -> GraphStaging {
+    GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)))
 }
 
 impl DurableSnapshotStore {
-    /// Commit `save` in one transaction (see the module docs).
+    /// Commit `save` in one transaction (see the module docs), with the
+    /// host's own state `host` stages.
     ///
     /// # Errors
     ///
     /// [`QuietPointRefusal`]: an identity the ledger already stands on,
     /// ownership lost or another store failure. Nothing is admitted.
-    pub async fn commit_park<P: Serialize>(
+    pub async fn commit_park(
         &self,
-        save: ParkSave<P>,
-    ) -> Result<Saved<P>, QuietPointRefusal> {
+        save: ParkSave<'_>,
+        host: &dyn KernelEffects,
+    ) -> Result<Saved, QuietPointRefusal> {
         let ParkSave {
             document,
             state,
+            releases,
             ledger,
             admit,
-            host,
             with,
         } = save;
         self.commit_checkpoint(
+            host,
             &document,
             ledger,
-            SavePhase::Parked(state),
-            host,
+            SavePhase::Parked { state, releases },
             admit,
             with,
         )
@@ -290,37 +444,46 @@ impl DurableSnapshotStore {
     }
 
     /// Commit a run's end: every execution still open is cancelled and
-    /// settles first, so the checkpoint that records the end names none.
+    /// settles first, so the root that records the end names none. A
+    /// cancelled run records no end, and is refused here.
     ///
     /// # Errors
     ///
     /// As [`commit_park`](Self::commit_park).
-    pub async fn commit_run_end<P: Serialize>(
+    pub async fn commit_run_end(
         &self,
         save: EndSave,
-    ) -> Result<Saved<P>, QuietPointRefusal> {
+        host: &dyn KernelEffects,
+    ) -> Result<Saved, QuietPointRefusal> {
         self.commit_checkpoint(
+            host,
             &save.document,
             save.ledger,
-            SavePhase::Ended(save.end),
-            save.host,
+            SavePhase::Ended {
+                end: save.end,
+                session: save.session,
+            },
             Vec::new(),
             save.with,
         )
         .await
     }
 
-    async fn commit_checkpoint<P: Serialize>(
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one park transaction, in its commit order"
+    )]
+    async fn commit_checkpoint(
         &self,
+        host: &dyn KernelEffects,
         document: &DocumentId,
         mut ledger: EffectLedger,
-        phase: SavePhase<P>,
-        host: Option<EncodedPayload>,
+        phase: SavePhase<'_>,
         admit: Vec<EffectAdmission>,
         with: Vec<DomainWrite>,
-    ) -> Result<Saved<P>, QuietPointRefusal> {
+    ) -> Result<Saved, QuietPointRefusal> {
         let mut members = self.members.lock().await;
-        if matches!(phase, SavePhase::Ended(_)) {
+        if matches!(phase, SavePhase::Ended { .. }) {
             if ledger.executions().next().is_some() {
                 members.close().await.map_err(refused)?;
             }
@@ -331,9 +494,16 @@ impl DurableSnapshotStore {
             let folded = members.fold().await.map_err(refused)?;
             ledger.drop_released(|admitted| final_output(&folded, &self.exec, admitted).is_some());
         }
+        struct Requested {
+            identity: EffectIdentity,
+            wait: WaitId,
+            effect: Option<EffectName>,
+            standing: Option<Standing>,
+            request: Option<FrozenRequest>,
+        }
         let mut drafts = Vec::new();
         let mut executions = Vec::new();
-        let mut standings = Vec::with_capacity(admit.len());
+        let mut requested = Vec::with_capacity(admit.len());
         let mut timers = Vec::new();
         for admission in admit {
             let EffectAdmission {
@@ -342,20 +512,35 @@ impl DurableSnapshotStore {
                 effect,
                 admit,
             } = admission;
-            let standing = match admit {
+            let (standing, request) = match admit {
                 AdmitAs::Execution(draft) => {
                     let MemberDraft { draft, request } = *draft;
-                    executions.push((standings.len(), request));
+                    executions.push((requested.len(), request));
                     drafts.push(draft);
-                    None
+                    (None, None)
                 }
-                AdmitAs::Sleep { until } => {
+                AdmitAs::Sleep { duration, until } => {
                     timers.push(until);
-                    Some(Standing::Sleeping { until_ms: until.0 })
+                    (
+                        Some(Standing::Sleeping { until_ms: until.0 }),
+                        Some(FrozenRequest::Sleep {
+                            duration,
+                            until_ms: until.0,
+                        }),
+                    )
                 }
-                AdmitAs::Refused(error) => Some(Standing::Refused(error)),
+                AdmitAs::Refused { error, args } => (
+                    Some(Standing::Refused(error.clone())),
+                    Some(FrozenRequest::Refused { error, args }),
+                ),
             };
-            standings.push((identity, wait, effect, standing));
+            requested.push(Requested {
+                identity,
+                wait,
+                effect,
+                standing,
+                request,
+            });
         }
         let expected = self.revision().await?;
         let mut tx = self.cx.begin().await.map_err(refused)?;
@@ -374,10 +559,17 @@ impl DurableSnapshotStore {
                 );
             }
         }
+        let mut staging = staging();
+        let mut book = self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let mut calls = Vec::new();
         let mut admitted: Vec<AdmittedExecution> = Vec::new();
         if !drafts.is_empty() {
             let park = ledger.take_park();
-            admitted = round::admit_round(
+            let pinned = round::pin_round(
                 &mut tx,
                 &waits::wait_scope(&self.cx).map_err(refused)?,
                 RoundDraft {
@@ -386,29 +578,75 @@ impl DurableSnapshotStore {
                     members: drafts,
                 },
             )
-            .map_err(refused)?
-            .members()
-            .to_vec();
-            for (execution, (index, request)) in admitted.iter().zip(executions) {
-                standings[index].3 = Some(Standing::Admitted(AdmittedEffect {
-                    operation: OperationId::of(execution.id()),
-                    call: execution.call().clone(),
-                    request,
-                }));
+            .map_err(refused)?;
+            let mut nodes = Vec::with_capacity(executions.len());
+            for ((ordinal, pin), (index, request)) in pinned.pins().into_iter().zip(executions) {
+                let entry = &mut requested[index];
+                let operation = OperationId {
+                    run: park,
+                    ordinal: ordinal.0,
+                };
+                let call = pin.call.clone();
+                let (node, write) = book
+                    .admit(
+                        &mut staging,
+                        &self.exec,
+                        FrozenAdmission {
+                            effect: entry.identity.clone(),
+                            wait: entry.wait.0,
+                            effect_name: entry.effect.clone(),
+                            request,
+                            execution: Some((operation, pin)),
+                        },
+                    )
+                    .map_err(refused)?;
+                tx.write(write);
+                nodes.push(node);
+                if let Some(operation) = &entry.effect {
+                    calls.push(AdmittedCall {
+                        effect: entry.identity.clone(),
+                        operation: operation.clone(),
+                        call: call.clone(),
+                        admission: node,
+                    });
+                }
+                entry.standing = Some(Standing::Admitted(AdmittedEffect { operation, call }));
             }
+            admitted = pinned
+                .admit(&mut tx, nodes)
+                .map_err(refused)?
+                .members()
+                .to_vec();
         }
-        for (identity, wait, effect, standing) in standings {
-            let Some(standing) = standing else {
+        for entry in requested {
+            let Some(standing) = entry.standing else {
                 return Err(refused("an execution's admission minted no identity"));
             };
-            let entry = PendingEffect {
-                wait: wait.0,
-                effect,
+            if let Some(request) = entry.request {
+                let (_, write) = book
+                    .admit(
+                        &mut staging,
+                        &self.exec,
+                        FrozenAdmission {
+                            effect: entry.identity.clone(),
+                            wait: entry.wait.0,
+                            effect_name: entry.effect.clone(),
+                            request,
+                            execution: None,
+                        },
+                    )
+                    .map_err(refused)?;
+                tx.write(write);
+            }
+            let pending = PendingEffect {
+                wait: entry.wait.0,
+                effect: entry.effect,
                 standing,
             };
-            if !ledger.stand(identity.clone(), entry) {
+            if !ledger.stand(entry.identity.clone(), pending) {
                 return Err(refused(format!(
-                    "the run already stands on effect {identity:?}"
+                    "the run already stands on effect {:?}",
+                    entry.identity
                 )));
             }
         }
@@ -416,7 +654,8 @@ impl DurableSnapshotStore {
         // that saves the state that consumed them. What their settled
         // members changed commits with the prune as the turn's run
         // namespaces (FIG-5301): a pruned outcome is never the only copy of
-        // a value.
+        // a value. The host's state, staged below, holds each consumed
+        // outcome first.
         let oldest = ledger.oldest_reachable();
         let changes = match (&self.exec, members.bodies()) {
             (ExecKey::Cell(session, run, _), Some(bodies)) if oldest > 0 => {
@@ -427,74 +666,336 @@ impl DurableSnapshotStore {
         if let Some((session, run, namespaces, _)) = &changes
             && !namespaces.is_empty()
         {
-            tx.write(DomainWrite::Turn(
-                lash_durable::domain::TurnWrite::Namespaces {
-                    session: session.clone(),
-                    run: run.clone(),
-                    namespaces: namespaces.clone(),
-                },
-            ));
+            tx.write_namespaces(session, run, namespaces)
+                .map_err(refused)?;
         }
         for write in with {
             tx.write(write);
         }
         if oldest > 0 {
-            tx.write(DomainWrite::RunRecord(RunRecordWrite::Prune {
+            tx.write(DomainWrite::RunFact(RunFactWrite::Prune {
                 owner: self.exec.owner(),
                 before: RunSeq(oldest),
             }));
         }
-        let checkpoint = ParkedCheckpoint {
-            phase: match phase {
-                SavePhase::Parked(state) => CheckpointPhase::Parked { state, ledger },
-                SavePhase::Ended(end) => CheckpointPhase::Ended { end },
-            },
-            host,
+        let mut reads = BTreeSet::new();
+        let parts = host
+            .stage_host(&mut staging, &mut reads, &calls)
+            .map_err(refused)?;
+        let mut parked = BTreeSet::new();
+        let (status, state, format, membership) = match phase {
+            SavePhase::Parked { state, releases } => {
+                let membership = book.membership(&ledger).map_err(refused)?;
+                for write in book.retire_unnamed(&self.exec, &membership) {
+                    tx.write(write);
+                }
+                self.pin_release(&mut tx, &state, releases, expected.is_none())?;
+                let (root, kernel) = (state.root, state.kernel);
+                // The park exports the whole state; a node the latest root
+                // reaches is stored, so only the others are staged and a
+                // large value an earlier park kept is never carried again.
+                let stored = self.stored_nodes();
+                parked = state.nodes.keys().copied().collect();
+                tx.stage(
+                    state
+                        .nodes
+                        .into_values()
+                        .filter(|node| !stored.contains(&node.id)),
+                );
+                (ExecStatus::Parked, root, kernel, Some(membership))
+            }
+            SavePhase::Ended { end, session } => {
+                for write in book.retire_unnamed(&self.exec, &EffectMembership::default()) {
+                    tx.write(write);
+                }
+                let terminal = super::state::export_end_state(&end, KERNEL_VERSION, u64::MAX)
+                    .map_err(refused)?
+                    .ok_or_else(|| refused("a cancelled run records no end"))?;
+                let (Some(host_root), Some(envelope)) = (parts.host, parts.envelope) else {
+                    return Err(refused("a cell's end names its host state and envelope"));
+                };
+                let end = CellEnd {
+                    terminal: terminal.root,
+                    session: session.root,
+                    host: host_root,
+                    envelope,
+                }
+                .stage(&mut staging)
+                .map_err(refused)?;
+                // The terminal export is whole, and the session's state
+                // shares the run's values: what the latest root reaches is
+                // stored, and the end's root reaches it in turn.
+                let stored = self.stored_nodes();
+                tx.stage(
+                    terminal
+                        .nodes
+                        .into_values()
+                        .chain(session.nodes.into_values())
+                        .filter(|node| !stored.contains(&node.id)),
+                );
+                (ExecStatus::Ended, end, KERNEL_VERSION, None)
+            }
         };
-        tx.write(DomainWrite::Snapshot(SnapshotWrite::Put {
-            exec: self.exec.clone(),
-            expected,
-            snapshot_ref: encode(&checkpoint)?,
-            executable_identity: document.to_string(),
-            format_version: KERNEL_VERSION,
-        }));
+        let (root, write) = stage_exec_root(
+            &mut staging,
+            &self.exec,
+            membership.as_ref(),
+            RootParts {
+                state,
+                status,
+                executable_identity: document.to_string(),
+                format,
+                host: parts.host,
+                envelope: parts.envelope,
+            },
+            (
+                expected.map(|held| held.rev),
+                expected.map(|held| held.root),
+            ),
+            CommitId::mint(),
+        )
+        .map_err(refused)?;
+        tx.stage_all(staging);
+        for read in reads {
+            tx.require(read);
+        }
+        tx.write(write);
         let label = if admitted.is_empty() {
             CommitLabel::CELL_SNAPSHOT
         } else {
             CommitLabel::CELL_SNAPSHOT_ADMIT
         };
         self.commit(tx, label, &mut members).await?;
+        *self
+            .stored
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = parked;
+        host.host_committed();
+        *self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = book;
         if let Some((_, _, namespaces, bodies)) = &changes {
             bodies.run_changes_committed(namespaces);
         }
         if !admitted.is_empty() {
             members.admitted(&admitted).map_err(refused)?;
         }
-        let rev = SnapshotRev(expected.map_or(1, |rev| rev.0 + 1));
-        *self.held_rev() = Some(Some(rev));
-        Ok(Saved { rev, checkpoint })
+        let rev = SnapshotRev(expected.map_or(1, |held| held.rev.0 + 1));
+        *self.held() = Some(Some(HeldRoot { rev, root }));
+        Ok(Saved { rev, root, ledger })
     }
 
-    /// The run's latest checkpoint, if any.
+    /// Pins the helper release `state` pins: on the execution's first root
+    /// its manifest's nodes are installed with the release's pin, and every
+    /// later root requires them.
+    fn pin_release(
+        &self,
+        tx: &mut lash_durable::ActorTx,
+        state: &WholeState,
+        releases: &ReleaseGraph,
+        first: bool,
+    ) -> Result<(), QuietPointRefusal> {
+        // The state omits the release manifest it pins; a whole that places
+        // a large value is read over the release's nodes, which tell its
+        // typed children from its leaves.
+        let source = super::state::Layered {
+            state: &state.nodes,
+            release: &releases.nodes,
+        };
+        let whole: lash_kernel_state::KernelWhole = GraphDecoder::new(&source, READ_LIMITS)
+            .decode(state.root, NodeKind::KERNEL_WHOLE)
+            .map_err(refused)?;
+        let release = NodeId(whole.release.0);
+        if !first {
+            tx.require(release);
+            return Ok(());
+        }
+        let (name, nodes) = releases
+            .pinned(release)
+            .ok_or_else(|| refused("the state pins a release this build does not hold"))?;
+        tx.stage(nodes.into_values());
+        tx.write(DomainWrite::ReleasePin(ReleasePinWrite::Install {
+            release: name,
+            root: release,
+        }));
+        Ok(())
+    }
+
+    /// The execution's latest root, read whole under one protection; none
+    /// when it has none. Read once, until a commit replaces it.
     ///
     /// # Errors
     ///
-    /// [`QuietPointRefusal`]: a store failure, or a row that is not a
-    /// kernel run's checkpoint.
-    pub async fn latest_park<P: DeserializeOwned>(
-        &self,
-    ) -> Result<Option<(SnapshotRev, ParkedCheckpoint<P>)>, QuietPointRefusal> {
-        let row = self.read().await?;
-        *self.held_rev() = Some(row.as_ref().map(|row| row.rev));
-        row.map(|row| {
-            Ok((
-                row.rev,
-                serde_json::from_str(&row.snapshot_ref).map_err(refused)?,
-            ))
-        })
-        .transpose()
+    /// [`QuietPointRefusal`]: a store failure, or a root that is not one of
+    /// this execution: its owner binding, its children's kinds, or a phase
+    /// that names a membership when ended or none when parked.
+    pub async fn latest_root(&self) -> Result<Option<std::sync::Arc<RootRead>>, QuietPointRefusal> {
+        if let Some(read) = self
+            .latest
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        {
+            return Ok(Some(read));
+        }
+        let Some(row) = self.read().await? else {
+            *self.held() = Some(None);
+            return Ok(None);
+        };
+        let graph = self
+            .cx
+            .durable_reads()
+            .map_err(refused)?
+            .hydrate(
+                RootOwner::Exec(self.exec.clone()),
+                Some(row.root),
+                READ_LIMITS,
+            )
+            .await
+            .map_err(refused)?;
+        let mut decoder = GraphDecoder::new(&graph, READ_LIMITS);
+        let body: ExecRoot = decoder
+            .decode(row.root, NodeKind::EXEC_ROOT)
+            .map_err(refused)?;
+        body.check_children(row.root, &mut decoder)
+            .map_err(refused)?;
+        let binding: lash_core_store::checkpoint_graph::bodies::OwnerBinding = decoder
+            .decode(body.owner, NodeKind::OWNER_BINDING)
+            .map_err(refused)?;
+        if binding != super::graph::owner_binding(&self.exec) {
+            return Err(refused("the root belongs to another execution"));
+        }
+        if (body.status == ExecStatus::Parked) != body.effect_membership.is_some() {
+            return Err(refused(
+                "a parked root names its membership, an ended one none",
+            ));
+        }
+        let held = HeldRoot {
+            rev: row.rev,
+            root: row.root,
+        };
+        *self.held() = Some(Some(held));
+        *self
+            .stored
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            graph.nodes.keys().copied().collect();
+        let read = std::sync::Arc::new(RootRead { held, body, graph });
+        *self
+            .latest
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(read.clone());
+        Ok(Some(read))
     }
 
+    /// The run's latest checkpoint, if any: a parked state with the ledger
+    /// and admissions its membership names, each tool request read through
+    /// the projection of `projections` it was frozen under, or the end it
+    /// recorded.
+    ///
+    /// # Errors
+    ///
+    /// [`QuietPointRefusal`]: a store failure, a root of another document,
+    /// or one that does not read back whole.
+    pub async fn checkpoint(
+        &self,
+        document: &DocumentId,
+        projections: &dyn Projections,
+    ) -> Result<Option<Checkpoint>, QuietPointRefusal> {
+        let Some(read) = self.latest_root().await? else {
+            return Ok(None);
+        };
+        if read.body.executable_identity != document.to_string() {
+            return Err(refused("the root holds another document's run"));
+        }
+        let mut decoder = GraphDecoder::new(&read.graph, READ_LIMITS);
+        match (read.body.status, read.body.effect_membership) {
+            (ExecStatus::Parked, Some(membership)) => {
+                let (membership, resolved) =
+                    EffectMembership::load(&mut decoder, membership, &self.exec, projections)
+                        .map_err(refused)?;
+                let ledger = ledger_of(&membership, &resolved)?;
+                let book = super::graph::AdmissionBook::restored(resolved);
+                let admissions = book.admitted_waits(&ledger).map_err(refused)?;
+                *self
+                    .book
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = book;
+                let whole = WholeState::parked_in(
+                    &read.graph,
+                    read.body.state,
+                    read.body.format,
+                    &READ_LIMITS,
+                )
+                .map_err(refused)?;
+                Ok(Some(Checkpoint::Parked {
+                    rev: read.held.rev,
+                    state: ParkedState {
+                        whole,
+                        document: read.body.executable_identity.clone(),
+                        admissions,
+                    },
+                    ledger,
+                }))
+            }
+            (ExecStatus::Ended, None) => {
+                let cell = CellEnd::load(&mut decoder, read.body.state).map_err(refused)?;
+                let end = super::state::read_end_in(&read.graph, cell.terminal, READ_LIMITS)
+                    .map_err(refused)?;
+                Ok(Some(Checkpoint::Ended {
+                    rev: read.held.rev,
+                    end,
+                    cell,
+                }))
+            }
+            _ => Err(refused(
+                "a parked root names its membership, an ended one none",
+            )),
+        }
+    }
+
+    /// Each wait `ledger` stands on with the request its admission froze:
+    /// what the state a park saved resumes with.
+    ///
+    /// # Errors
+    ///
+    /// [`QuietPointRefusal`] for a wait no admission holds.
+    pub fn admitted_waits(
+        &self,
+        ledger: &EffectLedger,
+    ) -> Result<Vec<lash_kernel_state::AdmittedWait>, QuietPointRefusal> {
+        self.book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .admitted_waits(ledger)
+            .map_err(refused)
+    }
+
+    /// The frozen request of each execution `ledger` names, by its
+    /// admission: what a resumed host rebuilds its open calls from.
+    #[must_use]
+    pub fn open_requests(&self, ledger: &EffectLedger) -> Vec<(AdmittedEffect, FrozenRequest)> {
+        let book = self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let pending = ledger
+            .pending()
+            .filter_map(|(identity, entry)| match &entry.standing {
+                Standing::Admitted(admitted) => Some((identity.clone(), admitted.clone())),
+                Standing::Sleeping { .. } | Standing::Refused(_) => None,
+            });
+        pending
+            .filter_map(|(identity, admitted)| Some((admitted, book.request(&identity)?.clone())))
+            .chain(ledger.released().iter().filter_map(|admitted| {
+                Some((
+                    admitted.clone(),
+                    book.released_request(admitted.operation)?.clone(),
+                ))
+            }))
+            .collect()
+    }
     /// Every wait `ledger` stands on whose outcome is committed now: read
     /// from the run records, so a restore answers the same ones again.
     ///

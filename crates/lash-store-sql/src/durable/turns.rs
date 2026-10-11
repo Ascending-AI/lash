@@ -8,7 +8,8 @@
 /// The table's unprefixed name: a turn's phase state, 1:1 with its
 /// `session_runs` row while the turn is unfinished. The run row stays the one
 /// admission authority (its one-unfinished-run index); this row carries only
-/// the phase with what a restore resumes it from: the encoded checkpoint
+/// the phase with what a restore resumes it from: its PhaseRoot checkpoint
+/// graph node, the working SessionExecution of its last successful cell,
 /// and, in the model phase, the model pin (its attempt is `phase_arg`, its
 /// call `model_calls`, and the live replay cursor its first attempt streamed
 /// after), how many model calls the turn admitted, and whether its
@@ -16,8 +17,9 @@
 pub const TABLE: &str = "turn_phases";
 
 /// The table of the plugin namespaces an unfinished turn's run changed
-/// (FIG-5301): one row per namespace, its entry and matching values body
-/// (NULL for base values), dropped with the turn's phase row.
+/// (FIG-5301): one row per namespace, its entry and its values as a
+/// NamespaceValue checkpoint graph node (NULL for base values), dropped with
+/// the turn's phase row.
 pub const NAMESPACES_TABLE: &str = "turn_namespaces";
 
 crate::statements! {
@@ -75,18 +77,38 @@ crate::statements! {
         delete_phase = "DELETE FROM turn_phases WHERE session_id = ?1 AND run = ?2";
 
         /// Record plugin `?3`'s namespace entry `?4` for run `?2` of session
-        /// `?1`, with values body `?5`. `?6` retains the held body for a
+        /// `?1`, with values root `?5`. `?6` retains the held root for a
         /// metadata-only write; otherwise replace it, including NULL for base.
-        upsert_namespace = "INSERT INTO turn_namespaces (session_id, run, plugin, entry, body)
+        upsert_namespace = "INSERT INTO turn_namespaces
+                 (session_id, run, plugin, entry, graph_root_ref)
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT (session_id, run, plugin)
              DO UPDATE SET entry = excluded.entry,
-                 body = CASE WHEN ?6 THEN turn_namespaces.body ELSE excluded.body END";
+                 graph_root_ref = CASE WHEN ?6 THEN turn_namespaces.graph_root_ref
+                     ELSE excluded.graph_root_ref END";
 
         /// Run `?2` of session `?1`'s namespace rows, by plugin.
-        namespaces = "SELECT plugin, entry, body FROM turn_namespaces
+        namespaces = "SELECT plugin, entry, graph_root_ref FROM turn_namespaces
              WHERE session_id = ?1 AND run = ?2
              ORDER BY plugin";
+
+        /// Plugin `?3`'s namespace root for run `?2` of session `?1`.
+        namespace_root = "SELECT graph_root_ref FROM turn_namespaces
+             WHERE session_id = ?1 AND run = ?2 AND plugin = ?3";
+
+        /// Run `?2` of session `?1`'s phase root.
+        phase_root = "SELECT checkpoint_ref FROM turn_phases WHERE session_id = ?1 AND run = ?2";
+
+        /// Run `?2` of session `?1`'s working execution root.
+        working_root = "SELECT working_execution_ref FROM turn_phases
+             WHERE session_id = ?1 AND run = ?2";
+
+        /// Point run `?2` of session `?1`'s working execution at `?3` when it
+        /// is `?4`, at epoch `?5`. No row otherwise.
+        working_set = "UPDATE turn_phases SET working_execution_ref = ?3, written_epoch = ?5
+             WHERE session_id = ?1 AND run = ?2
+               AND working_execution_ref IS NOT DISTINCT FROM ?4
+             RETURNING run";
 
         /// Drop run `?2` of session `?1`'s namespace rows.
         delete_namespaces = "DELETE FROM turn_namespaces WHERE session_id = ?1 AND run = ?2";
@@ -95,7 +117,7 @@ crate::statements! {
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                     p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                     p.turn_deadline_ms, p.written_epoch, p.model_calls, p.model_stream_from,
-                    p.trace_exported
+                    p.trace_exported, p.working_execution_ref
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL

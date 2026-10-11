@@ -1,12 +1,13 @@
 //! What the bench observes of the production runtime: a store-set
 //! decorator whose durable store forwards every call unchanged and records
-//! each write transaction's label, latency and payload, and the shared
-//! recorder the scripted model and engine report to.
+//! each write transaction's label, latency and encoded commit (the graph
+//! nodes it stages, by kind, and its domain writes), and the shared recorder
+//! the scripted model and engine report to.
 //!
 //! The runner, the activations and the fences are the production ones; the
 //! decorator only watches. Its own cost is one mutex push per transaction.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -15,9 +16,8 @@ use lash_core_execution::{
     ProcessRegistry, StoreBindingId, StoreSet,
 };
 use lash_durable::domain::{
-    DomainWrite, ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow,
-    ScopeKey, SessionCloseRow, SnapshotRow, SnapshotWrite, TurnEnd, TurnRow, TurnWrite, WaitId,
-    WaitRow,
+    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow,
+    RootOwner, RunFacts, ScopeKey, SessionCloseRow, TurnEnd, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DurableError,
@@ -42,12 +42,87 @@ pub struct Transaction {
     pub micros: u64,
     /// Whether the store accepted it.
     pub ok: bool,
-    /// Bytes of the turn checkpoints it wrote.
+    /// Encoded bytes of the turn checkpoint nodes it staged: PhaseRoots and
+    /// the TurnContent they name.
     pub checkpoint_bytes: usize,
-    /// Bytes of the VM or engine snapshots it wrote.
+    /// Encoded bytes of every other node it staged: execution state, cell
+    /// and process roots, reports and facts.
     pub snapshot_bytes: usize,
+    /// How many graph nodes it staged.
+    pub graph_nodes: usize,
+    /// Encoded bytes of every node it staged.
+    pub graph_bytes: usize,
+    /// Encoded bytes of the nodes it staged that no earlier accepted commit
+    /// staged: what it newly installed. Zero when the store refused it.
+    pub installed_bytes: usize,
+    /// The nodes it staged by kind, keyed by the kind's number.
+    pub by_kind: BTreeMap<u32, KindBytes>,
+    /// How many execution roots it put: a cell's or process's park.
+    pub exec_roots: usize,
     /// How many domain writes it carried.
     pub domain_writes: usize,
+}
+
+/// One kind's share of a commit's staged nodes.
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+pub struct KindBytes {
+    /// How many nodes of the kind it staged.
+    pub nodes: usize,
+    /// Their encoded bytes.
+    pub bytes: usize,
+}
+
+/// What one commit encodes: the nodes it stages and its domain writes.
+#[derive(Clone, Debug, Default)]
+struct Encoded {
+    checkpoint_bytes: usize,
+    snapshot_bytes: usize,
+    graph_nodes: usize,
+    graph_bytes: usize,
+    by_kind: BTreeMap<u32, KindBytes>,
+    exec_roots: usize,
+    domain_writes: usize,
+    nodes: Vec<(lash_core_store::checkpoint_graph::NodeId, usize)>,
+}
+
+impl Encoded {
+    fn of(tx: &ActorTx) -> Self {
+        use lash_core_store::checkpoint_graph::NodeKind;
+        let mut encoded = Self {
+            exec_roots: tx
+                .domain()
+                .iter()
+                .filter(|write| {
+                    matches!(
+                        write,
+                        lash_durable::DomainWrite::ExecRoot(
+                            lash_durable::domain::graph::ExecRootWrite::Put { .. }
+                        )
+                    )
+                })
+                .count(),
+            domain_writes: tx.domain().len(),
+            ..Self::default()
+        };
+        for node in tx.graph().values() {
+            let bytes = node.bytes.len();
+            // A node whose envelope does not read is refused by the commit;
+            // it still counts toward what the commit carried.
+            let kind = node.envelope().map_or(0, |envelope| envelope.kind.0);
+            let share = encoded.by_kind.entry(kind).or_default();
+            share.nodes += 1;
+            share.bytes += bytes;
+            encoded.graph_nodes += 1;
+            encoded.graph_bytes += bytes;
+            encoded.nodes.push((node.id, bytes));
+            if kind == NodeKind::PHASE_ROOT.0 || kind == NodeKind::TURN_CONTENT.0 {
+                encoded.checkpoint_bytes += bytes;
+            } else {
+                encoded.snapshot_bytes += bytes;
+            }
+        }
+        encoded
+    }
 }
 
 type Waiters = HashMap<(String, &'static str), oneshot::Sender<Instant>>;
@@ -56,6 +131,7 @@ type Waiters = HashMap<(String, &'static str), oneshot::Sender<Instant>>;
 pub struct Recorder {
     start: Instant,
     transactions: Mutex<Vec<Transaction>>,
+    installed: Mutex<std::collections::HashSet<lash_core_store::checkpoint_graph::NodeId>>,
     claims: Mutex<Vec<(Instant, String, String)>>,
     model_calls: Mutex<HashMap<String, Vec<Instant>>>,
     waiters: Mutex<Waiters>,
@@ -66,6 +142,7 @@ impl Default for Recorder {
         Self {
             start: Instant::now(),
             transactions: Mutex::default(),
+            installed: Mutex::default(),
             claims: Mutex::default(),
             model_calls: Mutex::default(),
             waiters: Mutex::default(),
@@ -132,21 +209,29 @@ impl Recorder {
     }
 
     fn record(&self, started: Instant, actor: String, label: &'static str, ok: bool) {
-        self.record_with(started, actor, label, ok, 0, 0, 0);
+        self.record_with(started, actor, label, ok, Encoded::default());
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn record_with(
         &self,
         started: Instant,
         actor: String,
         label: &'static str,
         ok: bool,
-        checkpoint_bytes: usize,
-        snapshot_bytes: usize,
-        domain_writes: usize,
+        encoded: Encoded,
     ) {
         let ended = Instant::now();
+        let installed_bytes = if ok {
+            let mut installed = self.installed.lock_recover();
+            encoded
+                .nodes
+                .iter()
+                .filter(|(id, _)| installed.insert(*id))
+                .map(|(_, bytes)| bytes)
+                .sum()
+        } else {
+            0
+        };
         let transaction = Transaction {
             at_us: self.since(started),
             micros: u64::try_from(ended.saturating_duration_since(started).as_micros())
@@ -154,9 +239,14 @@ impl Recorder {
             actor,
             label,
             ok,
-            checkpoint_bytes,
-            snapshot_bytes,
-            domain_writes,
+            checkpoint_bytes: encoded.checkpoint_bytes,
+            snapshot_bytes: encoded.snapshot_bytes,
+            graph_nodes: encoded.graph_nodes,
+            graph_bytes: encoded.graph_bytes,
+            installed_bytes,
+            by_kind: encoded.by_kind,
+            exec_roots: encoded.exec_roots,
+            domain_writes: encoded.domain_writes,
         };
         if ok {
             let waiter = self
@@ -169,21 +259,6 @@ impl Recorder {
         }
         self.transactions.lock_recover().push(transaction);
     }
-}
-
-fn payload_bytes(writes: &[DomainWrite]) -> (usize, usize) {
-    writes
-        .iter()
-        .fold((0, 0), |(checkpoints, snapshots), write| match write {
-            DomainWrite::Turn(TurnWrite::Advance { phase, .. }) => (
-                checkpoints + phase.checkpoint().map_or(0, str::len),
-                snapshots,
-            ),
-            DomainWrite::Snapshot(SnapshotWrite::Put { snapshot_ref, .. }) => {
-                (checkpoints, snapshots + snapshot_ref.len())
-            }
-            _ => (checkpoints, snapshots),
-        })
 }
 
 /// A durable store that records each write transaction.
@@ -268,19 +343,11 @@ impl DurableStore for RecordingStore {
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().to_string();
-        let (checkpoints, snapshots) = payload_bytes(tx.domain());
-        let writes = tx.domain().len();
+        let encoded = Encoded::of(&tx);
         let started = Instant::now();
         let answer = self.inner.commit(tx, label).await;
-        self.recorder.record_with(
-            started,
-            actor,
-            label.as_str(),
-            answer.is_ok(),
-            checkpoints,
-            snapshots,
-            writes,
-        );
+        self.recorder
+            .record_with(started, actor, label.as_str(), answer.is_ok(), encoded);
         answer
     }
 
@@ -289,7 +356,10 @@ impl DurableStore for RecordingStore {
         tx: MailTx,
         label: CommitLabel,
     ) -> Result<MailCommit, DurableError> {
-        let writes = tx.writes().len();
+        let encoded = Encoded {
+            domain_writes: tx.writes().len(),
+            ..Encoded::default()
+        };
         let started = Instant::now();
         let answer = self.inner.commit_mail(tx, label).await;
         self.recorder.record_with(
@@ -297,9 +367,7 @@ impl DurableStore for RecordingStore {
             self.node.clone(),
             label.as_str(),
             answer.is_ok(),
-            0,
-            0,
-            writes,
+            encoded,
         );
         answer
     }
@@ -340,20 +408,29 @@ impl DurableReads for RecordingStore {
         self.inner.turn_end(session, run).await
     }
 
-    async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError> {
-        self.inner.run_records(owner).await
+    async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
+        self.inner.run_facts(owner).await
     }
 
-    async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
-        self.inner.snapshot(exec).await
+    async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
+        self.inner.exec_root(exec).await
     }
 
-    async fn cell_snapshots(
+    async fn cell_roots(
         &self,
         session: &lash_sansio::SessionId,
         run: &lash_sansio::TurnId,
-    ) -> Result<Vec<SnapshotRow>, DurableError> {
-        self.inner.cell_snapshots(session, run).await
+    ) -> Result<Vec<ExecRootRow>, DurableError> {
+        self.inner.cell_roots(session, run).await
+    }
+
+    async fn hydrate(
+        &self,
+        owner: RootOwner,
+        expected: Option<lash_durable::domain::checkpoint_graph::NodeId>,
+        limits: lash_durable::domain::checkpoint_graph::DecodeLimits,
+    ) -> Result<HydratedGraph, DurableError> {
+        self.inner.hydrate(owner, expected, limits).await
     }
 
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {

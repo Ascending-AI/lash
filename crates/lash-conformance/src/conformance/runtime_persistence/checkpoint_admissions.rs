@@ -29,7 +29,9 @@ where
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.set_execution_state_snapshot(Some(b"known-execution-state".to_vec().into()));
+    state.set_execution_graph(lash_core::testing::store_fixtures::execution_graph(
+        "known-execution-state",
+    ));
     let mut first_commit = RuntimeCommit::persisted_state_for_test(&state);
     first_commit.checkpoint.components.extend([
         (
@@ -129,7 +131,7 @@ where
     // Explicit owner mutation still uses absence from the complete listing as
     // deletion. The arbitrary store-law mutations remain direct because the
     // runtime intentionally has no typed owner for those keys.
-    state.set_execution_state_snapshot(None);
+    state.set_execution_graph(crate::plugin::ExecutionGraphCapture::Clear);
     let mut third_commit = RuntimeCommit::persisted_state_for_test(&state);
     third_commit
         .checkpoint
@@ -152,11 +154,8 @@ where
         "absence from the complete key listing is deletion"
     );
     assert!(
-        !third
-            .manifest
-            .components
-            .contains_key(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
-        "explicit deletion of a known component must remove it"
+        third.manifest.execution_ref.is_none(),
+        "explicitly cleared execution state must leave the manifest"
     );
     drop(reopen);
 
@@ -202,10 +201,8 @@ where
     );
     assert!(!checkpoint.components.contains_key("arbitrary/deleted"));
     assert!(
-        !checkpoint
-            .components
-            .contains_key(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
-        "known component deletion must survive cold hydration"
+        checkpoint.execution.is_none(),
+        "cleared execution state must survive cold hydration"
     );
 
     state = crate::conformance::helpers::load_window_state(

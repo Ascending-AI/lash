@@ -37,11 +37,10 @@
 use lash_durable::CommitLabel;
 use lash_durable::DomainWrite;
 use lash_durable::DurableError;
-use lash_durable::domain::{
-    ModelCallId, PromptCallKey, RunSeq, SessionCommitWrite, SessionMailWrite, TurnWrite,
-};
+use lash_durable::domain::{ModelCallId, PromptCallKey, RunSeq, SessionMailWrite, TurnWrite};
 
 use super::head::HeadCache;
+use super::phase_root::StagedPhase;
 use super::session::{
     CellExit, CodeCell, ComposedCall, OpenTurn, ParkedTurnState, PhaseCheckpoint, PhaseExit,
     PreparedCall, TurnCancelRequest, TurnDone, TurnDrive, TurnError, TurnRow, TurnServices,
@@ -58,8 +57,8 @@ use lash_sansio::{SavedTurn, SessionId, TurnId};
 use std::sync::Arc;
 
 /// The phase checkpoint of `drive` as it stands: its machine's checkpoint
-/// and the input its checkpoints delivered.
-fn encode_checkpoint(drive: &mut dyn TurnDrive) -> Result<String, TurnError> {
+/// and the input its checkpoints delivered, staged as its PhaseRoot.
+fn encode_checkpoint(drive: &mut dyn TurnDrive) -> Result<StagedPhase, TurnError> {
     let saved = drive.machine().checkpoint();
     encode_phase(drive, saved)
 }
@@ -67,15 +66,14 @@ fn encode_checkpoint(drive: &mut dyn TurnDrive) -> Result<String, TurnError> {
 fn encode_phase(
     drive: &mut dyn TurnDrive,
     saved: SavedTurn<HostTurnProtocol>,
-) -> Result<String, TurnError> {
+) -> Result<StagedPhase, TurnError> {
     let checkpoint = PhaseCheckpoint {
         saved,
         delivered: drive.delivered_inputs(),
         before_turn: drive.before_turn(),
         trace: drive.trace_scope(),
     };
-    serde_json::to_string(&checkpoint)
-        .map_err(|error| TurnError::Exec(format!("the turn checkpoint does not encode: {error}")))
+    StagedPhase::of(&checkpoint).map_err(TurnError::Exec)
 }
 
 /// The plugin namespaces `drive`'s run changed that its rows do not record
@@ -89,11 +87,13 @@ pub(super) fn write_run_changes(
 ) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
     let changes = drive.run_changes();
     if !changes.is_empty() {
-        tx.write(DomainWrite::Turn(TurnWrite::Namespaces {
-            session: session.clone(),
-            run: run.clone(),
-            namespaces: changes.clone(),
-        }));
+        #[expect(
+            clippy::expect_used,
+            reason = "a namespace value always encodes, and an unbounded staging area places \
+                      every value it holds"
+        )]
+        tx.write_namespaces(session, run, &changes)
+            .expect("a run's namespace changes stage");
     }
     changes
 }
@@ -189,7 +189,7 @@ pub async fn run_phases(
     let mut calls = row.model_calls;
     let mut outcome = None;
     // A settled round's presentation, committed with the turn's next commit.
-    let mut carry: Option<DomainWrite> = None;
+    let mut carry: Option<lash_core_execution::runtime::actor::round::PresentRecord> = None;
     // An answered cell's tool calls, recorded with the turn's next commit.
     let mut answered_cell: Option<tool_round::AnsweredCell> = None;
     loop {
@@ -319,27 +319,37 @@ pub async fn run_phases(
                     // attempt and records nothing.
                     let label = tool_round::model_start_label(&carry);
                     if let Some(present) = carry.take() {
-                        tx.write(present);
+                        present.write(&mut tx);
                     }
                     if let Some(record) = admission {
                         tx.write(record);
                     }
-                    tool_round::record_answered_cell(cx, &mut tx, &row, &mut answered_cell)?;
+                    tool_round::consume_answered_cell(
+                        cx,
+                        drive.as_mut(),
+                        &mut tx,
+                        &row,
+                        &mut answered_cell,
+                        true,
+                    )
+                    .await?;
                     if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                         tx.write(bind);
                     }
                     let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
+                    let checkpoint = encode_phase(drive.as_mut(), saved)?.staged_in(&mut tx);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
                         phase: UnfinishedPhase::Model {
                             pin: pin.clone(),
-                            checkpoint: encode_phase(drive.as_mut(), saved)?,
+                            checkpoint,
                         },
                         iteration: current,
                     }));
                     cx.commit(tx, label).await?;
                     drive.run_changes_committed(&written);
+                    drive.phase_committed().await;
                     if !resent {
                         calls = pin.call;
                     }
@@ -372,24 +382,34 @@ pub async fn run_phases(
                 let named = matches!(row.phase, UnfinishedPhase::Tools { run, .. } if run == cell);
                 if !named || carry.is_some() || answered_cell.is_some() {
                     if let Some(present) = carry.take() {
-                        tx.write(present);
+                        present.write(&mut tx);
                     }
-                    tool_round::record_answered_cell(cx, &mut tx, &row, &mut answered_cell)?;
+                    tool_round::consume_answered_cell(
+                        cx,
+                        drive.as_mut(),
+                        &mut tx,
+                        &row,
+                        &mut answered_cell,
+                        true,
+                    )
+                    .await?;
                     if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                         tx.write(bind);
                     }
                     let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
+                    let checkpoint = encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
                         phase: UnfinishedPhase::Tools {
                             run: cell,
-                            checkpoint: encode_checkpoint(drive.as_mut())?,
+                            checkpoint,
                         },
                         iteration: iteration(drive.machine()),
                     }));
                     cx.commit(tx, CommitLabel::MODEL_DONE).await?;
                     drive.run_changes_committed(&written);
+                    drive.phase_committed().await;
                 }
                 let cell = drive.exec_cell(cx, id, CodeCell { language, code });
                 match turn_cancel::unless_cancelled(cx, cell).await? {
@@ -397,10 +417,11 @@ pub async fn run_phases(
                         if ran? == CellExit::Suspended {
                             return Ok(PhaseExit::Suspended { due: None });
                         }
+                        // Every answered cell is handed off, tools called
+                        // or not: its working state is the turn's from the
+                        // commit that consumes its answer.
                         let calls = drive.answered_cell_calls();
-                        if !calls.is_empty() {
-                            answered_cell = Some(tool_round::AnsweredCell { id, calls });
-                        }
+                        answered_cell = Some(tool_round::AnsweredCell { id, calls });
                     }
                     None => {
                         drive.stop_cell();
@@ -454,24 +475,34 @@ pub async fn run_phases(
                 }
                 tool_round::record_refused(cx, &mut tx, &row, id, &completed)?;
                 if let Some(present) = carry.take() {
-                    tx.write(present);
+                    present.write(&mut tx);
                 }
-                tool_round::record_answered_cell(cx, &mut tx, &row, &mut answered_cell)?;
+                tool_round::consume_answered_cell(
+                    cx,
+                    drive.as_mut(),
+                    &mut tx,
+                    &row,
+                    &mut answered_cell,
+                    true,
+                )
+                .await?;
                 if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                     tx.write(bind);
                 }
                 let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
+                let checkpoint = encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
                 tx.write(DomainWrite::Turn(TurnWrite::Advance {
                     session: session.clone(),
                     run: run.clone(),
                     phase: UnfinishedPhase::Tools {
                         run: RunSeq(id.0),
-                        checkpoint: encode_checkpoint(drive.as_mut())?,
+                        checkpoint,
                     },
                     iteration: iteration(drive.machine()),
                 }));
                 cx.commit(tx, CommitLabel::MODEL_DONE).await?;
                 drive.run_changes_committed(&written);
+                drive.phase_committed().await;
                 drive
                     .local(cx, Effect::ReportToolCalls { id, completed })
                     .await?;
@@ -515,19 +546,28 @@ pub async fn run_phases(
                     .finish(cx, done, heads.head(cx, &session).await?)
                     .await?;
                 if let Some(present) = carry.take() {
-                    tx.write(present);
+                    present.write(&mut tx);
                 }
-                tool_round::record_answered_cell(cx, &mut tx, &row, &mut answered_cell)?;
+                tool_round::consume_answered_cell(
+                    cx,
+                    drive.as_mut(),
+                    &mut tx,
+                    &row,
+                    &mut answered_cell,
+                    false,
+                )
+                .await?;
                 // The commit settles what the turn's checkpoints delivered:
                 // bound to the run first, as the settlement requires.
                 if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                     tx.write(bind);
                 }
-                tx.write(DomainWrite::SessionCommit(SessionCommitWrite {
-                    session: session.clone(),
-                    expected_head: commit.expected_head,
-                    commit_json: commit.commit_json,
-                }));
+                super::head_commit::write_session_commit(
+                    &mut tx,
+                    &session,
+                    commit.expected_head,
+                    commit.commit,
+                );
                 tx.write(DomainWrite::Turn(TurnWrite::Terminal {
                     session: session.clone(),
                     run: run.clone(),
@@ -577,7 +617,7 @@ pub async fn run_phases(
 /// step, unless the caller says the turn stands between steps.
 fn stopped(
     drive: Box<dyn TurnDrive>,
-    carry: &mut Option<DomainWrite>,
+    carry: &mut Option<lash_core_execution::runtime::actor::round::PresentRecord>,
     answered_cell: &mut Option<tool_round::AnsweredCell>,
 ) -> turn_cancel::StoppedTurn {
     turn_cancel::StoppedTurn {

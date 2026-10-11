@@ -19,9 +19,8 @@ use lash_core_execution::ProcessIdMint;
 use lash_core_execution::ProcessStatus;
 use lash_core_execution::store::SessionCheckpoint;
 use lash_core_execution::{
-    ArtifactReferrer, BlobRef, CheckpointComponentDescriptor, DurablePayload, DurableScan,
-    DurableSurface, HostArtifactPin, ModuleArtifactStore, ReferrerClaim, ScanCoverage,
-    StorePreflight,
+    ArtifactReferrer, BlobRef, DurablePayload, DurableScan, DurableSurface, HostArtifactPin,
+    ModuleArtifactStore, ReferrerClaim, ScanCoverage, StorePreflight,
 };
 use lash_postgres_store::PostgresStorePreflight;
 use lash_sansio::ProcessId;
@@ -230,13 +229,12 @@ async fn a_dangling_checkpoint_ref_is_reported_missing_rather_than_skipped() {
     // One healthy session whose manifest and execution-state component are both
     // present, so the dangling one below is a contrast rather than the only
     // shape the walk has ever seen.
-    let component = b"execution state bytes".to_vec();
-    let component_ref = "hash-execution-state";
-    let manifest = encoded_manifest(component_ref);
-    let manifest_ref = "hash-manifest";
-    seed_blob(&scratch, component_ref, &component).await;
-    seed_blob(&scratch, manifest_ref, &manifest).await;
-    seed_session(&scratch, &SessionId::from("session-healthy"), manifest_ref).await;
+    let (execution_root, component) = execution_root_node();
+    let component_ref = execution_root.to_hex();
+    let (manifest_ref, manifest) = encoded_manifest(Some(execution_root));
+    seed_blob(&scratch, &component_ref, &component).await;
+    seed_blob(&scratch, &manifest_ref, &manifest).await;
+    seed_session(&scratch, &SessionId::from("session-healthy"), &manifest_ref).await;
     seed_session(
         &scratch,
         &SessionId::from("session-dangling"),
@@ -263,13 +261,13 @@ async fn a_dangling_checkpoint_ref_is_reported_missing_rather_than_skipped() {
     }
     assert_eq!(
         page.items[1].payload,
-        DurablePayload::MessagePack(manifest.clone()),
-        "the healthy session yields the manifest's logical bytes unchanged"
+        DurablePayload::GraphNode(manifest.clone()),
+        "the healthy session yields the manifest node's bytes unchanged"
     );
 
-    // One level deeper: only the session whose manifest names an execution-state
-    // component contributes, and it yields that component's bytes rather than
-    // the manifest's.
+    // One level deeper: only the session whose manifest names an execution
+    // root contributes, and it yields that root node's bytes rather than the
+    // manifest's.
     let deeper = preflight
         .scan_durable(&DurableScan::first(
             DurableSurface::SessionExecutionState,
@@ -284,7 +282,7 @@ async fn a_dangling_checkpoint_ref_is_reported_missing_rather_than_skipped() {
     );
     assert_eq!(
         deeper.items[0].payload,
-        DurablePayload::MessagePack(component)
+        DurablePayload::GraphNode(component)
     );
 
     scratch.cleanup().await;
@@ -301,18 +299,15 @@ async fn a_deep_page_resumes_after_the_last_session_scanned_not_the_last_item() 
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
-    let manifest_with = encoded_manifest("hash-execution-state");
-    seed_blob(&scratch, "hash-execution-state", b"execution state bytes").await;
-    seed_blob(&scratch, "hash-with", &manifest_with).await;
-    seed_blob(
-        &scratch,
-        "hash-without",
-        &encoded_manifest_without_components(),
-    )
-    .await;
-    seed_session(&scratch, &SessionId::from("session-1"), "hash-with").await;
-    // Scanned second, emits nothing: it has no execution-state component at all.
-    seed_session(&scratch, &SessionId::from("session-2"), "hash-without").await;
+    let (execution_root, execution) = execution_root_node();
+    let (with_ref, manifest_with) = encoded_manifest(Some(execution_root));
+    let (without_ref, manifest_without) = encoded_manifest(None);
+    seed_blob(&scratch, &execution_root.to_hex(), &execution).await;
+    seed_blob(&scratch, &with_ref, &manifest_with).await;
+    seed_blob(&scratch, &without_ref, &manifest_without).await;
+    seed_session(&scratch, &SessionId::from("session-1"), &with_ref).await;
+    // Scanned second, emits nothing: it names no execution root at all.
+    seed_session(&scratch, &SessionId::from("session-2"), &without_ref).await;
 
     let page = PostgresStorePreflight::from_pool(scratch.pool.clone())
         .scan_durable(&DurableScan::first(
@@ -332,37 +327,35 @@ async fn a_deep_page_resumes_after_the_last_session_scanned_not_the_last_item() 
     scratch.cleanup().await;
 }
 
-/// Encode a checkpoint manifest exactly as the write path does — the real
-/// `SessionCheckpoint`, through the same named-field MessagePack encoding — so
-/// the walk's navigation is proved against the shape production writes rather
-/// than against a fixture that agrees with the reader by construction.
-fn encoded_manifest(execution_state_ref: &str) -> Vec<u8> {
-    let mut components = std::collections::BTreeMap::new();
-    components.insert(
-        lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
-        CheckpointComponentDescriptor {
-            blob_ref: BlobRef(execution_state_ref.to_string()),
-            encoding_version: lash_core_execution::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
-        },
-    );
-    encode_manifest(components)
-}
-
-fn encoded_manifest_without_components() -> Vec<u8> {
-    encode_manifest(std::collections::BTreeMap::new())
-}
-
-fn encode_manifest(
-    components: std::collections::BTreeMap<String, CheckpointComponentDescriptor>,
-) -> Vec<u8> {
+/// Stage a checkpoint manifest exactly as the write path does — the real
+/// `SessionCheckpoint`, through the same SessionManifest node encoding — so
+/// the walk's navigation is proved against the shape production writes
+/// rather than against a fixture that agrees with the reader by
+/// construction. Answers the node's reference and bytes.
+fn encoded_manifest(
+    execution: Option<lash_core::durable_port::domain::checkpoint_graph::NodeId>,
+) -> (String, Vec<u8>) {
     let manifest = SessionCheckpoint {
         schema_version: lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
         turn_state: lash_core_execution::PersistedTurnState::default(),
-        components,
+        components: std::collections::BTreeMap::new(),
+        execution_ref: execution.map(|root| BlobRef(root.to_hex())),
     };
-    let mut bytes = Vec::new();
-    rmp_serde::encode::write_named(&mut bytes, &manifest).expect("encode checkpoint manifest");
-    bytes
+    let (root, nodes) = manifest.to_graph().expect("stage checkpoint manifest");
+    (root.to_hex(), nodes[&root].bytes.to_vec())
+}
+
+/// A SessionExecution root node and its bytes.
+fn execution_root_node() -> (
+    lash_core::durable_port::domain::checkpoint_graph::NodeId,
+    Vec<u8>,
+) {
+    let lash_core_execution::plugin::ExecutionGraphCapture::Replace { root, nodes } =
+        lash_core::testing::store_fixtures::execution_graph("execution state")
+    else {
+        unreachable!("the fixture stages a root")
+    };
+    (root, nodes[&root].bytes.to_vec())
 }
 
 /// Seed a process row and answer the record it stores. The row's status is
@@ -400,14 +393,19 @@ async fn seed_process(
     record
 }
 
+/// Seeds the session past the foreign keys: a dangling checkpoint root is
+/// foreign data the schema refuses, and the walk must still report it.
 async fn seed_session(scratch: &ScratchSchema, session_id: &SessionId, checkpoint_ref: &str) {
     scratch
         .apply(&format!(
-            "WITH recorded AS (
+            "BEGIN;
+             SET LOCAL session_replication_role = replica;
+             WITH recorded AS (
                  INSERT INTO lash_session_revisions (session_id, head_revision, head_json, checkpoint_ref)
                  VALUES ('{session_id}', 1, '{{}}', '{checkpoint_ref}') RETURNING session_id, head_revision
              ) INSERT INTO lash_session_head (session_id, head_revision)
-                 SELECT session_id, head_revision FROM recorded"
+                 SELECT session_id, head_revision FROM recorded;
+             COMMIT"
         ))
         .await;
 }
@@ -416,7 +414,7 @@ async fn seed_blob(scratch: &ScratchSchema, hash: &str, content: &[u8]) {
     let hex: String = content.iter().map(|byte| format!("{byte:02x}")).collect();
     scratch
         .apply(&format!(
-            "INSERT INTO lash_blobs (hash, content) VALUES ('{hash}', '\\x{hex}')"
+            "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('{hash}', '\\x{hex}', 0)"
         ))
         .await;
 }

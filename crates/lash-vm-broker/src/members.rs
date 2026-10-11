@@ -23,7 +23,7 @@ use lash_core_execution::runtime::actor::round::lifecycle::{Act, Lifecycle, Memb
 use lash_core_execution::runtime::actor::round::{
     self, AdmittedExecution, PinnedWaits, PolicyView, RoundError, RunFold, fold,
 };
-use lash_durable::domain::{OwnerKey, RunRecordRow, RunSeq};
+use lash_durable::domain::{OwnerKey, RunFacts, RunSeq};
 use lash_durable::{CommitLabel, DueSource, DurableError, DurableInstant};
 use tokio_util::sync::CancellationToken;
 
@@ -55,7 +55,7 @@ pub enum Driven<T> {
 
 /// A decision over the owner's records, their fold and the store's time.
 pub(crate) type DecideFolded<'a, T> =
-    dyn FnMut(&[RunRecordRow], &RunFold, DurableInstant) -> Decide<T> + Send + 'a;
+    dyn FnMut(&RunFacts, &RunFold, DurableInstant) -> Decide<T> + Send + 'a;
 
 /// The members of one execution's owner on one activation: the lifecycle
 /// that runs their bodies and the records it reads. Never a grant: a new
@@ -68,7 +68,7 @@ pub(crate) struct Members {
     lifecycle: Option<Lifecycle>,
     /// The owner's records as last read and appended; `None` once a commit
     /// this cache does not see may have changed them.
-    rows: Option<Vec<RunRecordRow>>,
+    rows: Option<RunFacts>,
     /// The completion waits the admissions among `rows` pinned, read with
     /// them: a row a commit appends is never an admission.
     waits: PinnedWaits,
@@ -142,12 +142,12 @@ impl Members {
         Ok(())
     }
 
-    async fn rows(&mut self) -> Result<Vec<RunRecordRow>, RoundError> {
+    async fn rows(&mut self) -> Result<RunFacts, RoundError> {
         if let Some(rows) = &self.rows {
             return Ok(rows.clone());
         }
         let reads = self.cx.durable_reads()?;
-        let rows = reads.run_records(&self.owner).await?;
+        let rows = reads.run_facts(&self.owner).await?;
         self.waits = PinnedWaits::read(reads, &rows).await?;
         self.rows = Some(rows.clone());
         Ok(rows)

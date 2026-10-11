@@ -1,18 +1,19 @@
-//! VM snapshots on SQLite: the `snapshots` domain's statements, apply and read
-//! (I0, FIG-5194).
+//! Execution roots on SQLite: the `snapshots` domain's statements, apply and
+//! read (I0, FIG-5194).
 //!
 //! Owned by V0 (FIG-5170), then L7 (FIG-5177). The dispatch in `durable/mod.rs` calls these inside the
-//! fenced owner commit (or the mailbox commit), after the fence; a refusal
-//! rolls the whole commit back.
+//! fenced owner commit, after the fence and the installation of the commit's
+//! staged graph nodes; a refusal rolls the whole commit back.
 
 use std::sync::LazyLock;
 
-use lash_durable::domain::{DomainRefusal, ExecKey, SnapshotRev, SnapshotRow, SnapshotWrite};
+use lash_core_store::checkpoint_graph::{CommitId, NodeId};
+use lash_durable::domain::{DomainRefusal, ExecKey, ExecRootRow, ExecRootWrite, SnapshotRev};
 use lash_durable::{DurableError, Epoch};
 use lash_store_sql::durable::snapshots::SnapshotStatements;
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing, integer};
+use super::{Answer, Committing, corrupt, integer, node_ref};
 use crate::conn::cached_execute;
 
 static SQL: LazyLock<SnapshotStatements> =
@@ -27,181 +28,167 @@ pub(crate) const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS exec_snapshots (
     exec_key TEXT PRIMARY KEY,
     rev INTEGER NOT NULL CONSTRAINT ck_exec_snapshots_rev CHECK (rev >= 1),
-    snapshot_ref TEXT NOT NULL,
-    executable_identity TEXT NOT NULL,
-    format_version INTEGER NOT NULL CONSTRAINT ck_exec_snapshots_format_version
-        CHECK (format_version BETWEEN 0 AND 4294967295),
+    -- The execution's ExecRoot node (FIG-5887 §7) and the commit that wrote it.
+    root_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    commit_id BLOB NOT NULL CONSTRAINT ck_exec_snapshots_commit_id CHECK (length(commit_id) = 32),
     written_epoch INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_exec_snapshots_root_ref ON exec_snapshots (root_ref);
 ";
 
-pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &SnapshotWrite) -> Answer<()> {
+fn conflict(
+    exec: &ExecKey,
+    expected: Option<SnapshotRev>,
+    found: Option<SnapshotRev>,
+) -> Answer<()> {
+    Ok(Err(DurableError::Domain(
+        DomainRefusal::SnapshotRevConflict {
+            exec: exec.clone(),
+            expected,
+            found,
+        },
+    )))
+}
+
+pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWrite) -> Answer<()> {
     match write {
-        SnapshotWrite::Put {
+        ExecRootWrite::Put {
             exec,
             expected,
-            snapshot_ref,
-            executable_identity,
-            format_version,
+            expected_root,
+            root,
+            commit_id,
         } => {
             let key = exec.stored();
             let found = tx
-                .prepare_cached(SQL.rev.sql())?
-                .query_row([&key], |row| row.get::<_, i64>(0))
-                .optional()?
-                .map(revision)
-                .transpose()?;
-            if found != *expected {
-                return Ok(Err(DurableError::Domain(
-                    DomainRefusal::SnapshotRevConflict {
-                        exec: exec.clone(),
-                        expected: *expected,
-                        found,
-                    },
-                )));
+                .prepare_cached(SQL.root.sql())?
+                .query_row([&key], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })
+                .optional()?;
+            let (found_rev, found_root) = match found {
+                None => (None, None),
+                Some((rev, root)) => match node_ref(&root) {
+                    Ok(root) => (Some(revision(rev)?), Some(root)),
+                    Err(error) => return Ok(Err(error)),
+                },
+            };
+            if found_rev != *expected || found_root != *expected_root {
+                return conflict(exec, *expected, found_rev);
             }
             match expected {
                 None => {
                     cached_execute(
                         tx,
                         SQL.insert.sql(),
-                        rusqlite::params![
-                            key,
-                            snapshot_ref,
-                            executable_identity,
-                            format_version,
-                            commit.epoch.0
-                        ],
+                        rusqlite::params![key, root.to_hex(), &commit_id.0[..], commit.epoch.0],
                     )?;
                 }
-                Some(expected) => {
-                    tx.prepare_cached(SQL.replace.sql())?.query_row(
-                        rusqlite::params![
-                            key,
-                            integer::<i64>(expected.0)?,
-                            snapshot_ref,
-                            executable_identity,
-                            format_version,
-                            commit.epoch.0
-                        ],
-                        |_| Ok(()),
-                    )?;
+                Some(rev) => {
+                    let replaced = tx
+                        .prepare_cached(SQL.replace.sql())?
+                        .query_row(
+                            rusqlite::params![
+                                key,
+                                integer::<i64>(rev.0)?,
+                                root.to_hex(),
+                                &commit_id.0[..],
+                                commit.epoch.0
+                            ],
+                            |_| Ok(()),
+                        )
+                        .optional()?;
+                    if replaced.is_none() {
+                        return conflict(exec, *expected, found_rev);
+                    }
                 }
             }
             Ok(Ok(()))
         }
-        SnapshotWrite::Delete { exec } => {
-            cached_execute(tx, SQL.delete.sql(), [exec.stored()])?;
+        ExecRootWrite::Retire { exec, expected } => {
+            let retired = tx
+                .prepare_cached(SQL.retire.sql())?
+                .query_row([exec.stored(), expected.to_hex()], |_| Ok(()))
+                .optional()?;
+            if retired.is_none() {
+                return conflict(exec, None, None);
+            }
+            Ok(Ok(()))
+        }
+        ExecRootWrite::Clear { exec } => {
+            cached_execute(tx, SQL.clear.sql(), [exec.stored()])?;
             Ok(Ok(()))
         }
     }
 }
 
-pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<SnapshotRow>> {
+fn row_of(
+    exec: ExecKey,
+    rev: i64,
+    root: &str,
+    epoch: i64,
+    commit_id: &[u8],
+) -> rusqlite::Result<Result<ExecRootRow, DurableError>> {
+    let root: NodeId = match node_ref(root) {
+        Ok(root) => root,
+        Err(error) => return Ok(Err(error)),
+    };
+    let Ok(commit_id) = <[u8; 32]>::try_from(commit_id) else {
+        return Ok(Err(corrupt("commit id", &exec.stored())));
+    };
+    Ok(Ok(ExecRootRow {
+        exec,
+        rev: revision(rev)?,
+        root,
+        written_epoch: Epoch(epoch),
+        commit_id: CommitId(commit_id),
+    }))
+}
+
+pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<ExecRootRow>> {
     let row = tx
         .prepare_cached(SQL.read.sql())?
         .query_row([exec.stored()], |row| {
-            Ok(SnapshotRow {
-                exec: exec.clone(),
-                rev: revision(row.get(0)?)?,
-                snapshot_ref: row.get(1)?,
-                executable_identity: row.get(2)?,
-                format_version: row.get(3)?,
-                written_epoch: Epoch(row.get(4)?),
-            })
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+            ))
         })
         .optional()?;
-    Ok(Ok(row))
+    match row {
+        None => Ok(Ok(None)),
+        Some((rev, root, epoch, commit_id)) => {
+            Ok(row_of(exec.clone(), rev, &root, epoch, &commit_id)?.map(Some))
+        }
+    }
 }
 
-/// Every snapshot whose execution key starts with `prefix`, by key.
-pub(super) fn under(tx: &Connection, prefix: &str) -> Answer<Vec<SnapshotRow>> {
+/// Every execution root whose key starts with `prefix`, by key.
+pub(super) fn under(tx: &Connection, prefix: &str) -> Answer<Vec<ExecRootRow>> {
     let rows = tx
         .prepare_cached(SQL.under.sql())?
         .query_map([prefix], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                revision(row.get(1)?)?,
+                row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, u32>(4)?,
-                Epoch(row.get(5)?),
+                row.get::<_, i64>(3)?,
+                row.get::<_, Vec<u8>>(4)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows
-        .into_iter()
-        .map(
-            |(key, rev, snapshot_ref, executable_identity, format_version, written_epoch)| {
-                Ok(SnapshotRow {
-                    exec: ExecKey::parse(&key)
-                        .map_err(|error| super::corrupt("execution key", &error.0))?,
-                    rev,
-                    snapshot_ref,
-                    executable_identity,
-                    format_version,
-                    written_epoch,
-                })
-            },
-        )
-        .collect())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lash_durable::domain::CellId;
-    use lash_durable::{ActorKey, DurableInstant};
-
-    #[test]
-    fn snapshots_preserve_full_format_version_and_refuse_oversized_revision() {
-        let conn = Connection::open_in_memory().expect("open snapshots");
-        conn.execute_batch(TABLES).expect("create snapshots");
-        for version in [-1_i64, i64::from(u32::MAX) + 1] {
-            let error = conn
-                .execute(
-                    "INSERT INTO exec_snapshots VALUES ('bad', 1, 'snapshot', 'identity', ?1, 1)",
-                    [version],
-                )
-                .expect_err("format versions are u32");
-            assert!(
-                error
-                    .to_string()
-                    .contains("ck_exec_snapshots_format_version")
-            );
+    let mut roots = Vec::with_capacity(rows.len());
+    for (key, rev, root, epoch, commit_id) in rows {
+        let exec = match ExecKey::parse(&key) {
+            Ok(exec) => exec,
+            Err(error) => return Ok(Err(corrupt("execution key", &error.0))),
+        };
+        match row_of(exec, rev, &root, epoch, &commit_id)? {
+            Ok(row) => roots.push(row),
+            Err(error) => return Ok(Err(error)),
         }
-
-        let actor = ActorKey::session("session").expect("actor");
-        let commit = Committing {
-            actor: &actor,
-            epoch: Epoch(1),
-            now: DurableInstant(1),
-            fleet: lash_core_execution::FleetFormat::current(),
-            blob_profile: crate::BuiltinBlobProfile::default(),
-        };
-        let exec = ExecKey::Cell("session".into(), "turn".into(), CellId::new("cell"));
-        let put = |expected| SnapshotWrite::Put {
-            exec: exec.clone(),
-            expected,
-            snapshot_ref: "snapshot".into(),
-            executable_identity: "identity".into(),
-            format_version: u32::MAX,
-        };
-        apply(&conn, &commit, &put(None))
-            .expect("insert")
-            .expect("accepted");
-        let before = read(&conn, &exec)
-            .expect("read")
-            .expect("decoded")
-            .expect("snapshot");
-        assert_eq!(before.format_version, u32::MAX);
-        assert!(!matches!(
-            apply(&conn, &commit, &put(Some(SnapshotRev(u64::MAX)))),
-            Ok(Ok(()))
-        ));
-        assert_eq!(
-            read(&conn, &exec).expect("read").expect("decoded"),
-            Some(before)
-        );
     }
+    Ok(Ok(roots))
 }

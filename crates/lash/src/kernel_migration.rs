@@ -101,15 +101,14 @@ pub async fn survey_kernel_migration(
             };
             let mut refused = Vec::new();
             if let Some(turn) = reads.turn(&session).await? {
-                for cell in reads.cell_snapshots(&session, &turn.run).await? {
+                for cell in stored_cells(&**reads, &session, &turn.run).await? {
                     let lash_core::durable_port::domain::ExecKey::Cell(_, _, id) = &cell.exec
                     else {
                         continue;
                     };
-                    if let Some(refusal) = lash_protocol_rlm::cell_migration_refusal(
-                        &cell.snapshot_ref,
-                        Arc::clone(functions),
-                    ) {
+                    if let Some(refusal) =
+                        lash_protocol_rlm::cell_migration_refusal(&cell, Arc::clone(functions))
+                    {
                         refused.push(RefusedKernelCell {
                             turn: turn.run.clone(),
                             cell: id.as_str().to_owned(),
@@ -299,4 +298,31 @@ fn surveyed_helper_releases() -> Result<Vec<u32>, KernelMigrationSurveyError> {
     releases.sort_unstable();
     releases.dedup();
     Ok(releases)
+}
+
+/// The root of each cell of `session`'s `run`, each read whole under one
+/// protection: what a survey reads of a turn stopped in a cell.
+#[cfg(feature = "rlm")]
+pub(crate) async fn stored_cells(
+    reads: &dyn lash_core::DurableStore,
+    session: &lash_core::SessionId,
+    run: &lash_core::TurnId,
+) -> Result<Vec<lash_core::plugin::StoredCell>, lash_core::durable_port::DurableError> {
+    use lash_core::durable_port::domain::graph::{OWNER_READ_LIMITS, RootOwner};
+    let mut cells = Vec::new();
+    for row in reads.cell_roots(session, run).await? {
+        let graph = reads
+            .hydrate(
+                RootOwner::Exec(row.exec.clone()),
+                Some(row.root),
+                OWNER_READ_LIMITS,
+            )
+            .await?;
+        cells.push(lash_core::plugin::StoredCell {
+            exec: row.exec.clone(),
+            row,
+            graph,
+        });
+    }
+    Ok(cells)
 }

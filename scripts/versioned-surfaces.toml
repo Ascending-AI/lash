@@ -70,6 +70,26 @@ constant = "MIN_SUPPORTED_WORKER_PROTOCOL_VERSION"
 constant_path = "crates/lash-vm-protocol/src/version.rs"
 reason = "lower read bound for WORKER_PROTOCOL_VERSION, not a separately written format"
 
+[[unregistered]]
+constant = "FIRST_NATIVE_VERSION"
+constant_path = "crates/lash-kernel-doc/src/function.rs"
+reason = "the revision a native implementation states when it states none: the implementation's own number, which a release manifest pins by fingerprint, not a lash format"
+
+[[unregistered]]
+constant = "FINISH_ARGS"
+constant_path = "crates/lash-protocol-rlm/src/executor/host.rs"
+reason = "names the projection a frozen request's finish arguments were made under; the FrozenRequest node it is written in is the format, frozen with the 1.0 checkpoint graph"
+
+[[unregistered]]
+constant = "CALL_ARGS"
+constant_path = "crates/lash-protocol-rlm/src/executor/host.rs"
+reason = "names the projection a frozen request's call arguments were made under; the FrozenRequest node it is written in is the format, frozen with the 1.0 checkpoint graph"
+
+[[unregistered]]
+constant = "MODEL_RETURN_RENDERER"
+constant_path = "crates/lash-sansio/src/tool_output/graph.rs"
+reason = "the spec whose digest identifies the one renderer a presentation recipe is reconstructed with; a recipe under another renderer is refused, never re-rendered, so it versions no stored shape"
+
 # BLAKE3 hash domains that are permanently reserved but no longer used: a
 # retired name must never identify another format. The domains in use are the
 # `lash*/vN` identity constants the release inventory resolves;
@@ -208,3 +228,7 @@ reason = "FIG-5571: the pre-1.0 substrate cutover uses the Lash VM namespace"
 [[retired_hash_domain]]
 name = "lash-lashlang-program/v3"
 reason = "FIG-5571: the pre-1.0 substrate cutover uses the Lash VM namespace"
+
+[[retired_hash_domain]]
+name = "lash-codemode-execution-state-leaf/v2"
+reason = "FIG-5894: a session's execution state is one SessionExecution graph of content-addressed nodes, with no named leaves"

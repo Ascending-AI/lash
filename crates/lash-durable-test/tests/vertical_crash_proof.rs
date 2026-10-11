@@ -141,6 +141,72 @@ enum Protocol {
     /// [`Protocol::Code`] whose cell's prints are retained out of history
     /// as one archive.
     Archived,
+    /// A code cell that keeps a large text across every await of its
+    /// operation (PC-LARGE-ONCE).
+    Large(Pad),
+    /// Two cells in one turn (PC-WORKING): A binds a text and a function
+    /// its report never shows, around the operation; after a model wait B
+    /// reads them, and ends as [`Second`] says.
+    Working(Second),
+}
+
+/// How [`Protocol::Working`]'s second cell ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Second {
+    /// It binds a total of A's text and function.
+    Succeeds,
+    /// It binds a partial value, then throws.
+    Fails,
+}
+
+/// The text cell A binds: longer than any preview of it, and made at run
+/// time, so not even A's source holds it whole.
+fn carried() -> String {
+    "carried ".repeat(250)
+}
+
+/// Cell A: binds [`carried`] and a function, then calls the operation,
+/// whatever its answer.
+const WORKING_FIRST_CELL: &str = "<typescript>\nlet carried_text = 'carried '.repeat(250);\nfunction twice_of(n) { return n * 2; }\nlet written = null;\ntry { written = await tools.ext_write({ x: 7 }); } catch (error) { written = String(error); }\nconsole.log(written);\n</typescript>";
+
+/// Cell B, as [`Second`] says.
+fn working_second_cell(second: Second) -> &'static str {
+    match second {
+        Second::Succeeds => {
+            "<typescript>\nlet second_total = twice_of(carried_text.length);\nconsole.log('second total ' + second_total);\n</typescript>"
+        }
+        Second::Fails => {
+            "<typescript>\nlet second_partial = twice_of(carried_text.length);\nthrow new Error('the second cell fails at ' + second_partial);\n</typescript>"
+        }
+    }
+}
+
+/// What [`Protocol::Large`]'s cell keeps after each await: the same large
+/// text, or a fresh one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pad {
+    Repeated,
+    Fresh,
+}
+
+/// The large text's length: far past the 256-byte inline bound.
+const PAD: usize = 16 * 1024;
+/// How many times [`Protocol::Large`]'s cell awaits its operation.
+const AWAITS: usize = 10;
+
+impl Pad {
+    /// The cell: a `PAD`-byte text in its source, kept once more after each
+    /// of `AWAITS` awaits, as itself or as a fresh text.
+    fn cell(self) -> String {
+        let kept = match self {
+            Self::Repeated => "pad",
+            Self::Fresh => "pad + i",
+        };
+        format!(
+            "<typescript>\nconst pad = \"{}\";\nconst kept = [];\nfor (let i = 0; i < {AWAITS}; i++) {{\n  const written = await tools.ext_write({{ x: i }});\n  kept.push({kept});\n}}\nconsole.log(kept.length);\n</typescript>",
+            "x".repeat(PAD)
+        )
+    }
 }
 
 impl Protocol {
@@ -148,8 +214,8 @@ impl Protocol {
     /// answers in prose.
     fn rounds(self) -> usize {
         match self {
-            Self::Code | Self::Tools | Self::Noted | Self::Archived => 1,
-            Self::NotedTwice => 2,
+            Self::Code | Self::Tools | Self::Noted | Self::Archived | Self::Large(_) => 1,
+            Self::NotedTwice | Self::Working(_) => 2,
         }
     }
 }
@@ -249,6 +315,11 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
                     }
                     (false, Protocol::Code) => text(&request, CELL),
                     (false, Protocol::Archived) => text(&request, ARCHIVED_CELL),
+                    (false, Protocol::Large(pad)) => text(&request, &pad.cell()),
+                    (false, Protocol::Working(second)) => match called {
+                        0 => text(&request, WORKING_FIRST_CELL),
+                        _ => text(&request, working_second_cell(second)),
+                    },
                     (false, Protocol::Tools | Protocol::Noted | Protocol::NotedTwice) => {
                         LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
@@ -307,18 +378,20 @@ fn core(
     seen: &Arc<Mutex<Seen>>,
 ) -> lash::LashCore {
     let builder = match protocol {
-        Protocol::Code | Protocol::Archived => lash::LashCore::rlm_builder(
-            backend.clone(),
-            lash::rlm::RlmProtocolPluginFactory::new(
-                lash::rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash::rlm::RlmChannel::Cell)
-                    .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-                    .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-                    .build(),
-                lash::rlm::CellDialect::typescript(),
+        Protocol::Code | Protocol::Archived | Protocol::Large(_) | Protocol::Working(_) => {
+            lash::LashCore::rlm_builder(
+                backend.clone(),
+                lash::rlm::RlmProtocolPluginFactory::new(
+                    lash::rlm::RlmProtocolPluginConfig::builder()
+                        .channel(lash::rlm::RlmChannel::Cell)
+                        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                        .build(),
+                    lash::rlm::CellDialect::typescript(),
+                )
+                .with_worker_service(sim::workers(clock)),
             )
-            .with_worker_service(sim::workers(clock)),
-        ),
+        }
         Protocol::Tools => lash::LashCore::standard_builder(backend.clone()),
         Protocol::Noted | Protocol::NotedTwice => lash::LashCore::builder(backend.clone())
             .protocol_plugin(Arc::new(noted::NotedProtocolFactory)),
@@ -668,17 +741,30 @@ impl V0 {
             })
             .is_some_and(|at| first_snapshot.is_none_or(|first| at < first));
         let programs: usize = counts.vm_programs.values().sum();
-        if programs > 1 + unsnapshotted + usize::from(lost_before_snapshot) {
+        // A working turn's second cell never parks: it runs again under each
+        // owner that took the turn over before its end was consumed.
+        let second_cell = match self.protocol {
+            Protocol::Working(_) => 1 + owners(&trace),
+            _ => 0,
+        };
+        if programs > 1 + second_cell + unsnapshotted + usize::from(lost_before_snapshot) {
             violations.push(format!(
                 "P4: the cell's program was entered fresh {programs} times with {unsnapshotted} uncommitted snapshots: {:?}",
                 counts.vm_programs
             ));
         }
-        if matches!(self.protocol, Protocol::Code | Protocol::Archived) && programs == 0 {
+        if matches!(
+            self.protocol,
+            Protocol::Code | Protocol::Archived | Protocol::Large(_) | Protocol::Working(_)
+        ) && programs == 0
+        {
             violations.push("the turn's cell never ran".to_owned());
         }
         if self.protocol == Protocol::Archived {
             violations.extend(self.archive_laws(completed).await);
+        }
+        if let Protocol::Working(second) = self.protocol {
+            violations.extend(self.working_laws(second, &seen, &told).await);
         }
         if counts.outcome_lookups.values().sum::<usize>() != 0 {
             violations.push("P4: an outcome was looked up for re-running code".to_owned());
@@ -693,16 +779,8 @@ impl V0 {
             .unwrap_or(0);
         // A turn is restored only by an owner taking it over, or by a pass
         // that failed before it committed (a lost acknowledgement, a crashed
-        // VM worker) and reloads the rows: at most once per owner. The
-        // session is the scenario's one actor, so every claim that took it
-        // is an owner.
-        let owners = trace
-            .iter()
-            .filter(|write| {
-                write.point.label == CommitLabel::CLAIM
-                    && matches!(write.stored, Stored::Committed { effective: true })
-            })
-            .count();
+        // VM worker) and reloads the rows: at most once per owner.
+        let owners = owners(&trace);
         if restores > owners.max(1) {
             violations.push(format!(
                 "P4: the turn was restored {restores} times by {owners} owners"
@@ -748,6 +826,84 @@ impl V0 {
                     "the turn's commit did not hold its cell's archive on the session: {referrers:?}"
                 ));
             }
+        }
+        violations
+    }
+}
+
+/// The owners that took the session: it is the scenario's one actor, so
+/// every claim that took it is one.
+fn owners(trace: &[lash_durable_test::Write]) -> usize {
+    trace
+        .iter()
+        .filter(|write| {
+            write.point.label == CommitLabel::CLAIM
+                && matches!(write.stored, Stored::Committed { effective: true })
+        })
+        .count()
+}
+
+impl V0 {
+    /// PC-WORKING (FIG-5887 §6): A's text and function are its working
+    /// state, whole whatever its report shows, through the model wait to B
+    /// and the turn's commit. The model never saw the text whole, yet B read
+    /// it whole; the session's committed execution holds A's bindings and
+    /// B's total, or, when B failed, A's bindings and nothing of B.
+    async fn working_laws(&self, second: Second, seen: &[String], told: &str) -> Vec<String> {
+        let mut violations = Vec::new();
+        let carried = carried();
+        if seen.iter().any(|request| request.contains(&carried)) {
+            violations.push("PC-WORKING: the model was shown A's text whole".to_owned());
+        }
+        let total = format!("second total {}", 2 * carried.len());
+        match second {
+            Second::Succeeds if !told.contains(&total) => violations.push(format!(
+                "PC-WORKING: B did not read A's text and function whole: the model was told {told}"
+            )),
+            Second::Fails if !told.contains("the second cell fails at") => violations.push(
+                format!("PC-WORKING: B did not fail after reading A's state: {told}"),
+            ),
+            _ => {}
+        }
+        let view =
+            lash_core::store::SessionStore::new(self.backend().session_store_factory(), session())
+                .expect("the session's store");
+        let execution = lash_core::store::load_session_window_state(
+            &view,
+            lash_core::store::WindowSelector::Current,
+        )
+        .await
+        .map(|loaded| loaded.map(|loaded| loaded.state.execution_state_hydration()));
+        let Ok(Some(Ok(Some(execution)))) = execution else {
+            violations.push(format!(
+                "PC-WORKING: the committed head holds no execution state: {execution:?}"
+            ));
+            return violations;
+        };
+        let holds = |needle: &str| {
+            execution.nodes.values().any(|node| {
+                node.bytes
+                    .windows(needle.len())
+                    .any(|window| window == needle.as_bytes())
+            })
+        };
+        let kept: &[&str] = match second {
+            Second::Succeeds => &["carried_text", "twice_of", "second_total"],
+            Second::Fails => &["carried_text", "twice_of"],
+        };
+        let dropped = "second_partial";
+        for name in kept {
+            if !holds(name) {
+                violations.push(format!("PC-WORKING: the committed execution lost `{name}`"));
+            }
+        }
+        if holds(dropped) {
+            violations.push(format!(
+                "PC-WORKING: the committed execution holds B's `{dropped}`"
+            ));
+        }
+        if !holds(&carried) {
+            violations.push("PC-WORKING: the committed execution lost A's text".to_owned());
         }
         violations
     }
@@ -901,6 +1057,20 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
+        Protocol::Large(_) => unreachable!("the large-value law runs its turn uncut"),
+        Protocol::Working(_) => vec![
+            CommitLabel::TURN_ADMIT,
+            CommitLabel::MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::CELL_SNAPSHOT,
+            CommitLabel::MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::MODEL_START,
+            CommitLabel::TURN_COMMIT,
+            CommitLabel::SESSION_RELEASE,
+        ],
         Protocol::NotedTwice => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
@@ -938,6 +1108,30 @@ async fn a_once_operation_in_a_cell_killed_after_its_work_resumes_without_replay
         return;
     };
     prove(Protocol::Code, Dialect::Postgres, Some(url)).await;
+}
+
+/// PC-WORKING on SQLite in memory: cell A's working state reaches B across
+/// the model wait and the turn's commit, cut at every commit.
+#[tokio::test]
+async fn a_cells_working_state_reaches_the_next_cell_and_the_session_wherever_its_turn_was_cut() {
+    prove(
+        Protocol::Working(Second::Succeeds),
+        Dialect::SqliteMemory,
+        None,
+    )
+    .await;
+}
+
+/// PC-WORKING on SQLite in memory: a second cell that fails leaves A's
+/// working state as the session's, cut at every commit.
+#[tokio::test]
+async fn a_failed_second_cell_leaves_the_first_cells_working_state_wherever_its_turn_was_cut() {
+    prove(
+        Protocol::Working(Second::Fails),
+        Dialect::SqliteMemory,
+        None,
+    )
+    .await;
 }
 
 /// The archived code turn on SQLite in memory: every cell of the matrix
@@ -1313,6 +1507,148 @@ async fn a_turn_resumed_at_any_checkpoint_commits_messages_and_protocol_records_
     }
 }
 
+/// The graph nodes earlier commits installed, and the bytes of each park's
+/// nodes that none of them did: what the park newly installs.
+#[derive(Default)]
+struct Installs {
+    installed: std::collections::BTreeSet<lash_core_store::checkpoint_graph::NodeId>,
+    parks: Vec<usize>,
+}
+
+impl Installs {
+    /// Observes the uncut run's commit `tx`, labelled `label`.
+    fn observe(&mut self, label: CommitLabel, tx: &lash_durable::ActorTx) {
+        let mut new = 0;
+        for (id, node) in tx.graph() {
+            if self.installed.insert(*id) {
+                new += node.bytes.len();
+            }
+        }
+        if label == CommitLabel::CELL_SNAPSHOT_ADMIT {
+            self.parks.push(new);
+        }
+    }
+}
+
+/// PC-LARGE-ONCE (FIG-5887 §11, the FIG-5880 amplification): a cell keeps a
+/// [`PAD`]-byte text across each of [`AWAITS`] awaits. Every park installs
+/// what changed since the last, never again the large text an earlier one
+/// installed: a repeated text is installed once, a fresh one once per
+/// await, and no park's new nodes hold an earlier park's large text. After
+/// the turn and an immediate collection, the session's execution state
+/// hydrates whole.
+async fn large_values_install_once(pad: Pad) {
+    let uncut = V0::new(Protocol::Large(pad), Dialect::SqliteMemory, None);
+    let clock = SimClock::new();
+    let database = uncut.database(Arc::clone(&clock)).await;
+    let script = Script::new();
+    let installs = Arc::new(Mutex::new(Installs::default()));
+    script.observe_commits({
+        let installs = Arc::clone(&installs);
+        Arc::new(move |label, tx| installs.lock_recover().observe(label, tx))
+    });
+    let nodes = SimNodes::new(
+        Arc::clone(&database),
+        Arc::clone(&clock),
+        script,
+        uncut.config(),
+        uncut.activation(),
+    );
+    uncut.send().await.expect("the turn is sent");
+    nodes.start("a");
+    let horizon = clock.logical_ms() + 600_000;
+    while !uncut.done(&nodes).await {
+        if let Ok(Some(snapshot)) = database.actor(&actor()).await
+            && snapshot.state == ActorState::Parked
+        {
+            panic!(
+                "{pad:?}: the session parked: {:?}\n{}",
+                facade_park(&uncut).await,
+                nodes.script().rendered_trace()
+            );
+        }
+        assert!(
+            clock.logical_ms() < horizon && nodes.step().await.is_some(),
+            "{pad:?}: the turn stalled:\n{}",
+            nodes.script().rendered_trace()
+        );
+    }
+    nodes.quiesce().await;
+
+    let parks = installs.lock_recover().parks.clone();
+    assert_eq!(
+        parks.len(),
+        AWAITS,
+        "{pad:?}: one park per await: {parks:?}"
+    );
+    assert!(
+        parks[0] >= PAD,
+        "{pad:?}: the first park installs the large text: {parks:?}"
+    );
+    // A later park installs the kernel's whole structure and its new
+    // admission, plus, for a fresh text, that one text.
+    let bound = match pad {
+        Pad::Repeated => PAD / 2,
+        Pad::Fresh => PAD + PAD / 2,
+    };
+    for (index, bytes) in parks.iter().enumerate().skip(1) {
+        assert!(
+            *bytes < bound,
+            "{pad:?}: park {} installs {bytes} bytes, not under {bound}: an earlier park's large text again: {parks:?}",
+            index + 1
+        );
+        if pad == Pad::Fresh {
+            assert!(
+                *bytes >= PAD,
+                "{pad:?}: park {} installs its fresh text: {parks:?}",
+                index + 1
+            );
+        }
+    }
+
+    let catalog = uncut.backend().session_store_factory();
+    let execution = |when: &'static str| {
+        let catalog = Arc::clone(&catalog);
+        async move {
+            let view = lash_core::store::SessionStore::new(catalog, session())
+                .expect("the session's store");
+            lash_core::store::load_session_window_state(
+                &view,
+                lash_core::store::WindowSelector::Current,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{pad:?}: the head loads {when}: {error:?}"))
+            .expect("the session has a head")
+            .state
+            .execution_state_hydration()
+            .unwrap_or_else(|error| {
+                panic!("{pad:?}: the execution state hydrates {when}: {error:?}")
+            })
+        }
+    };
+    assert!(
+        execution("after the turn").await.is_some(),
+        "{pad:?}: the cell's globals are the session's execution state"
+    );
+    lash_core::StoreMaintenance::gc_unreachable(catalog.as_ref())
+        .await
+        .expect("the collection runs");
+    assert_eq!(
+        execution("after an immediate collection").await,
+        execution("after an immediate collection").await,
+    );
+}
+
+#[tokio::test]
+async fn a_repeated_large_text_kept_across_awaits_is_written_once() {
+    large_values_install_once(Pad::Repeated).await;
+}
+
+#[tokio::test]
+async fn a_fresh_large_text_per_await_is_written_once_per_await() {
+    large_values_install_once(Pad::Fresh).await;
+}
+
 /// Re-record the session image (`support/images.rs`): node A runs the turn
 /// until its cell's `Once` operation's outcome commits, and dies; the store
 /// it leaves is the fixture. It holds the turn checkpoint, the cell's
@@ -1458,7 +1794,8 @@ async fn a_session_decodes_and_resumes_from_its_1_0_image() {
 }
 
 /// A session activation whose first claim rewrites the unfinished turn's
-/// checkpoint as another build left it, with `stale`.
+/// phase root as another build left it, its checkpoint text made `stale`
+/// of it.
 struct StaleCheckpoint {
     rewritten: std::sync::atomic::AtomicBool,
     database: Arc<dyn DurableStore>,
@@ -1489,7 +1826,7 @@ fn stale_driver_state(value: &mut serde_json::Value) -> bool {
 /// carrying a field this build does not know.
 fn with_a_stale_driver_state(checkpoint: &str) -> String {
     let mut stale: serde_json::Value =
-        serde_json::from_str(checkpoint).expect("the image's checkpoint is JSON");
+        serde_json::from_str(checkpoint).expect("the image's checkpoint text is JSON");
     assert!(
         stale_driver_state(&mut stale),
         "the image's checkpoint parks no driver state"
@@ -1518,16 +1855,36 @@ impl Activation for StaleCheckpoint {
                     row.phase
                 );
             };
+            let graph = self
+                .database
+                .hydrate(
+                    lash_durable::domain::graph::RootOwner::TurnPhase {
+                        session: session(),
+                        run: row.run.clone(),
+                    },
+                    Some(*checkpoint),
+                    lash_durable::domain::graph::OWNER_READ_LIMITS,
+                )
+                .await
+                .expect("the image's phase root reads");
             let mut tx = owned
                 .begin()
                 .await
                 .expect("the first claim reads its actor");
+            let checkpoint =
+                lash_core::runtime::durable::session::PhaseCheckpoint::restage_text_for_test(
+                    &graph,
+                    *checkpoint,
+                    self.stale,
+                    &mut tx,
+                )
+                .expect("the stale phase root stages");
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session(),
                 run: row.run.clone(),
                 phase: UnfinishedPhase::Tools {
                     run: *run,
-                    checkpoint: (self.stale)(checkpoint),
+                    checkpoint,
                 },
                 iteration: row.iteration,
             }));
@@ -1682,16 +2039,24 @@ async fn a_parked_driver_state_this_build_cannot_decode_is_refused_at_restore_be
     );
 }
 
-/// A session activation whose first claim rewrites the snapshot its
-/// unfinished turn's cell resumes from, leaving the parked kernel run
-/// inside it as a build of another kernel version sealed it.
+/// A session activation whose first claim rewrites the root its unfinished
+/// turn's cell resumes from, leaving the parked kernel run inside it as a
+/// build of another kernel version wrote it.
 struct StaleCellContinuation {
     rewritten: std::sync::atomic::AtomicBool,
-    /// What the first claim makes of the cell's stored snapshot.
-    stale: fn(&str) -> String,
+    /// What the first claim makes of the cell's stored root: it edits the
+    /// root's body and may stage what the edit names.
+    stale: StaleRoot,
     database: Arc<dyn DurableStore>,
     session: Arc<dyn Activation>,
 }
+
+/// An edit of a cell's stored ExecRoot over its graph.
+type StaleRoot = fn(
+    &lash_durable::domain::HydratedGraph,
+    &mut lash_core_store::checkpoint_graph::bodies::ExecRoot,
+    &mut lash_core_store::checkpoint_graph::GraphStaging,
+);
 
 /// The execution of the cell the 1.0 session image stopped in.
 fn image_cell() -> lash_durable::domain::ExecKey {
@@ -1702,90 +2067,104 @@ fn image_cell() -> lash_durable::domain::ExecKey {
     )
 }
 
-/// `snapshot`, a cell's stored snapshot, with its parked kernel run sealed
-/// under a kernel version no build interprets, as a build past this one's
-/// window would have written it. Everything else the parent checks still
-/// holds: the checkpoint and the cell's envelope decode, and the state is
-/// sealed again over the same bytes, under the same owner and document.
-fn with_a_stale_continuation(snapshot: &str) -> String {
-    let mut stale: serde_json::Value =
-        serde_json::from_str(snapshot).expect("the image's cell snapshot is JSON");
-    let parked: lash_vm_protocol::OpaqueVmState =
-        serde_json::from_value(stale["phase"]["parked"]["state"].clone())
-            .expect("the image's cell stopped on a parked kernel run");
-    stale["phase"]["parked"]["state"] =
-        serde_json::to_value(lash_vm_protocol::OpaqueVmState::seal(
-            parked.owner().clone(),
-            u32::MAX,
-            parked.document().to_owned(),
-            parked.bytes().to_vec(),
-        ))
-        .expect("the stale parked run encodes");
-    stale.to_string()
+/// The cell's root recording its parked kernel run under a kernel version
+/// no build interprets, as a build past this one's window would have
+/// written it. Everything else the parent checks still holds: the owner,
+/// the envelope and the document are the image's.
+fn with_a_stale_continuation(
+    _graph: &lash_durable::domain::HydratedGraph,
+    root: &mut lash_core_store::checkpoint_graph::bodies::ExecRoot,
+    _staging: &mut lash_core_store::checkpoint_graph::GraphStaging,
+) {
+    assert_eq!(
+        root.status,
+        lash_core_store::checkpoint_graph::bodies::ExecStatus::Parked,
+        "the image's cell stopped on a parked kernel run"
+    );
+    root.format = u32::MAX;
 }
 
-/// `snapshot`, a cell's stored snapshot, with the bytes of its parked
-/// kernel run stating another kernel version than the one they are sealed
-/// under. The seal is intact: the same owner, kernel version and document,
-/// and a hash that matches the bytes.
-fn with_bytes_of_another_kernel_version(snapshot: &str) -> String {
-    let mut stale: serde_json::Value =
-        serde_json::from_str(snapshot).expect("the image's cell snapshot is JSON");
-    let parked: lash_vm_protocol::OpaqueVmState =
-        serde_json::from_value(stale["phase"]["parked"]["state"].clone())
+/// The cell's root over a parked kernel state that states another kernel
+/// version than the one the root records: the root, its owner and its
+/// document are the image's.
+fn with_bytes_of_another_kernel_version(
+    graph: &lash_durable::domain::HydratedGraph,
+    root: &mut lash_core_store::checkpoint_graph::bodies::ExecRoot,
+    staging: &mut lash_core_store::checkpoint_graph::GraphStaging,
+) {
+    use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
+    let mut whole: lash_kernel_state::KernelWhole =
+        GraphDecoder::new(graph, lash_durable::domain::graph::OWNER_READ_LIMITS)
+            .decode(root.state, NodeKind::KERNEL_WHOLE)
             .expect("the image's cell stopped on a parked kernel run");
-    let mut run: serde_json::Value =
-        serde_json::from_slice(parked.bytes()).expect("the parked run is JSON");
-    run["run"]["kernel"] = (parked.kernel() + 1).into();
-    stale["phase"]["parked"]["state"] =
-        serde_json::to_value(lash_vm_protocol::OpaqueVmState::seal(
-            parked.owner().clone(),
-            parked.kernel(),
-            parked.document().to_owned(),
-            serde_json::to_vec(&run).expect("the parked run encodes"),
-        ))
+    whole.kernel = root.format + 1;
+    root.state = staging
+        .encode_value(NodeKind::KERNEL_WHOLE, &whole)
         .expect("the stale parked run encodes");
-    stale.to_string()
 }
 
 #[async_trait::async_trait]
 impl Activation for StaleCellContinuation {
     async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
+        use lash_core_store::checkpoint_graph::{
+            EncodeBudget, ExplicitLimit, GraphDecoder, GraphStaging, NodeKind, bodies::ExecRoot,
+        };
         use lash_durable::DomainWrite;
-        use lash_durable::domain::SnapshotWrite;
+        use lash_durable::domain::graph::{ExecRootWrite, OWNER_READ_LIMITS, RootOwner};
         if !self
             .rewritten
             .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
             let row = self
                 .database
-                .snapshot(&image_cell())
+                .exec_root(&image_cell())
                 .await
-                .expect("the cell's snapshot reads")
-                .expect("the image holds its cell's snapshot");
+                .expect("the cell's root reads")
+                .expect("the image holds its cell's root");
+            let graph = self
+                .database
+                .hydrate(
+                    RootOwner::Exec(image_cell()),
+                    Some(row.root),
+                    OWNER_READ_LIMITS,
+                )
+                .await
+                .expect("the cell's graph reads");
+            let mut body: ExecRoot = GraphDecoder::new(&graph, OWNER_READ_LIMITS)
+                .decode(row.root, NodeKind::EXEC_ROOT)
+                .expect("the image's cell root decodes");
+            let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+            (self.stale)(&graph, &mut body, &mut staging);
+            let root = staging
+                .encode_value(NodeKind::EXEC_ROOT, &body)
+                .expect("the stale root encodes");
             let mut tx = owned
                 .begin()
                 .await
                 .expect("the first claim reads its actor");
-            tx.write(DomainWrite::Snapshot(SnapshotWrite::Put {
+            for child in graph.nodes.keys() {
+                tx.require(*child);
+            }
+            tx.stage_all(staging);
+            tx.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
                 exec: row.exec.clone(),
                 expected: Some(row.rev),
-                snapshot_ref: (self.stale)(&row.snapshot_ref),
-                executable_identity: row.executable_identity.clone(),
-                format_version: row.format_version,
+                expected_root: Some(row.root),
+                root,
+                commit_id: lash_core_store::checkpoint_graph::CommitId::mint(),
             }));
             owned
                 .commit(tx, CommitLabel::CELL_SNAPSHOT)
                 .await
-                .expect("the stale cell snapshot commits");
+                .expect("the stale cell root commits");
         }
         self.session.activate(owned).await
     }
 }
 
 /// D-PARKREFUSE (FIG-5613): a session whose stopped cell holds a parked
-/// kernel run sealed under a kernel version this build does not read is
-/// refused when its turn is restored, by the check of the seal, before the
+/// kernel run recorded under a kernel version this build does not read is
+/// refused when its turn is restored, by the check of its root, before the
 /// cell is re-delivered.
 /// The cell's refusal never reaches the model as a failed cell: no model
 /// call is made, nothing of the turn commits, and the session parks with the
@@ -1796,26 +2175,25 @@ async fn a_parked_cell_continuation_this_build_cannot_decode_is_refused_at_resto
     a_stale_cell_snapshot_is_refused(with_a_stale_continuation, "outside read range").await;
 }
 
-/// FIG-5716: the seal is where the parent reads a parked run's kernel
-/// version from, so bytes that state another version under an intact seal
-/// would be resumed as a version they were not parked under. The restore
-/// reads the bytes' own version and refuses the mismatch as it refuses a
-/// stale seal: typed, before the cell is re-delivered, and never as a
-/// failed cell.
+/// FIG-5716: the root is where the parent reads a parked run's kernel
+/// version from, so a state that states another version under it would be
+/// resumed as a version it was not parked under. The restore reads the
+/// state's own version and refuses the mismatch as it refuses a stale root:
+/// typed, before the cell is re-delivered, and never as a failed cell.
 #[tokio::test]
 async fn a_parked_run_whose_bytes_state_another_kernel_version_than_its_seal_is_refused_at_restore()
 {
     a_stale_cell_snapshot_is_refused(
         with_bytes_of_another_kernel_version,
-        "its bytes state kernel version",
+        "its state states kernel version",
     )
     .await;
 }
 
-/// The 1.0 session image resumed with `stale` made of its cell's snapshot:
+/// The 1.0 session image resumed with `stale` made of its cell's root:
 /// no model call is made, nothing of the turn commits, and the session
 /// parks with the typed refusal of its cell snapshot, which says `account`.
-async fn a_stale_cell_snapshot_is_refused(stale: fn(&str) -> String, account: &str) {
+async fn a_stale_cell_snapshot_is_refused(stale: StaleRoot, account: &str) {
     let (resumed, database, nodes, _clock) = resumed_with_stale_state(move |database, session| {
         Arc::new(StaleCellContinuation {
             rewritten: std::sync::atomic::AtomicBool::new(false),

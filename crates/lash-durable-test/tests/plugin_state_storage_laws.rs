@@ -333,11 +333,11 @@ struct Ledger {
 }
 
 impl Ledger {
-    fn observe(&self, label: CommitLabel, writes: &[DomainWrite]) {
+    fn observe(&self, label: CommitLabel, tx: &lash_durable::ActorTx) {
         if !self.steady.load(Ordering::SeqCst) {
             return;
         }
-        let measured = measure(writes);
+        let measured = measure(tx);
         let mut phases = self.phases.lock_recover();
         let phase = phases.entry(label.as_str()).or_default();
         phase.commits += 1;
@@ -349,9 +349,29 @@ impl Ledger {
     }
 }
 
-/// What `writes` carry of any namespace, and of [`MEMORY`]'s.
-fn measure(writes: &[DomainWrite]) -> Written {
+/// What `tx` carries of any namespace, and of [`MEMORY`]'s: in its domain
+/// writes and in the graph nodes it stages.
+fn measure(tx: &lash_durable::ActorTx) -> Written {
+    let writes = tx.domain();
+    let staged = tx.graph();
     let unit = UNIT.as_bytes();
+    // A namespace value's bytes: its node and every node beneath it this
+    // commit stages. A node an earlier commit installed is not carried.
+    let carried = |root: &lash_core_store::checkpoint_graph::NodeId| {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut pending = vec![*root];
+        let mut bytes = 0;
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            if let Some(node) = staged.get(&id) {
+                bytes += node.bytes.len();
+                pending.extend(node.children().unwrap_or_default());
+            }
+        }
+        bytes
+    };
     // A body's bytes as a byte list renders them, debug and JSON.
     let listed = |separator: &str| {
         unit.iter()
@@ -361,6 +381,12 @@ fn measure(writes: &[DomainWrite]) -> Written {
     };
     let (spaced, tight) = (listed(", "), listed(","));
     let mut written = Written::default();
+    if staged
+        .values()
+        .any(|node| node.bytes.windows(unit.len()).any(|window| window == unit))
+    {
+        written.marker_writes += 1;
+    }
     for write in writes {
         let rendered = format!("{write:?}");
         if rendered.contains(UNIT) || rendered.contains(&spaced) || rendered.contains(&tight) {
@@ -369,7 +395,10 @@ fn measure(writes: &[DomainWrite]) -> Written {
         match write {
             DomainWrite::Turn(TurnWrite::Namespaces { namespaces, .. }) => {
                 for namespace in namespaces {
-                    let bytes = namespace.values.body().map_or(0, <[u8]>::len);
+                    let bytes = match &namespace.values {
+                        lash_durable::domain::StoredValues::Root(root) => carried(root),
+                        _ => 0,
+                    };
                     written.value_bytes += bytes;
                     if namespace.plugin == MEMORY {
                         written.memory_rows += 1;
@@ -698,11 +727,9 @@ impl Scenario for Storage {
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
         let ledger = Arc::clone(&self.ledger);
-        nodes
-            .script()
-            .observe_commits(Arc::new(move |label, writes| {
-                ledger.observe(label, writes);
-            }));
+        nodes.script().observe_commits(Arc::new(move |label, tx| {
+            ledger.observe(label, tx);
+        }));
         // The host is outside the deployment under test: its sends are
         // uncut.
         let session = self

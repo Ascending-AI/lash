@@ -6,7 +6,7 @@
 use lash_sansio::{SessionId, TurnId};
 
 use super::{LawBroken, LawOutcome};
-use crate::domain::{CANCEL_MAIL, CellId, DomainWrite, ExecKey, SnapshotWrite};
+use crate::domain::{CANCEL_MAIL, CellId, DomainWrite, ExecKey, ExecRootWrite};
 use crate::{
     ActorKey, ActorState, ClaimPurpose, CommitLabel, DurableError, DurableStore, FormatSet,
     MailKind, MailTx, NodeId, NodeLease, NodeSpec, Release, fleet_writable,
@@ -230,7 +230,7 @@ pub async fn a_draining_node_claims_nothing_and_releases_ready(
 
 /// The listings an operator's survey and sweep read (FIG-5787): the actors
 /// in one format set that have not ended, by key and a page at a time; and
-/// the cell snapshots of one turn, which no other turn's cell, no turn of
+/// the cell roots of one turn, which no other turn's cell, no turn of
 /// another session and no process joins.
 ///
 /// # Errors
@@ -275,12 +275,14 @@ pub async fn actors_in_a_format_set_and_a_turns_cells_are_listed(
                 cell(&other_session, &run, "cell-1"),
                 ExecKey::Process(process.clone()),
             ] {
-                tx.write(DomainWrite::Snapshot(SnapshotWrite::Put {
-                    snapshot_ref: exec.stored(),
+                let (root, node) = super::tagged_node(&exec.stored());
+                tx.stage([node]);
+                tx.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
                     exec,
                     expected: None,
-                    executable_identity: "law".to_owned(),
-                    format_version: 1,
+                    expected_root: None,
+                    root,
+                    commit_id: lash_core_store::checkpoint_graph::CommitId::mint(),
                 }));
             }
         }
@@ -311,7 +313,7 @@ pub async fn actors_in_a_format_set_and_a_turns_cells_are_listed(
         "the actors listed in the newer set were {listed:?}"
     );
 
-    let cells = store.cell_snapshots(&session, &run).await?;
+    let cells = store.cell_roots(&session, &run).await?;
     let keys: Vec<ExecKey> = cells.iter().map(|row| row.exec.clone()).collect();
     super::ensure!(
         keys == [
@@ -323,12 +325,10 @@ pub async fn actors_in_a_format_set_and_a_turns_cells_are_listed(
     super::ensure!(
         cells
             .iter()
-            .all(|row| row.snapshot_ref == row.exec.stored() && row.format_version == 1),
-        "a listed cell's snapshot is not the one written: {cells:?}"
+            .all(|row| row.root == super::tagged_node(&row.exec.stored()).0),
+        "a listed cell's root is not the one written: {cells:?}"
     );
-    let none = store
-        .cell_snapshots(&session, &turn("run-unknown")?)
-        .await?;
+    let none = store.cell_roots(&session, &turn("run-unknown")?).await?;
     super::ensure!(none.is_empty(), "a turn with no cell listed {none:?}");
     Ok(())
 }

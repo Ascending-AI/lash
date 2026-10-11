@@ -57,6 +57,10 @@ struct BatchRecord<'a> {
     durable_transactions: usize,
     checkpoint_bytes: usize,
     snapshot_bytes: usize,
+    graph_nodes: usize,
+    graph_bytes: usize,
+    /// What the batch's commits newly installed.
+    installed_bytes: usize,
     counters: Snapshot,
 }
 
@@ -133,6 +137,9 @@ fn batch_record<'a>(
         durable_transactions: transactions.iter().filter(|t| t.ok).count(),
         checkpoint_bytes: transactions.iter().map(|t| t.checkpoint_bytes).sum(),
         snapshot_bytes: transactions.iter().map(|t| t.snapshot_bytes).sum(),
+        graph_nodes: transactions.iter().map(|t| t.graph_nodes).sum(),
+        graph_bytes: transactions.iter().map(|t| t.graph_bytes).sum(),
+        installed_bytes: transactions.iter().map(|t| t.installed_bytes).sum(),
         counters,
     }
 }
@@ -373,6 +380,10 @@ struct BlockSample {
     block: usize,
     label: &'static str,
     snapshot_bytes: usize,
+    /// What the block's commit newly installed.
+    installed_bytes: usize,
+    graph_nodes: usize,
+    by_kind: std::collections::BTreeMap<u32, crate::recorder::KindBytes>,
     commit_us: u64,
     /// From this block's snapshot commit to the next one's.
     cycle_us: Option<u64>,
@@ -380,7 +391,8 @@ struct BlockSample {
 
 /// The code mode cell (H5): a turn whose cell awaits `tools.ext_echo`
 /// `cell_calls` times, keeping each answer; each await blocks the VM, which
-/// commits its snapshot with the operation's admission. A batch whose cell
+/// commits its root, and the nodes no earlier park installed, with the
+/// operation's admission. A batch whose cell
 /// does not settle every operation is refused.
 pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
     let mut deployment = run.deployment();
@@ -417,7 +429,7 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
         );
         let blocks: Vec<&Transaction> = transactions
             .iter()
-            .filter(|t| t.actor == actor && t.ok && t.snapshot_bytes > 0)
+            .filter(|t| t.actor == actor && t.ok && t.exec_roots > 0)
             .collect();
         for (index, block) in blocks.iter().enumerate() {
             let cycle_us = blocks.get(index + 1).map(|next| next.at_us - block.at_us);
@@ -433,6 +445,9 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
                     block: index,
                     label: block.label,
                     snapshot_bytes: block.snapshot_bytes,
+                    installed_bytes: block.installed_bytes,
+                    graph_nodes: block.graph_nodes,
+                    by_kind: block.by_kind.clone(),
                     commit_us: block.micros,
                     cycle_us,
                 },

@@ -275,11 +275,9 @@ impl From<OutcomeWire> for Outcome {
     }
 }
 
-/// How a run ended: the end a checkpoint would record, or `None` for a
-/// cancelled run, which records none.
-pub type EndWire = Option<RecordedEnd>;
-
-pub use lash_vm_broker::kernel::RecordedEnd;
+/// How a run ended: its TerminalWhole as sealed graph state, or `None` for
+/// a cancelled run, which records no end.
+pub type EndWire = Option<lash_vm_protocol::SealedGraphState>;
 
 /// A read through a projection handle. The answer is
 /// [`ProjectionAnswer`].

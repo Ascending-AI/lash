@@ -12,8 +12,15 @@
 
 mod ast;
 mod canonical;
+mod codec_variants;
 mod document;
 mod function;
+mod graph_codec;
+/// The canonical binary token grammar of checkpoint graph node bodies: a
+/// cross-crate seam for the kernel's and the store's binary codecs, not part
+/// of the document vocabulary.
+#[doc(hidden)]
+pub mod graph_tokens;
 mod identity;
 mod name;
 mod native;
@@ -39,6 +46,9 @@ pub use document::{
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDefinition, Guard, Implementation,
     Measure, Operand,
+};
+pub use graph_codec::{
+    FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, FrozenDatum, MAX_DECODE_DEPTH,
 };
 pub use identity::{EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity};
 pub use name::{

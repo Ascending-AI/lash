@@ -35,6 +35,7 @@ pub type LawOutcome = Result<(), LawBroken>;
 pub type Advance<'a> = &'a (dyn Fn(Duration) + Sync);
 
 mod formats;
+pub mod graph;
 mod model_calls;
 pub mod node_wakes;
 mod prompts;
@@ -67,6 +68,30 @@ use ensure;
 const TTL_MILLIS: i64 = 15_000;
 const TTL: Duration = Duration::from_millis(15_000);
 const LABEL: CommitLabel = CommitLabel::new("law.write");
+
+/// A small checkpoint graph node naming `tag`: a root a law's row can
+/// publish, staged with it.
+fn tagged_node(
+    tag: &str,
+) -> (
+    lash_core_store::checkpoint_graph::NodeId,
+    lash_core_store::checkpoint_graph::EncodedNode,
+) {
+    use lash_core_store::checkpoint_graph::{
+        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
+    };
+    let mut out = TokenWriter::new();
+    out.text(tag);
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let id = staging
+        .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(out.as_bytes()))
+        .unwrap_or_else(|error| panic!("a law's node encodes: {error}"));
+    let node = staging
+        .get(&id)
+        .cloned()
+        .unwrap_or_else(|| panic!("a law's node is staged"));
+    (id, node)
+}
 
 fn formats() -> FormatSet {
     FormatSet::new("law-formats")

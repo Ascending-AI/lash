@@ -471,7 +471,9 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
         "a commit that opens no frame ends none"
     );
 
-    state.set_execution_state_snapshot(Some(b"frame-globals".to_vec().into()));
+    state.set_execution_graph(crate::testing::store_fixtures::execution_graph(
+        "frame-globals",
+    ));
     let opened = super::super::open_agent_frame_in_state_with_clock(
         &mut state,
         frame_request(frame_key("frame-a"), AgentFrameReason::new("frame-a")),
@@ -480,7 +482,7 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
     .expect("open frame a");
     assert!(opened.opened);
     assert_eq!(
-        state.execution_state_snapshot(),
+        state.execution_state_ref(),
         None,
         "a frame open wipes the frame's globals"
     );

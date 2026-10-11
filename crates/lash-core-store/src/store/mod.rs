@@ -10,14 +10,16 @@ pub mod artifact_cleanup;
 pub mod attachment_referrers;
 pub mod catalog;
 mod checkpoint;
+mod session_manifest;
+pub use session_manifest::{NamedManifest, SESSION_COMPONENT_CODEC};
 pub mod namespace;
 pub use crate::plugin_state::fork_checkpoint_plugin_state;
 pub use checkpoint::{
-    CHECKPOINT_COMPONENT_ENCODING_VERSION, CheckpointComponentDescriptor,
-    EXECUTION_STATE_CHECKPOINT_COMPONENT, HydratedCheckpointComponent, HydratedSessionCheckpoint,
-    PLUGIN_ADMISSION_CHECKPOINT_COMPONENT, PLUGIN_STATE_CHECKPOINT_COMPONENT,
-    SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint, TOOL_STATE_CHECKPOINT_COMPONENT,
-    ensure_checkpoint_component_encoding_version, ensure_checkpoint_component_hash_agreement,
+    CHECKPOINT_COMPONENT_ENCODING_VERSION, CheckpointComponentDescriptor, CheckpointExecution,
+    HydratedCheckpointComponent, HydratedSessionCheckpoint, PLUGIN_ADMISSION_CHECKPOINT_COMPONENT,
+    PLUGIN_STATE_CHECKPOINT_COMPONENT, SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint,
+    TOOL_STATE_CHECKPOINT_COMPONENT, ensure_checkpoint_component_encoding_version,
+    ensure_checkpoint_component_hash_agreement,
 };
 pub mod admission_plan;
 pub mod commit_budget;
@@ -165,10 +167,10 @@ pub use run::{
     UnfinishedRun, decide_run_terminal_write, run_binding_conflict,
 };
 pub use runtime_commit::{
-    AppendRequestIdentity, FrameTransition, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
-    RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit, RuntimeCommitReceipt,
-    RuntimeTurnCommitStamp, SemanticBoundaryOperation, TurnChange, TurnChangeCursor,
-    TurnChangeKind, TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome,
+    AppendRequestIdentity, EncodedSessionCommit, FrameTransition,
+    RUNTIME_COMMIT_RECEIPT_RECORD_KIND, RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit,
+    RuntimeCommitReceipt, RuntimeTurnCommitStamp, SemanticBoundaryOperation, TurnChange,
+    TurnChangeCursor, TurnChangeKind, TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome,
     TurnProjectionWatermark, TurnTraceReceipt, decode_runtime_commit_receipt,
     decode_runtime_commit_receipt_for_fleet, decode_session_commit, encode_session_commit,
     ensure_supported_receipt_version, ensure_supported_receipt_version_for_fleet,

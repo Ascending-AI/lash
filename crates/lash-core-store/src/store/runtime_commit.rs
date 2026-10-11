@@ -956,8 +956,10 @@ mod tests {
 /// command's settlement, or not at all.
 ///
 /// It crosses the durable port as text and is decoded in the same
-/// transaction; it is never stored. The execution view and a frame switch
-/// ride beside the commit because the commit's own encoding leaves them out.
+/// transaction; it is never stored. The execution view, a frame switch and
+/// the checkpoint's execution root ride beside the commit because the
+/// commit's own encoding leaves them out; the execution's nodes are staged
+/// in the same transaction, never carried as text (FIG-5887 §6).
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SessionCommitEnvelope {
@@ -966,6 +968,19 @@ struct SessionCommitEnvelope {
     execution_config: Option<Box<crate::PersistedSessionConfig>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     frame_transition: Option<FrameTransitionWire>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    execution: Option<BlobRef>,
+}
+
+/// A session head commit encoded for the session actor's fenced head
+/// commit: its text, the checkpoint's execution root, and the execution
+/// nodes the store may not hold yet, which the commit's transaction stages
+/// beside it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EncodedSessionCommit {
+    pub json: String,
+    pub execution: Option<crate::checkpoint_graph::NodeId>,
+    pub nodes: Vec<crate::checkpoint_graph::EncodedNode>,
 }
 
 /// A [`FrameTransition`] as the envelope carries it.
@@ -1029,34 +1044,60 @@ impl From<FrameTransitionWire> for FrameTransition {
 ///
 /// [`StoreError::Backend`] when the commit carries a run terminal, which
 /// the durable path records on the turn's own row, or does not encode.
-pub fn encode_session_commit(commit: &RuntimeCommit) -> Result<String, StoreError> {
+pub fn encode_session_commit(commit: &RuntimeCommit) -> Result<EncodedSessionCommit, StoreError> {
     if commit.run_terminal.is_some() {
         return Err(StoreError::Backend(
             "a session actor's head commit cannot carry a run terminal".to_owned(),
         ));
     }
-    serde_json::to_string(&SessionCommitEnvelope {
+    let execution = commit.checkpoint.execution.as_ref();
+    let json = serde_json::to_string(&SessionCommitEnvelope {
         commit: commit.clone(),
         execution_config: commit.execution_config.clone(),
         frame_transition: commit.frame_transition.as_ref().map(Into::into),
+        execution: execution.map(super::CheckpointExecution::root_ref),
     })
-    .map_err(|error| StoreError::Backend(format!("the session commit does not encode: {error}")))
+    .map_err(|error| StoreError::Backend(format!("the session commit does not encode: {error}")))?;
+    Ok(EncodedSessionCommit {
+        json,
+        execution: execution.map(|execution| execution.root),
+        nodes: execution
+            .map(|execution| execution.nodes.values().cloned().collect())
+            .unwrap_or_default(),
+    })
 }
 
 /// Decode a commit [`encode_session_commit`] encoded.
 ///
 /// # Errors
 ///
-/// [`StoreError::Backend`] when `encoded` is not one.
+/// [`StoreError::Backend`] when `encoded` is not one. Its checkpoint's
+/// execution names its root alone: the nodes were staged in the commit's
+/// transaction.
 pub fn decode_session_commit(encoded: &str) -> Result<RuntimeCommit, StoreError> {
     let SessionCommitEnvelope {
         mut commit,
         execution_config,
         frame_transition,
+        execution,
     } = serde_json::from_str(encoded).map_err(|error| {
         StoreError::Backend(format!("the session commit does not decode: {error}"))
     })?;
     commit.execution_config = execution_config;
     commit.frame_transition = frame_transition.map(Into::into);
+    commit.checkpoint.execution = execution
+        .map(|root| {
+            crate::checkpoint_graph::NodeId::from_hex(root.as_str())
+                .map(|root| super::CheckpointExecution {
+                    root,
+                    nodes: std::collections::BTreeMap::new(),
+                })
+                .ok_or_else(|| {
+                    StoreError::Backend(format!(
+                        "the session commit's execution `{root}` is not a node reference"
+                    ))
+                })
+        })
+        .transpose()?;
     Ok(commit)
 }

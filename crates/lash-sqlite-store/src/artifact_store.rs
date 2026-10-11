@@ -118,26 +118,6 @@ pub(crate) fn store_namespace(store: &ArtifactStoreId) -> Option<&'static str> {
     }
 }
 
-/// The [`PersistedArtifactKind`] a pointer-table row carries, derived from the
-/// row's own namespace key — the namespace is the sole owner of the
-/// payload-family fact (FIG-1949). A new namespace must extend this match; an
-/// unknown namespace fails the caller rather than inheriting a sibling's label.
-pub(crate) fn artifact_namespace_kind(
-    namespace: &str,
-) -> Result<PersistedArtifactKind, StoreError> {
-    match namespace {
-        MODULE_ARTIFACT_NAMESPACE => Ok(PersistedArtifactKind::KernelDocument),
-        PROCESS_ENV_NAMESPACE => Ok(PersistedArtifactKind::ProcessExecutionEnv),
-        PROCESS_DEFINITION_NAMESPACE => Ok(PersistedArtifactKind::ProcessDefinition),
-        TOOL_MATERIAL_NAMESPACE => Ok(PersistedArtifactKind::ToolMaterial),
-        TURN_PRELUDE_NAMESPACE => Ok(PersistedArtifactKind::TurnPrelude),
-        unknown => Err(stored_data_corrupt(
-            "artifact_refs namespace",
-            format!("unknown artifact namespace `{unknown}`"),
-        )),
-    }
-}
-
 /// Keep the typed refusals raised within a SQLite write transaction.
 fn artifact_sqlite_error(error: rusqlite::Error) -> ArtifactStoreError {
     match error {
@@ -1208,6 +1188,11 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().expect("open SQLite");
         conn.execute_batch(crate::schema::SCHEMA)
             .expect("create durable core");
+        conn.execute(
+            "INSERT INTO blobs (hash, content, encoding) VALUES ('b', X'00', 0)",
+            [],
+        )
+        .expect("insert artifact blob");
         conn.execute(
             "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES ('kernel_document', 'm', 'b')",
             [],

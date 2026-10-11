@@ -478,10 +478,6 @@ impl BlobArtifactDescriptor {
         }
     }
 
-    pub fn checkpoint_manifest() -> Self {
-        Self::new(vec![BlobStorageHint::Compressible])
-    }
-
     pub fn checkpoint_component() -> Self {
         Self::new(vec![
             BlobStorageHint::Compressible,
@@ -517,12 +513,6 @@ impl BlobArtifactDescriptor {
             BlobStorageHint::LargePayload,
         ])
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct RetainedArtifactRef {
-    pub blob_ref: BlobRef,
-    pub kind: PersistedArtifactKind,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -5,7 +5,18 @@
 //! one in a single transaction when it is committed, so a transaction is
 //! never held open across an `.await` in the caller's code.
 
-use crate::domain::{DomainWrite, MailDomainWrite, TurnCancelRequest};
+use std::collections::{BTreeMap, BTreeSet};
+
+use lash_core_store::checkpoint_graph::{
+    EncodeBudget, EncodedNode, ExplicitLimit, GraphCommitBudget, GraphRefusal, GraphStaging, NodeId,
+};
+use lash_sansio::{SessionId, TurnId};
+
+use crate::domain::namespace_value::NamespaceValue;
+use crate::domain::{
+    DomainWrite, MailDomainWrite, RunValuesWrite, StoredNamespaceWrite, StoredValues,
+    TurnCancelRequest, TurnNamespaceWrite, TurnWrite,
+};
 use crate::formats::FormatSet;
 use crate::ids::{ActorKey, DurableInstant, Epoch, MailKind, MailSeq, StateRevision};
 
@@ -54,6 +65,12 @@ pub enum Release {
 /// and bumps the actor's state revision; then its [`DomainWrite`]s in the
 /// order recorded, then the acknowledgement, then the release. A refused
 /// domain write rolls all of it back.
+///
+/// It also carries the checkpoint graph nodes its domain writes publish
+/// ([`Self::stage`]): the commit checks every staged node and the closure
+/// each published root needs, installs the new blobs and their edges after
+/// the fence and before the domain writes, and refuses with nothing written
+/// when a referenced node is neither staged nor stored.
 #[derive(Clone, Debug)]
 pub struct ActorTx {
     actor: ActorKey,
@@ -68,6 +85,9 @@ pub struct ActorTx {
     ack: Option<MailSeq>,
     release: Option<Release>,
     formats: Option<FormatSet>,
+    graph: BTreeMap<NodeId, EncodedNode>,
+    reads: BTreeSet<NodeId>,
+    budget: Option<GraphCommitBudget>,
 }
 
 /// What a fenced read saw of one owned actor.
@@ -112,6 +132,9 @@ impl ActorTx {
             ack: None,
             release: None,
             formats: None,
+            graph: BTreeMap::new(),
+            reads: BTreeSet::new(),
+            budget: None,
         }
     }
 
@@ -184,6 +207,94 @@ impl ActorTx {
     /// applies them itself in the same database transaction.
     pub fn take_domain(&mut self) -> Vec<DomainWrite> {
         std::mem::take(&mut self.domain)
+    }
+
+    /// Stage `nodes` for this commit to install: every node a domain write
+    /// publishes, or that a staged node references, and that no
+    /// acknowledged commit installed.
+    pub fn stage(&mut self, nodes: impl IntoIterator<Item = EncodedNode>) -> &mut Self {
+        for node in nodes {
+            self.graph.entry(node.id).or_insert(node);
+        }
+        self
+    }
+
+    /// Stage everything `staging` made.
+    pub fn stage_all(&mut self, staging: GraphStaging) -> &mut Self {
+        self.stage(staging.into_nodes().into_values())
+    }
+
+    /// Require `node`, which this commit references without staging: the
+    /// commit refuses with nothing written when it is not stored.
+    pub fn require(&mut self, node: NodeId) -> &mut Self {
+        self.reads.insert(node);
+        self
+    }
+
+    /// The nodes this transaction stages, by identity.
+    #[must_use]
+    pub fn graph(&self) -> &BTreeMap<NodeId, EncodedNode> {
+        &self.graph
+    }
+
+    /// The stored nodes this transaction requires without staging them.
+    #[must_use]
+    pub fn reads(&self) -> &BTreeSet<NodeId> {
+        &self.reads
+    }
+
+    /// Admit this commit only within `budget`, measured over its whole
+    /// encoding (FIG-5887 §9); refused with nothing written past it.
+    pub fn within(&mut self, budget: GraphCommitBudget) -> &mut Self {
+        self.budget = Some(budget);
+        self
+    }
+
+    /// The budget this commit is admitted within, if one was chosen.
+    #[must_use]
+    pub fn budget(&self) -> Option<&GraphCommitBudget> {
+        self.budget.as_ref()
+    }
+
+    /// Record `changes`, the namespaces `session`'s unfinished `run`
+    /// changed, staging each replaced value as its NamespaceValue node.
+    ///
+    /// # Errors
+    ///
+    /// Any refusal of the staging area.
+    pub fn write_namespaces(
+        &mut self,
+        session: &SessionId,
+        run: &TurnId,
+        changes: &[TurnNamespaceWrite],
+    ) -> Result<&mut Self, GraphRefusal> {
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let mut namespaces = Vec::with_capacity(changes.len());
+        for change in changes {
+            let values = match &change.values {
+                RunValuesWrite::Base => StoredValues::Base,
+                RunValuesWrite::Held => StoredValues::Held,
+                RunValuesWrite::Body(body) => StoredValues::Root(
+                    NamespaceValue {
+                        plugin: change.plugin.clone(),
+                        body: body.clone(),
+                    }
+                    .stage(&mut staging)?,
+                ),
+            };
+            namespaces.push(StoredNamespaceWrite {
+                plugin: change.plugin.clone(),
+                entry: change.entry.clone(),
+                values,
+            });
+        }
+        self.stage_all(staging);
+        self.write(DomainWrite::Turn(TurnWrite::Namespaces {
+            session: session.clone(),
+            run: run.clone(),
+            namespaces,
+        }));
+        Ok(self)
     }
 
     /// The position this transaction acknowledges through, if any.

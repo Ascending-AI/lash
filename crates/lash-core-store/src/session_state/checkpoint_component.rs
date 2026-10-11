@@ -18,7 +18,6 @@ pub(super) enum ResidentCheckpointComponentBody {
         snapshot: Option<crate::PluginState>,
         map: PluginStateRecord,
     },
-    ExecutionState(Option<Arc<[u8]>>),
     Opaque(Option<Arc<[u8]>>),
 }
 
@@ -71,7 +70,6 @@ pub(super) enum PendingCheckpointComponentBody {
         snapshot: crate::PluginState,
         map: PluginStateRecord,
     },
-    ExecutionState(Arc<[u8]>),
     Opaque(Arc<[u8]>),
 }
 
@@ -91,9 +89,6 @@ impl PendingCheckpointComponentBody {
                 snapshot: Some(snapshot),
                 map,
             },
-            Self::ExecutionState(bytes) => {
-                ResidentCheckpointComponentBody::ExecutionState(Some(bytes))
-            }
             Self::Opaque(bytes) => ResidentCheckpointComponentBody::Opaque(Some(bytes)),
         }
     }
@@ -185,21 +180,7 @@ impl ResidentCheckpointComponent {
         }
     }
 
-    pub(super) fn execution_state_body(&self) -> Option<Arc<[u8]>> {
-        match self {
-            Self::Unchanged {
-                body: ResidentCheckpointComponentBody::ExecutionState(body),
-                ..
-            } => body.clone(),
-            Self::Changed {
-                body: PendingCheckpointComponentBody::ExecutionState(body),
-                ..
-            } => Some(Arc::clone(body)),
-            _ => None,
-        }
-    }
-
-    /// The resident bytes of a keyed execution-state leaf.
+    /// The resident bytes of an opaque component.
     pub(super) fn opaque_body(&self) -> Option<Arc<[u8]>> {
         match self {
             Self::Unchanged {
@@ -232,8 +213,7 @@ impl ResidentCheckpointComponent {
     /// Releases the tool and plugin snapshot payloads. A changed typed body
     /// was the pending write's only copy; with the write discarded the
     /// component demotes to the durable ref it superseded, and reports whether
-    /// anything durable remains to track. Accepted execution bodies are the
-    /// storeless restore's source and stay.
+    /// anything durable remains to track.
     pub(super) fn release_typed_snapshot(&mut self) -> bool {
         let released = match self {
             Self::Unchanged { body, .. } => {
@@ -242,8 +222,7 @@ impl ResidentCheckpointComponent {
                     ResidentCheckpointComponentBody::PluginState { snapshot, .. } => {
                         *snapshot = None
                     }
-                    ResidentCheckpointComponentBody::ExecutionState(_)
-                    | ResidentCheckpointComponentBody::Opaque(_) => {}
+                    ResidentCheckpointComponentBody::Opaque(_) => {}
                 }
                 return true;
             }
@@ -261,8 +240,7 @@ impl ResidentCheckpointComponent {
                             map: std::mem::take(map),
                         }
                     }
-                    PendingCheckpointComponentBody::ExecutionState(_)
-                    | PendingCheckpointComponentBody::Opaque(_) => return true,
+                    PendingCheckpointComponentBody::Opaque(_) => return true,
                 };
                 (descriptor, released)
             }
@@ -282,8 +260,8 @@ impl ResidentCheckpointComponent {
     /// Releases every resident payload of an unchanged component: once the
     /// durable ref is authoritative, the encoded bytes are a second resident
     /// copy. A changed body has not committed yet; a discarded pending write
-    /// demotes to the durable ref it superseded, except a changed opaque leaf,
-    /// which is the retry's only source and stays.
+    /// demotes to the durable ref it superseded, except a changed opaque
+    /// body, which is the retry's only source and stays.
     pub(super) fn release_body(&mut self) -> bool {
         let released = match self {
             Self::Unchanged { body, .. } => {
@@ -292,8 +270,7 @@ impl ResidentCheckpointComponent {
                     ResidentCheckpointComponentBody::PluginState { snapshot, .. } => {
                         *snapshot = None
                     }
-                    ResidentCheckpointComponentBody::ExecutionState(payload)
-                    | ResidentCheckpointComponentBody::Opaque(payload) => *payload = None,
+                    ResidentCheckpointComponentBody::Opaque(payload) => *payload = None,
                 }
                 return true;
             }
@@ -310,9 +287,6 @@ impl ResidentCheckpointComponent {
                             snapshot: None,
                             map: std::mem::take(map),
                         }
-                    }
-                    PendingCheckpointComponentBody::ExecutionState(_) => {
-                        ResidentCheckpointComponentBody::ExecutionState(None)
                     }
                     PendingCheckpointComponentBody::Opaque(_) => return true,
                 };

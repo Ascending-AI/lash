@@ -56,8 +56,6 @@ pub const TOOL_STATE_CHECKPOINT_COMPONENT: &str = "tool_state";
 pub const PLUGIN_STATE_CHECKPOINT_COMPONENT: &str = "plugin_state";
 /// Well-known component key for the recorded plugin admission and native view.
 pub const PLUGIN_ADMISSION_CHECKPOINT_COMPONENT: &str = "plugin_admission";
-/// Well-known component key used by protocol-owned execution state.
-pub const EXECUTION_STATE_CHECKPOINT_COMPONENT: &str = "execution_state";
 
 /// Complete durable root for a session checkpoint.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -67,6 +65,10 @@ pub struct SessionCheckpoint {
     /// A key absent here is deleted.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub components: std::collections::BTreeMap<String, CheckpointComponentDescriptor>,
+    /// The session's protocol execution state: a SessionExecution root the
+    /// manifest names as a typed child (FIG-5887 §3), or none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_ref: Option<BlobRef>,
 }
 
 impl Default for SessionCheckpoint {
@@ -88,12 +90,14 @@ impl SessionCheckpoint {
                 .writer_version(crate::surface_format!(SESSION_CHECKPOINT_SCHEMA_VERSION)),
             turn_state: crate::PersistedTurnState::default(),
             components: std::collections::BTreeMap::new(),
+            execution_ref: None,
         }
     }
 
     pub fn new(
         turn_state: crate::PersistedTurnState,
         components: std::collections::BTreeMap<String, CheckpointComponentDescriptor>,
+        execution_ref: Option<BlobRef>,
         fleet_format: crate::store::FleetFormat,
     ) -> Self {
         Self {
@@ -101,6 +105,7 @@ impl SessionCheckpoint {
                 .writer_version(crate::surface_format!(SESSION_CHECKPOINT_SCHEMA_VERSION)),
             turn_state,
             components,
+            execution_ref,
         }
     }
 
@@ -125,6 +130,15 @@ impl SessionCheckpoint {
         &self,
         fleet_format: crate::store::FleetFormat,
     ) -> Result<(), StoreError> {
+        let window =
+            fleet_format.read_window(crate::surface_format!(SESSION_CHECKPOINT_SCHEMA_VERSION));
+        if !window.admits(self.schema_version) {
+            crate::store::ensure_supported_schema_version(
+                "SessionCheckpoint",
+                self.schema_version,
+                window.newest(),
+            )?;
+        }
         for (key, descriptor) in &self.components {
             ensure_checkpoint_component_encoding_version_for_fleet(
                 key,
@@ -439,6 +453,39 @@ pub struct HydratedSessionCheckpoint {
     /// A key absent here is deleted.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub components: std::collections::BTreeMap<String, HydratedCheckpointComponent>,
+    /// The session's protocol execution state as graph nodes, or none.
+    #[serde(skip)]
+    pub execution: Option<CheckpointExecution>,
+}
+
+/// A session checkpoint's SessionExecution graph (FIG-5887 §3, §6).
+///
+/// Committed, `nodes` are the nodes the root needs that the store may not
+/// hold yet: a store installs them with the manifest, and refuses the
+/// commit when a node the root reaches is in neither. Read back, `nodes`
+/// is every node the root reaches.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckpointExecution {
+    /// A SessionExecution node.
+    pub root: crate::checkpoint_graph::NodeId,
+    pub nodes: std::collections::BTreeMap<
+        crate::checkpoint_graph::NodeId,
+        crate::checkpoint_graph::EncodedNode,
+    >,
+}
+
+impl CheckpointExecution {
+    /// The root as the manifest names it.
+    #[must_use]
+    pub fn root_ref(&self) -> BlobRef {
+        BlobRef(self.root.to_hex())
+    }
+
+    /// The graph's encoded bytes a commit carries.
+    #[must_use]
+    pub fn node_bytes(&self) -> usize {
+        self.nodes.values().map(|node| node.bytes.len()).sum()
+    }
 }
 
 impl HydratedSessionCheckpoint {
@@ -563,6 +610,7 @@ impl HydratedSessionCheckpoint {
         Ok(SessionCheckpoint::new(
             self.turn_state.clone(),
             components,
+            self.execution.as_ref().map(CheckpointExecution::root_ref),
             fleet_format,
         ))
     }
@@ -603,7 +651,7 @@ mod checkpoint_tests {
 
     #[test]
     fn checked_component_body_validates_the_opaque_component_envelope() {
-        let key = EXECUTION_STATE_CHECKPOINT_COMPONENT;
+        let key = "opaque/owner";
         let checkpoint = HydratedSessionCheckpoint {
             components: [(
                 key.to_string(),
