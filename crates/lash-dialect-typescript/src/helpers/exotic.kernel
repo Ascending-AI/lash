@@ -81,9 +81,11 @@ body {
       let properties = target.data.properties
       if same(kind(properties), "record") {
         if record.contains(properties, key) { return properties[key] }
+        if same(key, "message") { return "" }
       }
-      if same(key, "message") { return "" }
-    } else { if same(key, "message") { return target.message } }
+    }
+    # Host errors carry typed cause data, not guest Error property slots.
+    if same(key, "message") { return target.message }
     return absent
   }
   if same(k, "record") {
