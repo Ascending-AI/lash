@@ -52,7 +52,10 @@ pub use catalogue_preview::{
     catalogue_preview_entries_from_catalog_records, catalogue_preview_entries_from_manifests,
     catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
 };
-pub use control_tools::{FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition};
+pub use control_tools::{
+    FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition,
+    read_output_tool_definition,
+};
 pub use deferred::{
     DeferredResolutionError, DeferredResolveContext, DeferredToolResolver,
     RecordedGrantInstallError, Resolution, SharedDeferredToolResolver, ToolGrant,

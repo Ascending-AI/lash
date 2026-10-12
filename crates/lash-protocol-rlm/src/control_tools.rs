@@ -20,7 +20,7 @@ impl ToolProvider for RlmControlToolsProvider {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
         vec![
             continue_as_tool_definition_for(self.vocabulary).manifest(),
-            read_output_tool_definition().manifest(),
+            read_output_tool_definition_for(self.vocabulary).manifest(),
         ]
     }
 
@@ -29,7 +29,9 @@ impl ToolProvider for RlmControlToolsProvider {
             "continue_as" => Some(Arc::new(
                 continue_as_tool_definition_for(self.vocabulary).contract(),
             )),
-            "read_output" => Some(Arc::new(read_output_tool_definition().contract())),
+            "read_output" => Some(Arc::new(
+                read_output_tool_definition_for(self.vocabulary).contract(),
+            )),
             _ => None,
         }
     }
@@ -54,12 +56,20 @@ pub(crate) fn finish_tool_provider(
     lash_core::FinishToolProvider::new([finish_tool_definition_for(vocabulary)])
 }
 
+/// The retained-output reader as a session in `dialect` advertises it.
+/// Include it in restricted tool access to let cells retrieve retained values.
+pub fn read_output_tool_definition(dialect: &dyn crate::dialect::DialectPrompts) -> ToolDefinition {
+    read_output_tool_definition_for(dialect.prompt_vocabulary())
+}
+
 #[expect(clippy::expect_used, reason = "the tool declares fixed valid schemas")]
-fn read_output_tool_definition() -> ToolDefinition {
+fn read_output_tool_definition_for(
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+) -> ToolDefinition {
     ToolDefinition::raw(
         "tool:read_output",
         "read_output",
-        "Read a value retained out of history whole. Pass history[N].output_archive.attachment for a step's print values, in order, or history[N].final_output.attachment for its final value; the retained record's `shape` already says what the value holds. Inline values are already whole in history. Throws a `retained_value_unavailable` failure when the value's bytes are no longer stored. Reads are explicit and never expand the prompt automatically.",
+        format!("Read a value retained out of history whole. Pass history[N].output_archive.attachment for a step's print values, in order, or history[N].final_output.attachment for its final value; the retained record's `shape` already says what the value holds. Inline values are already whole in history. Throws a `retained_value_unavailable` failure when the value's bytes are no longer stored. Reads are explicit {cell_noun} calls and never expand the prompt automatically.", cell_noun = vocabulary.cell_noun),
         json!({
             "type": "object",
             "properties": {"archive": {"type": "object"}},

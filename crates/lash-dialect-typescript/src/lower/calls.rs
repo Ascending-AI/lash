@@ -785,6 +785,20 @@ impl Lowerer<'_> {
         if let Some(wait) = self.wait_of(callee) {
             return self.lower_wait_call(wait, args, span);
         }
+        if let Some(path) = self.unbound_path(callee)
+            && path.starts_with("control.")
+            && self
+                .effects
+                .keys()
+                .any(|effect| effect.as_str().starts_with("control."))
+        {
+            return Err(Diagnostic::with_repair(
+                DiagnosticCode::UnknownBinding,
+                format!("the tool `{path}` is not granted in this session"),
+                "use a control tool listed in the session's offered catalog",
+                Some(span),
+            ));
+        }
         if let Some(refused) = self.reflective_call(callee, args) {
             return Err(refused);
         }

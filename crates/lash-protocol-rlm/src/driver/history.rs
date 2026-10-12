@@ -473,7 +473,7 @@ pub(crate) fn step_output_text(
             out,
             "{}\n{}",
             archive.output.witness,
-            retained_value_reading(&format!("history[{index}].output_archive"), archive),
+            retained_value_shape(&format!("history[{index}].output_archive"), archive),
         );
     }
     if !entry.images.is_empty() {
@@ -574,7 +574,7 @@ pub(crate) fn step_output_text(
             out.push_str("Final output:\n");
             out.push_str(&retained.output.witness);
             out.push('\n');
-            out.push_str(&retained_value_reading(
+            out.push_str(&retained_value_shape(
                 &format!("history[{index}].final_output"),
                 retained,
             ));
@@ -591,14 +591,13 @@ pub(crate) fn step_output_text(
     out
 }
 
-/// How a cell reads a retained value at `path`: its shape in place, and the
-/// value whole only by asking for it.
-fn retained_value_reading(path: &str, retained: &lash_core::RetainedValue) -> String {
+/// Retained history always exposes its shape. Retrieval guidance belongs to
+/// the reader's offered catalog documentation, so an ungranted reader is
+/// never taught by history.
+fn retained_value_shape(path: &str, retained: &lash_core::RetainedValue) -> String {
     let shape = serde_json::to_string(&retained.shape)
         .unwrap_or_else(|_| "{\"error\":\"unrenderable shape\"}".to_string());
-    format!(
-        "Shape ({path}.shape): {shape}\nFull value: await control.read_output({{ archive: {path}.attachment }})"
-    )
+    format!("Shape ({path}.shape): {shape}")
 }
 
 fn message_attachment_refs(parts: &[lash_core::Part]) -> Vec<RlmAttachmentRef> {

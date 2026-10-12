@@ -929,3 +929,292 @@ for (let i = 0; i < history.length; i++) {
     );
     Ok(())
 }
+
+/// FIG-6045: retained history teaches only tools the session grants, and
+/// a missing control operation is refused by name in either dialect.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restricted_finish_names_ungranted_controls_and_omits_read_output_teaching_on_sqlite()
+-> Result<()> {
+    for dialect in [
+        crate::rlm::CellDialect::typescript(),
+        crate::rlm::CellDialect::python(),
+    ] {
+        for channel in [
+            crate::rlm::RlmChannel::Cell,
+            crate::rlm::RlmChannel::NativeTool,
+        ] {
+            let python = dialect.name() == "python";
+            let rows = if python {
+                "rows = []\nfor i in range(3000):\n    rows.append({'index': i, 'text': 'a retained row'})\nawait control_finish({'rows': rows})".to_string()
+            } else {
+                ROWS_CELL.to_string()
+            };
+            let prefix = if python { "control_" } else { "control." };
+            let mut cells = vec![rows];
+            for name in ["read_output", "continue_as", "missing"] {
+                cells.push(format!("await {prefix}{name}({{}})"));
+            }
+            cells.push(format!("await {prefix}finish(7)"));
+            let RestrictedControls {
+                core,
+                session,
+                requests,
+                ..
+            } = restricted_control_session(dialect.clone(), channel, cells, false).await?;
+            session
+                .send(TurnInput::text("retain rows"))
+                .output()
+                .await?;
+            let output = session
+                .send(TurnInput::text("try unavailable controls"))
+                .output()
+                .await?;
+            assert_eq!(
+                output.finished().map(|(_, value)| value),
+                Some(&serde_json::json!(7))
+            );
+            {
+                let requests = requests.lock_recover();
+                assert_eq!(requests.len(), 5, "the refused cells reach the repair loop");
+                assert!(
+                    requests[1].contains("Shape ("),
+                    "retained history reaches the renderer"
+                );
+                assert!(
+                    !requests[1].contains("read_output"),
+                    "an ungranted reader is not taught anywhere in the prompt"
+                );
+                for request in requests.iter().skip(1) {
+                    assert!(
+                        !request.contains("Full value:"),
+                        "ungranted retrieval instruction: {request}"
+                    );
+                }
+                for (index, name) in ["read_output", "continue_as", "missing"].iter().enumerate() {
+                    let repair = &requests[index + 2];
+                    assert!(
+                        repair.contains(&format!("{prefix}{name}` is not granted in this session")),
+                        "tool-specific refusal: {repair}"
+                    );
+                }
+            }
+            session.close().await?;
+            drop(core);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+struct RestrictedControls {
+    core: LashCore,
+    session: crate::LashSession,
+    backend: lash_core::Backend,
+    requests: Arc<StdMutex<Vec<String>>>,
+    responses: Arc<tokio::sync::Mutex<std::collections::VecDeque<LlmResponse>>>,
+}
+
+#[cfg(feature = "rlm")]
+fn control_cell_response(
+    dialect: &crate::rlm::CellDialect,
+    channel: crate::rlm::RlmChannel,
+    index: usize,
+    code: String,
+) -> LlmResponse {
+    if channel == crate::rlm::RlmChannel::Cell {
+        let tags = dialect.prompts().prompt_vocabulary().cell_tags;
+        text_response(&format!("{}\n{code}\n{}", tags.open, tags.close))
+    } else {
+        LlmResponse {
+            parts: vec![LlmOutputPart::ToolCall {
+                call_id: format!("cell-{index}"),
+                tool_name: "execute_code".into(),
+                input_json: serde_json::json!({"code": code}).to_string(),
+                replay: None,
+            }],
+            ..Default::default()
+        }
+    }
+}
+
+#[cfg(feature = "rlm")]
+async fn restricted_control_session(
+    dialect: crate::rlm::CellDialect,
+    channel: crate::rlm::RlmChannel,
+    cells: Vec<String>,
+    read_output: bool,
+) -> Result<RestrictedControls> {
+    let backend = sqlite_memory_store_backend().await;
+    let responses = Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::from(
+        cells
+            .into_iter()
+            .enumerate()
+            .map(|(index, code)| control_cell_response(&dialect, channel, index, code))
+            .collect::<Vec<_>>(),
+    )));
+    let scripted = responses.clone();
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let captured = requests.clone();
+    let provider = crate::testing::TestProvider::builder().kind("restricted-controls")
+        .complete(move |request| {
+            let responses = scripted.clone();
+            let captured = captured.clone();
+            async move {
+                captured.lock_recover().push(serde_json::json!({"instructions": request.instructions, "messages": request.messages}).to_string());
+                Ok(responses.lock().await.pop_front().unwrap_or_else(|| {
+                    let feedback = request.messages.iter().flat_map(|message| message.blocks.iter())
+                        .filter_map(|block| match block {
+                            LlmContentBlock::Text { text, .. } => text.split_once("\n\nNext:").map(|(message, _)| message.to_string()),
+                            _ => None,
+                        }).collect::<Vec<_>>();
+                    panic!("scripted control cell exhausted: {feedback:?}");
+                }))
+            }
+        }).build().into_handle();
+    let mut tools = vec![crate::rlm::finish_tool_definition(
+        dialect.prompts().as_ref(),
+    )];
+    if read_output {
+        tools.push(crate::rlm::read_output_tool_definition(
+            dialect.prompts().as_ref(),
+        ));
+    }
+    let factory = crate::rlm::RlmProtocolPluginFactory::new(
+        crate::rlm::RlmProtocolPluginConfig::builder()
+            .channel(channel)
+            .instruction_limit(crate::rlm::InstructionBound::standard())
+            .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
+            .build(),
+        dialect,
+    )
+    .with_worker_service(untimed_fixture_workers());
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend.clone(), factory))
+        .data_retention(crate::DataRetention {
+            attachments: crate::persistence::AttachmentPolicy {
+                output_retention: POLICY,
+                ..crate::persistence::AttachmentPolicy::standard()
+            },
+            ..crate::DataRetention::standard()
+        })
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let id = SessionId::fixture("restricted-controls");
+    core.session(id.clone())
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::restricted(tools).expect("control grants"),
+            mock_session_spec(),
+        ))
+        .await?;
+    let session = core.session(id).open().await?;
+    Ok(RestrictedControls {
+        core,
+        session,
+        backend,
+        requests,
+        responses,
+    })
+}
+
+/// FIG-6045: the public reader definition grants access to the whole retained
+/// value, on both transports and with either dialect's callable spelling.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restricted_read_output_definition_reads_retained_value_on_sqlite() -> Result<()> {
+    for dialect in [
+        crate::rlm::CellDialect::typescript(),
+        crate::rlm::CellDialect::python(),
+    ] {
+        for channel in [
+            crate::rlm::RlmChannel::Cell,
+            crate::rlm::RlmChannel::NativeTool,
+        ] {
+            let python = dialect.name() == "python";
+            let rows = if python {
+                "rows = []\nfor i in range(3000):\n    rows.append({'index': i, 'text': 'a retained row'})\nawait control_finish({'rows': rows})".to_string()
+            } else {
+                ROWS_CELL.to_string()
+            };
+            let RestrictedControls {
+                core,
+                session,
+                backend,
+                requests,
+                responses,
+            } = restricted_control_session(dialect.clone(), channel, vec![rows], true).await?;
+            let original = session
+                .send(TurnInput::text("retain rows"))
+                .output()
+                .await?;
+            let reader = if python {
+                // Give Python the retained reference as JSON; history's host
+                // records currently arrive without Python dict conversion.
+                let (_, window) = committed_frame(&backend, "restricted-controls").await;
+                let mut finals = Vec::new();
+                collect_retained(
+                    &serde_json::to_value(window.window).expect("window"),
+                    &mut Vec::new(),
+                    &mut finals,
+                );
+                let [retained] = finals.as_slice() else {
+                    panic!("one retained final value");
+                };
+                let mut reference =
+                    lash_core::ToolValue::Attachment(retained.output.reference.clone())
+                        .to_json_value();
+                // The reference contains strings and integers. Omit absent
+                // optional fields so its JSON is also a Python dict literal.
+                reference["reference"]
+                    .as_object_mut()
+                    .expect("attachment reference")
+                    .retain(|_, value| !value.is_null());
+                format!(
+                    "archive = {reference}\nwhole = await control_read_output({{'archive': archive}})\nawait control_finish(whole)"
+                )
+            } else {
+                format!(
+                    "{PRIOR_FINAL_OUTPUT}\nawait control.finish(await control.read_output({{ archive: prior.attachment }}));"
+                )
+            };
+            responses
+                .lock()
+                .await
+                .push_back(control_cell_response(&dialect, channel, 1, reader));
+            let read = session
+                .send(TurnInput::text("read whole retained value"))
+                .output()
+                .await?;
+            assert!(
+                read.finished().is_some(),
+                "{} {channel:?}: {:?}",
+                dialect.name(),
+                read.result.outcome
+            );
+            assert_eq!(
+                read.finished(),
+                original.finished(),
+                "retrieval preserves the complete retained value"
+            );
+            let call_path = if python {
+                "control_read_output"
+            } else {
+                "control.read_output"
+            };
+            {
+                let requests = requests.lock_recover();
+                assert_eq!(requests.len(), 2);
+                assert!(
+                    requests[1].contains(&format!("{call_path}(")),
+                    "the offered reader has a dialect-correct signature"
+                );
+                assert!(
+                    requests[1].contains("Read a value retained out of history whole."),
+                    "the offered catalog teaches retrieval"
+                );
+            }
+            session.close().await?;
+            drop(core);
+        }
+    }
+    Ok(())
+}

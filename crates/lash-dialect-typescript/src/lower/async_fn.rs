@@ -186,7 +186,7 @@ impl Lowerer<'_> {
     }
 
     /// `a.b.c` as a dotted path, when the source does not bind `a`.
-    fn unbound_path(&self, expr: &ast::Expr) -> Option<String> {
+    pub(super) fn unbound_path(&self, expr: &ast::Expr) -> Option<String> {
         match expr {
             ast::Expr::Ident(name, _) => (!self.is_bound(name)).then(|| name.clone()),
             ast::Expr::Member {

@@ -337,6 +337,19 @@ impl Lowerer<'_> {
                         repair,
                     ));
                 }
+                if id.starts_with("control_")
+                    && self
+                        .effects
+                        .keys()
+                        .any(|effect| effect.as_str().starts_with("control_"))
+                {
+                    return Err(diagnostics::with_repair(
+                        Code::UnknownName,
+                        format!("the tool `{id}` is not granted in this session"),
+                        call.range(),
+                        "use a control tool listed in the session's offered catalog",
+                    ));
+                }
                 Err(self.not_a_variable(id, name.range))
             }
             PyExpr::Attribute(attribute) => self.method(attribute, call),

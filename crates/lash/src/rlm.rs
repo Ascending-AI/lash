@@ -117,9 +117,10 @@ pub use lash_protocol_rlm::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
     ShapeField, ShapeKind, ShapeRow,
 };
-/// Lash's two control tools, as a session advertises them.
+/// Lash's control tools, as a session advertises them.
 pub use lash_protocol_rlm::{
     FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition,
+    read_output_tool_definition,
 };
 /// What a code-mode prompt discloses (FIG-1435, FIG-1438): which tools a
 /// discovery session lists under its recorded budget and which it leaves to
