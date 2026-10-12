@@ -2,6 +2,77 @@
 
 use super::machine;
 
+/// FIG-6049: host history records expose string keys like Python dicts,
+/// including nested records and the typed exception for a missing key.
+#[test]
+fn history_records_support_dict_reads_and_typed_key_errors() {
+    use lash_kernel_doc::{Datum, Name, Object, ObjectId, Value};
+    use lash_kernel_vm::{Bindings, End, RunError};
+    use std::collections::BTreeMap;
+
+    let bindings = Bindings {
+        variables: BTreeMap::from([(Name::new("history"), Value::List(ObjectId(1)))]),
+        objects: BTreeMap::from([
+            (
+                ObjectId(1),
+                Object::List(vec![Value::Null, Value::Record(ObjectId(2))]),
+            ),
+            (
+                ObjectId(2),
+                Object::Record(vec![("final_output".into(), Value::Record(ObjectId(3)))]),
+            ),
+            (
+                ObjectId(3),
+                Object::Record(vec![
+                    ("attachment".into(), Value::Text("retained-value".into())),
+                    ("empty".into(), Value::Record(ObjectId(4))),
+                ]),
+            ),
+            (ObjectId(4), Object::Record(Vec::new())),
+        ]),
+    };
+    let source = "\
+output = history[1]['final_output']
+print(output['attachment'])
+print('attachment' in output, 'missing' in output, 1 in output)
+print(output.get('attachment'), output.get('missing', 'fallback'), output.get('missing'))
+print(output.keys(), list(output), [key for key in output], len(output))
+print(output['empty'].keys(), list(output['empty']), len(output['empty']), bool(output['empty']))
+try:
+    output['missing']
+except KeyError as error:
+    print(type(error).__name__, error.args, str(error))
+history[1]['missing']
+";
+    let (lines, end) = machine::drive(source, BTreeMap::new(), bindings, |_, _, _| {
+        panic!("reading history does not park")
+    });
+    assert_eq!(
+        lines,
+        [
+            "retained-value",
+            "True False False",
+            "retained-value fallback None",
+            "['attachment', 'empty'] ['attachment', 'empty'] ['attachment', 'empty'] 2",
+            "[] [] 0 False",
+            "KeyError ('missing',) 'missing'",
+        ],
+        "{end:?}"
+    );
+    let End::Error(RunError::Uncaught(Datum::Error(error))) = end else {
+        panic!("a missing history key raises a typed error: {end:?}");
+    };
+    assert_eq!(error.kind, "KeyError");
+    assert_eq!(error.message, "'missing'");
+    assert_eq!(
+        error.data,
+        Datum::Tuple(vec![
+            Datum::Tuple(vec![Datum::Text("missing".into())]),
+            Datum::Null,
+        ])
+    );
+}
+
 /// A top-level name is the session's: the next cell reads and rebinds it
 /// without declaring it again, and a temporary is the cell's own.
 #[test]

@@ -1010,7 +1010,6 @@ async fn restricted_finish_names_ungranted_controls_and_omits_read_output_teachi
 struct RestrictedControls {
     core: LashCore,
     session: crate::LashSession,
-    backend: lash_core::Backend,
     requests: Arc<StdMutex<Vec<String>>>,
     responses: Arc<tokio::sync::Mutex<std::collections::VecDeque<LlmResponse>>>,
 }
@@ -1110,7 +1109,6 @@ async fn restricted_control_session(
     Ok(RestrictedControls {
         core,
         session,
-        backend,
         requests,
         responses,
     })
@@ -1138,7 +1136,6 @@ async fn restricted_read_output_definition_reads_retained_value_on_sqlite() -> R
             let RestrictedControls {
                 core,
                 session,
-                backend,
                 requests,
                 responses,
             } = restricted_control_session(dialect.clone(), channel, vec![rows], true).await?;
@@ -1147,30 +1144,7 @@ async fn restricted_read_output_definition_reads_retained_value_on_sqlite() -> R
                 .output()
                 .await?;
             let reader = if python {
-                // Give Python the retained reference as JSON; history's host
-                // records currently arrive without Python dict conversion.
-                let (_, window) = committed_frame(&backend, "restricted-controls").await;
-                let mut finals = Vec::new();
-                collect_retained(
-                    &serde_json::to_value(window.window).expect("window"),
-                    &mut Vec::new(),
-                    &mut finals,
-                );
-                let [retained] = finals.as_slice() else {
-                    panic!("one retained final value");
-                };
-                let mut reference =
-                    lash_core::ToolValue::Attachment(retained.output.reference.clone())
-                        .to_json_value();
-                // The reference contains strings and integers. Omit absent
-                // optional fields so its JSON is also a Python dict literal.
-                reference["reference"]
-                    .as_object_mut()
-                    .expect("attachment reference")
-                    .retain(|_, value| !value.is_null());
-                format!(
-                    "archive = {reference}\nwhole = await control_read_output({{'archive': archive}})\nawait control_finish(whole)"
-                )
+                "archive = history[1]['final_output']['attachment']\nwhole = await control_read_output({'archive': archive})\nawait control_finish(whole)".to_string()
             } else {
                 format!(
                     "{PRIOR_FINAL_OUTPUT}\nawait control.finish(await control.read_output({{ archive: prior.attachment }}));"

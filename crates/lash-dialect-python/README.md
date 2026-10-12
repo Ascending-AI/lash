@@ -32,6 +32,14 @@ each array a list. So indexing, `in`, `len`, `get`, `keys`, `items`,
 object is false. This holds however the reply is awaited: directly, through
 a task or through `asyncio.gather`.
 
+Host bindings such as `history` hold kernel records directly. These support
+string-key indexing, `in`, `get(key, default)`, `keys()`, key iteration,
+`list(record)`, `len` and truthiness, retaining the record's field order and
+nested values. Reading a missing key raises `KeyError` with the key in its
+`args`. Record fields are read with subscripts; arbitrary field attributes
+are outside the dialect. Records do not offer dict mutation methods,
+`items()` or `values()`; tool replies remain ordinary dicts.
+
 Where Python's meaning is the kernel's, the lowerer emits the kernel form:
 `==` is `eq`, `is` is `same`, `//` and `%` on integers are `div_floor` and
 `rem_floor`, `await tool(x)` is one `perform`, whose reply `py.reply`

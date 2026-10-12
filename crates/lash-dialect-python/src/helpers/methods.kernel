@@ -39,6 +39,8 @@ use map.values
 use map.entries
 use map.copy
 use map.clear
+use record.contains
+use record.keys
 use set.contains
 use set.copy
 use set.clear
@@ -363,8 +365,19 @@ function py.method.get(self: Any, key: Any, default?: Any) -> Any
 kernel 1
 charge sum(4, deep(key))
 body {
-  if same(kind(self), "map") {
-    if map.contains(self, key) {
+  let k = kind(self)
+  let mapping = same(k, "map")
+  if same(k, "record") { set mapping = true }
+  if mapping {
+    let present = false
+    if same(k, "map") {
+      set present = map.contains(self, key)
+    } else {
+      if same(kind(key), "text") {
+        set present = record.contains(self, key)
+      }
+    }
+    if present {
       return self[key]
     }
     if same(default, absent) {
@@ -382,6 +395,9 @@ charge sum(4, size(self))
 body {
   if same(kind(self), "map") {
     return map.keys(self)
+  }
+  if same(kind(self), "record") {
+    return record.keys(self)
   }
   do invoke py.no_attribute(self, "keys")
   return null
