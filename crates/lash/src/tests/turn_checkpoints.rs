@@ -36,7 +36,7 @@ fn core_with(
     let builder = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(model, mock_llm_profile_spec());
     match tools {
-        Some(tools) => builder.tools(tools),
+        Some(tools) => builder.tools(crate::hook_key!("tools"), tools),
         None => builder,
     }
     .build(crate::testing::runtime_lease_owner())
@@ -457,7 +457,7 @@ async fn checkpoint_observer_failure_leaves_active_input_pending_without_applica
         scripted(Arc::clone(&requests), Arc::new(send_then_answer)),
         mock_llm_profile_spec(),
     )
-    .tools(Arc::new(SendTool(sender)))
+    .tools(crate::hook_key!("tools"), Arc::new(SendTool(sender)))
     .plugin(failing_checkpoint_observer())
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core");

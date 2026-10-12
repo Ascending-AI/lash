@@ -54,7 +54,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
             stores.clone(),
         )))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .tools(Arc::new(AppTools))
+        .tools(crate::hook_key!("tools"), Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())
     };
     let core = deploy()?;
@@ -189,7 +189,7 @@ async fn tool_completed_activity_is_canonical_while_model_observation_is_project
                 crate::plugins::StandardProtocolPluginFactory::with_config(standard_config),
             )))
             .serve_test_llm_profile(standard_provider, mock_llm_profile_spec())
-            .tools(Arc::new(LongTextTools))
+            .tools(crate::hook_key!("tools"), Arc::new(LongTextTools))
             .build(crate::testing::runtime_lease_owner())?;
         let standard_session = standard_core
             .session(
@@ -237,7 +237,7 @@ await control.finish("done");"#,
                         )]),
                         mock_llm_profile_spec(),
                     )
-                    .tools(Arc::new(LongTextTools))
+                    .tools(crate::hook_key!("tools"), Arc::new(LongTextTools))
                     .build(crate::testing::runtime_lease_owner())?;
             let rlm_session = rlm_core
                 .session(crate::SessionId::parse("rlm-projection").expect("nonblank host identity"))
@@ -327,9 +327,12 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .tools(Arc::new(BuilderSentinelTools {
-            calls: Arc::clone(&calls),
-        }))
+        .tools(
+            crate::hook_key!("tools"),
+            Arc::new(BuilderSentinelTools {
+                calls: Arc::clone(&calls),
+            }),
+        )
         .plugin(Arc::new(SurfacePluginFactory))
         .build(crate::testing::runtime_lease_owner())?;
     let id = "builder-sentinels";
@@ -482,7 +485,7 @@ console.log("abcdefghijklmnopqrstuvwxyz");"#,
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
         .output_cuts(cuts)
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .tools(Arc::new(AppTools))
+        .tools(crate::hook_key!("tools"), Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(SessionId::from("host-rlm-presentation"))

@@ -424,9 +424,6 @@ pub mod tools {
     /// Typed cancellation evidence constructed by tool implementors; pass it to
     /// [`ToolCallOutput::cancelled`] when a tool stops without completing.
     pub use lash_core::ToolCancellation;
-    /// Source and owning plugin identity of tools registered with
-    /// [`crate::LashCoreBuilder::tools`]. Use it in deferred grants for those tools.
-    pub use lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID;
     /// The pending model call passed to a tool's preparation hook.
     pub use lash_core::sansio::PendingToolCall;
     pub use lash_core::{

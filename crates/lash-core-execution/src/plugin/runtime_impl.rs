@@ -536,7 +536,6 @@ impl PluginHost {
                 std::sync::atomic::Ordering::SeqCst,
             );
             let composition = Arc::new(super::ExecutionComposition::new(
-                self.factories().iter().map(|f| f.id().to_owned()).collect(),
                 &mut contributions,
                 Arc::clone(&registry),
             ));
@@ -629,7 +628,6 @@ impl PluginHost {
         drop(registry);
         let mut plugins = Vec::new();
         let mut contributions = PluginContributions::default();
-        let mut tool_names = Default::default();
         for factory in self.factories() {
             let plugin = factory.build(ctx)?;
             if plugin.id() != factory.id() {
@@ -641,7 +639,6 @@ impl PluginHost {
             }
             let mut reg = PluginRegistrar::new(String::from(factory.id()));
             reg.contributions = contributions;
-            reg.tool_names = tool_names;
             reg.state = Some(PluginStateView::bind(
                 &ctx.owner,
                 plugin.id(),
@@ -659,7 +656,6 @@ impl PluginHost {
                 }
             }
             contributions = reg.contributions;
-            tool_names = reg.tool_names;
             plugins.push(plugin);
         }
 
@@ -745,18 +741,14 @@ pub(crate) fn build_tool_registry(
     contributions: &PluginContributions,
     tool_snapshot: Option<crate::ToolState>,
 ) -> Result<Arc<crate::ToolRegistry>, PluginError> {
-    let mut providers_by_source = BTreeMap::<String, Vec<Arc<dyn crate::ToolProvider>>>::new();
-    for registered in &contributions.tool_providers {
-        providers_by_source
-            .entry(registered.identity.owner.clone())
-            .or_default()
-            .push(Arc::clone(&registered.hook));
-    }
-    let registry =
-        crate::ToolRegistry::from_tool_registrations(providers_by_source.into_iter().collect())
-            .map_err(|err| {
-                PluginError::Registration(format!("failed to build tool registry: {err}"))
-            })?;
+    let providers = contributions
+        .tool_providers
+        .iter()
+        .map(|registered| (registered.identity.clone(), Arc::clone(&registered.hook)))
+        .collect();
+    let registry = crate::ToolRegistry::from_tool_registrations(providers).map_err(|err| {
+        PluginError::Registration(format!("failed to build tool registry: {err}"))
+    })?;
     match tool_snapshot {
         Some(snapshot) => registry
             .fork_with_state(snapshot)

@@ -210,7 +210,8 @@ impl lash::process::ProcessComponentFactory for ProbeComponent {
                 .push((env, cx.capabilities.clone()));
         }
         let mut spec = lash::process::ProcessComponentSpec::default();
-        spec.tool_providers.push(Arc::clone(&self.tools));
+        spec.tool_providers
+            .push((lash::hook_key!("probe"), Arc::clone(&self.tools)));
         Ok(spec)
     }
 }
@@ -330,11 +331,10 @@ fn worker(
     );
     let core = lash::LashCore::rlm_builder(backend.clone(), factory)
         .llm_profiles(Arc::new(models))
-        .tools(probe_tools(
-            seen,
-            holds,
-            &[WAIT, READ, LATER, EXTRA, SESSION_ONLY],
-        ))
+        .tools(
+            lash::hook_key!("tools"),
+            probe_tools(seen, holds, &[WAIT, READ, LATER, EXTRA, SESSION_ONLY]),
+        )
         .process_component(
             Arc::new(ProbeComponent {
                 seen: Arc::clone(seen),

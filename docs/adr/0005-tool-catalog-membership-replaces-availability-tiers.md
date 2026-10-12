@@ -12,7 +12,7 @@ Standard protocol presents all catalog members when discovery is absent. With di
 
 RLM's host-provided `DeferredToolResolver` resolves missing call paths during linking, in the context of the execution that links: its owner, its logical Run, and the capability refs that Run's spec recorded. The runtime gathers unresolved paths, excludes recorded outcomes, resolves one batch, folds grants into the link environment, and links. Missing answers become `NotAvailable`. Outcomes, including negative answers and Tool Execution Bindings, are frozen under the cell's admitted execution and commit with its VM snapshot ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8). Resume reinstalls recorded routing through the host hook and reuses the outcomes; a different cell starts a fresh record. Resolution does not mutate the session catalog.
 
-A deferred grant's source names its owning plugin. Providers registered with `LashCoreBuilder::tools` belong to `lash::tools::PLUGIN_TOOL_SOURCE_ID` (`embed_tools`); the builder's plugin declaration and the tool registry use that same identity. Grants for other plugins name those plugins' ids. Grant execution and restore resolve that exact source, without searching other plugins for a matching tool.
+A deferred grant names the provider that executes it by its declared identity, owner plus key (FIG-6073). A provider registered with `LashCoreBuilder::tools(key, provider)` is installed as plugin `key` with its one provider declared under `key`; a plugin's own providers carry the keys it registers them under. Grant execution and restore resolve that exact provider, without searching other providers for a matching tool.
 
 ## Why and alternatives
 

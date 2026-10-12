@@ -160,7 +160,7 @@ impl<'grant> AttemptAuthority<'grant> {
             Self::Catalog(_) => tool_context,
             Self::Granted(grant) => tool_context
                 .with_tool_execution_binding(grant.execution_binding.clone())
-                .with_granted_source_id(grant.source_id.clone()),
+                .with_granted_provider(grant.provider.clone()),
         }
     }
 }
@@ -213,16 +213,16 @@ fn body_state(
     if state.is_empty() {
         return None;
     }
-    let source = match authority {
+    let granted = match authority {
         AttemptAuthority::Catalog(_) => None,
-        AttemptAuthority::Granted(grant) => grant.source_id.as_deref(),
+        AttemptAuthority::Granted(grant) => Some(&grant.provider),
     };
     let proposal = context
         .composition
-        .tool_execution_owner(tool_id, source)
-        .map(|owner| {
+        .tool_provider(tool_id, granted)
+        .map(|provider| {
             crate::plugin::Proposal::for_tool(
-                owner,
+                provider.owner,
                 crate::plugin::StateCommandOrigin::ToolAttempt {
                     call_id: ids.call_id.clone(),
                     attempt: lash_core_store::tool_run::AttemptOrdinal::new(attempt)

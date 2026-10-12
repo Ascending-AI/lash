@@ -1014,7 +1014,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() {
     // A core that carries the session's tool source, to persist tool state.
     let granting = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .tools(Arc::new(AppTools))
+        .tools(crate::hook_key!("tools"), Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())
         .expect("granting core");
     let granted = create(&granting, session_id.as_str()).await;
@@ -1661,7 +1661,7 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
                 ),
                 mock_llm_profile_spec(),
             )
-            .tools(Arc::new(AppTools))
+            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
             .build(crate::testing::runtime_lease_owner())
     }
     let backend = sqlite_memory_store_backend().await;
@@ -1768,7 +1768,7 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
                 ),
                 mock_llm_profile_spec(),
             )
-            .tools(Arc::new(AppTools))
+            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
             .build(crate::testing::runtime_lease_owner())
     }
     let backend = sqlite_memory_store_backend().await;
@@ -1899,11 +1899,14 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
                     ),
                     mock_llm_profile_spec(),
                 )
-                .tools(Arc::new(SecondLookupHeld {
-                    calls: std::sync::atomic::AtomicUsize::new(0),
-                    entered: Arc::clone(&entered),
-                    release: Arc::clone(&release),
-                }))
+                .tools(
+                    crate::hook_key!("tools"),
+                    Arc::new(SecondLookupHeld {
+                        calls: std::sync::atomic::AtomicUsize::new(0),
+                        entered: Arc::clone(&entered),
+                        release: Arc::clone(&release),
+                    }),
+                )
                 .build(crate::testing::runtime_lease_owner())
         };
         let backend = sqlite_memory_store_backend().await;
@@ -1998,7 +2001,7 @@ async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_th
                 ),
                 mock_llm_profile_spec(),
             )
-            .tools(Arc::new(AppTools))
+            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
             .plugin(Arc::new(plugin))
             .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -2059,7 +2062,7 @@ async fn a_cells_recorded_tool_calls_are_bounded_by_the_recorded_presentation() 
                 ),
                 mock_llm_profile_spec(),
             )
-            .tools(Arc::new(AppTools))
+            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
             .build(crate::testing::runtime_lease_owner())
     }
     let left_out = Some(lash_core::OmittedToolCalls {
@@ -2304,7 +2307,7 @@ async fn a_cell_at_its_tool_call_limit_can_still_finish() -> Result<()> {
                 ),
                 mock_llm_profile_spec(),
             )
-            .tools(Arc::new(AppTools))
+            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
             .build(crate::testing::runtime_lease_owner())?;
     let spec = crate::SessionSpec::new(
         mock_llm_profile_spec().wire_model,

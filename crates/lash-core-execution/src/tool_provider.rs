@@ -162,14 +162,15 @@ impl AttemptProcessReads {
 ///
 /// The route is deliberately private to the core so provider authors observe
 /// only the ordinary prepare/execute APIs and their existing execution
-/// binding. Registry-backed granted calls still need their live source id,
-/// however, because that source is intentionally outside the pinned catalog.
+/// binding. Registry-backed granted calls still need their provider's
+/// identity, however, because that provider is intentionally outside the
+/// pinned catalog.
 #[derive(Clone, Default)]
 pub(crate) enum ToolExecutionRoute {
     #[default]
     Catalog,
     Granted {
-        source_id: Option<String>,
+        provider: crate::plugin::PluginCallbackIdentity,
     },
 }
 
@@ -992,8 +993,11 @@ impl<'run> ToolContext<'run> {
         self
     }
 
-    pub(crate) fn with_granted_source_id(mut self, source_id: Option<String>) -> Self {
-        self.tool_execution_route = ToolExecutionRoute::Granted { source_id };
+    pub(crate) fn with_granted_provider(
+        mut self,
+        provider: crate::plugin::PluginCallbackIdentity,
+    ) -> Self {
+        self.tool_execution_route = ToolExecutionRoute::Granted { provider };
         self
     }
 
@@ -1115,29 +1119,34 @@ impl PreparedToolBatch {
 // float arm has no total equality. Comparison verifies that retained
 // admission preserves the granted authority.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ToolExecutionGrant {
-    /// The plugin whose declared code executes this grant.
-    pub owner: String,
+    /// The declared provider that prepares and executes this grant's calls:
+    /// the one identity its calls bind to and dispatch through.
+    #[serde(
+        deserialize_with = "lash_core_store::store::plugin_writers::declared_tool_provider::deserialize"
+    )]
+    pub provider: crate::plugin::PluginCallbackIdentity,
     /// Tool identity and model-facing metadata authorized by the grant.
     pub(crate) manifest: ToolManifest,
     /// Contract used to validate granted call arguments without consulting the
     /// current Tool Catalog.
     pub(crate) contract: Box<ToolContract>,
-    /// Explicit registry source route for registry-backed execution. Direct
-    /// non-registry providers may ignore this; [`ToolRegistry`](crate::ToolRegistry)
-    /// requires it.
-    pub source_id: Option<String>,
     /// Opaque host routing payload passed to prepare and execute contexts.
     pub execution_binding: serde_json::Value,
 }
 
 impl ToolExecutionGrant {
-    pub fn from_definition(owner: String, definition: ToolDefinition) -> Self {
+    /// A grant of `definition`, executed by the provider declared as
+    /// `provider`.
+    pub fn from_definition(
+        provider: crate::plugin::PluginCallbackIdentity,
+        definition: ToolDefinition,
+    ) -> Self {
         Self {
-            owner,
+            provider,
             manifest: definition.manifest(),
             contract: Box::new(definition.contract()),
-            source_id: None,
             execution_binding: serde_json::Value::Null,
         }
     }
@@ -1150,13 +1159,6 @@ impl ToolExecutionGrant {
     /// Returns the contract used to validate granted call arguments.
     pub fn contract(&self) -> &ToolContract {
         &self.contract
-    }
-
-    /// Sets the source id carried by a `ToolExecutionGrant` for protocol and process-engine
-    /// implementors while preparing or executing an authorized tool call.
-    pub fn with_source_id(mut self, source_id: impl Into<String>) -> Self {
-        self.source_id = Some(source_id.into());
-        self
     }
 
     /// Sets the execution binding carried by a `ToolExecutionGrant` for protocol and process-engine
@@ -1248,8 +1250,11 @@ impl ToolPrepareContext {
         self
     }
 
-    pub(crate) fn with_granted_source_id(mut self, source_id: Option<String>) -> Self {
-        self.tool_execution_route = ToolExecutionRoute::Granted { source_id };
+    pub(crate) fn with_granted_provider(
+        mut self,
+        provider: crate::plugin::PluginCallbackIdentity,
+    ) -> Self {
+        self.tool_execution_route = ToolExecutionRoute::Granted { provider };
         self
     }
 

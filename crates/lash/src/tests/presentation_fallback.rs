@@ -133,7 +133,7 @@ fn deploy(backend: &lash_core::Backend, seen: &Seen, hold: bool) -> Result<LashC
     };
     explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .tools(Arc::new(Answering))
+        .tools(crate::hook_key!("tools"), Arc::new(Answering))
         .plugin(Arc::new(chain(seen)))
         .build(crate::testing::runtime_lease_owner())
 }

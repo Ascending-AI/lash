@@ -91,7 +91,7 @@ async fn session(
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec());
     if let Some(tools) = tools {
-        builder = builder.tools(tools);
+        builder = builder.tools(crate::hook_key!("tools"), tools);
     }
     let core = builder.build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -227,7 +227,7 @@ await control.finish("must not finish");"#
     let core =
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(model, mock_llm_profile_spec())
-            .tools(tool.clone())
+            .tools(crate::hook_key!("tools"), tool.clone())
             .process_component(
                 lash_core::testing::tool_component(PANIC_COMPONENT, tool.clone()),
                 PANIC_COMPONENT,

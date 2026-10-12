@@ -113,7 +113,7 @@ impl World {
                 text_provider("turn-retirement", cell(finishes)),
                 mock_llm_profile_spec(),
             )
-            .tools(Arc::new(ApprovalTools { keys }))
+            .tools(crate::hook_key!("tools"), Arc::new(ApprovalTools { keys }))
             .build(crate::testing::runtime_lease_owner())?;
         Ok(Self {
             stores,

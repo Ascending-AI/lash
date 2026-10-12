@@ -103,7 +103,7 @@ async fn run_policy_turn(
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(Arc::new(EchoTool))
+    .tools(crate::hook_key!("tools"), Arc::new(EchoTool))
     .plugin(tool_policy_plugin(decision))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core

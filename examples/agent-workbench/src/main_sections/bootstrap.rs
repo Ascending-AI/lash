@@ -315,9 +315,12 @@ pub(crate) async fn workbench_core_builder(
                     .with_worker_service(rlm_workers.context("RLM worker was not prewarmed")?)
                     .with_deferred_tool_resolver(deferred_tools.resolver());
             // The chat's own finish tool takes the place of Lash's.
-            LashCore::rlm_builder(host_backend, factory).tools(Arc::new(
-                lash::tools::FinishToolProvider::new([plugins::chat_reply_tool()]),
-            ))
+            LashCore::rlm_builder(host_backend, factory).tools(
+                lash::hook_key!("chat-reply"),
+                Arc::new(lash::tools::FinishToolProvider::new([
+                    plugins::chat_reply_tool(),
+                ])),
+            )
         }
     }
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -328,7 +331,7 @@ pub(crate) async fn workbench_core_builder(
     .live_replay_store(live_replay)
     .delta_coalescing(delta_coalescing_from_environment()?);
     if let Some(tool_provider) = tool_provider {
-        builder = builder.tools(tool_provider);
+        builder = builder.tools(lash::hook_key!("host-tools"), tool_provider);
     }
     let shutdown_marker =
         shutdown_marker::factory_from_env("agent-workbench").map_err(anyhow::Error::msg)?;

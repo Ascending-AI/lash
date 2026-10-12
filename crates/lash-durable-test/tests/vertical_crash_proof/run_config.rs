@@ -406,8 +406,10 @@ impl Deployment<'_> {
         if let Some(definition) = self.definition {
             builder = builder.run_definition(definition);
         }
-        for tools in self.tools {
-            builder = builder.tools(tools);
+        let keys = [lash::hook_key!("tools"), lash::hook_key!("tools-2")];
+        assert!(self.tools.len() <= keys.len(), "a key per tool provider");
+        for (key, tools) in keys.into_iter().zip(self.tools) {
+            builder = builder.tools(key, tools);
         }
         builder
             .build(lash::persistence::LeaseOwnerIdentity::opaque(

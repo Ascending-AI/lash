@@ -79,7 +79,8 @@ impl PluginExtensions {
 #[derive(Clone, Default)]
 pub struct PluginSpec {
     pub extension_contributions: Vec<PluginExtensionContribution>,
-    pub tool_providers: Vec<Arc<dyn ToolProvider>>,
+    /// Each provider under its declared key (FIG-6073).
+    pub tool_providers: Vec<(HookKey, Arc<dyn ToolProvider>)>,
     pub tool_catalog_contributors: Vec<(HookKey, ToolCatalogContributor)>,
     pub before_turn_hooks: Vec<(HookKey, BeforeTurnHook)>,
     pub tool_args_transforms: Vec<(HookKey, ToolArgsTransformHook)>,
@@ -117,8 +118,8 @@ impl PluginSpec {
         self
     }
 
-    pub fn with_tool_provider(mut self, provider: Arc<dyn ToolProvider>) -> Self {
-        self.tool_providers.push(provider);
+    pub fn with_tool_provider(mut self, key: HookKey, provider: Arc<dyn ToolProvider>) -> Self {
+        self.tool_providers.push((key, provider));
         self
     }
 
@@ -637,7 +638,6 @@ impl PluginComposition {
 
     /// A Core deployment's composition: builtins followed by the supplied
     /// protocol and host declarations. Supplied ids replace matching builtins.
-    /// Include `embed_tools` when registering tool providers on the Core builder.
     pub fn with_builtins(
         declarations: impl IntoIterator<Item = PluginDeclaration>,
     ) -> Result<Self, PluginDeclarationError> {
@@ -1069,8 +1069,8 @@ impl SessionPlugin for SpecPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        for provider in &self.spec.tool_providers {
-            reg.tools().provider(Arc::clone(provider))?;
+        for (key, provider) in &self.spec.tool_providers {
+            reg.tools().provider(*key, Arc::clone(provider))?;
         }
         for (key, contributor) in &self.spec.tool_catalog_contributors {
             reg.tool_catalog()

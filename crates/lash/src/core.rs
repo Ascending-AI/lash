@@ -701,7 +701,9 @@ pub struct LashCoreBuilder {
     tool_source_policy: Option<lash_core::ToolSourcePolicy>,
     execution_budgets: Option<lash_core::ExecutionBudgets>,
     delta_coalescing: Option<crate::DeltaCoalescing>,
-    tool_providers: Vec<Arc<dyn ToolProvider>>,
+    /// Each builder tool provider under its declared key: the plugin it is
+    /// installed as, and its provider within that plugin (FIG-6073).
+    tool_providers: Vec<(lash_core::plugin::HookKey, Arc<dyn ToolProvider>)>,
     plugin_stack: PluginStack,
     /// The process components a process environment may name (FIG-6034),
     /// and the first registration refused, reported at build.
@@ -917,10 +919,15 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Register tools under [`crate::tools::PLUGIN_TOOL_SOURCE_ID`], the owning
-    /// plugin identity that deferred grants for these tools must name.
-    pub fn tools(mut self, tools: Arc<dyn ToolProvider>) -> Self {
-        self.tool_providers.push(tools);
+    /// Install `tools` under `key`, its static identity: a plugin of that id
+    /// whose one provider is declared under the same key. Every call of one
+    /// of its tools records and dispatches through that identity, so the
+    /// order of `tools` calls changes nothing; a grant of one of these tools
+    /// names it as
+    /// [`PluginCallbackIdentity::tool_provider(key, key)`](crate::plugins::PluginCallbackIdentity::tool_provider).
+    /// A key used twice, or the id of another plugin, refuses the build.
+    pub fn tools(mut self, key: lash_core::plugin::HookKey, tools: Arc<dyn ToolProvider>) -> Self {
+        self.tool_providers.push((key, tools));
         self
     }
 
@@ -1186,6 +1193,7 @@ impl LashCoreBuilder {
         if let Some(refusal) = self.process_component_refusal.take() {
             return Err(refusal.into());
         }
+        refuse_duplicate_tool_keys(&self.tool_providers, &self.plugin_stack)?;
         let backend = self.backend.clone();
         let store_factory = backend.session_store_factory();
         let data_retention = self
@@ -1257,19 +1265,16 @@ impl LashCoreBuilder {
                 .watched()
                 .add_event_sink(process_lifecycle_sink),
         );
-        let mut plugin_factories = Vec::new();
-        if !self.tool_providers.is_empty() {
-            let spec = self
-                .tool_providers
-                .into_iter()
-                .fold(PluginSpec::new(), PluginSpec::with_tool_provider);
-            plugin_factories.push(Arc::new(StaticPluginFactory::new(
-                lash_core::plugin::PluginDeclaration::initial(
-                    facade_support::PLUGIN_TOOL_SOURCE_ID,
-                ),
-                spec,
-            )) as Arc<dyn PluginFactory>);
-        }
+        let mut plugin_factories = self
+            .tool_providers
+            .into_iter()
+            .map(|(key, provider)| {
+                Arc::new(StaticPluginFactory::new(
+                    lash_core::plugin::PluginDeclaration::initial(key.as_str()),
+                    PluginSpec::new().with_tool_provider(key, provider),
+                )) as Arc<dyn PluginFactory>
+            })
+            .collect::<Vec<_>>();
         plugin_factories.extend(self.plugin_stack.into_factories());
         refuse_foreign_backend_factories(
             &backend,
@@ -1363,6 +1368,30 @@ impl LashCoreBuilder {
         core.node.ensure(&core);
         Ok(core)
     }
+}
+
+/// Refuses a builder tool key used twice, or one that is another plugin's
+/// id: each key is the static identity of one plugin and its provider.
+fn refuse_duplicate_tool_keys(
+    tools: &[(lash_core::plugin::HookKey, Arc<dyn ToolProvider>)],
+    plugins: &PluginStack,
+) -> Result<()> {
+    let mut keys = std::collections::BTreeSet::new();
+    for (key, _) in tools {
+        let taken = !keys.insert(key.as_str())
+            || plugins
+                .factories()
+                .iter()
+                .chain(plugins.protocol_factory())
+                .any(|factory| factory.id() == key.as_str());
+        if taken {
+            return Err(lash_core::PluginError::Registration(format!(
+                "tool provider key `{key}` names another builder tool provider or plugin"
+            ))
+            .into());
+        }
+    }
+    Ok(())
 }
 
 /// Refuses a plugin factory bound to a backend other than `backend`

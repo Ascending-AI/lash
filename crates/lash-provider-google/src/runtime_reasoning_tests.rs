@@ -133,7 +133,7 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
                 )
                 .expect("register the test model"),
         ))
-        .tools(Arc::new(RuntimeLookupTool))
+        .tools(lash::hook_key!("tools"), Arc::new(RuntimeLookupTool))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))

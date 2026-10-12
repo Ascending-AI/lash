@@ -308,7 +308,7 @@ async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ord
             text_call("still absent"),
         ])
         .into_handle(),
-        |builder| builder.tools(Arc::new(EchoTool)),
+        |builder| builder.tools(crate::hook_key!("tools"), Arc::new(EchoTool)),
     )
     .await?;
     let session = traced.session("tool-membership").await?;
@@ -423,7 +423,7 @@ async fn composition_trace_fires_once_when_same_member_tool_schema_changes() -> 
             text_call("unchanged second schema"),
         ])
         .into_handle(),
-        |builder| builder.tools(tools),
+        |builder| builder.tools(crate::hook_key!("tools"), tools),
     )
     .await?;
     let session = traced.session("tool-schema").await?;
@@ -540,11 +540,10 @@ async fn assert_standard_tool_lifecycle(
         ])
         .into_handle(),
         |builder| {
-            plugins
-                .into_iter()
-                .fold(builder.tools(Arc::new(EchoTool)), |builder, plugin| {
-                    builder.plugin(plugin)
-                })
+            plugins.into_iter().fold(
+                builder.tools(crate::hook_key!("tools"), Arc::new(EchoTool)),
+                |builder, plugin| builder.plugin(plugin),
+            )
         },
     )
     .await?;
@@ -778,7 +777,7 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() -> R
             text_call("done"),
         ])
         .into_handle(),
-        |builder| builder.tools(Arc::new(PendingEchoTool(keys))),
+        |builder| builder.tools(crate::hook_key!("tools"), Arc::new(PendingEchoTool(keys))),
     )
     .await?;
     let session = traced.session("pending-tool").await?;
@@ -1303,7 +1302,7 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     // The golden run: one node from the send to the turn's end.
     let (keys, mut published) = tokio::sync::mpsc::unbounded_channel();
     let golden = Traced::new(tree_provider(), |builder| {
-        builder.tools(Arc::new(PendingEchoTool(keys)))
+        builder.tools(crate::hook_key!("tools"), Arc::new(PendingEchoTool(keys)))
     })
     .await?;
     let session = golden.session(TREE_SESSION).await?;
@@ -1323,7 +1322,7 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
             crate::persistence::LeaseIncarnationId::new("node-a"),
         ),
         tree_provider(),
-        |builder| builder.tools(Arc::new(PendingEchoTool(keys))),
+        |builder| builder.tools(crate::hook_key!("tools"), Arc::new(PendingEchoTool(keys))),
     )?;
     let session = node_a.session(TREE_SESSION).await?;
     let parked = tokio::spawn(send(&session));
@@ -1340,7 +1339,7 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
             crate::persistence::LeaseIncarnationId::new("node-b"),
         ),
         mock_provider(vec![text_call("done")]).into_handle(),
-        |builder| builder.tools(Arc::new(PendingEchoTool(keys))),
+        |builder| builder.tools(crate::hook_key!("tools"), Arc::new(PendingEchoTool(keys))),
     )?;
     let session = node_b
         .core

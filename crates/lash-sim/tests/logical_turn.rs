@@ -196,7 +196,7 @@ fn standard_core_on(
 ) -> (lash::LashCore, lash_sim::backend::SimEngine) {
     let core = lash::LashCore::standard_builder(engine.backend())
         .serve_test_llm_profile(provider, model())
-        .tools(tools)
+        .tools(lash::hook_key!("tools"), tools)
         .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
@@ -310,7 +310,10 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model())
-        .tools(Arc::new(SeedSwitchTool { initial_nodes }))
+        .tools(
+            lash::hook_key!("tools"),
+            Arc::new(SeedSwitchTool { initial_nodes }),
+        )
         .trace_sink(trace.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("logical-turn-test"),
@@ -590,9 +593,12 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
     let engine = sim_engine().await;
     let core = lash::LashCore::standard_builder(engine.backend())
         .serve_test_llm_profile(provider, model())
-        .tools(Arc::new(BoundedSwitchTools {
-            switch_count: limit + 1,
-        }))
+        .tools(
+            lash::hook_key!("tools"),
+            Arc::new(BoundedSwitchTools {
+                switch_count: limit + 1,
+            }),
+        )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))

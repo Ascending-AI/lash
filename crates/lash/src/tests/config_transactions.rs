@@ -219,7 +219,7 @@ async fn namespace_collision_law(per_run: bool) -> Result<()> {
         let core =
             explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
                 .serve_test_llm_profile(provider, mock_llm_profile_spec())
-                .tools(Arc::new(DataTool))
+                .tools(crate::hook_key!("tools"), Arc::new(DataTool))
                 .build(crate::testing::runtime_lease_owner())?;
         let id =
             SessionId::parse(format!("namespace-collision-{per_run}-{index}")).expect("session id");
@@ -355,7 +355,10 @@ async fn namespace_installation_law(provider_refresh: bool) -> Result<()> {
     let core =
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
-            .tools(Arc::new(ChangingDataTool(Arc::clone(&visible))))
+            .tools(
+                crate::hook_key!("tools"),
+                Arc::new(ChangingDataTool(Arc::clone(&visible))),
+            )
             .build(crate::testing::runtime_lease_owner())?;
     let id =
         SessionId::parse(format!("namespace-installation-{provider_refresh}")).expect("session id");

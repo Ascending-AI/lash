@@ -87,7 +87,7 @@ async fn admitted_plugin_abort_commits_and_settles_input() -> Result<()> {
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(one_tool_call("echo_tool"), mock_llm_profile_spec())
-    .tools(Arc::new(EchoTool))
+    .tools(crate::hook_key!("tools"), Arc::new(EchoTool))
     .plugin(abort)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -178,7 +178,7 @@ async fn stream_turn_tool_put_is_bound_to_the_turn_id() -> Result<()> {
     let backend = sqlite_memory_store_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(one_tool_call("attachment_put"), mock_llm_profile_spec())
-        .tools(Arc::new(AttachmentPutTool))
+        .tools(crate::hook_key!("tools"), Arc::new(AttachmentPutTool))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse("attachment-owner").expect("nonblank host identity"))

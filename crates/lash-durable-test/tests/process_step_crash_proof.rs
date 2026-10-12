@@ -112,7 +112,8 @@ fn ext_write(world: &Arc<ExternalWorld>) -> Arc<dyn lash::process::ProcessCompon
     Arc::new(
         lash_core::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial(EXT_WRITE.component()),
-            lash_core::facade_support::PluginSpec::new().with_tool_provider(provider),
+            lash_core::facade_support::PluginSpec::new()
+                .with_tool_provider(lash::hook_key!("tools"), provider),
         )
         .as_component(EXT_WRITE.format())
         .expect("ext_write is a process component"),

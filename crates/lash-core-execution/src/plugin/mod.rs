@@ -12,6 +12,7 @@ use crate::{SessionPolicy, ToolManifest, ToolProvider};
 
 pub use lash_core_store::store::plugin_writers::{
     PluginCallbackIdentity, RecordedCallbackUnavailable, StreamStateFormatRefusal,
+    declared_tool_provider,
 };
 
 pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginConfigNamespace};
@@ -468,7 +469,8 @@ mod tests {
         }
 
         fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-            reg.tools().provider(Arc::new(MockToolProvider))?;
+            reg.tools()
+                .provider(crate::hook_key!("mock"), Arc::new(MockToolProvider))?;
             let session_id = self.session_id.clone();
             reg.operations().query(
                 PluginOperationSpec {

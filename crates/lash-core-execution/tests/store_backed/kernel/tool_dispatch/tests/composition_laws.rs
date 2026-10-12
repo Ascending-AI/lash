@@ -74,7 +74,10 @@ fn session(tools: &CountingTools, mut plugins: Vec<Arc<dyn PluginFactory>>) -> A
         0,
         plugin(
             "composition_tools",
-            PluginSpec::new().with_tool_provider(Arc::new(tools.clone())),
+            PluginSpec::new().with_tool_provider(
+                lash_core_execution::hook_key!("tools"),
+                Arc::new(tools.clone()),
+            ),
         ),
     );
     crate::support::plugin_host(plugins)

@@ -80,7 +80,10 @@ pub(super) fn build(
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .tools(Arc::new(DeferredTools(definition()?)));
+        .tools(
+            lash::hook_key!("tools"),
+            Arc::new(DeferredTools(definition()?)),
+        );
     if registered {
         builder = builder.serve_test_llm_profile(provider, metadata()?);
     }

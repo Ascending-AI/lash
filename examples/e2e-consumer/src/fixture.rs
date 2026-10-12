@@ -178,10 +178,13 @@ impl SessionPlugin for ConsumerPlugin {
             json!({"type":"string"}),
         ).map_err(|error| PluginError::Session(error.to_string()))?
         .with_execution(std::time::Duration::from_secs(120));
-        reg.tools().provider(Arc::new(StaticToolProvider::new(
-            vec![definition],
-            Echo(self.0.clone()),
-        )))?;
+        reg.tools().provider(
+            lash::hook_key!("tools"),
+            Arc::new(StaticToolProvider::new(
+                vec![definition],
+                Echo(self.0.clone()),
+            )),
+        )?;
         let controls = self.0.clone();
         reg.operations()
             .typed_task::<EchoTask, _, _>(move |ctx, text| {

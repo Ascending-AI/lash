@@ -20,7 +20,6 @@ pub enum ContributionKind {
 
 /// Built once per materialization, in owner and registration order.
 pub struct ExecutionComposition {
-    owners: Vec<String>,
     tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
     tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
     tool_args_transforms: Vec<RegisteredHook<ToolArgsTransformHook>>,
@@ -35,12 +34,10 @@ pub struct ExecutionComposition {
 
 impl ExecutionComposition {
     pub(super) fn new(
-        owners: Vec<String>,
         contributions: &mut PluginContributions,
         tool_registry: Arc<crate::ToolRegistry>,
     ) -> Self {
         Self {
-            owners,
             tool_providers: std::mem::take(&mut contributions.tool_providers),
             tool_catalog_contributors: std::mem::take(&mut contributions.tool_catalog_contributors),
             tool_args_transforms: std::mem::take(&mut contributions.tool_args_transforms),
@@ -120,43 +117,39 @@ impl ExecutionComposition {
         )
     }
 
-    /// Resolve ownership from the registered tool source, before admission.
-    pub fn tool_execution_owner(
+    /// The one provider identity a call of `tool` binds to and dispatches
+    /// through, before admission: the provider its grant names, else the
+    /// provider the catalog binds the tool to. It must be registered here.
+    pub fn tool_provider(
         &self,
         tool: &crate::ToolId,
-        source: Option<&str>,
-    ) -> Result<String, PluginError> {
-        let source = source
-            .map(str::to_owned)
-            .or_else(|| self.tool_registry.execution_source_id(tool));
-        self.owners
-            .clone()
-            .into_iter()
-            .find(|owner| source.as_deref() == Some(owner.as_str()))
+        granted: Option<&PluginCallbackIdentity>,
+    ) -> Result<PluginCallbackIdentity, PluginError> {
+        let provider = granted
+            .cloned()
+            .or_else(|| self.tool_registry.execution_provider(tool))
             .ok_or_else(|| {
-                PluginError::Registration(format!("tool `{tool}` has no registered plugin owner"))
-            })
+                PluginError::Registration(format!("tool `{tool}` has no registered provider"))
+            })?;
+        if !self
+            .tool_providers
+            .iter()
+            .any(|registered| registered.identity == provider)
+        {
+            return Err(PluginError::Registration(format!(
+                "tool `{tool}` names provider `{}:{}`, which is not registered",
+                provider.owner, provider.key
+            )));
+        }
+        Ok(provider)
     }
 
     pub(crate) fn tool_run_binding(
         &self,
         tool: &crate::ToolId,
-        source: Option<&str>,
+        granted: Option<&PluginCallbackIdentity>,
     ) -> Result<crate::tool_run::AdmittedBinding, PluginError> {
-        let owner = self.tool_execution_owner(tool, source)?;
-        let executable = self
-            .tool_providers
-            .iter()
-            .find(|registered| {
-                registered.identity.owner == owner
-                    && registered.hook.resolve_manifest_by_id(tool).is_some()
-            })
-            .map(|registered| registered.identity.clone())
-            .ok_or_else(|| {
-                PluginError::Registration(format!(
-                    "tool `{tool}` has no registered executable callback"
-                ))
-            })?;
+        let executable = self.tool_provider(tool, granted)?;
         Ok(crate::tool_run::AdmittedBinding {
             preparation: executable.clone(),
             executable,
@@ -525,8 +518,10 @@ mod tests {
         }
 
         fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-            reg.tools()
-                .provider(Arc::new(crate::testing::EmptyToolProvider))?;
+            reg.tools().provider(
+                crate::hook_key!("empty"),
+                Arc::new(crate::testing::EmptyToolProvider),
+            )?;
             reg.tool_catalog().contribute(
                 crate::hook_key!("catalog"),
                 Arc::new(|_| Ok(Default::default())),
@@ -617,5 +612,269 @@ mod tests {
         assert_eq!(owners.len(), 1);
         assert_eq!(owners[0].1.key.as_str(), "direct");
         assert!(Arc::ptr_eq(&composition, &session.composition()));
+    }
+
+    const KEYED_TOOL: &str = "tool:keyed";
+
+    /// A provider of one tool, `keyed`, that answers with its `label`. A
+    /// provider that does not `advertise` still resolves the tool by id, as
+    /// a grant-only provider does.
+    struct Keyed {
+        label: &'static str,
+        advertises: bool,
+    }
+
+    impl Keyed {
+        fn definition() -> crate::ToolDefinition {
+            crate::ToolDefinition::raw(
+                KEYED_TOOL,
+                "keyed",
+                "keyed probe",
+                crate::ToolDefinition::default_input_schema(),
+                serde_json::json!({ "type": "string" }),
+            )
+            .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(30))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ToolProvider for Keyed {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            if self.advertises {
+                vec![Self::definition().manifest()]
+            } else {
+                Vec::new()
+            }
+        }
+
+        fn resolve_manifest_by_id(&self, id: &crate::ToolId) -> Option<crate::ToolManifest> {
+            (id.as_str() == KEYED_TOOL).then(|| Self::definition().manifest())
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            (name == "keyed").then(|| Arc::new(Self::definition().contract()))
+        }
+
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            crate::ToolOutcome::ok(serde_json::json!(self.label)).into()
+        }
+    }
+
+    /// The advertising provider under `served`, then the id-only one under
+    /// `hidden`, or the reverse.
+    fn keyed_providers(served_first: bool) -> Vec<(HookKey, Arc<dyn ToolProvider>)> {
+        let served = (
+            crate::hook_key!("served"),
+            Arc::new(Keyed {
+                label: "served",
+                advertises: true,
+            }) as Arc<dyn ToolProvider>,
+        );
+        let hidden = (
+            crate::hook_key!("hidden"),
+            Arc::new(Keyed {
+                label: "hidden",
+                advertises: false,
+            }) as Arc<dyn ToolProvider>,
+        );
+        if served_first {
+            vec![served, hidden]
+        } else {
+            vec![hidden, served]
+        }
+    }
+
+    /// What a call of `keyed` records as its binding under `composition`,
+    /// and what dispatch through `tools` executes.
+    async fn bound_and_executed(
+        composition: &ExecutionComposition,
+        tools: &dyn ToolProvider,
+    ) -> (crate::tool_run::AdmittedBinding, serde_json::Value) {
+        let binding = composition
+            .tool_run_binding(&crate::ToolId::from(KEYED_TOOL), None)
+            .expect("the catalog binds the tool");
+        let crate::ToolAttemptOutcome::Done { result, .. } =
+            crate::testing::run_tool(tools, "keyed", &serde_json::json!({})).await
+        else {
+            panic!("the call completes inline");
+        };
+        let executed = crate::ToolOutcome::from_output(result.into_output()).value_for_projection();
+        (binding, executed)
+    }
+
+    fn session_of(factories: Vec<Arc<dyn PluginFactory>>) -> Arc<PluginSession> {
+        crate::testing::test_plugin_host(factories)
+            .build_session(PluginSessionRequest::creation(
+                "keyed-providers",
+                SessionAuthorityContext::ambient_fixture(),
+            ))
+            .expect("materialized session")
+    }
+
+    fn keyed_plugin(
+        id: &'static str,
+        providers: Vec<(HookKey, Arc<dyn ToolProvider>)>,
+    ) -> Arc<dyn PluginFactory> {
+        let spec = providers
+            .into_iter()
+            .fold(PluginSpec::new(), |spec, (key, provider)| {
+                spec.with_tool_provider(key, provider)
+            });
+        Arc::new(StaticPluginFactory::new(
+            PluginDeclaration::initial(id),
+            spec,
+        ))
+    }
+
+    /// KEYED-PROVIDERS (FIG-6073): a call binds to and dispatches through one
+    /// declared provider identity, so reordering two provider registrations
+    /// (in one plugin, as builder tool plugins, or in one process component)
+    /// changes nothing recorded or executed, even when another provider
+    /// resolves the same tool id.
+    #[tokio::test]
+    async fn reordering_provider_registrations_changes_nothing_recorded_or_executed() {
+        let served = PluginCallbackIdentity::tool_provider("keyed", "served");
+        for served_first in [true, false] {
+            let session = session_of(vec![keyed_plugin("keyed", keyed_providers(served_first))]);
+            let (binding, executed) =
+                bound_and_executed(&session.composition(), session.tools().as_ref()).await;
+            assert_eq!(binding.executable, served, "served first: {served_first}");
+            assert_eq!(binding.preparation, served, "served first: {served_first}");
+            assert_eq!(executed, serde_json::json!("served"));
+        }
+
+        for served_first in [true, false] {
+            let plugins = keyed_providers(served_first)
+                .into_iter()
+                .map(|(key, provider)| keyed_plugin(key.as_str(), vec![(key, provider)]))
+                .collect();
+            let session = session_of(plugins);
+            let (binding, executed) =
+                bound_and_executed(&session.composition(), session.tools().as_ref()).await;
+            assert_eq!(
+                binding.executable,
+                PluginCallbackIdentity::tool_provider("served", "served"),
+                "served first: {served_first}"
+            );
+            assert_eq!(executed, serde_json::json!("served"));
+        }
+
+        let key = crate::ProcessConfigKey::<()>::new("keyed-component", crate::FormatVersion::ONE);
+        for served_first in [true, false] {
+            let mut components = ProcessComponentRegistry::new();
+            components
+                .register(
+                    Arc::new(
+                        StaticPluginFactory::new(
+                            PluginDeclaration::initial("keyed-component"),
+                            PluginSpec {
+                                tool_providers: keyed_providers(served_first),
+                                ..PluginSpec::default()
+                            },
+                        )
+                        .as_component(key.format())
+                        .expect("tool providers are a process component"),
+                    ),
+                    key,
+                )
+                .expect("the component registers");
+            let composition = components
+                .compose(
+                    &crate::testing::component_env("keyed-component", key.format()),
+                    None,
+                )
+                .expect("the components compose");
+            let (binding, executed) =
+                bound_and_executed(&composition.composition, composition.registry.as_ref()).await;
+            assert_eq!(
+                binding.executable,
+                PluginCallbackIdentity::tool_provider("keyed-component", "served"),
+                "served first: {served_first}"
+            );
+            assert_eq!(executed, serde_json::json!("served"));
+        }
+    }
+
+    /// A duplicate provider key is refused at registration, in a session
+    /// plugin and in a process component alike, and so is a key that does
+    /// not begin with a letter.
+    #[test]
+    fn a_duplicate_or_positional_provider_key_is_refused_at_registration() {
+        let twice = || {
+            vec![
+                (
+                    crate::hook_key!("search"),
+                    Arc::new(crate::testing::EmptyToolProvider) as Arc<dyn ToolProvider>,
+                ),
+                (
+                    crate::hook_key!("search"),
+                    Arc::new(crate::testing::EmptyToolProvider) as Arc<dyn ToolProvider>,
+                ),
+            ]
+        };
+        let refused = crate::testing::test_plugin_host(vec![keyed_plugin("twice", twice())])
+            .build_session(PluginSessionRequest::creation(
+                "duplicate-key",
+                SessionAuthorityContext::ambient_fixture(),
+            ))
+            .err()
+            .expect("a duplicate key refuses the session's registration");
+        assert!(
+            matches!(&refused, PluginError::Registration(message)
+                if message.contains("duplicate hook key `tool_provider:search`")),
+            "{refused}"
+        );
+
+        let positional = crate::testing::test_plugin_host(vec![keyed_plugin(
+            "positional",
+            vec![(
+                crate::hook_key!("0"),
+                Arc::new(crate::testing::EmptyToolProvider) as Arc<dyn ToolProvider>,
+            )],
+        )])
+        .build_session(PluginSessionRequest::creation(
+            "positional-key",
+            SessionAuthorityContext::ambient_fixture(),
+        ))
+        .err()
+        .expect("a positional key refuses the session's registration");
+        assert!(
+            matches!(&positional, PluginError::Registration(message)
+                if message.contains("must begin with a letter")),
+            "{positional}"
+        );
+
+        let key = crate::ProcessConfigKey::<()>::new("twice-component", crate::FormatVersion::ONE);
+        let mut components = ProcessComponentRegistry::new();
+        components
+            .register(
+                Arc::new(
+                    StaticPluginFactory::new(
+                        PluginDeclaration::initial("twice-component"),
+                        PluginSpec {
+                            tool_providers: twice(),
+                            ..PluginSpec::default()
+                        },
+                    )
+                    .as_component(key.format())
+                    .expect("tool providers are a process component"),
+                ),
+                key,
+            )
+            .expect("the component registers");
+        let refused = components
+            .compose(
+                &crate::testing::component_env("twice-component", key.format()),
+                None,
+            )
+            .err()
+            .expect("a duplicate key refuses the component's registration");
+        assert!(
+            refused
+                .to_string()
+                .contains("duplicate hook key `tool_provider:search`"),
+            "{refused}"
+        );
     }
 }

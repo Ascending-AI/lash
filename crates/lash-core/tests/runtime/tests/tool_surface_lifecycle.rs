@@ -126,7 +126,8 @@ fn dynamic_plugin_host(
     let mut factories = lash_core::testing::test_standard_protocol_factories();
     factories.push(Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("dynamic_tool_surface"),
-        lash_core::facade_support::PluginSpec::new().with_tool_provider(provider),
+        lash_core::facade_support::PluginSpec::new()
+            .with_tool_provider(lash_core::hook_key!("tools"), provider),
     )));
     Arc::new(lash_core::testing::test_plugin_host(factories))
 }

@@ -48,7 +48,7 @@ fn builder(backend: &lash::Backend) -> lash::LashCoreBuilder {
             lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
         ),
     ))
-    .tools(Arc::new(Fetch))
+    .tools(lash::hook_key!("tools"), Arc::new(Fetch))
 }
 
 /// The names the production prompt binds in `request` (a rendered request):

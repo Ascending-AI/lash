@@ -192,7 +192,9 @@ impl ProcessComponentPorts {
 /// Only what process execution consumes. Nothing session-shaped.
 #[derive(Clone, Default)]
 pub struct ProcessComponentSpec {
-    pub tool_providers: Vec<Arc<dyn ToolProvider>>,
+    /// Each provider under its declared key, the static identity its calls
+    /// bind and dispatch through.
+    pub tool_providers: Vec<(HookKey, Arc<dyn ToolProvider>)>,
     pub tool_catalog_contributors: Vec<(HookKey, ToolCatalogContributor)>,
     pub tool_args_transforms: Vec<(HookKey, ToolArgsTransformHook)>,
     pub tool_args_checks: Vec<(HookKey, ToolArgsCheckHook)>,
@@ -423,7 +425,6 @@ impl ProcessComponentRegistry {
         state: &Arc<std::sync::Mutex<state::PluginStateRegistry>>,
     ) -> Result<BuiltComponents, ProcessEnvRefusal> {
         let mut contributions = PluginContributions::default();
-        let mut tool_names = BTreeSet::new();
         let mut tool_owners = BTreeMap::<String, String>::new();
         let mut presenter_owner: Option<String> = None;
         let mut owners = Vec::with_capacity(env.components().len());
@@ -451,7 +452,7 @@ impl ProcessComponentRegistry {
                     id: id.clone(),
                     reason: error.to_string(),
                 })?;
-            for provider in &spec.tool_providers {
+            for (_, provider) in &spec.tool_providers {
                 for manifest in provider.tool_manifests() {
                     if let Some(first) = tool_owners.insert(manifest.name.clone(), id.clone()) {
                         return Err(ProcessEnvRefusal::DuplicateToolName {
@@ -485,7 +486,6 @@ impl ProcessComponentRegistry {
             let owner = id.clone();
             let mut reg = PluginRegistrar::new(owner.clone());
             reg.contributions = contributions;
-            reg.tool_names = tool_names;
             register_spec(&mut reg, spec).map_err(|error| {
                 ProcessEnvRefusal::ComponentBuildFailed {
                     id: id.clone(),
@@ -493,7 +493,6 @@ impl ProcessComponentRegistry {
                 }
             })?;
             contributions = reg.contributions;
-            tool_names = reg.tool_names;
             owners.push(owner);
         }
         let registry =
@@ -529,7 +528,6 @@ impl ProcessComponentRegistry {
         } = self.contributions(env, process, &state)?;
         let reducers = std::mem::take(&mut contributions.state_reducers);
         let composition = Arc::new(ExecutionComposition::new(
-            owners.clone(),
             &mut contributions,
             Arc::clone(&registry),
         ));
@@ -562,8 +560,8 @@ fn register_spec(reg: &mut PluginRegistrar, spec: ProcessComponentSpec) -> Resul
         direct_prompt_sections,
         state_reducers,
     } = spec;
-    for provider in tool_providers {
-        reg.tools().provider(provider)?;
+    for (key, provider) in tool_providers {
+        reg.tools().provider(key, provider)?;
     }
     for (key, contributor) in tool_catalog_contributors {
         reg.tool_catalog().contribute(key, contributor)?;

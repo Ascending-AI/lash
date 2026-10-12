@@ -183,8 +183,10 @@ impl DelegationPluginFactory {
         Arc::new(
             lash::plugins::StaticPluginFactory::new(
                 <Self as PluginDefinition>::declaration(),
-                lash::plugins::PluginSpec::new()
-                    .with_tool_provider(tool::spawn_provider(Arc::clone(&self.child))),
+                lash::plugins::PluginSpec::new().with_tool_provider(
+                    lash::hook_key!("spawn"),
+                    tool::spawn_provider(Arc::clone(&self.child), true),
+                ),
             )
             .as_component(DELEGATION_CONFIG.format())
             .expect("spawn_agent is a process component"),
@@ -242,13 +244,20 @@ impl SessionPlugin for DelegationSessionPlugin {
         DELEGATION_PLUGIN_ID
     }
 
+    /// Both providers exist in every session; the session's role decides
+    /// only which tool each offers.
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+        reg.tools().provider(
+            lash::hook_key!("spawn"),
+            tool::spawn_provider(Arc::clone(&self.child), !self.delegated),
+        )?;
+        reg.tools().provider(
+            lash::hook_key!("submit-error"),
+            tool::submit_error_provider(self.delegated),
+        )?;
         if !self.delegated {
-            return reg
-                .tools()
-                .provider(tool::spawn_provider(Arc::clone(&self.child)));
+            return Ok(());
         }
-        reg.tools().provider(tool::submit_error_provider())?;
         reg.prompt().section(
             PromptSectionSpec::new(
                 lash::prompt::PromptSectionKey::new(DELEGATED_CHILD_SECTION)

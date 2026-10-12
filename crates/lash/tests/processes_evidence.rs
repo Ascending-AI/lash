@@ -787,7 +787,7 @@ mod named_component_laws {
             match self.shape {
                 Shape::Check => spec.tool_result_checks.push((key, check)),
                 Shape::Tool => {
-                    spec.tool_providers.push(a_provider());
+                    spec.tool_providers.push((key, a_provider()));
                     spec.tool_result_checks.push((key, check));
                 }
                 Shape::Presenter => {
@@ -1036,8 +1036,8 @@ mod named_component_laws {
             .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
-            .tools(a_provider())
-            .tools(Arc::new(AmbientIsolated))
+            .tools(lash::hook_key!("tools"), a_provider())
+            .tools(lash::hook_key!("tools-2"), Arc::new(AmbientIsolated))
             .plugin(Arc::new(CountingPlugin(Arc::clone(&witness))))
             .plugin(Arc::new(
                 lash::process_controls::SessionProcessAdminPluginFactory::new(
@@ -1046,10 +1046,13 @@ mod named_component_laws {
                 ),
             ));
         if authority {
-            builder = builder.tools(Arc::new(lash::tools::StaticToolProvider::new(
-                vec![a_definition("b"), a_definition("c")],
-                AnswerA,
-            )));
+            builder = builder.tools(
+                lash::hook_key!("authority"),
+                Arc::new(lash::tools::StaticToolProvider::new(
+                    vec![a_definition("b"), a_definition("c")],
+                    AnswerA,
+                )),
+            );
         }
         for (key, shape) in [
             (CHECK, Shape::Check),

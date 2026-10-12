@@ -358,7 +358,6 @@ pub mod facade_support {
     pub use crate::session_model::context::PreparedContext;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
-    pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
     pub use crate::tool_registry::ReconfigureError;
     pub use crate::tool_registry::SupersededToolIdentity;
     pub use crate::tool_registry::ToolRestoreReport;

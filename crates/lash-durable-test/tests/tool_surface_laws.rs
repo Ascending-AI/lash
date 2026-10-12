@@ -201,7 +201,7 @@ impl Deployment {
         policy: lash_core::ToolSourcePolicy,
     ) -> lash::LashCore {
         lash::LashCore::standard_builder(self.backend.clone())
-            .tools(tools)
+            .tools(lash::hook_key!("tools"), tools)
             .tool_source_policy(policy)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())

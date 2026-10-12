@@ -463,15 +463,22 @@ fn explicit_core(backend: &lash::Backend, tools: &Arc<SessionTools>) -> lash::La
     .expect("the check is a process component");
     let b = lash_core::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial(B_COMPONENT.component()),
-        lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(
-            lash::tools::StaticToolProvider::new(vec![object_tool(B_TOOL, ["b", "run"])], AnswerB),
-        )),
+        lash_core::facade_support::PluginSpec::new().with_tool_provider(
+            lash::hook_key!("tools"),
+            Arc::new(lash::tools::StaticToolProvider::new(
+                vec![object_tool(B_TOOL, ["b", "run"])],
+                AnswerB,
+            )),
+        ),
     )
     .as_component(B_COMPONENT.format())
     .expect("B is a process component");
     lash::LashCore::standard_builder(backend.clone())
         .serve_test_llm_profile(model, metadata())
-        .tools(Arc::clone(tools) as Arc<dyn lash_core::ToolProvider>)
+        .tools(
+            lash::hook_key!("tools"),
+            Arc::clone(tools) as Arc<dyn lash_core::ToolProvider>,
+        )
         .process_component(Arc::new(check), CHECK_COMPONENT)
         .process_component(Arc::new(b), B_COMPONENT)
 }

@@ -87,13 +87,8 @@ impl ToolRegistry {
     fn resolve_granted_execution_source(
         &self,
         tool_id: &ToolId,
-        source_id: Option<&str>,
+        provider: &crate::plugin::PluginCallbackIdentity,
     ) -> Result<Arc<dyn ToolSourceExecutor>, ToolOutcome> {
-        let Some(source_id) = source_id else {
-            return Err(ToolOutcome::err_fmt(format_args!(
-                "Granted tool id `{tool_id}` is missing an explicit tool source"
-            )));
-        };
         let sources = {
             let authority = self.inner.read_recover();
             authority
@@ -102,21 +97,18 @@ impl ToolRegistry {
                 .unwrap_or(&authority.sources)
                 .clone()
         };
-        let leaf_source_key = ToolSourceKey::new(source_id);
-        let source = match sources.get(&leaf_source_key) {
-            Some(source) => Arc::clone(source),
-            None => {
-                return Err(ToolOutcome::err_fmt(format_args!(
-                    "Tool source `{source_id}` missing for granted tool id `{tool_id}`"
-                )));
-            }
+        let source_key = ToolSourceKey::Provider(provider.clone());
+        let Some(source) = sources.get(&source_key).map(Arc::clone) else {
+            return Err(ToolOutcome::err_fmt(format_args!(
+                "Tool provider `{source_key}` missing for granted tool id `{tool_id}`"
+            )));
         };
         if !source
             .resolve_manifest_by_id(tool_id)
             .is_some_and(|manifest| manifest.id == *tool_id)
         {
             return Err(ToolOutcome::err_fmt(format_args!(
-                "Tool source `{source_id}` does not resolve granted tool id `{tool_id}`"
+                "Tool provider `{source_key}` does not resolve granted tool id `{tool_id}`"
             )));
         }
         Ok(source)
@@ -129,8 +121,8 @@ impl ToolRegistry {
     ) -> Result<Arc<dyn ToolSourceExecutor>, ToolOutcome> {
         match route {
             crate::tool_provider::ToolExecutionRoute::Catalog => self.resolve_bound_source(tool_id),
-            crate::tool_provider::ToolExecutionRoute::Granted { source_id } => {
-                self.resolve_granted_execution_source(tool_id, source_id.as_deref())
+            crate::tool_provider::ToolExecutionRoute::Granted { provider } => {
+                self.resolve_granted_execution_source(tool_id, provider)
             }
         }
     }

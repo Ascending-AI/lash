@@ -92,7 +92,7 @@ async fn seed_session_with_a_persisted_tool(
     let factory: Arc<dyn DeploymentStore> = backend.session_store_factory();
     let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .tools(Arc::new(AppTools))
+        .tools(crate::hook_key!("tools"), Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let granted = granting_core
         .session(session_id.clone())

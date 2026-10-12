@@ -230,11 +230,13 @@ async fn world_with(
         tier,
         vec![Arc::new(lash_core_execution::testing::HeldProcessEngine)],
         move |backend| {
-            let mut builder =
-                lash::LashCore::standard_builder(backend.clone()).tools(Arc::new(ActivityTools {
+            let mut builder = lash::LashCore::standard_builder(backend.clone()).tools(
+                lash::hook_key!("tools"),
+                Arc::new(ActivityTools {
                     gate,
                     backend: backend.clone(),
-                }));
+                }),
+            );
             if present {
                 builder = builder.plugin(presenter());
             }
@@ -976,10 +978,13 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
             served::model(Arc::clone(&world.scripts)),
             served::metadata(),
         )
-        .tools(Arc::new(ActivityTools {
-            gate: gate.clone(),
-            backend: world.backend.clone(),
-        }))
+        .tools(
+            lash::hook_key!("tools"),
+            Arc::new(ActivityTools {
+                gate: gate.clone(),
+                backend: world.backend.clone(),
+            }),
+        )
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("activity-attached-deployment"),
             lash::persistence::LeaseIncarnationId::new("activity-attached-boot"),

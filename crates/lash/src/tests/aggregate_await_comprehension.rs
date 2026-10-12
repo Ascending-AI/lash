@@ -122,7 +122,7 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
     let core =
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
-            .tools(Arc::new(RetailTools))
+            .tools(crate::hook_key!("tools"), Arc::new(RetailTools))
             .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse("fig2764-comprehension").expect("nonblank host identity"))

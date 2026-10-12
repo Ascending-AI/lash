@@ -268,7 +268,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
             )),
             lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG,
         )
-        .tools(tools)
+        .tools(lash::hook_key!("tools"), tools)
         .plugins(plugins)
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())

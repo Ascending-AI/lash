@@ -300,7 +300,7 @@ impl crate::DeferredToolResolver for GrantsWebFetch {
                             "web",
                             "fetch",
                         ))
-                        .with_source_id(lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID),
+                        .with_provider(lash_core::testing::test_tools_provider()),
                     ))
                 } else {
                     crate::Resolution::NotAvailable { note: None }

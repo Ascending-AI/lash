@@ -169,7 +169,7 @@ async fn served_turn() -> Result<(Observed, LashCore)> {
         .into_handle(),
         mock_llm_profile_spec(),
     )
-    .tools(Arc::new(EchoTool));
+    .tools(crate::hook_key!("tools"), Arc::new(EchoTool));
     let (observed, builder) = Observed::install(builder);
     let core = builder.build(crate::testing::runtime_lease_owner())?;
     let session = core

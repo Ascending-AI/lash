@@ -707,10 +707,13 @@ impl lash::plugins::SessionPlugin for StatePlugin {
         reg: &mut lash::plugins::PluginRegistrar,
     ) -> Result<(), lash::plugins::PluginError> {
         let view = reg.state();
-        reg.tools().provider(Arc::new(StateTools {
-            world: Arc::clone(&self.world),
-            view: Some(view),
-        }))
+        reg.tools().provider(
+            lash::hook_key!("tools"),
+            Arc::new(StateTools {
+                world: Arc::clone(&self.world),
+                view: Some(view),
+            }),
+        )
     }
 }
 
@@ -749,10 +752,13 @@ impl lash_core::plugin::ProcessComponentFactory for StateComponent {
         cx: &lash_core::plugin::ProcessComponentContext<'_>,
     ) -> Result<lash_core::plugin::ProcessComponentSpec, lash::plugins::PluginError> {
         Ok(lash_core::plugin::ProcessComponentSpec {
-            tool_providers: vec![Arc::new(StateTools {
-                world: Arc::clone(&self.world),
-                view: cx.state.clone(),
-            })],
+            tool_providers: vec![(
+                lash::hook_key!("state"),
+                Arc::new(StateTools {
+                    world: Arc::clone(&self.world),
+                    view: cx.state.clone(),
+                }),
+            )],
             ..lash_core::plugin::ProcessComponentSpec::default()
         })
     }
@@ -890,18 +896,24 @@ impl Crash {
                     lash::LashCore::standard_builder(backend.clone())
                 };
                 let builder = if self.turn == Turn::Put {
-                    builder.tools(Arc::new(Puts {
-                        world: Arc::clone(&self.world),
-                        backend: backend.clone(),
-                        clock: Arc::clone(&clock),
-                    }))
+                    builder.tools(
+                        lash::hook_key!("puts"),
+                        Arc::new(Puts {
+                            world: Arc::clone(&self.world),
+                            backend: backend.clone(),
+                            clock: Arc::clone(&clock),
+                        }),
+                    )
                 } else {
                     builder
                 };
                 let builder = if self.turn == Turn::Finish {
-                    builder.tools(Arc::new(Submit {
-                        world: Arc::clone(&self.world),
-                    }))
+                    builder.tools(
+                        lash::hook_key!("submit"),
+                        Arc::new(Submit {
+                            world: Arc::clone(&self.world),
+                        }),
+                    )
                 } else {
                     builder
                 };
@@ -922,9 +934,12 @@ impl Crash {
                         served::model(Arc::clone(&self.scripts)),
                         served::metadata(),
                     )
-                    .tools(Arc::new(Probe {
-                        world: Arc::clone(&self.world),
-                    }))
+                    .tools(
+                        lash::hook_key!("probe"),
+                        Arc::new(Probe {
+                            world: Arc::clone(&self.world),
+                        }),
+                    )
                     .plugin(Arc::new(StatePlugin {
                         world: Arc::clone(&self.world),
                     }))

@@ -7,10 +7,10 @@ fn restore_state_adopts_generation_at_or_above_three() {
     // adopts the snapshot's generation verbatim; `apply_state` (a gen-matched
     // delta) rejects it. This is the exact divergence the durable worker /
     // session resume rebuild relies on `restore_state` to absorb.
-    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source registry");
+    let source = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("source registry");
     let snapshot = source.export_state().with_generation_for_conformance(3);
 
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target registry");
+    let target = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("target registry");
     assert_eq!(
         target.generation(),
         1,
@@ -34,7 +34,7 @@ fn restore_state_adopts_generation_at_or_above_three() {
 
     // apply_state on the same high-generation snapshot is rejected — proving
     // the rebuild would have failed without restore_state.
-    let fresh = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("fresh registry");
+    let fresh = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("fresh registry");
     assert!(
         matches!(
             fresh.apply_state(snapshot),
@@ -50,7 +50,7 @@ fn restore_state_adopts_generation_at_or_above_three() {
 /// Build a snapshot whose `mcp__demo__search` entry only resolves while
 /// `ExternalMockSource` is registered — restoring it elsewhere orphans it.
 fn snapshot_with_external_tool() -> ToolState {
-    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source registry");
+    let source = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("source registry");
     source
         .upsert_source(Arc::new(ExternalMockSource))
         .expect("source registered");
@@ -61,7 +61,7 @@ fn snapshot_with_external_tool() -> ToolState {
 async fn restore_orphans_unresolved_tools_instead_of_failing() {
     let snapshot = snapshot_with_external_tool();
 
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
+    let target = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("target");
     let report = target
         .restore_state(snapshot)
         .expect("restore tolerates the missing source");
@@ -108,7 +108,7 @@ async fn restore_orphans_unresolved_tools_instead_of_failing() {
 #[tokio::test]
 async fn orphan_rebinds_when_source_is_upserted_again() {
     let snapshot = snapshot_with_external_tool();
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
+    let target = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("target");
     target.restore_state(snapshot).expect("restore");
     let orphaned_generation = target.generation();
 
@@ -158,13 +158,13 @@ fn restore_uses_live_manifest_and_preserves_membership_for_same_id() {
         }
     }
 
-    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source");
+    let source = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("source");
     let mut snapshot = source.export_state();
     snapshot
         .set_membership(&tool_id("mock_tool"), false)
         .expect("opt out");
     let target =
-        ToolRegistry::from_tool_provider(Arc::new(UpdatedMockTool)).expect("target registry");
+        ToolRegistry::from_test_provider(Arc::new(UpdatedMockTool)).expect("target registry");
 
     target.restore_state(snapshot).expect("restore");
     let exported = target.export_state();
@@ -176,7 +176,7 @@ fn restore_uses_live_manifest_and_preserves_membership_for_same_id() {
 #[test]
 fn orphan_rebinds_at_explicit_source_admission() {
     let snapshot = host_only_snapshot(1);
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
+    let target = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("target");
     let report = target.restore_state(snapshot).expect("restore");
     assert_eq!(report.lost_members, vec![tool_id("host_only")]);
 
@@ -226,7 +226,7 @@ fn restore_drops_superseded_orphan_and_does_not_transfer_opt_out() {
     snapshot
         .set_membership(&tool_id("mcp__demo__search"), false)
         .expect("opt out old id");
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
+    let target = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("target");
     target
         .add_tool_provider(Arc::new(ReplacedSearchTool))
         .expect("replacement registered");
@@ -263,7 +263,7 @@ fn restore_drops_superseded_orphan_and_does_not_transfer_opt_out() {
 fn apply_state_round_trips_while_orphans_exist() {
     // `export_state` → edit → `apply_state` must work with an orphan in
     // the snapshot: the exported orphan flag exempts it from strictness.
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
+    let target = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("target");
     target
         .restore_state(snapshot_with_external_tool())
         .expect("restore");
@@ -298,7 +298,7 @@ fn apply_state_round_trips_while_orphans_exist() {
 
 #[test]
 fn orphan_flag_serializes_on_every_entry_and_is_required() {
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
+    let target = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("target");
     target
         .restore_state(snapshot_with_external_tool())
         .expect("restore");
@@ -325,7 +325,7 @@ fn orphan_flag_serializes_on_every_entry_and_is_required() {
 
 #[test]
 fn remove_source_preserves_non_member_curation_across_reattach() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+    let registry = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("registry");
     registry
         .upsert_source(Arc::new(ExternalMockSource))
         .expect("source registered");
@@ -362,7 +362,7 @@ fn remove_source_preserves_non_member_curation_across_reattach() {
 
     let encoded = serde_json::to_value(&detached).expect("serialize detached state");
     let decoded: ToolState = serde_json::from_value(encoded).expect("deserialize detached state");
-    let restored = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("restore registry");
+    let restored = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("restore registry");
     let report = restored
         .restore_state(decoded)
         .expect("restore detached state");

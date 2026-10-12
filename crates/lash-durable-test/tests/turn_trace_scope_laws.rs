@@ -116,7 +116,7 @@ fn builder(
     let keys = keys.clone();
     move |backend| {
         lash::LashCore::standard_builder(backend.clone())
-            .tools(Arc::new(DeferredTool { keys }))
+            .tools(lash::hook_key!("tools"), Arc::new(DeferredTool { keys }))
             .trace_runtime(telemetry.runtime())
     }
 }
@@ -375,7 +375,7 @@ fn held_builder(
                 backend.clone(),
                 served::rlm(backend, None, sim::untimed_workers()),
             )
-            .tools(Arc::new(hold)),
+            .tools(lash::hook_key!("tools"), Arc::new(hold)),
         };
         builder.trace_runtime(telemetry.runtime())
     }

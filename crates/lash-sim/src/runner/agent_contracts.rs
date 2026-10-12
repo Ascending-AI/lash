@@ -516,7 +516,7 @@ async fn facade_final_value_execution_inner(
     if process_surface == ProcessSurface::Installed {
         builder = with_contract_processes(builder, tools, None);
     } else if let Some(tools) = tools {
-        builder = builder.tools(tools);
+        builder = builder.tools(lash::hook_key!("tools"), tools);
     }
     let core = builder
         .build(crate::sim_process_owner())
@@ -913,7 +913,7 @@ fn with_contract_processes(
                 lash_core::testing::tool_component(CONTRACT_TOOLS, Arc::clone(&tools)),
                 CONTRACT_TOOLS,
             )
-            .tools(tools);
+            .tools(lash::hook_key!("tools"), tools);
     }
     if let Some(delegation) = delegation {
         builder = builder

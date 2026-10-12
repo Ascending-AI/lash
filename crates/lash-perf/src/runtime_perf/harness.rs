@@ -802,7 +802,7 @@ fn benchmark_plugin_factories(
     )];
     let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("runtime_perf_tools"),
-        PluginSpec::new().with_tool_provider(benchmark_tool),
+        PluginSpec::new().with_tool_provider(lash::hook_key!("tools"), benchmark_tool),
     ))];
     if wiring.llm_query_plugin {
         factories.push(Arc::new(LlmToolsPluginFactory::default()));
@@ -840,13 +840,17 @@ fn benchmark_plugin_factories(
     if wiring.oblique_tools_plugin {
         factories.push(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("runtime_perf_oblique_tools"),
-            PluginSpec::new().with_tool_provider(Arc::new(BenchmarkObliqueTools)),
+            PluginSpec::new()
+                .with_tool_provider(lash::hook_key!("tools"), Arc::new(BenchmarkObliqueTools)),
         )));
     }
     if wiring.large_tool_catalog_plugin {
         factories.push(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("runtime_perf_large_tool_catalog"),
-            PluginSpec::new().with_tool_provider(Arc::new(BenchmarkLargeToolCatalog::default())),
+            PluginSpec::new().with_tool_provider(
+                lash::hook_key!("tools"),
+                Arc::new(BenchmarkLargeToolCatalog::default()),
+            ),
         )));
     }
     if let Some(observer) = tool_catalog_observer {
@@ -935,7 +939,10 @@ pub(crate) async fn build_embed_core(
             factory.worker_service().pool()?;
             benchmark_rlm_builder(backend.clone(), provider, factory)
                 .with_explicit_ephemeral_facets()
-                .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
+                .tools(
+                    lash::hook_key!("tools"),
+                    Arc::new(BenchmarkEchoTool::new(effect_host)),
+                )
                 .build(runtime_perf_owner())
                 .map(BenchmarkCore::Rlm)
                 .map_err(anyhow::Error::from)

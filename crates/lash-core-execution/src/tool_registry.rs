@@ -15,7 +15,7 @@ use lash_core_store::tool_state::facade_ops::ToolStateFacadeOps;
 
 mod state;
 pub(crate) use state::{LeafToolSourceExecutor, ToolSourceCapture, ToolSourceExecutor};
-pub use state::{PLUGIN_TOOL_SOURCE_ID, ToolSourceHandle, ToolState, ToolStateEntry};
+pub use state::{ToolSourceHandle, ToolState, ToolStateEntry};
 mod sources;
 use sources::{ToolBinding, ToolProviderSource};
 mod registry_types;
@@ -105,8 +105,8 @@ pub mod facade_ops {
                 format!("live:{next_live_source_id}")
             };
             self.upsert_source(Arc::new(ToolProviderSource::new(
-                source_id.clone(),
-                vec![provider],
+                ToolSourceKey::new(source_id.clone()),
+                provider,
             )))?;
             Ok(ToolSourceHandle::new(source_id))
         }

@@ -43,8 +43,8 @@ fn run_material(role: MaterialRole) -> MaterialRef {
 
 fn binding() -> AdmittedBinding {
     AdmittedBinding {
-        executable: callback("tools", "tool_provider:0"),
-        preparation: callback("tools", "tool_provider:0"),
+        executable: callback("tools", "tool_provider:search"),
+        preparation: callback("tools", "tool_provider:search"),
         presentation: PresentationBinding {
             presenter: Some(callback("standard", "presentation_presenter")),
             steps: vec![callback("render", "presentation_step:0")],
@@ -84,6 +84,33 @@ fn cause(error_type: &str) -> HookCause {
 
 fn attempt(n: u32) -> AttemptOrdinal {
     AttemptOrdinal::new(n).unwrap()
+}
+
+/// KEYED-PROVIDERS (FIG-6073): a recorded binding names its provider by
+/// a declared key. A positional `tool_provider:{n}` key, which is what every
+/// recorded `embed_tools` binding carried, is refused at decode, not mapped.
+#[test]
+fn a_binding_naming_a_positional_provider_is_refused_at_decode() {
+    let declared = serde_json::to_value(binding()).unwrap();
+    assert_eq!(
+        serde_json::from_value::<AdmittedBinding>(declared.clone()).unwrap(),
+        binding()
+    );
+    for (owner, key) in [
+        ("tools", "tool_provider:0"),
+        ("embed_tools", "tool_provider:1"),
+        ("tools", "tool_provider"),
+        ("tools", "presentation_step:search"),
+    ] {
+        for field in ["executable", "preparation"] {
+            let mut recorded = declared.clone();
+            recorded[field] = json!({"owner": owner, "key": key});
+            assert!(
+                serde_json::from_value::<AdmittedBinding>(recorded).is_err(),
+                "{field} `{owner}:{key}` must not decode"
+            );
+        }
+    }
 }
 
 #[test]

@@ -51,8 +51,8 @@ pub use lash_core_execution::testing::{
     standard_test_llm_profiles, standard_test_policy, store_fixtures, test_code_protocol_factories,
     test_llm_profile_config, test_llm_profile_metadata, test_plugin_host,
     test_protocol_factories_ending_without_done, test_standard_protocol_factories,
-    test_standard_protocol_factory_with_runtime_state, tool_component, tool_hook_context,
-    tool_registry_with_live_provider, trace_capture,
+    test_standard_protocol_factory_with_runtime_state, test_tools_provider, tool_component,
+    tool_hook_context, tool_registry_with_live_provider, trace_capture,
 };
 
 /// Prompt composition over a cut a test states (ADR 0133).

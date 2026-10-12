@@ -55,9 +55,12 @@ async fn a_host_finish_replaces_the_default_and_a_run_retypes_it_alone() -> Resu
     let core =
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
-            .tools(Arc::new(lash_core::FinishToolProvider::new([answer_tool(
-                serde_json::json!({ "type": "integer" }),
-            )])))
+            .tools(
+                crate::hook_key!("tools"),
+                Arc::new(lash_core::FinishToolProvider::new([answer_tool(
+                    serde_json::json!({ "type": "integer" }),
+                )])),
+            )
             .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(SessionId::parse("host-finish").expect("nonblank host identity"))
@@ -204,10 +207,13 @@ async fn run_submit_turn(
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(Arc::new(SubmitTool {
-        body,
-        value: lash_core::JsonSchema::any(),
-    }))
+    .tools(
+        crate::hook_key!("tools"),
+        Arc::new(SubmitTool {
+            body,
+            value: lash_core::JsonSchema::any(),
+        }),
+    )
     .plugin(plugin)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -408,11 +414,14 @@ async fn a_batch_member_finish_is_checked_against_its_value_schema() -> Result<(
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(Arc::new(SubmitTool {
-        body: |args| lash_core::ToolOutcome::finish(args["answer"].clone()),
-        value: lash_core::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
-            .expect("an integer schema is admitted"),
-    }))
+    .tools(
+        crate::hook_key!("tools"),
+        Arc::new(SubmitTool {
+            body: |args| lash_core::ToolOutcome::finish(args["answer"].clone()),
+            value: lash_core::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
+                .expect("an integer schema is admitted"),
+        }),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(SessionId::parse("batch-member-finish").expect("nonblank host identity"))

@@ -281,12 +281,13 @@ impl SessionPlugin for TelemetryPlugin {
             0,
             0,
         ));
-        registrar
-            .tools()
-            .provider(Arc::new(StaticToolProvider::new(
+        registrar.tools().provider(
+            lash::hook_key!("tools"),
+            Arc::new(StaticToolProvider::new(
                 vec![definition],
                 TelemetryTool(self.0.clone()),
-            )))?;
+            )),
+        )?;
         Ok(())
     }
 }

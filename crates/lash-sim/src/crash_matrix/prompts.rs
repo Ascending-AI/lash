@@ -334,7 +334,7 @@ impl lash_core::plugin::SessionPlugin for Memo {
                 })
             }),
         )?;
-        reg.tools().provider(tools()?)
+        reg.tools().provider(lash::hook_key!("tools"), tools()?)
     }
 }
 

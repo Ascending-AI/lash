@@ -134,9 +134,12 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
         };
         let core = explicit_ephemeral_facets(builder)
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
-            .tools(Arc::new(DiscoveryTools {
-                calls: calls.clone(),
-            }))
+            .tools(
+                crate::hook_key!("tools"),
+                Arc::new(DiscoveryTools {
+                    calls: calls.clone(),
+                }),
+            )
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session(lash_core::SessionId::fixture(format!("discovery-{mode}")))

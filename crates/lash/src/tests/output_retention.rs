@@ -192,7 +192,7 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
             ..crate::DataRetention::standard()
         })
         .serve_test_llm_profile(tool_calling_provider(), mock_llm_profile_spec())
-        .tools(Arc::new(RetentionTools))
+        .tools(crate::hook_key!("tools"), Arc::new(RetentionTools))
         .plugin(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("output-retention-appendix"),
             lash_core::plugin::PluginSpec::new()

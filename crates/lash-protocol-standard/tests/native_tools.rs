@@ -30,7 +30,8 @@ fn standard_session_with_access(
             Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
             Arc::new(lash_core::plugin::StaticPluginFactory::new(
                 lash_core::plugin::PluginDeclaration::initial("native-tools-fixture"),
-                lash_core::facade_support::PluginSpec::new().with_tool_provider(fixture),
+                lash_core::facade_support::PluginSpec::new()
+                    .with_tool_provider(lash_core::hook_key!("tools"), fixture),
             )),
         ],
         lash_core::ExecutionBudgets::recommended(),
@@ -76,7 +77,8 @@ fn a_catalogue_tool_named_batch_is_refused_while_the_sugar_is_offered() {
                 ),
                 Arc::new(lash_core::plugin::StaticPluginFactory::new(
                     lash_core::plugin::PluginDeclaration::initial("catalogue-batch"),
-                    lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
+                    lash_core::facade_support::PluginSpec::new()
+                        .with_tool_provider(lash_core::hook_key!("tools"), tools),
                 )),
             ],
             lash_core::ExecutionBudgets::recommended(),

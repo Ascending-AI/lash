@@ -268,7 +268,8 @@ impl lash::plugins::SessionPlugin for StoragePlugin {
                 }),
             )?;
         }
-        reg.tools().provider(Arc::new(self.clone()))
+        reg.tools()
+            .provider(lash::hook_key!("tools"), Arc::new(self.clone()))
     }
 }
 

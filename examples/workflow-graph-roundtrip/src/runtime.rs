@@ -552,7 +552,7 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
         ));
     let host_tools = lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(HOST_TOOLS.component()),
-        lash::plugins::PluginSpec::new().with_tool_provider(provider),
+        lash::plugins::PluginSpec::new().with_tool_provider(lash::hook_key!("tools"), provider),
     )
     .as_component(HOST_TOOLS.format())?;
     let workers = lash::vm::WorkerService::default();

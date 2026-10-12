@@ -212,20 +212,23 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
                 )
                 .expect("register the test model"),
         ))
-        .tools(Arc::new(lash::tools::StaticToolProvider::new(
-            vec![
-                lash::tools::ToolDefinition::raw(
-                    "ping",
-                    "ping",
-                    "Ping",
-                    serde_json::json!({"type":"object"}),
-                    serde_json::json!({"type":"string"}),
-                )
-                .expect("tool schema")
-                .with_execution(std::time::Duration::from_secs(120)),
-            ],
-            Ping,
-        )))
+        .tools(
+            lash::hook_key!("tools"),
+            Arc::new(lash::tools::StaticToolProvider::new(
+                vec![
+                    lash::tools::ToolDefinition::raw(
+                        "ping",
+                        "ping",
+                        "Ping",
+                        serde_json::json!({"type":"object"}),
+                        serde_json::json!({"type":"string"}),
+                    )
+                    .expect("tool schema")
+                    .with_execution(std::time::Duration::from_secs(120)),
+                ],
+                Ping,
+            )),
+        )
         .plugin(Arc::new(Instruction))
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),

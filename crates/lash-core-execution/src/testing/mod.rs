@@ -229,7 +229,8 @@ pub fn tool_component(
     std::sync::Arc::new(
         crate::plugin::StaticPluginFactory::new(
             crate::plugin::PluginDeclaration::initial(key.component()),
-            crate::plugin::PluginSpec::new().with_tool_provider(provider),
+            crate::plugin::PluginSpec::new()
+                .with_tool_provider(crate::hook_key!("tools"), provider),
         )
         .as_component(key.format())
         .expect("a tool provider is a process component"),
@@ -1316,7 +1317,7 @@ impl<'run> crate::AttemptContext<'run> {
         let context = context
             .clone()
             .with_tool_execution_binding(grant.execution_binding.clone())
-            .with_granted_source_id(grant.source_id.clone());
+            .with_granted_provider(grant.provider.clone());
         Self::from_tool_context(
             &context,
             execution_scope_id.into(),

@@ -162,7 +162,7 @@ fn core(
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .serve_test_llm_profile(model(), metadata()?)
-    .tools(ext_write(Arc::downgrade(world))?);
+    .tools(lash::hook_key!("tools"), ext_write(Arc::downgrade(world))?);
     let builder = if watched {
         builder.plugin(Arc::new(Watch))
     } else {

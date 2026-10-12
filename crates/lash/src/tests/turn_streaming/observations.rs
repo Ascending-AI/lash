@@ -451,7 +451,7 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(Arc::new(AppTools))
+    .tools(crate::hook_key!("tools"), Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(
@@ -1548,10 +1548,13 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
             sqlite_memory_store_backend().await,
         ))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .tools(Arc::new(crate::tools::StaticToolProvider::new(
-            vec![definition],
-            SwitchFrame,
-        )))
+        .tools(
+            crate::hook_key!("tools"),
+            Arc::new(crate::tools::StaticToolProvider::new(
+                vec![definition],
+                SwitchFrame,
+            )),
+        )
         .live_replay_store(replay_store.clone())
         .build(crate::testing::runtime_lease_owner())?;
         let session_id = SessionId::fixture(format!("two-histories-switch-{boundary:?}"));

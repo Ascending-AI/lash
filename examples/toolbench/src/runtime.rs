@@ -402,7 +402,7 @@ fn build_turn_core(
             model,
             lash::RegisteredLlmProfile::new(profile_metadata(model)?, provider),
         )?))
-        .tools(if channel == crate::ChannelSelection::Standard {
+        .tools(lash::hook_key!("tools"), if channel == crate::ChannelSelection::Standard {
             world.standard_provider()
         } else {
             world.provider()

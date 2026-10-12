@@ -1653,7 +1653,8 @@ impl lash::process::ProcessComponentFactory for HoldComponent {
         _cx: &lash::process::ProcessComponentContext<'_>,
     ) -> Result<lash::process::ProcessComponentSpec, lash::plugins::PluginError> {
         let mut spec = lash::process::ProcessComponentSpec::default();
-        spec.tool_providers.push(Arc::clone(&self.body));
+        spec.tool_providers
+            .push((lash::hook_key!("body"), Arc::clone(&self.body)));
         Ok(spec)
     }
 }

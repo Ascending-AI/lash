@@ -83,7 +83,7 @@ fn race_core(
             queued_text_provider(vec![typescript_block(source), "The race settled.".into()]),
             mock_llm_profile_spec(),
         )
-        .tools(tools)
+        .tools(crate::hook_key!("tools"), tools)
         .build(crate::testing::runtime_lease_owner())
 }
 

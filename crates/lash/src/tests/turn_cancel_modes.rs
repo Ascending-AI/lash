@@ -229,7 +229,7 @@ async fn session_with(
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(model, mock_llm_profile_spec())
-    .tools(tools)
+    .tools(crate::hook_key!("tools"), tools)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(id).expect("nonblank host identity"))
@@ -991,7 +991,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
                 tool_calling_model(WATCH, &calls, &seen),
                 mock_llm_profile_spec(),
             )
-            .tools(Arc::new(tool))
+            .tools(crate::hook_key!("tools"), Arc::new(tool))
             .build(crate::testing::runtime_lease_owner())
     };
     // The first owner's tool never finishes: the owner is lost with the
@@ -1078,7 +1078,7 @@ async fn an_accepted_cancel_survives_its_owners_loss_in_a_retry_backoff_without_
                 tool_calling_model(RETRY, &calls, &seen),
                 mock_llm_profile_spec(),
             )
-            .tools(Arc::new(tool.clone()))
+            .tools(crate::hook_key!("tools"), Arc::new(tool.clone()))
             .build(crate::testing::runtime_lease_owner())
     };
     let core = deploy()?;

@@ -112,16 +112,27 @@ impl SessionPlugin for WorkbenchSessionPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+        reg.tools().provider(
+            lash::hook_key!("tool-search"),
+            self.deferred_tools.search_provider(),
+        )?;
+        reg.tools().provider(
+            crate::deferred_tools::DEFERRED_PROVIDER_KEY,
+            self.deferred_tools.execution_provider(),
+        )?;
         reg.tools()
-            .provider(self.deferred_tools.search_provider())?;
-        reg.tools()
-            .provider(self.deferred_tools.execution_provider())?;
-        reg.tools().provider(self.approvals.provider())?;
-        reg.tools().provider(self.host_triggers.provider())?;
-        reg.tools().provider(Arc::new(mail::MockMailProvider::new(
-            self.mail_world.clone(),
-            self.host_triggers.clone(),
-        )))?;
+            .provider(lash::hook_key!("approvals"), self.approvals.provider())?;
+        reg.tools().provider(
+            lash::hook_key!("host-triggers"),
+            self.host_triggers.provider(),
+        )?;
+        reg.tools().provider(
+            lash::hook_key!("mail"),
+            Arc::new(mail::MockMailProvider::new(
+                self.mail_world.clone(),
+                self.host_triggers.clone(),
+            )),
+        )?;
         register_workbench_sections(reg)?;
         reg.turn().after(
             lash::hook_key!("write-back-notes"),

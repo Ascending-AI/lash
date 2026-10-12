@@ -116,7 +116,7 @@ fn tool_calling_model(calls: &Calls) -> ProviderHandle {
 fn deploy(backend: &lash_core::Backend, calls: &Calls) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(tool_calling_model(calls), mock_llm_profile_spec())
-        .tools(Arc::new(HeldTool(calls.clone())))
+        .tools(crate::hook_key!("tools"), Arc::new(HeldTool(calls.clone())))
         .build(crate::testing::runtime_lease_owner())
 }
 

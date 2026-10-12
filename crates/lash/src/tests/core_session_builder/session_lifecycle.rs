@@ -292,10 +292,13 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() {
         provider,
         [historical_model.clone(), builder_model.clone()],
     ))
-    .tools(Arc::new(crate::tools::StaticToolProvider::new(
-        vec![definition],
-        SwitchFrame,
-    )))
+    .tools(
+        crate::hook_key!("tools"),
+        Arc::new(crate::tools::StaticToolProvider::new(
+            vec![definition],
+            SwitchFrame,
+        )),
+    )
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core");
     let session_id = SessionId::from("reconcile-open");

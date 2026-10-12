@@ -204,7 +204,7 @@ async fn tool_calling_turn(
     let core = configure(
         explicit_ephemeral_facets(LashCore::standard_builder(backend))
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
-            .tools(Arc::new(EchoTool))
+            .tools(crate::hook_key!("tools"), Arc::new(EchoTool))
             .trace_runtime(runtime)
             .trace_sink(Arc::new(lash_trace::TeeTraceSink::new([
                 Arc::new(lash_trace::JsonlTraceSink::new(path.clone())) as Arc<dyn TraceSink>,

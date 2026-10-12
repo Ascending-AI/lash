@@ -477,9 +477,12 @@ pub(super) fn build_core(
     let mut plugins = lash::PluginStack::new();
     plugins.push(Arc::new(lash::plugins::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("latency_tools"),
-        lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(
-            crate::runtime_perf::providers::BenchmarkEchoTool::new(effect_host.clone()),
-        )),
+        lash::plugins::PluginSpec::new().with_tool_provider(
+            lash::hook_key!("tools"),
+            Arc::new(crate::runtime_perf::providers::BenchmarkEchoTool::new(
+                effect_host.clone(),
+            )),
+        ),
     )));
     lash::LashCore::standard_builder(backend)
         .serve_sessions(spec.topology == Topology::SameProcess && spec.name != "observer")

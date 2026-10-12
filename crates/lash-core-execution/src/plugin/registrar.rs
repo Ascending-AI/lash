@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core_store::tool_run::CallbackSlot;
@@ -12,27 +12,6 @@ pub(crate) struct RegisteredHook<T> {
 }
 
 pub(crate) type RegisteredExclusiveHook<T> = RegisteredHook<T>;
-
-/// Registers a routed definition (a tool provider) under its per-plugin
-/// ordinal: providers dispatch by tool authority, not by callback order.
-fn push_ordinal_hook<T>(
-    hooks: &mut Vec<RegisteredHook<T>>,
-    owner: &str,
-    slot: CallbackSlot,
-    hook: T,
-) {
-    let ordinal = hooks
-        .iter()
-        .filter(|registered| registered.identity.owner == owner)
-        .count();
-    hooks.push(RegisteredHook {
-        identity: PluginCallbackIdentity {
-            owner: owner.to_owned(),
-            key: format!("{}:{ordinal}", slot.key_prefix()),
-        },
-        hook,
-    });
-}
 
 /// The identity of `owner`'s callback named `key` in `slot`.
 fn keyed_identity(owner: &str, slot: CallbackSlot, key: HookKey) -> PluginCallbackIdentity {
@@ -161,7 +140,6 @@ pub struct PluginRegistrar {
     pub(super) state: Option<super::PluginStateView>,
     pub(crate) contributions: PluginContributions,
     pub(crate) owner: String,
-    pub(super) tool_names: BTreeSet<String>,
 }
 
 pub struct ToolRegistrations<'a> {
@@ -169,8 +147,16 @@ pub struct ToolRegistrations<'a> {
 }
 
 impl ToolRegistrations<'_> {
-    pub fn provider(self, provider: Arc<dyn ToolProvider>) -> Result<(), PluginError> {
-        self.reg.add_tool_provider(provider)
+    /// Register `provider` under `key`, its static identity within this
+    /// plugin: every call bound to one of its tools records and dispatches
+    /// through that identity, whatever order the plugin registers its
+    /// providers in. A key begins with a letter; a duplicate key is refused.
+    pub fn provider(
+        self,
+        key: HookKey,
+        provider: Arc<dyn ToolProvider>,
+    ) -> Result<(), PluginError> {
+        self.reg.add_tool_provider(key, provider)
     }
 }
 
@@ -740,7 +726,6 @@ impl PluginRegistrar {
             state: None,
             contributions: PluginContributions::default(),
             owner,
-            tool_names: BTreeSet::new(),
         }
     }
 
@@ -788,22 +773,24 @@ impl PluginRegistrar {
         ExecutionRegistrations { reg: self }
     }
 
-    fn add_tool_provider(&mut self, provider: Arc<dyn ToolProvider>) -> Result<(), PluginError> {
-        for manifest in provider.tool_manifests() {
-            if !self.tool_names.insert(manifest.name.clone()) {
-                return Err(PluginError::Registration(format!(
-                    "duplicate plugin tool name `{}`",
-                    manifest.name
-                )));
-            }
+    fn add_tool_provider(
+        &mut self,
+        key: HookKey,
+        provider: Arc<dyn ToolProvider>,
+    ) -> Result<(), PluginError> {
+        if !lash_core_store::store::plugin_writers::is_declared_tool_provider_key(key.as_str()) {
+            return Err(PluginError::Registration(format!(
+                "tool provider key `{key}` of plugin `{}` must begin with a letter",
+                self.owner
+            )));
         }
-        push_ordinal_hook(
+        push_keyed_hook(
             &mut self.contributions.tool_providers,
             &self.owner,
             CallbackSlot::ToolProvider,
+            key,
             provider,
-        );
-        Ok(())
+        )
     }
 
     fn add_assistant_prose_projector(

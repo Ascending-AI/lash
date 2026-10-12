@@ -199,15 +199,15 @@ impl ProductionToolHandlers<'_> {
             definition = definition.with_admitted_declaration(admitted.clone());
         }
         if let Some(engine) = definition.manifest.isolation_engine() {
-            let source = invocation
+            let granted = invocation
                 .execution_grant
                 .as_deref()
-                .and_then(|grant| grant.source_id.as_deref());
+                .map(|grant| &grant.provider);
             let binding = self
                 .context
                 .dispatch()
                 .composition
-                .tool_run_binding(&invocation.tool_id, source)
+                .tool_run_binding(&invocation.tool_id, granted)
                 .map_err(crate::RuntimeEffectControllerError::from)?;
             match self
                 .bind_isolated(

@@ -143,10 +143,13 @@ impl SessionPlugin for TestSessionPlugin {
                 })
             }),
         )?;
-        reg.tools().provider(Arc::new(TestTools {
-            label,
-            seen: Arc::clone(&self.tool_seen),
-        }))
+        reg.tools().provider(
+            lash::hook_key!("tools"),
+            Arc::new(TestTools {
+                label,
+                seen: Arc::clone(&self.tool_seen),
+            }),
+        )
     }
 }
 

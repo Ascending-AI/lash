@@ -316,7 +316,7 @@ pub(super) async fn prepare_with_provider(
     .with_dispatch_catalog(Arc::clone(&context.tool_catalog))
     .with_process_originator(context.process_originator.clone());
     let prepare_context = match grant {
-        Some(grant) => prepare_context.with_granted_source_id(grant.source_id.clone()),
+        Some(grant) => prepare_context.with_granted_provider(grant.provider.clone()),
         None => prepare_context,
     };
     let prepare_call = ToolPrepareCall {

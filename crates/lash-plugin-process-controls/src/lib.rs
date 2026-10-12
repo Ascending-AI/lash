@@ -111,7 +111,10 @@ fn controls_spec(
             environment,
         },
     );
-    PluginSpec::new().with_tool_provider(Arc::new(provider) as Arc<dyn ToolProvider>)
+    PluginSpec::new().with_tool_provider(
+        lash_core::hook_key!("tools"),
+        Arc::new(provider) as Arc<dyn ToolProvider>,
+    )
 }
 
 /// The config key of the process-controls component: its config is `()`.

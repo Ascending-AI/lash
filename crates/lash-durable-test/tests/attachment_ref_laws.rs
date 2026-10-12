@@ -295,7 +295,7 @@ async fn send(url: bool, tools: bool) -> Sent {
                 .build()
                 .unwrap(),
         )
-        .tools(Arc::new(NestedMedia))
+        .tools(lash::hook_key!("tools"), Arc::new(NestedMedia))
         .data_retention(lash::DataRetention {
             attachments: lash::persistence::AttachmentPolicy {
                 max_attachment_bytes: Some(1024),
@@ -540,9 +540,12 @@ async fn tool_put_receipts_match_session_delivery_advice() {
                 .build()
                 .unwrap(),
         )
-        .tools(Arc::new(ReceiptTool {
-            receipts: receipts.clone(),
-        }))
+        .tools(
+            lash::hook_key!("tools"),
+            Arc::new(ReceiptTool {
+                receipts: receipts.clone(),
+            }),
+        )
         .data_retention(lash::DataRetention {
             attachments: lash::persistence::AttachmentPolicy {
                 max_attachment_bytes: Some(1024),

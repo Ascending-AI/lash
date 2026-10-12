@@ -208,10 +208,13 @@ async fn a_frame_switch_through_send_completes_and_its_follow_on_runs_next() {
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(Arc::new(crate::tools::StaticToolProvider::new(
-        vec![definition],
-        SwitchFrame,
-    )))
+    .tools(
+        crate::hook_key!("tools"),
+        Arc::new(crate::tools::StaticToolProvider::new(
+            vec![definition],
+            SwitchFrame,
+        )),
+    )
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core");
     let session_id =
@@ -357,9 +360,12 @@ impl AccountCore {
             sqlite_memory_store_backend().await,
         ))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .tools(Arc::new(AccountTools {
-            names: Arc::clone(&accounts),
-        }))
+        .tools(
+            crate::hook_key!("tools"),
+            Arc::new(AccountTools {
+                names: Arc::clone(&accounts),
+            }),
+        )
         .build(crate::testing::runtime_lease_owner())
         .expect("standard core");
         Self {
@@ -619,7 +625,10 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
                     lash_conformance::backend_over(stores.clone()),
                 ))
                 .serve_test_llm_profile(provider.clone(), mock_llm_profile_spec())
-                .tools(Arc::new(lash_core::testing::FixtureTools))
+                .tools(
+                    crate::hook_key!("tools"),
+                    Arc::new(lash_core::testing::FixtureTools),
+                )
                 .build(lash_core::LeaseOwnerIdentity::opaque(
                     lash_core::LeaseOwnerId::new(owner),
                     lash_core::LeaseIncarnationId::new("boot"),
@@ -1064,9 +1073,12 @@ async fn a_turns_request_carries_its_sections_where_they_are_placed() {
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(Arc::new(AccountTools {
-        names: Arc::new(StdMutex::new(vec!["ask".to_owned()])),
-    }))
+    .tools(
+        crate::hook_key!("tools"),
+        Arc::new(AccountTools {
+            names: Arc::new(StdMutex::new(vec!["ask".to_owned()])),
+        }),
+    )
     .plugin(Arc::new(HostSections))
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core");

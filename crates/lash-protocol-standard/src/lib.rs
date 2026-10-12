@@ -547,9 +547,9 @@ impl PluginFactory for StandardProtocolPluginFactory {
                 ))
             })?;
         // A session whose turns only a control call ends is offered
-        // `finish`. A run that requires one of a session that is not finds
-        // no `finish` unless the host installed a tool that declares it,
-        // and is refused when its turn is formed.
+        // `finish`. A run that requires one of a session that is not is
+        // offered no `finish` unless the host installed a tool that declares
+        // it, and is refused when its turn is formed.
         let termination = recorded
             .as_ref()
             .and_then(|recorded| recorded.termination)
@@ -617,10 +617,12 @@ impl SessionPlugin for StandardProtocolPlugin {
             .protocol_driver(Arc::new(StandardProtocolDriver {
                 config: self.config.clone(),
             }))?;
-        if !self.termination.prose_ends_turn() {
-            reg.tools()
-                .provider(Arc::new(finish::finish_tool_provider()))?;
-        }
+        // The finish provider exists in every session; the session's
+        // termination decides only what it advertises.
+        reg.tools().provider(
+            lash_core::hook_key!("finish"),
+            Arc::new(finish::finish_tool_provider(self.termination)),
+        )?;
         let discovery = self.config.discovery.clone();
         let batch = self.config.batch;
         reg.tool_catalog().contribute(

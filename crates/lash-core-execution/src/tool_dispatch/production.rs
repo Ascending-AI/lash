@@ -656,7 +656,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         if let Some(grant) = &prepared.input.grant {
             context = context
                 .with_tool_execution_binding(grant.execution_binding.clone())
-                .with_granted_source_id(grant.source_id.clone());
+                .with_granted_provider(grant.provider.clone());
         }
         let authority = match &prepared.input.grant {
             Some(grant) => atomic_attempt::AttemptAuthority::Granted(grant),

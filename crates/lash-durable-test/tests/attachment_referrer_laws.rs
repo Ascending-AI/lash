@@ -463,9 +463,12 @@ impl Law {
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .tools(Arc::new(BlobTools {
-            witness: Arc::clone(witness),
-        }))
+        .tools(
+            lash::hook_key!("tools"),
+            Arc::new(BlobTools {
+                witness: Arc::clone(witness),
+            }),
+        )
         .process_component(
             lash_core::testing::tool_component(
                 BLOB_COMPONENT,

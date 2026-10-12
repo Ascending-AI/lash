@@ -118,20 +118,28 @@ impl ToolSurface {
     }
 }
 
-/// Typed registry-source identity: the label of the source that advertises
-/// a tool.
+/// Typed registry-source identity: what advertises a tool and executes it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct ToolSourceKey(String);
+pub(crate) enum ToolSourceKey {
+    /// A registered tool provider, by the identity its plugin or component
+    /// declared it under (FIG-6073).
+    Provider(crate::plugin::PluginCallbackIdentity),
+    /// A source a host attached to one open registry, by its handle.
+    Attached(String),
+}
 
 impl ToolSourceKey {
     pub(crate) fn new(source_id: impl Into<String>) -> Self {
-        Self(source_id.into())
+        Self::Attached(source_id.into())
     }
 }
 
 impl std::fmt::Display for ToolSourceKey {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
+        match self {
+            Self::Provider(identity) => write!(formatter, "{}:{}", identity.owner, identity.key),
+            Self::Attached(id) => formatter.write_str(id),
+        }
     }
 }
 

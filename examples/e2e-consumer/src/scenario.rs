@@ -401,14 +401,17 @@ impl<P: CaseId> SessionPlugin for CasePlugin<P> {
             })
             .collect::<Result<Vec<_>, PluginError>>()?;
         let view = reg.state();
-        reg.tools().provider(Arc::new(StaticToolProvider::new(
-            definitions,
-            Bodies {
-                plans,
-                shared: self.0.clone(),
-                view,
-            },
-        )))?;
+        reg.tools().provider(
+            lash::hook_key!("tools"),
+            Arc::new(StaticToolProvider::new(
+                definitions,
+                Bodies {
+                    plans,
+                    shared: self.0.clone(),
+                    view,
+                },
+            )),
+        )?;
         Ok(())
     }
 }

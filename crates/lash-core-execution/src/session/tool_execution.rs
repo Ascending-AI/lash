@@ -166,12 +166,14 @@ pub(crate) fn tool_call_limit_failure(exceeded: crate::ToolCallLimitExceeded) ->
 }
 
 impl RuntimeExecutionContext<'_> {
-    pub fn tool_execution_owner(
+    /// The one provider identity a call of `tool` binds to and dispatches
+    /// through: the provider `granted` names, else the catalog's.
+    pub fn tool_provider(
         &self,
         tool: &crate::ToolId,
-        source: Option<&str>,
-    ) -> Result<String, crate::PluginError> {
-        self.dispatch.composition.tool_execution_owner(tool, source)
+        granted: Option<&crate::plugin::PluginCallbackIdentity>,
+    ) -> Result<crate::plugin::PluginCallbackIdentity, crate::PluginError> {
+        self.dispatch.composition.tool_provider(tool, granted)
     }
 
     /// `call_key` is the material the call's observation lanes key under —

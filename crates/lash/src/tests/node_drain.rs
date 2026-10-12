@@ -168,7 +168,10 @@ fn build_boot(
         scripted_provider(Arc::clone(script)),
         mock_llm_profile_spec(),
     )
-    .tools(Arc::new(CountedEcho(Arc::clone(script))))
+    .tools(
+        crate::hook_key!("tools"),
+        Arc::new(CountedEcho(Arc::clone(script))),
+    )
     .build(lash_core::LeaseOwnerIdentity::opaque(
         lash_core::LeaseOwnerId::new(owner),
         lash_core::LeaseIncarnationId::new(boot),

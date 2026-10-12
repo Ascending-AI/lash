@@ -6,6 +6,22 @@ use std::sync::Arc;
 
 use super::{EmptyToolProvider, MockSessionManager};
 
+/// The plugin a test context registers its provider in.
+pub const TEST_TOOLS_PLUGIN_ID: &str = "test_tools";
+
+/// The key a test context registers its provider under.
+pub const TEST_TOOLS_PROVIDER_KEY: crate::plugin::HookKey = crate::hook_key!("tools");
+
+/// The identity of a test context's provider: what a grant of one of its
+/// tools names.
+#[must_use]
+pub fn test_tools_provider() -> crate::plugin::PluginCallbackIdentity {
+    crate::plugin::PluginCallbackIdentity::tool_provider(
+        TEST_TOOLS_PLUGIN_ID,
+        TEST_TOOLS_PROVIDER_KEY.as_str(),
+    )
+}
+
 pub enum TestSessionHostMode {
     Independent,
     Shared(Arc<MockSessionManager>),
@@ -431,8 +447,9 @@ impl<'run> TestExecutionContextBuilder<'run> {
             .plugin_factories
             .unwrap_or_else(default_plugin_factories);
         factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
-            crate::plugin::PluginDeclaration::initial(crate::PLUGIN_TOOL_SOURCE_ID),
-            crate::plugin::PluginSpec::new().with_tool_provider(Arc::clone(&self.provider)),
+            crate::plugin::PluginDeclaration::initial(TEST_TOOLS_PLUGIN_ID),
+            crate::plugin::PluginSpec::new()
+                .with_tool_provider(TEST_TOOLS_PROVIDER_KEY, Arc::clone(&self.provider)),
         )));
         let plugins = crate::plugin::PluginHost::new(
             factories,

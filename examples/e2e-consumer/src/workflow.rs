@@ -186,7 +186,8 @@ fn builder_over(backend: lash::Backend, bodies: &std::path::Path) -> Result<lash
     ));
     let host_tools = lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(HOST_TOOLS.component()),
-        lash::plugins::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider(lash::hook_key!("tools"), Arc::clone(&tools)),
     )
     .as_component(HOST_TOOLS.format())?;
     // A process a turn starts runs the turn's recorded model and tools,
@@ -204,7 +205,7 @@ fn builder_over(backend: lash::Backend, bodies: &std::path::Path) -> Result<lash
             lash::vm::TYPESCRIPT_DIALECT,
             bounds,
         )))
-        .tools(tools)
+        .tools(lash::hook_key!("tools"), tools)
         .process_component(Arc::new(host_tools), HOST_TOOLS)
         .process_component(
             Arc::new(lash::process_controls::ProcessControlsComponent::new(

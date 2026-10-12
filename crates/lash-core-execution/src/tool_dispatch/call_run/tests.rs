@@ -31,8 +31,8 @@ fn ordinary_call(label: &str) -> SingletonToolCall {
         arguments: serde_json::Value::Null,
         declaration: ToolDeclaration::default(),
         binding: AdmittedBinding {
-            executable: callback("tool_provider:0"),
-            preparation: callback("tool_provider:0"),
+            executable: callback("tool_provider:tools"),
+            preparation: callback("tool_provider:tools"),
             presentation: PresentationBinding {
                 presenter: None,
                 steps: Vec::new(),

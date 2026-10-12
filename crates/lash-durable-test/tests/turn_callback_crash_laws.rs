@@ -369,7 +369,7 @@ impl Crash {
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(model(Arc::clone(&self.world)), served::metadata())
-                    .tools(Arc::new(SearchTool))
+                    .tools(lash::hook_key!("tools"), Arc::new(SearchTool))
                     .plugin(Arc::new(CallbackPlugin {
                         world: Arc::clone(&self.world),
                     }))

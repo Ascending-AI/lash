@@ -146,11 +146,14 @@ impl GeneratedRuntimeWorld {
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .live_replay_store(world_live_replay_store())
             .serve_test_llm_profile(provider_handle, model.clone())
-            .tools(Arc::new(SuspendToolProvider::new(
-                tool_name.clone(),
-                Arc::clone(&key_slot),
-                observer,
-            )) as Arc<dyn lash_core::ToolProvider>)
+            .tools(
+                lash::hook_key!("tools"),
+                Arc::new(SuspendToolProvider::new(
+                    tool_name.clone(),
+                    Arc::clone(&key_slot),
+                    observer,
+                )) as Arc<dyn lash_core::ToolProvider>,
+            )
             .build(crate::sim_process_owner())
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let session = crate::open_created_session(

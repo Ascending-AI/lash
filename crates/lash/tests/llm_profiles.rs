@@ -1218,13 +1218,16 @@ impl AskTwiceRun {
         let tools: Arc<dyn lash::plugins::PluginFactory> =
             Arc::new(lash::plugins::StaticPluginFactory::new(
                 lash::plugins::PluginDeclaration::initial("keys-ask-twice"),
-                lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskTwice {
-                    catalog: Arc::clone(&catalog),
-                    retire,
-                    retired: AtomicBool::new(false),
-                    entered: Arc::clone(&entered),
-                    acted_past_a_fault: Arc::clone(&acted_past_a_fault),
-                })),
+                lash::plugins::PluginSpec::new().with_tool_provider(
+                    lash::hook_key!("tools"),
+                    Arc::new(AskTwice {
+                        catalog: Arc::clone(&catalog),
+                        retire,
+                        retired: AtomicBool::new(false),
+                        entered: Arc::clone(&entered),
+                        acted_past_a_fault: Arc::clone(&acted_past_a_fault),
+                    }),
+                ),
             ));
         let core = core_over(double, &catalog, vec![tools]);
         let session = created_on(&core, session_id, KIMI).await;

@@ -1,35 +1,40 @@
 use super::*;
+use crate::plugin::PluginCallbackIdentity;
 
 impl ToolRegistry {
-    pub fn from_tool_provider(provider: Arc<dyn ToolProvider>) -> Result<Self, ReconfigureError> {
-        let registry = Self::empty();
-        registry.upsert_source(Arc::new(ToolProviderSource::new(
-            PLUGIN_TOOL_SOURCE_ID,
-            vec![provider],
-        )))?;
-        Ok(registry)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_tool_providers(
-        providers: Vec<Arc<dyn ToolProvider>>,
+    /// A registry of the one provider declared as `identity`.
+    pub fn from_tool_provider(
+        identity: PluginCallbackIdentity,
+        provider: Arc<dyn ToolProvider>,
     ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_provider_sources(vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), providers)])
+        Self::from_tool_registrations(vec![(identity, provider)])
     }
 
+    /// The identity of a test provider declared as `key`.
     #[cfg(test)]
-    pub(crate) fn from_tool_provider_sources(
-        sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
-    ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_registrations(sources)
+    pub(crate) fn test_provider(key: &str) -> PluginCallbackIdentity {
+        PluginCallbackIdentity::tool_provider("tests", key)
     }
 
+    /// A registry of the one test provider declared as `tools`.
+    #[cfg(test)]
+    pub(crate) fn from_test_provider(
+        provider: Arc<dyn ToolProvider>,
+    ) -> Result<Self, ReconfigureError> {
+        Self::from_tool_provider(Self::test_provider("tools"), provider)
+    }
+
+    /// A registry with one source per registered provider, keyed by the
+    /// identity its plugin or component declared it under.
     pub(crate) fn from_tool_registrations(
-        sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
+        providers: Vec<(PluginCallbackIdentity, Arc<dyn ToolProvider>)>,
     ) -> Result<Self, ReconfigureError> {
         let registry = Self::empty();
-        for (source_id, providers) in sources {
-            registry.upsert_source(Arc::new(ToolProviderSource::new(source_id, providers)))?;
+        for (identity, provider) in providers {
+            registry.upsert_source(Arc::new(ToolProviderSource::new(
+                ToolSourceKey::Provider(identity),
+                provider,
+            )))?;
         }
         Ok(registry)
     }
@@ -49,15 +54,14 @@ impl ToolRegistry {
         }
     }
 
-    pub(crate) fn execution_source_id(&self, tool: &ToolId) -> Option<String> {
+    /// The declared provider the catalog binds `tool` to, if a registered
+    /// provider advertises it.
+    pub(crate) fn execution_provider(&self, tool: &ToolId) -> Option<PluginCallbackIdentity> {
         let authority = self.inner.read_recover();
-        authority
-            .state
-            .surface
-            .get(tool)?
-            .binding
-            .source_key()
-            .map(ToString::to_string)
+        match authority.state.surface.get(tool)?.binding.source_key()? {
+            ToolSourceKey::Provider(identity) => Some(identity.clone()),
+            ToolSourceKey::Attached(_) => None,
+        }
     }
 
     pub fn generation(&self) -> u64 {

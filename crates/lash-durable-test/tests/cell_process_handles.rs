@@ -79,7 +79,7 @@ async fn world(tier: Tier, inspector: &Arc<Inspector>) -> Option<World> {
                 lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
             ),
         ))
-        .tools(inspector)
+        .tools(lash::hook_key!("tools"), inspector)
     })
     .await
 }

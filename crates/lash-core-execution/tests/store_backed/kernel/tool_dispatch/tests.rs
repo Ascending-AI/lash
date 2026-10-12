@@ -116,7 +116,8 @@ fn provider_plugins(
 ) -> Arc<PluginSession> {
     crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
         lash_core_execution::plugin::PluginDeclaration::initial("test_tools"),
-        crate::PluginSpec::new().with_tool_provider(provider),
+        crate::PluginSpec::new()
+            .with_tool_provider(lash_core_execution::hook_key!("tools"), provider),
     ))])
     .build_session(PluginSessionRequest::creation("root", authority))
     .expect("plugin session")
@@ -259,10 +260,9 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     ))
     .await;
     let grant = crate::ToolExecutionGrant::from_definition(
-        String::from("mock"),
+        crate::plugin::PluginCallbackIdentity::tool_provider("test_tools", "tools"),
         named_beta_tool("host_only"),
     )
-    .with_source_id("test_tools")
     .with_execution_binding(json!({ "kind": "test", "route": "deferred" }));
     let pending = crate::sansio::PendingToolCall {
         call_id: lash_core_execution::ToolCallId::fixture("grant-call"),
@@ -427,7 +427,10 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
         lash_core_execution::plugin::PluginDeclaration::initial("projection_policy_tools"),
         crate::PluginSpec::new()
-            .with_tool_provider(Arc::new(ProjectionPolicyTools))
+            .with_tool_provider(
+                lash_core_execution::hook_key!("tools"),
+                Arc::new(ProjectionPolicyTools),
+            )
             .with_tool_args_transform(lash_core_execution::hook_key!("capture"), hook),
     ))])
     .build_session(PluginSessionRequest::creation(

@@ -923,7 +923,7 @@ mod tool_catalog_cache_tests {
         let mut factories = crate::testing::test_standard_protocol_factories();
         factories.push(Arc::new(StaticPluginFactory::new(
             crate::plugin::PluginDeclaration::initial("admission_probe"),
-            crate::PluginSpec::new().with_tool_provider(provider),
+            crate::PluginSpec::new().with_tool_provider(crate::hook_key!("probe"), provider),
         )));
         crate::PluginHost::new(
             factories,
@@ -1090,7 +1090,7 @@ mod tool_catalog_cache_tests {
         let mut factories = crate::testing::test_standard_protocol_factories();
         factories.push(Arc::new(StaticPluginFactory::new(
             crate::plugin::PluginDeclaration::initial("pinned_surface"),
-            crate::PluginSpec::new().with_tool_provider(provider),
+            crate::PluginSpec::new().with_tool_provider(crate::hook_key!("pinned"), provider),
         )));
         let plugins = crate::PluginHost::new(
             factories,
@@ -1219,10 +1219,11 @@ mod tool_catalog_cache_tests {
             }) as Arc<dyn ToolProvider>,
         ];
         let mut factories = crate::testing::test_standard_protocol_factories();
-        let spec = providers
+        let spec = [crate::hook_key!("a"), crate::hook_key!("b")]
             .into_iter()
-            .fold(crate::PluginSpec::new(), |spec, provider| {
-                spec.with_tool_provider(provider)
+            .zip(providers)
+            .fold(crate::PluginSpec::new(), |spec, (key, provider)| {
+                spec.with_tool_provider(key, provider)
             });
         factories.push(Arc::new(StaticPluginFactory::new(
             crate::plugin::PluginDeclaration::initial("reassignable"),

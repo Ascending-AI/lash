@@ -35,16 +35,24 @@ pub const SPAWN_HOST_ORIGINATED_PROCESS: &str = "subagent_spawn_host_originated_
 /// after each of two crashes.
 const SPAWN_ATTEMPTS: std::num::NonZeroU32 = std::num::NonZeroU32::MIN.saturating_add(2);
 
-pub(crate) fn spawn_provider(child: Arc<ChildConfig>) -> Arc<dyn ToolProvider> {
+/// The provider of `spawn_agent`, which it offers only when `offered`.
+pub(crate) fn spawn_provider(child: Arc<ChildConfig>, offered: bool) -> Arc<dyn ToolProvider> {
     Arc::new(StaticToolProvider::new(
-        vec![spawn_agent_tool_definition()],
+        offered
+            .then(spawn_agent_tool_definition)
+            .into_iter()
+            .collect(),
         SpawnAgent { child },
     ))
 }
 
-pub(crate) fn submit_error_provider() -> Arc<dyn ToolProvider> {
+/// The provider of `submit_error`, which it offers only when `offered`.
+pub(crate) fn submit_error_provider(offered: bool) -> Arc<dyn ToolProvider> {
     Arc::new(StaticToolProvider::new(
-        vec![submit_error_tool_definition()],
+        offered
+            .then(submit_error_tool_definition)
+            .into_iter()
+            .collect(),
         SubmitError,
     ))
 }

@@ -156,7 +156,7 @@ fn scripted_provider(served: &Served, script: &Arc<Script>) -> ProviderHandle {
 /// A core over `backend` with the sections and `app_lookup` installed.
 fn core_over(backend: lash_core::Backend, provider: ProviderHandle) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .tools(Arc::new(AppTools))
+        .tools(crate::hook_key!("tools"), Arc::new(AppTools))
         .plugin(Arc::new(Sections))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())

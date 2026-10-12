@@ -79,7 +79,7 @@ async fn l12_pinned_routes_preserve_the_admitted_binding_and_declaration() {
         .manifest
         .bindings
         .insert("lash.mcp".into(), json!({"revision": "current"}));
-    let registry = ToolRegistry::from_tool_provider(Arc::new(Echo(definition))).unwrap();
+    let registry = ToolRegistry::from_test_provider(Arc::new(Echo(definition))).unwrap();
     let pinned = registry.pin_session_surface().unwrap();
     let mut admitted = pinned.tool_manifests().remove(0);
     admitted.name = "curated_alias".into();
@@ -203,22 +203,22 @@ fn request_pin_detects_hidden_known_id_collision() {
     let registry = ToolRegistry::empty();
     registry
         .upsert_source(Arc::new(ToolProviderSource::new(
-            "hidden-first",
-            vec![Arc::new(ToggleExactProvider {
+            ToolSourceKey::Provider(ToolRegistry::test_provider("hidden-first")),
+            Arc::new(ToggleExactProvider {
                 active: Arc::new(AtomicBool::new(true)),
                 definition: test_tool("batch", "hidden first batch"),
                 route: "first",
-            })],
+            }),
         )))
         .expect("hidden first source registered");
     registry
         .upsert_source(Arc::new(ToolProviderSource::new(
-            "hidden-second",
-            vec![Arc::new(ToggleExactProvider {
+            ToolSourceKey::Provider(ToolRegistry::test_provider("hidden-second")),
+            Arc::new(ToggleExactProvider {
                 active: Arc::clone(&second_active),
                 definition: test_tool("batch", "hidden second batch"),
                 route: "second",
-            })],
+            }),
         )))
         .expect("inactive hidden second source registered");
     let mut entries = BTreeMap::new();
@@ -256,7 +256,7 @@ async fn request_pin_preserves_transparent_wrapper_delegated_default_resolution(
         "the wrapper delegates exact-id resolution to the inner default"
     );
     let registry =
-        ToolRegistry::from_tool_provider(Arc::new(provider)).expect("filtering wrapper registry");
+        ToolRegistry::from_test_provider(Arc::new(provider)).expect("filtering wrapper registry");
     let mut entries = BTreeMap::new();
     entries.insert(
         definition.id().clone(),
@@ -290,7 +290,7 @@ async fn request_pin_preserves_transparent_wrapper_delegated_default_resolution(
 async fn pinned_source_rebinds_nonadvertised_orphan_when_its_provider_returns() {
     let available = Arc::new(AtomicBool::new(false));
     let definition = test_tool("returning_resident", "returning nonadvertised resident");
-    let registry = ToolRegistry::from_tool_provider(Arc::new(ToggleExactProvider {
+    let registry = ToolRegistry::from_test_provider(Arc::new(ToggleExactProvider {
         active: Arc::clone(&available),
         definition: definition.clone(),
         route: "returning-resident",
@@ -384,22 +384,22 @@ async fn pinned_source_executes_with_the_provider_manifest_under_alias_drift_and
     let b_active = Arc::new(AtomicBool::new(false));
     let a_seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let b_seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let registry = ToolRegistry::from_tool_provider_sources(vec![
+    let registry = ToolRegistry::from_tool_registrations(vec![
         (
-            "drifted-a".to_string(),
-            vec![Arc::new(NameRecordingExactProvider {
+            ToolRegistry::test_provider("drifted-a"),
+            Arc::new(NameRecordingExactProvider {
                 active: Arc::clone(&a_active),
                 definition: drifted_provider_definition("provider_alpha"),
                 seen: Arc::clone(&a_seen),
-            }) as Arc<dyn ToolProvider>],
+            }) as Arc<dyn ToolProvider>,
         ),
         (
-            "drifted-b".to_string(),
-            vec![Arc::new(NameRecordingExactProvider {
+            ToolRegistry::test_provider("drifted-b"),
+            Arc::new(NameRecordingExactProvider {
                 active: Arc::clone(&b_active),
                 definition: drifted_provider_definition("provider_beta"),
                 seen: Arc::clone(&b_seen),
-            }) as Arc<dyn ToolProvider>],
+            }) as Arc<dyn ToolProvider>,
         ),
     ])
     .expect("two-source resident registry");

@@ -104,7 +104,7 @@ async fn a_tools_direct_completion_runs_in_its_call_and_records_usage_and_trace(
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(Arc::new(DirectProbe))
+    .tools(crate::hook_key!("tools"), Arc::new(DirectProbe))
     .trace_jsonl_path(trace_path.clone())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core

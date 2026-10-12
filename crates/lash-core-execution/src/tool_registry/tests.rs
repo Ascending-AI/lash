@@ -446,8 +446,7 @@ fn indexed_contract_lookup_falls_back_to_by_id_resolution() {
         }
     }
 
-    let registry =
-        ToolRegistry::from_tool_providers(vec![Arc::new(ByIdOnlyProvider)]).expect("registry");
+    let registry = ToolRegistry::from_test_provider(Arc::new(ByIdOnlyProvider)).expect("registry");
     let actual = registry
         .resolve_contract("deferred_contract")
         .expect("by-id-only contract should resolve through the source index");
@@ -507,9 +506,9 @@ fn indexed_contract_lookup_does_not_cross_identity_after_name_drift() {
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120)),
     ]));
-    let registry = ToolRegistry::from_tool_providers(vec![Arc::new(DriftingProvider {
+    let registry = ToolRegistry::from_test_provider(Arc::new(DriftingProvider {
         definitions: Arc::clone(&definitions),
-    })])
+    }))
     .expect("registry");
 
     let reassigned_id = ToolDefinition::raw(
@@ -552,7 +551,7 @@ fn indexed_contract_lookup_does_not_cross_identity_after_name_drift() {
 async fn removal_hides_source_from_new_session_snapshots_without_revoking_in_flight_snapshot() {
     let entered = Arc::new(tokio::sync::Semaphore::new(0));
     let release = Arc::new(tokio::sync::Semaphore::new(0));
-    let root = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("root registry");
+    let root = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("root registry");
     let handle = root
         .add_tool_provider(Arc::new(BlockingLiveTool {
             entered: Arc::clone(&entered),
@@ -603,7 +602,7 @@ async fn removal_hides_source_from_new_session_snapshots_without_revoking_in_fli
 
 #[test]
 fn exported_tool_state_is_source_free() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+    let registry = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("registry");
     registry
         .add_tool_provider(Arc::new(MixedEnabledTool))
         .expect("live provider registered");
@@ -612,21 +611,21 @@ fn exported_tool_state_is_source_free() {
     let serialized = value.to_string();
 
     assert!(!serialized.contains("source_id"));
-    assert!(!serialized.contains(PLUGIN_TOOL_SOURCE_ID));
+    assert!(!serialized.contains("tool_provider"));
     assert!(!serialized.contains("live:"));
 }
 
 #[test]
 fn apply_state_rejects_snapshot_when_provider_is_absent() {
     let source_registry =
-        ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source registry");
+        ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("source registry");
     source_registry
         .upsert_source(Arc::new(ExternalMockSource))
         .expect("source registered");
     let snapshot = source_registry.export_state();
 
     let target_registry =
-        ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target registry");
+        ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("target registry");
     let err = target_registry
         .apply_state(snapshot.with_generation_for_conformance(target_registry.generation()))
         .expect_err("missing provider should fail");
@@ -661,10 +660,10 @@ fn apply_state_rejects_ambiguous_current_source_binding() {
 async fn single_provider_source_refuses_unknown_id_without_calling_the_provider() {
     let prepares = Arc::new(AtomicUsize::new(0));
     let source = ToolProviderSource::new(
-        "single",
-        vec![Arc::new(CountingPrepareProvider {
+        ToolSourceKey::Provider(ToolRegistry::test_provider("single")),
+        Arc::new(CountingPrepareProvider {
             prepares: Arc::clone(&prepares),
-        }) as Arc<dyn ToolProvider>],
+        }) as Arc<dyn ToolProvider>,
     );
 
     let prepare_context = crate::ToolPrepareContext::with_execution_binding(
@@ -723,7 +722,7 @@ fn refresh_sources_re_reads_multi_provider_manifests() {
     let provider: Arc<dyn ToolProvider> = Arc::new(DynamicToolProvider {
         names: Arc::clone(&names),
     });
-    let registry = ToolRegistry::from_tool_providers(vec![provider]).expect("registry");
+    let registry = ToolRegistry::from_test_provider(provider).expect("registry");
 
     let tool_names = || {
         registry
@@ -755,12 +754,11 @@ async fn cold_restore_adds_newly_advertised_tools_and_marks_state_dirty() {
     let provider: Arc<dyn ToolProvider> = Arc::new(DynamicToolProvider {
         names: Arc::clone(&names),
     });
-    let source =
-        ToolRegistry::from_tool_providers(vec![Arc::clone(&provider)]).expect("source registry");
+    let source = ToolRegistry::from_test_provider(Arc::clone(&provider)).expect("source registry");
     let snapshot = source.export_state();
 
     names.lock_recover().push("dynamic_two".to_string());
-    let resumed = ToolRegistry::from_tool_providers(vec![provider]).expect("cold resume registry");
+    let resumed = ToolRegistry::from_test_provider(provider).expect("cold resume registry");
     let report = resumed
         .restore_state(snapshot.clone())
         .expect("restore live surface");
@@ -788,7 +786,7 @@ async fn fork_with_state_adds_newly_advertised_tools() {
     let provider: Arc<dyn ToolProvider> = Arc::new(DynamicToolProvider {
         names: Arc::clone(&names),
     });
-    let registry = ToolRegistry::from_tool_providers(vec![provider]).expect("registry");
+    let registry = ToolRegistry::from_test_provider(provider).expect("registry");
     let snapshot = registry.export_state();
     names.lock_recover().push("dynamic_two".to_string());
 
@@ -810,7 +808,7 @@ async fn fork_with_state_adds_newly_advertised_tools() {
 
 #[tokio::test]
 async fn dispatch_manifest_lookup_does_not_mutate_registry_generation() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+    let registry = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("registry");
     registry
         .upsert_source(Arc::new(ExactResolvingSource {
             manifest_resolutions: Arc::new(AtomicUsize::new(0)),
@@ -842,7 +840,7 @@ async fn unadmitted_exact_manifest_is_not_dispatchable() {
     let manifest_resolutions = Arc::new(AtomicUsize::new(0));
     let contract_resolutions = Arc::new(AtomicUsize::new(0));
     let executions = Arc::new(AtomicUsize::new(0));
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+    let registry = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("registry");
     registry
         .upsert_source(Arc::new(ExactResolvingSource {
             manifest_resolutions: Arc::clone(&manifest_resolutions),
@@ -880,14 +878,14 @@ async fn unadmitted_exact_manifest_is_not_dispatchable() {
 async fn execution_grant_routes_through_ordinary_provider_contexts_without_catalog_membership() {
     let prepared_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
     let executed_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+    let registry = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("registry");
     registry
         .upsert_source(Arc::new(ToolProviderSource::new(
-            "exact",
-            vec![Arc::new(GrantBindingProvider {
+            ToolSourceKey::Provider(ToolRegistry::test_provider("exact")),
+            Arc::new(GrantBindingProvider {
                 prepared_bindings: Arc::clone(&prepared_bindings),
                 executed_bindings: Arc::clone(&executed_bindings),
-            })],
+            }),
         )))
         .expect("source registered");
     let registry = registry
@@ -903,10 +901,9 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
     );
 
     let grant = crate::ToolExecutionGrant::from_definition(
-        String::from("mock"),
+        ToolRegistry::test_provider("exact"),
         test_tool("host_only", "host-only"),
     )
-    .with_source_id("exact")
     .with_execution_binding(json!({ "kind": "test", "route": "grant" }));
     let prepare_context = crate::ToolPrepareContext::with_execution_binding(
         crate::RuntimeOwner::Session(SessionId::from("registry-test")),
@@ -916,7 +913,7 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
         grant.execution_binding.clone(),
         crate::FleetFormat::current(),
     )
-    .with_granted_source_id(grant.source_id.clone());
+    .with_granted_provider(grant.provider.clone());
     let prepared = registry
         .prepare_tool_call(crate::ToolPrepareCall {
             tool_id: grant.manifest().id.clone(),
@@ -936,7 +933,7 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
     let context = crate::testing::mock_attempt_context_from(
         &test_tool_context()
             .with_tool_execution_binding(grant.execution_binding.clone())
-            .with_granted_source_id(grant.source_id.clone()),
+            .with_granted_provider(grant.provider.clone()),
     );
     let args = json!({});
     let result = leaf_outcome(
@@ -970,14 +967,14 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
 #[tokio::test]
 async fn run_tool_granted_honors_the_granted_source_binding() {
     let executed_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+    let registry = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("registry");
     registry
         .upsert_source(Arc::new(ToolProviderSource::new(
-            "exact",
-            vec![Arc::new(GrantBindingProvider {
+            ToolSourceKey::Provider(ToolRegistry::test_provider("exact")),
+            Arc::new(GrantBindingProvider {
                 prepared_bindings: Arc::new(std::sync::Mutex::new(Vec::new())),
                 executed_bindings: Arc::clone(&executed_bindings),
-            })],
+            }),
         )))
         .expect("source registered");
     let registry = registry
@@ -985,10 +982,9 @@ async fn run_tool_granted_honors_the_granted_source_binding() {
         .expect("resident catalog with live grant sources");
 
     let grant = crate::ToolExecutionGrant::from_definition(
-        String::from("mock"),
+        ToolRegistry::test_provider("exact"),
         test_tool("host_only", "host-only"),
     )
-    .with_source_id("exact")
     .with_execution_binding(json!({ "kind": "test", "route": "grant" }));
     let args = json!({});
 
@@ -1006,41 +1002,10 @@ async fn run_tool_granted_honors_the_granted_source_binding() {
     );
 }
 
+/// KEYED-PROVIDERS (FIG-6073): a grant executes through the provider it
+/// names, even when another registered provider resolves the same tool id.
 #[tokio::test]
-async fn execution_grant_without_source_does_not_infer_registry_route() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
-    registry
-        .upsert_source(Arc::new(ExactResolvingSource {
-            manifest_resolutions: Arc::new(AtomicUsize::new(0)),
-            contract_resolutions: Arc::new(AtomicUsize::new(0)),
-            executions: Arc::new(AtomicUsize::new(0)),
-        }))
-        .expect("source registered");
-
-    let grant = crate::ToolExecutionGrant::from_definition(
-        String::from("mock"),
-        test_tool("host_only", "host-only"),
-    );
-    let context = crate::testing::mock_attempt_context_from(
-        &test_tool_context().with_granted_source_id(grant.source_id.clone()),
-    );
-    let args = json!({});
-    let result = leaf_outcome(
-        registry
-            .execute(ToolCall::new(grant.manifest(), &args, &context))
-            .await,
-    );
-
-    assert!(!result.is_success());
-    assert_eq!(
-        result.value_for_projection(),
-        json!("Granted tool id `tool:host_only` is missing an explicit tool source")
-    );
-    assert!(!registry.export_state().contains(&tool_id("host_only")));
-}
-
-#[tokio::test]
-async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
+async fn execution_grant_routes_to_the_provider_it_names() {
     struct HiddenSameNameProvider {
         id: &'static str,
         result: &'static str,
@@ -1083,36 +1048,41 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
         }
     }
 
-    let registry = ToolRegistry::from_tool_providers(vec![
-        Arc::new(HiddenSameNameProvider {
-            id: "tool:hidden_alpha",
-            result: "wrong-provider",
-        }),
-        Arc::new(HiddenSameNameProvider {
-            id: "tool:hidden_zeta",
-            result: "right-provider",
-        }),
+    let registry = ToolRegistry::from_tool_registrations(vec![
+        (
+            ToolRegistry::test_provider("alpha"),
+            Arc::new(HiddenSameNameProvider {
+                id: "tool:hidden",
+                result: "wrong-provider",
+            }) as Arc<dyn ToolProvider>,
+        ),
+        (
+            ToolRegistry::test_provider("zeta"),
+            Arc::new(HiddenSameNameProvider {
+                id: "tool:hidden",
+                result: "right-provider",
+            }),
+        ),
     ])
     .expect("registry");
     let registry = registry
         .pin_session_surface()
         .expect("resident snapshot keeps hidden providers out of its admitted source");
     let grant = crate::ToolExecutionGrant::from_definition(
-        String::from("mock"),
+        ToolRegistry::test_provider("zeta"),
         ToolDefinition::raw(
-            "tool:hidden_zeta",
+            "tool:hidden",
             "shared_hidden_name",
-            "grant selects the second hidden provider by id",
+            "grant names the second hidden provider",
             ToolDefinition::default_input_schema(),
             json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120)),
-    )
-    .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID);
+    );
 
     let context = crate::testing::mock_attempt_context_from(
-        &test_tool_context().with_granted_source_id(grant.source_id.clone()),
+        &test_tool_context().with_granted_provider(grant.provider.clone()),
     );
     let args = json!({});
     let result = leaf_outcome(
@@ -1164,7 +1134,7 @@ async fn pinned_source_preserves_provider_execute_result_and_intents() {
         }
     }
 
-    let registry = ToolRegistry::from_tool_provider(Arc::new(IntentProvider))
+    let registry = ToolRegistry::from_test_provider(Arc::new(IntentProvider))
         .expect("intent provider registry")
         .pin_session_surface()
         .expect("pinned intent provider registry");
@@ -1255,13 +1225,19 @@ async fn resident_snapshot_refuses_mismatched_known_id_without_overwriting_adver
     }
 
     let mismatched = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let registry = ToolRegistry::from_tool_providers(vec![
-        Arc::new(AdvertisedProvider),
-        Arc::new(KnownIdProvider {
-            mismatched: Arc::clone(&mismatched),
-        }),
+    let registry = ToolRegistry::from_tool_registrations(vec![
+        (
+            ToolRegistry::test_provider("advertised"),
+            Arc::new(AdvertisedProvider) as Arc<dyn ToolProvider>,
+        ),
+        (
+            ToolRegistry::test_provider("known"),
+            Arc::new(KnownIdProvider {
+                mismatched: Arc::clone(&mismatched),
+            }),
+        ),
     ])
-    .expect("grouped provider registry");
+    .expect("provider registry");
     let mut restored = BTreeMap::new();
     restored.insert(
         tool_id("known"),
@@ -1293,10 +1269,11 @@ async fn resident_snapshot_refuses_mismatched_known_id_without_overwriting_adver
     );
     assert_eq!(
         error,
-        Some(format!(
-            "validation error: source `{PLUGIN_TOOL_SOURCE_ID}` resolved tool id `tool:known` \
+        Some(
+            "validation error: source `tests:tool_provider:known` resolved tool id `tool:known` \
              with mismatched manifest id `tool:advertised`"
-        ))
+                .to_owned()
+        )
     );
 }
 
@@ -1335,7 +1312,7 @@ fn unadmitted_alias_lookup_does_not_fall_through_to_source() {
     }
 
     let registry =
-        ToolRegistry::from_tool_provider(Arc::new(IdOccupiedProvider)).expect("registry");
+        ToolRegistry::from_test_provider(Arc::new(IdOccupiedProvider)).expect("registry");
 
     assert!(registry.resolve_manifest_by_id(&tool_id("alias")).is_none());
     assert_eq!(
@@ -1349,7 +1326,7 @@ fn unadmitted_alias_lookup_does_not_fall_through_to_source() {
 
 #[test]
 fn upsert_source_preserves_membership_on_refresh() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+    let registry = ToolRegistry::from_test_provider(Arc::new(MockTool)).expect("registry");
     registry
         .upsert_source(Arc::new(ExternalMockSource))
         .expect("source registered");

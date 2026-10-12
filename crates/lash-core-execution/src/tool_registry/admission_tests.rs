@@ -629,7 +629,7 @@ fn same_generation_restore_fences_an_in_flight_refresh() {
 
 #[test]
 fn removed_provider_destructor_reenters_registry_after_unlock() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(ReentrantDropProvider {
+    let registry = ToolRegistry::from_test_provider(Arc::new(ReentrantDropProvider {
         registry: None,
         read_completed: Arc::new(AtomicBool::new(false)),
     }))

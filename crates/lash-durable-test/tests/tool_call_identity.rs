@@ -219,10 +219,13 @@ async fn world(tier: Tier) -> Option<(World, Arc<Witness>)> {
     let witness = Arc::new(Witness::default());
     let probes = Arc::clone(&witness);
     let world = World::new(tier, move |backend| {
-        lash::LashCore::standard_builder(backend.clone()).tools(Arc::new(Probes {
-            witness: probes,
-            backend: backend.clone(),
-        }))
+        lash::LashCore::standard_builder(backend.clone()).tools(
+            lash::hook_key!("tools"),
+            Arc::new(Probes {
+                witness: probes,
+                backend: backend.clone(),
+            }),
+        )
     })
     .await?;
     Some((world, witness))
@@ -632,10 +635,13 @@ async fn retry_into_a_park(tier: Tier, records: &Arc<Records>) -> Option<(World,
             .trace_sink(sink)
             .trace_level(lash::tracing::TraceLevel::Extended)
             .telemetry_content(lash::tracing::TelemetryContent::Captured)
-            .tools(Arc::new(Probes {
-                witness: probes,
-                backend: backend.clone(),
-            }))
+            .tools(
+                lash::hook_key!("tools"),
+                Arc::new(Probes {
+                    witness: probes,
+                    backend: backend.clone(),
+                }),
+            )
     })
     .await?;
     let name = "retry-into-a-park";
@@ -840,10 +846,13 @@ mod sqlite_memory_traced {
                 .trace_sink(sink)
                 .trace_level(lash::tracing::TraceLevel::Extended)
                 .telemetry_content(lash::tracing::TelemetryContent::Captured)
-                .tools(std::sync::Arc::new(super::Probes {
-                    witness: probes,
-                    backend: backend.clone(),
-                }))
+                .tools(
+                    lash::hook_key!("tools"),
+                    std::sync::Arc::new(super::Probes {
+                        witness: probes,
+                        backend: backend.clone(),
+                    }),
+                )
         })
         .await
         .expect("SQLite memory is available");

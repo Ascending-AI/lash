@@ -191,9 +191,12 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
         scripted_provider(Arc::clone(&requests), malformed_then_done),
         mock_llm_profile_spec(),
     )
-    .tools(Arc::new(CountingTools {
-        executed: Arc::clone(&executed),
-    }))
+    .tools(
+        crate::hook_key!("tools"),
+        Arc::new(CountingTools {
+            executed: Arc::clone(&executed),
+        }),
+    )
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core");
     let session = core
@@ -402,10 +405,13 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
         scripted_provider(Arc::clone(&requests), discovery_calls(mixed)),
         mock_llm_profile_spec(),
     )
-    .tools(Arc::new(DiscoveryTools {
-        admitted: Arc::clone(&admitted),
-        refused: Arc::clone(&refused),
-    }))
+    .tools(
+        crate::hook_key!("tools"),
+        Arc::new(DiscoveryTools {
+            admitted: Arc::clone(&admitted),
+            refused: Arc::clone(&refused),
+        }),
+    )
     .trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(
         trace_path.clone(),
     )))
@@ -621,7 +627,7 @@ async fn persisted_provider_parts(
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(Arc::new(LookupTool))
+    .tools(crate::hook_key!("tools"), Arc::new(LookupTool))
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core");
     let session = core

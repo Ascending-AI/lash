@@ -860,7 +860,7 @@ async fn a_linked_childs_attachment_is_held_by_the_child_alone(tier: Tier) {
     let deployment = deploy(tier, Vec::new(), |builder| {
         builder
             .serve_test_llm_profile(model, metadata())
-            .tools(write_attachment_tool())
+            .tools(lash::hook_key!("tools"), write_attachment_tool())
     })
     .await;
     let parent = SessionId::from("attachment-parent");
@@ -1084,7 +1084,7 @@ async fn a_turn_report_sums_two_model_calls_usage(tier: Tier) {
     let deployment = deploy(tier, Vec::new(), |builder| {
         builder
             .serve_test_llm_profile(model, metadata())
-            .tools(write_attachment_tool())
+            .tools(lash::hook_key!("tools"), write_attachment_tool())
     })
     .await;
     let output = settle(&deployment.core, "report-two-calls", "write the attachment").await;
@@ -1332,7 +1332,8 @@ fn write_component(world: &Arc<World>) -> Arc<dyn lash::process::ProcessComponen
     Arc::new(
         lash_core::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial(WRITE_COMPONENT.component()),
-            lash_core::facade_support::PluginSpec::new().with_tool_provider(write_tool(world)),
+            lash_core::facade_support::PluginSpec::new()
+                .with_tool_provider(lash::hook_key!("tools"), write_tool(world)),
         )
         .as_component(WRITE_COMPONENT.format())
         .expect("the write tool is a process component"),
@@ -1931,7 +1932,10 @@ fn isolated_core(backend: &lash::Backend, tools: &Arc<IsolatedTools>) -> lash::L
     });
     rlm_core(backend)
         .serve_test_llm_profile(model, metadata())
-        .tools(Arc::clone(tools) as Arc<dyn lash_core::ToolProvider>)
+        .tools(
+            lash::hook_key!("tools"),
+            Arc::clone(tools) as Arc<dyn lash_core::ToolProvider>,
+        )
 }
 
 /// The processes of the isolated engine the registry holds.

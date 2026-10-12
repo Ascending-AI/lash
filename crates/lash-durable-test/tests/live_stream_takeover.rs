@@ -381,8 +381,10 @@ async fn a_second_model_call_reset_preserves_the_first_calls_blocks_on_sqlite_me
         .into_handle();
     let world =
         served::World::with_model(served::Tier::SqliteMemory, Vec::new(), model, |backend| {
-            lash::LashCore::standard_builder(backend.clone())
-                .tools(Arc::new(lash_core::testing::runtime_helpers::EchoTool))
+            lash::LashCore::standard_builder(backend.clone()).tools(
+                lash::hook_key!("tools"),
+                Arc::new(lash_core::testing::runtime_helpers::EchoTool),
+            )
         })
         .await
         .expect("the SQLite world opens");

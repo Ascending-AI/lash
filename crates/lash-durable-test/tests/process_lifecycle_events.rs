@@ -121,7 +121,7 @@ fn core(
         .build()
         .expect("the backend assembles");
     let core = lash::LashCore::standard_builder(backend.clone())
-        .tools(write_tool(world))
+        .tools(lash::hook_key!("tools"), write_tool(world))
         .process_component(
             lash_core::testing::tool_component(WRITE_COMPONENT, write_tool(world)),
             WRITE_COMPONENT,

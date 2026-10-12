@@ -74,7 +74,8 @@ impl crate::plugins::SessionPlugin for StatePlugin {
         &self,
         reg: &mut crate::plugins::PluginRegistrar,
     ) -> std::result::Result<(), crate::plugins::PluginError> {
-        reg.tools().provider(Arc::new(self.clone()))
+        reg.tools()
+            .provider(crate::hook_key!("tools"), Arc::new(self.clone()))
     }
 }
 

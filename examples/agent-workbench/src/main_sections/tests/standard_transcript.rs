@@ -93,7 +93,7 @@ async fn two_round_turn() -> (lash::persistence::SessionReadView, TurnId) {
                 .build()
                 .expect("profile"),
         )
-        .tools(Arc::new(Echo))
+        .tools(lash::hook_key!("tools"), Arc::new(Echo))
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))

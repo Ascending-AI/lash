@@ -51,15 +51,15 @@ impl ProductionToolHandlers<'_> {
         parent: Option<crate::RuntimeInvocation>,
         attribution: &crate::session::ToolObservationAttribution,
     ) -> Result<SingletonToolCall, SingletonRunError> {
-        let source = invocation
+        let granted = invocation
             .execution_grant
             .as_deref()
-            .and_then(|grant| grant.source_id.as_deref());
+            .map(|grant| &grant.provider);
         let binding = self
             .context
             .dispatch()
             .composition
-            .tool_run_binding(&invocation.tool_id, source)
+            .tool_run_binding(&invocation.tool_id, granted)
             .map_err(crate::RuntimeEffectControllerError::from)?;
         let mut attribution = attribution.clone();
         if invocation.issuing_language_node_id.is_some() {

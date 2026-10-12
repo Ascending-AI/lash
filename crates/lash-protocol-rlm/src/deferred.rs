@@ -30,12 +30,19 @@ use lash_vm_runtime::{HostBoundary, ToolBindingError};
 /// host-owned Tool Execution Binding that routes a call to the backing
 /// account, service, secret or remote executor.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ToolGrant {
     /// The callable contract and identity of the resolved tool.
     pub definition: lash_core::ToolDefinition,
-    /// Optional registry source route authorized by the host.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_id: Option<String>,
+    /// The declared provider the host authorizes to execute the tool. A
+    /// grant that names none executes through the provider the session's
+    /// catalog binds the tool to.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lash_core::plugin::declared_tool_provider::option::deserialize"
+    )]
+    pub provider: Option<lash_core::plugin::PluginCallbackIdentity>,
     /// Host-owned routing authority, opaque to the runtime.
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub execution_binding: serde_json::Value,
@@ -45,13 +52,14 @@ impl ToolGrant {
     pub fn new(definition: lash_core::ToolDefinition) -> Self {
         Self {
             definition,
-            source_id: None,
+            provider: None,
             execution_binding: serde_json::Value::Null,
         }
     }
 
-    pub fn with_source_id(mut self, source_id: impl Into<String>) -> Self {
-        self.source_id = Some(source_id.into());
+    /// Execute the granted tool through the provider declared as `provider`.
+    pub fn with_provider(mut self, provider: lash_core::plugin::PluginCallbackIdentity) -> Self {
+        self.provider = Some(provider);
         self
     }
 
@@ -433,18 +441,15 @@ pub(crate) fn offer_deferred_grants(
                     source,
                 })?;
         }
-        let owner = ctx
-            .tool_execution_owner(&definition.manifest.id, grant.source_id.as_deref())
+        let provider = ctx
+            .tool_provider(&definition.manifest.id, grant.provider.as_ref())
             .map_err(|source| DeferredResolutionError::Owner {
                 path: path.clone(),
                 source,
             })?;
-        let mut execution_grant =
-            lash_core::ToolExecutionGrant::from_definition(owner, definition.clone())
+        let execution_grant =
+            lash_core::ToolExecutionGrant::from_definition(provider, definition.clone())
                 .with_execution_binding(grant.execution_binding.clone());
-        if let Some(source_id) = grant.source_id.as_deref() {
-            execution_grant = execution_grant.with_source_id(source_id);
-        }
         grants.insert(execution_grant.manifest().id.clone(), execution_grant);
     }
     Ok(grants)

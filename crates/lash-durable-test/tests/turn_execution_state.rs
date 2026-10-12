@@ -172,7 +172,7 @@ fn core_with(
                 Some(code_executor),
             ),
         )
-        .tools(tools)
+        .tools(lash::hook_key!("tools"), tools)
 }
 
 /// A model whose answer `respond` decides from each request and its

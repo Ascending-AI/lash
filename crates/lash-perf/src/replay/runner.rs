@@ -144,7 +144,7 @@ pub(crate) fn build_core(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider::model(book), provider::metadata()?)
-        .tools(tools)
+        .tools(lash::hook_key!("tools"), tools)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("lash-perf-replay"),
             lash::persistence::LeaseIncarnationId::new(format!("{}", std::process::id())),

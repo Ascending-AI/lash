@@ -230,7 +230,7 @@ await control.finish(await handle);"#,
         ),
         &[RETRYING_DIRECT_COMPONENT],
     )
-    .tools(Arc::new(RetryingDirectTools))
+    .tools(crate::hook_key!("tools"), Arc::new(RetryingDirectTools))
     .process_component(
         lash_core::testing::tool_component(
             RETRYING_DIRECT_COMPONENT,
@@ -359,7 +359,10 @@ async fn context_overflow_mid_turn_continues_on_the_same_session() -> Result<()>
         let core =
             explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
                 .serve_test_llm_profile(provider, mock_llm_profile_spec())
-                .tools(Arc::new(OverflowPayloadTools(Arc::clone(&tool_calls))))
+                .tools(
+                    crate::hook_key!("tools"),
+                    Arc::new(OverflowPayloadTools(Arc::clone(&tool_calls))),
+                )
                 .build(crate::testing::runtime_lease_owner())?;
         let session_id = crate::SessionId::parse(format!("overflow-continuation-{classified}"))
             .expect("nonblank session identity");

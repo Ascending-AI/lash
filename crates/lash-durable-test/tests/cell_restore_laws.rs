@@ -425,8 +425,9 @@ impl lash::tools::DeferredToolResolver for GrantingResolver {
             .map(|path| {
                 let resolution = if *path == format!("tools.{GRANTED}") && !redeployed {
                     lash::tools::DeferredToolResolution::Resolved(Box::new(
-                        lash::tools::DeferredToolGrant::new(granted(GRANTED))
-                            .with_source_id(lash::tools::PLUGIN_TOOL_SOURCE_ID),
+                        lash::tools::DeferredToolGrant::new(granted(GRANTED)).with_provider(
+                            lash::plugins::PluginCallbackIdentity::tool_provider("tools", "tools"),
+                        ),
                     ))
                 } else {
                     lash::tools::DeferredToolResolution::NotAvailable { note: None }
@@ -906,7 +907,7 @@ impl CellTurn {
                             .build()
                             .expect("the model's metadata"),
                     )
-                    .tools(tools)
+                    .tools(lash::hook_key!("tools"), tools)
                     .plugin(Arc::new(
                         lash::process_controls::SessionProcessAdminPluginFactory::new(
                             lash_core::lifetime::session_or_starter,

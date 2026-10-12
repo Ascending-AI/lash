@@ -277,10 +277,13 @@ pub(crate) async fn prove_pending_tool_completion_on(
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
         )
-        .tools(Arc::new(PendingToolProvider::new(
-            key_tx,
-            crate::invariants::ToolObserver::new(recorder.clone()),
-        )) as Arc<dyn lash_core::ToolProvider>)
+        .tools(
+            lash::hook_key!("tools"),
+            Arc::new(PendingToolProvider::new(
+                key_tx,
+                crate::invariants::ToolObserver::new(recorder.clone()),
+            )) as Arc<dyn lash_core::ToolProvider>,
+        )
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session = crate::open_created_session("mock-model", &core, "sim-pending-tool-session")

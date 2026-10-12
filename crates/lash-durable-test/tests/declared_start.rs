@@ -819,9 +819,10 @@ impl World {
                     if shape.producer == Producer::PromiseAll {
                         builder
                     } else {
-                        builder
-                            .tools(probe)
-                            .tools(Arc::new(lash_core_execution::testing::FixtureTools::new()))
+                        builder.tools(lash::hook_key!("tools"), probe).tools(
+                            lash::hook_key!("tools-2"),
+                            Arc::new(lash_core_execution::testing::FixtureTools::new()),
+                        )
                     }
                 },
             )

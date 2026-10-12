@@ -13,10 +13,17 @@ pub(crate) fn finish_tool_id() -> lash_core::ToolId {
     lash_core::finish_tool_id(FINISH_TOOL_NAME)
 }
 
-/// The default finish: a provider's tool input is a JSON object, so the
-/// answer is any object, whole.
+/// The provider of the default finish, registered in every standard
+/// session: it offers `finish` only to a session whose turns only a control
+/// call ends. A provider's tool input is a JSON object, so the answer is any
+/// object, whole.
 #[expect(clippy::expect_used, reason = "a fixed object schema is admitted")]
-pub(crate) fn finish_tool_provider() -> lash_core::FinishToolProvider {
+pub(crate) fn finish_tool_provider(
+    termination: lash_core::TerminationMode,
+) -> lash_core::FinishToolProvider {
+    if termination.prose_ends_turn() {
+        return lash_core::FinishToolProvider::new([]);
+    }
     let mut definition = lash_core::finish_tool(
         FINISH_TOOL_NAME,
         lash_core::JsonSchema::admit(serde_json::json!({ "type": "object" }))

@@ -405,12 +405,17 @@ impl Steering {
                         model(self.arrival, Arc::clone(&self.core), Arc::clone(&self.seen)),
                         metadata(),
                     )
-                    .tools(match self.arrival {
-                        Arrival::Candidate => finish_round(Arc::clone(&self.core), self.arrival),
-                        Arrival::Work | Arrival::Terminal => {
-                            steer_round(Arc::clone(&self.core), self.arrival)
-                        }
-                    })
+                    .tools(
+                        lash::hook_key!("tools"),
+                        match self.arrival {
+                            Arrival::Candidate => {
+                                finish_round(Arc::clone(&self.core), self.arrival)
+                            }
+                            Arrival::Work | Arrival::Terminal => {
+                                steer_round(Arc::clone(&self.core), self.arrival)
+                            }
+                        },
+                    )
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
                         lash::persistence::LeaseOwnerId::new("steering-deployment"),
                         lash::persistence::LeaseIncarnationId::new("steering-boot"),

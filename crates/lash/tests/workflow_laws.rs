@@ -134,7 +134,7 @@ fn echo_tool() -> Arc<lash::tools::StaticToolProvider<Echo>> {
 fn echo_component() -> lash::process::StaticProcessComponent {
     lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(ECHO_TOOLS.component()),
-        lash::plugins::PluginSpec::new().with_tool_provider(echo_tool()),
+        lash::plugins::PluginSpec::new().with_tool_provider(lash::hook_key!("tools"), echo_tool()),
     )
     .as_component(ECHO_TOOLS.format())
     .expect("the echo tools are a process component")
@@ -173,7 +173,7 @@ async fn core_with_process_tools(
             lash::vm::TYPESCRIPT_DIALECT,
             bounds,
         )))
-        .tools(echo_tool())
+        .tools(lash::hook_key!("tools"), echo_tool())
         .process_component(Arc::new(echo_component()), ECHO_TOOLS);
     // A process a workflow starts runs under its starter's environment.
     let builder = if process_tools {

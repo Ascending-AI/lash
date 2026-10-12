@@ -58,9 +58,15 @@ impl PresentationBinding {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdmittedBinding {
-    /// The tool provider that executes the body.
+    /// The tool provider that executes the body, by its declared key.
+    #[serde(
+        deserialize_with = "crate::store::plugin_writers::declared_tool_provider::deserialize"
+    )]
     pub executable: PluginCallbackIdentity,
-    /// The tool provider that prepared the request.
+    /// The tool provider that prepared the request, by its declared key.
+    #[serde(
+        deserialize_with = "crate::store::plugin_writers::declared_tool_provider::deserialize"
+    )]
     pub preparation: PluginCallbackIdentity,
     pub presentation: PresentationBinding,
 }

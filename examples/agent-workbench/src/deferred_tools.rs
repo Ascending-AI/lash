@@ -25,7 +25,17 @@ use sha2::{Digest, Sha256};
 
 const SEARCH_TOOL_NAME: &str = "search_tools";
 const SEARCH_CALL_PATH: &str = "tools.search";
-const DEFERRED_SOURCE_ID: &str = "agent_workbench";
+/// The key the workbench declares its deferred execution provider under.
+pub(crate) const DEFERRED_PROVIDER_KEY: lash::plugins::HookKey = lash::hook_key!("deferred");
+
+/// The provider every deferred grant executes through: the workbench
+/// plugin's deferred execution provider.
+fn deferred_provider() -> lash::plugins::PluginCallbackIdentity {
+    lash::plugins::PluginCallbackIdentity::tool_provider(
+        "agent_workbench",
+        DEFERRED_PROVIDER_KEY.as_str(),
+    )
+}
 const PREVIEW_MODULE_LIMIT: usize = 2;
 const PREVIEW_CALL_NAME_LIMIT: usize = 4;
 const SEARCH_RESULT_LIMIT: usize = 20;
@@ -341,7 +351,7 @@ impl StaticToolExecute for SearchDeferredTools {
                     .get(&result.call_path)
                     .expect("search result comes from deferred catalogue");
                 let grant = DeferredToolGrant::new(definition.clone())
-                    .with_source_id(DEFERRED_SOURCE_ID)
+                    .with_provider(deferred_provider())
                     .with_execution_binding(json!({
                         "kind": "agent_workbench_deferred",
                         "call_path": result.call_path,
@@ -728,7 +738,7 @@ mod tests {
                 .expect("deferred definition")
                 .clone(),
         )
-        .with_source_id(DEFERRED_SOURCE_ID)
+        .with_provider(deferred_provider())
         .with_execution_binding(json!({
             "kind": "agent_workbench_deferred",
             "call_path": call_path,
@@ -767,7 +777,7 @@ mod tests {
             restored.definition.id().as_str(),
             "workbench:deferred:text_sha256"
         );
-        assert_eq!(restored.source_id.as_deref(), Some(DEFERRED_SOURCE_ID));
+        assert_eq!(restored.provider, Some(deferred_provider()));
         assert!(
             reopened.resolver.installed.lock_recover().is_empty(),
             "restart discovery must not install before replay commitment"

@@ -141,7 +141,7 @@ async fn every_registered_first_party_tool_succeeds_from_a_production_cell(tier:
                     backend.clone(),
                     served::rlm(backend, None, sim::untimed_workers()),
                 )
-                .tools(tools)
+                .tools(lash::hook_key!("tools"), tools)
             },
         )
         .await

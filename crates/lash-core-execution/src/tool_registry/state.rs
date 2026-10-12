@@ -1,11 +1,6 @@
 use super::*;
 pub use lash_core_store::tool_state::{ToolState, ToolStateEntry};
 
-/// Owning plugin and execution source for providers registered with the Core
-/// builder. Deferred grants for those tools must name this source; grants for
-/// other plugins must name their owning plugin's id.
-pub const PLUGIN_TOOL_SOURCE_ID: &str = "embed_tools";
-
 /// Ephemeral identity for a live tool-provider source.
 ///
 /// Session hosts use this handle to correlate provider bookkeeping and later

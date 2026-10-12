@@ -327,7 +327,9 @@ impl lash::tools::DeferredToolResolver for GrantedLeaves {
                 let resolution = if *path == format!("tools.{GRANTED_LEAF}") {
                     lash::tools::DeferredToolResolution::Resolved(Box::new(
                         lash::tools::DeferredToolGrant::new(leaf_definition(GRANTED_LEAF))
-                            .with_source_id(lash::tools::PLUGIN_TOOL_SOURCE_ID),
+                            .with_provider(lash::plugins::PluginCallbackIdentity::tool_provider(
+                                "tools", "tools",
+                            )),
                     ))
                 } else {
                     lash::tools::DeferredToolResolution::NotAvailable { note: None }
@@ -363,10 +365,13 @@ impl Producers {
             } else {
                 lash::LashCore::standard_builder(backend.clone())
             };
-            builder.tools(Arc::new(Leaves {
-                rendezvous: leaves,
-                backend: backend.clone(),
-            }))
+            builder.tools(
+                lash::hook_key!("tools"),
+                Arc::new(Leaves {
+                    rendezvous: leaves,
+                    backend: backend.clone(),
+                }),
+            )
         })
         .await?;
         Some(Self { world, rendezvous })
@@ -1061,7 +1066,7 @@ impl lash_core::ToolProvider for SugarTools {
 fn sugar_plugin(witness: Arc<Witness>) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     let hooked = Arc::clone(&witness);
     let spec = lash_core::facade_support::PluginSpec::new()
-        .with_tool_provider(Arc::new(SugarTools { witness }))
+        .with_tool_provider(lash::hook_key!("tools"), Arc::new(SugarTools { witness }))
         .with_tool_args_check(
             lash_core::hook_key!("guard"),
             Arc::new(move |input| {

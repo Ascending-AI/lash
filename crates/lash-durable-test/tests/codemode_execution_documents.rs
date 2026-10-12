@@ -84,7 +84,7 @@ async fn world_with_tools(
             lash_core::testing::tool_component(TOOLS_COMPONENT, Arc::clone(&tools)),
             TOOLS_COMPONENT,
         )
-        .tools(tools)
+        .tools(lash::hook_key!("tools"), tools)
         .trace_sink(sink)
     })
     .await

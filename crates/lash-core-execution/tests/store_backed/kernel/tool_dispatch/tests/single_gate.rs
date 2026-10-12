@@ -12,7 +12,8 @@ async fn authority_hidden_tool_executes_on_pinned_registry_but_is_absent_from_ca
     });
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
         lash_core_execution::plugin::PluginDeclaration::initial("test_tools"),
-        crate::PluginSpec::new().with_tool_provider(provider),
+        crate::PluginSpec::new()
+            .with_tool_provider(lash_core_execution::hook_key!("tools"), provider),
     ))])
     .build_session(PluginSessionRequest::creation(
         "root",

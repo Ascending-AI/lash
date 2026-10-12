@@ -68,7 +68,7 @@ fn rlm_core(backend: lash_core::Backend, tools: bool) -> Result<LashCore> {
         mock_llm_profile_spec(),
     );
     let builder = if tools {
-        builder.tools(Arc::new(AppTools))
+        builder.tools(crate::hook_key!("tools"), Arc::new(AppTools))
     } else {
         builder
     };

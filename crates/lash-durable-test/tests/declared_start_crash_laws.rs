@@ -338,7 +338,10 @@ impl Spawn {
                                 ),
                             ),
                         ))
-                        .tools(Arc::new(Echo(Arc::clone(&self.echoes))))
+                        .tools(
+                            lash::hook_key!("tools"),
+                            Arc::new(Echo(Arc::clone(&self.echoes))),
+                        )
                 } else {
                     builder
                 };

@@ -38,7 +38,7 @@ async fn world(
         move |backend| {
             let builder = lash::LashCore::standard_builder(backend.clone());
             match tools {
-                Some(tools) => builder.tools(tools),
+                Some(tools) => builder.tools(lash::hook_key!("tools"), tools),
                 None => builder,
             }
         },
@@ -915,13 +915,14 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
         Vec::new(),
         attachment_model(Arc::clone(&asked)),
         |backend| {
-            lash::LashCore::standard_builder(backend.clone()).tools(Arc::new(
-                AttachmentResultTool {
+            lash::LashCore::standard_builder(backend.clone()).tools(
+                lash::hook_key!("tools"),
+                Arc::new(AttachmentResultTool {
                     media_type: "application/octet-stream",
                     bytes: UNSUPPORTED_BYTES,
                     label: "workspace_badge.bin",
-                },
-            ))
+                }),
+            )
         },
     )
     .await
@@ -981,13 +982,14 @@ async fn accepted_tool_attachment_round_trips_without_degradation(tier: Tier) {
         Vec::new(),
         attachment_model(Arc::clone(&asked)),
         |backend| {
-            lash::LashCore::standard_builder(backend.clone()).tools(Arc::new(
-                AttachmentResultTool {
+            lash::LashCore::standard_builder(backend.clone()).tools(
+                lash::hook_key!("tools"),
+                Arc::new(AttachmentResultTool {
                     media_type: "image/png",
                     bytes: IMAGE_BYTES,
                     label: "accepted.png",
-                },
-            ))
+                }),
+            )
         },
     )
     .await
@@ -1131,7 +1133,8 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
         .build()
         .into_handle();
     let Some(world) = World::with_model(tier, Vec::new(), model, |backend| {
-        lash::LashCore::standard_builder(backend.clone()).tools(Arc::new(ArrayAttachmentTool))
+        lash::LashCore::standard_builder(backend.clone())
+            .tools(lash::hook_key!("tools"), Arc::new(ArrayAttachmentTool))
     })
     .await
     else {
@@ -1293,16 +1296,19 @@ async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_fini
         .into_handle(),
         move |backend| {
             lash::LashCore::standard_builder(backend.clone())
-                .tools(Arc::new(TerminalControlTool {
-                    controls: vec![lash_core::ToolControl::Turn {
-                        control: lash_core::TurnControl::Finish {
-                            value: lash_core::ToolValue::untrusted_json(serde_json::json!(
-                                "accepted"
-                            )),
-                            value_schema: None,
-                        },
-                    }],
-                }))
+                .tools(
+                    lash::hook_key!("tools"),
+                    Arc::new(TerminalControlTool {
+                        controls: vec![lash_core::ToolControl::Turn {
+                            control: lash_core::TurnControl::Finish {
+                                value: lash_core::ToolValue::untrusted_json(serde_json::json!(
+                                    "accepted"
+                                )),
+                                value_schema: None,
+                            },
+                        }],
+                    }),
+                )
                 .plugin(cancel_at_completion)
         },
     )

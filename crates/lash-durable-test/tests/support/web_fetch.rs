@@ -63,8 +63,9 @@ impl lash::tools::DeferredToolResolver for GrantFetch {
             .map(|path| {
                 let resolution = if *path == "web.fetch" {
                     lash::tools::DeferredToolResolution::Resolved(Box::new(
-                        lash::tools::DeferredToolGrant::new(fetch_definition())
-                            .with_source_id(lash::tools::PLUGIN_TOOL_SOURCE_ID),
+                        lash::tools::DeferredToolGrant::new(fetch_definition()).with_provider(
+                            lash::plugins::PluginCallbackIdentity::tool_provider("tools", "tools"),
+                        ),
                     ))
                 } else {
                     lash::tools::DeferredToolResolution::NotAvailable { note: None }

@@ -325,7 +325,10 @@ fn standard_core(
                 },
             ),
         ))
-        .tools(Arc::clone(tool) as Arc<dyn lash_core::ToolProvider>)
+        .tools(
+            lash::hook_key!("tools"),
+            Arc::clone(tool) as Arc<dyn lash_core::ToolProvider>,
+        )
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))

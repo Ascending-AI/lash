@@ -693,10 +693,13 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120));
     let native_id = native.manifest.id.clone();
-    let rebuilt = lash_core::ToolRegistry::from_tool_provider(Arc::new(NativeAndMcpProvider {
-        native,
-        mcp: crate::McpToolProvider::new(Arc::clone(&pool)),
-    }));
+    let rebuilt = lash_core::ToolRegistry::from_tool_provider(
+        lash_core::plugin::PluginCallbackIdentity::tool_provider("mcp", "servers"),
+        Arc::new(NativeAndMcpProvider {
+            native,
+            mcp: crate::McpToolProvider::new(Arc::clone(&pool)),
+        }),
+    );
 
     // With the reservation reverted, the rejected attach above becomes a second child.
     pool.shutdown_all().await;

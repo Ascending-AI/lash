@@ -159,7 +159,9 @@ fn builder_accepts_tools_and_plugins(
     tools: Arc<dyn lash::tools::ToolProvider>,
     plugin: Arc<dyn lash::plugins::PluginFactory>,
 ) -> lash::LashCoreBuilder {
-    builder.tools(tools).plugin(plugin)
+    builder
+        .tools(lash::hook_key!("tools"), tools)
+        .plugin(plugin)
 }
 
 fn a_core_is_built_over_one_backend(backend: lash::Backend) -> lash::LashCoreBuilder {

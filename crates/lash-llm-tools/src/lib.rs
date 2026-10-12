@@ -16,6 +16,10 @@ use serde_json::{Value, json};
 /// The plugin id `llm_query` registers under.
 pub const LLM_TOOLS_PLUGIN_ID: &str = "llm_tools";
 
+/// The key the `llm_query` provider is declared under, in sessions and in
+/// process components alike.
+const LLM_QUERY_PROVIDER_KEY: lash_core::plugin::HookKey = lash_core::hook_key!("llm-query");
+
 /// The usage source, and the name of the direct purpose, of every
 /// `llm_query` sub-question.
 pub const LLM_QUERY_PURPOSE: &str = "llm_query";
@@ -62,7 +66,8 @@ impl lash_core::facade_support::SessionPlugin for LlmToolsPlugin {
     }
 
     fn register(&self, reg: &mut lash_core::plugin::PluginRegistrar) -> Result<(), PluginError> {
-        reg.tools().provider(Arc::clone(&self.provider))?;
+        reg.tools()
+            .provider(LLM_QUERY_PROVIDER_KEY, Arc::clone(&self.provider))?;
         let (section, renderer) = llm_query_section()?;
         reg.prompt().section(section, renderer)
     }
@@ -133,7 +138,7 @@ impl lash_core::plugin::ProcessComponentFactory for LlmToolsComponent {
         _cx: &lash_core::plugin::ProcessComponentContext<'_>,
     ) -> Result<lash_core::plugin::ProcessComponentSpec, PluginError> {
         Ok(lash_core::plugin::ProcessComponentSpec {
-            tool_providers: vec![Arc::new(llm_query_provider())],
+            tool_providers: vec![(LLM_QUERY_PROVIDER_KEY, Arc::new(llm_query_provider()))],
             direct_prompt_sections: vec![llm_query_section()?],
             ..lash_core::plugin::ProcessComponentSpec::default()
         })

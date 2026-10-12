@@ -210,7 +210,7 @@ async fn witness_core_with(
         builder
     };
     let builder = match tools {
-        Some(tools) => builder.tools(tools),
+        Some(tools) => builder.tools(lash::hook_key!("tools"), tools),
         None => builder,
     };
     builder

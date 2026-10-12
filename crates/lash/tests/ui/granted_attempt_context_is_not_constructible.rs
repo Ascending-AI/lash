@@ -3,7 +3,7 @@
 // different manifest to `ToolCall::new` would bypass the dispatcher's
 // prepared-identity refusal. `run_tool_granted` is the sole entry.
 fn main() {
-    let grant = lash::tools::ToolExecutionGrant::from_definition(String::from("mock"), lash::tools::ToolDefinition::raw(
+    let grant = lash::tools::ToolExecutionGrant::from_definition(lash::plugins::PluginCallbackIdentity::tool_provider("mock", "tools"), lash::tools::ToolDefinition::raw(
         "tool:grant_only",
         "grant_only",
         "granted",
