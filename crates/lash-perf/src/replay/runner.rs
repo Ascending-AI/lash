@@ -93,11 +93,12 @@ fn tempfile_dir() -> Result<std::path::PathBuf> {
     Ok(dir)
 }
 
-fn build_core(
+pub(crate) fn build_core(
     workload: &Workload,
     backend: &lash::Backend,
     book: Arc<ScriptBook>,
     workers: Option<&lash::vm::WorkerService>,
+    tools: Arc<dyn lash_core::ToolProvider>,
 ) -> Result<lash::LashCore> {
     let builder = match (workload.protocol, workers) {
         (Protocol::Standard, _) => {
@@ -143,7 +144,7 @@ fn build_core(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider::model(book), provider::metadata()?)
-        .tools(provider::fixtures()?)
+        .tools(tools)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("lash-perf-replay"),
             lash::persistence::LeaseIncarnationId::new(format!("{}", std::process::id())),
@@ -186,7 +187,13 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             )
         })
         .transpose()?;
-    let core = build_core(workload, &backend, Arc::clone(&book), workers.as_ref())?;
+    let core = build_core(
+        workload,
+        &backend,
+        Arc::clone(&book),
+        workers.as_ref(),
+        provider::fixtures()?,
+    )?;
     let cleanup = lash::testing::quiesce_artifact_cleanup(&core).await;
     let pool = workers
         .as_ref()

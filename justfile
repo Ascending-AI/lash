@@ -137,6 +137,24 @@ perf-replay *args:
   export LASH_VM_WORKER
   "$binary" replay --store-dir "$artifacts/stores" --out "$artifacts/replay-receipt.json" {{args}}
 
+# Optional identical-work control; never part of the replay merge budgets.
+# Produces an optimized FULL-mode table, JSON receipt and peak RSS evidence.
+perf-code-mode-control *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  artifacts="${LASH_CONTROL_ARTIFACT_DIR:-{{repo}}/target/perf-code-mode-control}"
+  mkdir -p "$artifacts"
+  kiln build --config=optimized //crates/lash-perf:lash-perf__bin //crates/lash-vm-worker:lash-vm-worker__bin \
+    --materializations final --build-report "$artifacts/build-report.json"
+  binary="$(python3 "{{repo}}/tools/buck2/outputs.py" \
+    --report "$artifacts/build-report.json" --label //crates/lash-perf:lash-perf__bin --single)"
+  LASH_VM_WORKER="$(python3 "{{repo}}/tools/buck2/outputs.py" \
+    --report "$artifacts/build-report.json" --label //crates/lash-vm-worker:lash-vm-worker__bin --single)"
+  export LASH_VM_WORKER
+  (ulimit -v 8388608; /usr/bin/time -v -o "$artifacts/peak-rss.txt" \
+    "$binary" code-mode-control --store-dir "$artifacts/stores-$BASHPID" \
+    --out "$artifacts/receipt.json" {{args}}) | tee "$artifacts/table.txt"
+
 # Re-bless the per-merge replay gate's baseline from a fresh run of its
 # subset, in the build the gate test uses. Commit the rewritten
 # crates/lash-perf/workloads/replay/baseline.json with the change that moved it.

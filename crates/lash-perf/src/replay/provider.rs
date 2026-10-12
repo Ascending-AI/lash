@@ -80,6 +80,15 @@ impl ScriptBook {
             .unwrap_or_default()
     }
 
+    /// Count calls without consuming the per-turn deviation evidence.
+    pub(crate) fn total_calls(&self) -> u64 {
+        self.calls
+            .lock_recover()
+            .values()
+            .map(|calls| (calls.scripted + calls.past_script) as u64)
+            .sum()
+    }
+
     fn respond(&self, request: &LlmRequest) -> LlmResponse {
         let Some((marker, at)) = latest_marker(request) else {
             return text(request, FALLBACK_TEXT);
@@ -236,12 +245,16 @@ pub const LARGE: &str = "fixture_large";
 /// workers first, so the cell awaiting it resumes on a fresh worker.
 pub const SLOW: &str = "fixture_slow";
 
-struct Fixtures;
+type FixtureObserver = dyn Fn(&str, &serde_json::Value) + Send + Sync;
+struct Fixtures(Option<Arc<FixtureObserver>>);
 
 #[async_trait::async_trait]
 impl StaticToolExecute for Fixtures {
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let args = call.args;
+        if let Some(observe) = &self.0 {
+            observe(call.name(), args);
+        }
         let key = args
             .get("key")
             .and_then(serde_json::Value::as_str)
@@ -339,6 +352,13 @@ fn definition(
 
 /// The fixture tools, bound as `tools.<name>` in code mode.
 pub fn fixtures() -> anyhow::Result<Arc<dyn lash_core::ToolProvider>> {
+    observed_fixtures(None)
+}
+
+/// The same fixtures with a benchmark-owned observation at body entry.
+pub(crate) fn observed_fixtures(
+    observer: Option<Arc<FixtureObserver>>,
+) -> anyhow::Result<Arc<dyn lash_core::ToolProvider>> {
     let key = serde_json::json!({ "type": "string" });
     let number = serde_json::json!({ "type": "number" });
     Ok(Arc::new(StaticToolProvider::new(
@@ -366,6 +386,6 @@ pub fn fixtures() -> anyhow::Result<Arc<dyn lash_core::ToolProvider>> {
                 false,
             )?,
         ],
-        Fixtures,
+        Fixtures(observer),
     )))
 }

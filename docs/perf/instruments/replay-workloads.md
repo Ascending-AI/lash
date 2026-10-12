@@ -118,6 +118,72 @@ Counted metrics compare across hosts. Allocation counts differ between
 `debug` and `release` builds. Timed metrics (`*_ms`) compare only within one
 host and build and are never gated.
 
+## Code-mode control (optional)
+
+```sh
+. ./env.sh
+just perf-code-mode-control                         # N=1,8,32; five samples per leg
+just perf-code-mode-control --n 8,64 --repeats 10
+```
+
+This builds the optimized harness and TypeScript worker through Kiln, then
+runs under the 8 GiB virtual-memory cap with `/usr/bin/time -v`. The text table,
+JSON receipt, and peak RSS land in `target/perf-code-mode-control/`;
+`LASH_CONTROL_ARTIFACT_DIR` moves them. Each invocation uses new file stores
+with **WAL and synchronous=FULL**, standard durable settings (recorded in the
+header), and `Once` fixture executions. No network, merge budget or timing gate
+is involved. The underlying subcommand is `lash-perf code-mode-control --n
+1,8,32 --repeats 5 --store-dir <new-directory> --out <receipt.json>`.
+
+Every leg executes the same N `fixture_lookup` calls with keys `item-0` through
+`item-(N-1)`. The runner refuses a sample unless the observed tool names and
+inputs match exactly, including across an owner crash. Plain sequential sends
+one call per scripted model response; plain parallel sends all N in one
+response. TypeScript uses sequential awaits or `Promise.all`, Python uses
+sequential awaits or `asyncio.gather`. Plain legs finish with one final text
+response; cells finish through `control.finish`/`control_finish`. Model-call
+counts make that orchestration difference explicit.
+
+The resume leg SIGKILLs its owner and workers synchronously after k=floor(N/2)
+lookup outcomes have committed under `round.outcome`, before delivery returns
+to the cell. For N=1, k=0: it cuts just before the first `cell.snapshot+admit` commit.
+That admission writes `x_start` as well, so cutting after it would interrupt
+a `Once` call whose body had not yet run. A new process opens the same database and attaches to the
+original send id; the engine reaps the dead node and resumes the stored turn.
+There is no graceful drain, host-driven turn, or worker-only crash substitution.
+Resume latency runs from fresh-owner initialization (before store open and
+pool/core setup) to the next tool body's entry. The receipt keeps the bytes
+returned by durable SQL calls, graph nodes/bytes hydrated by that point, and
+the combined sample and its raw prefix (subtract prefix counters to recover
+the resume-only window); separate owner sample JSON files remain beside each
+database. Exact input equality rejects repeated
+completed tools. Hydration measures restored graph work, not replayed source
+instructions or all filesystem bytes.
+
+Wall and CPU columns show median/p90 over the stated repeat count (nearest-rank
+p90, no warmups). Fresh windows bracket send through outcome after session
+creation; the resume row sums prefix and fresh-owner-through-outcome windows,
+excluding the dead-owner/reexec gap. CPU sums the nanosecond host process clock
+and the pool's charged worker CPU; raw host and worker values remain separate.
+Fresh workers' initialization can be charged by their first cell execution;
+these are independent-session samples, not warm persistent-session throughput.
+
+**Logical owner commits** count successful, fenced observer receipts by label;
+mailbox and maintenance writes are not owner commits. **Physical syncs** are
+`null`/`n/a`: the existing observers have no fsync/fdatasync counter. WAL frames
+use the SQLite witness's cache-write page count; bytes are frames × (page size
++ 24-byte frame header), excluding WAL headers and checkpoint I/O. Neither
+column estimates syncs. SQL statements and rows read/written use the existing
+process witness across all store connections. `staged_bytes` counts graph node
+bytes prepared for owner commit attempts, including restaged nodes and the
+uncommitted zero-prefix attempt; it is distinct from
+physical WAL bytes. `bytes_read` counts returned scalar SQL payload in the
+decorated durable port, including writes' returned values, and excludes catalog
+reads and OS read amplification. The receipt records commit, dirty status,
+executable SHA-256, compiler/profile, N, repeats, raw label counts and all
+samples. Compare timed results only within a host/build; counted differences
+explain whether batching saves model rounds, owner commits or storage work.
+
 ## The per-merge gate
 
 `//crates/lash-perf:replay__test` runs `lash-perf replay-gate`: the subset in

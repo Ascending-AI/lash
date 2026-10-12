@@ -5,6 +5,7 @@
 //!
 //! See `docs/perf/instruments/replay-workloads.md`.
 
+pub mod control;
 pub mod gate;
 pub mod meter;
 pub mod provider;

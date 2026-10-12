@@ -156,6 +156,10 @@ enum Command {
     OfferedLoad(lash_perf::offered_load::Args),
     /// Replay standard sessions end to end and write their counted receipt.
     Replay(lash_perf::replay::ReplayArgs),
+    /// Compare identical plain and code-mode tool work, including owner recovery.
+    CodeModeControl(lash_perf::replay::control::Args),
+    #[command(hide = true)]
+    CodeModeControlSample(lash_perf::replay::control::SampleArgs),
     /// The per-merge counted replay gate: the fast subset against the
     /// committed budgets and baseline; `--bless` re-blesses the baseline.
     ReplayGate(lash_perf::replay::GateArgs),
@@ -347,6 +351,16 @@ fn run_main() -> anyhow::Result<()> {
                 .build()?;
             runtime.block_on(lash_perf::offered_load::run(options))?;
             return Ok(());
+        }
+        Some(Command::CodeModeControl(options)) => {
+            return lash_perf::replay::control::run(options);
+        }
+        Some(Command::CodeModeControlSample(options)) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()?;
+            return runtime.block_on(lash_perf::replay::control::sample(options));
         }
         Some(Command::Replay(options)) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
