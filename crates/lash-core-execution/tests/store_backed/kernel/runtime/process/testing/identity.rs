@@ -7,6 +7,8 @@ struct PriorFamilyEnv {
     bytes: Vec<u8>,
 }
 
+lash_core_execution::impl_current_fleet_format!(PriorFamilyEnv);
+
 #[async_trait::async_trait]
 impl crate::ProcessEnvStore for PriorFamilyEnv {
     async fn publish_process_env(

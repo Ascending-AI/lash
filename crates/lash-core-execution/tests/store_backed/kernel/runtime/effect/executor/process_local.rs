@@ -531,6 +531,23 @@ mod tests {
         interleavings: AtomicUsize,
     }
 
+    impl crate::store::FleetFormatStore for FenceStartBeforeFirstAcquire {
+        fn fleet_format(&self) -> crate::FleetFormat {
+            self.inner.fleet_format()
+        }
+
+        fn plugin_writers(&self) -> crate::store::PluginWriterRangesFuture<'_> {
+            self.inner.plugin_writers()
+        }
+
+        fn provision_plugin_writers<'a>(
+            &'a self,
+            registrations: &'a [crate::store::plugin_writers::PluginWriterRegistration],
+        ) -> crate::store::PluginWriterRangesFuture<'a> {
+            self.inner.provision_plugin_writers(registrations)
+        }
+    }
+
     #[async_trait::async_trait]
     impl crate::ProcessEnvStore for FenceStartBeforeFirstAcquire {
         async fn publish_process_env(

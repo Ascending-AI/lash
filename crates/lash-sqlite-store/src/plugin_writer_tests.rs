@@ -547,16 +547,17 @@ async fn a_deleted_writer_entry_refuses_writes_and_publishes_nothing() {
 /// plugin is (FIG-6061): on a finalized fleet, an environment naming a
 /// component that writes config format 2 natively publishes at format 2, and
 /// the record permits the component everything up to its native format.
+///
+/// A fresh store records its build's writable floor, which is this build's
+/// own epoch only where the build writes one epoch; the law finalizes the
+/// fleet so it states the same fleet under every feature variant.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_component_publishes_its_native_config_format_on_a_finalized_fleet() {
     const COMPONENT: &str = "native-two";
-    let set = SqliteStoreSet::memory().await.expect("open the store set");
+    let (_run, set) = file_set().await;
+    crate::testing::finalize_fleet_format(set.location(), FleetFormat::writable().max())
+        .expect("finalize the fleet at this build's own epoch");
     let store = set.process_env_store();
-    assert_eq!(
-        lash_core_execution::FleetFormatStore::fleet_format(store.as_ref()).version(),
-        FleetFormat::writable().max(),
-        "this build's own fleet epoch: the fleet is finalized"
-    );
     let registry = lash_core_execution::testing::native_format_two_component(COMPONENT);
     let env = lash_core_execution::testing::component_env(COMPONENT, version(2));
     let claim =
@@ -567,12 +568,17 @@ async fn a_component_publishes_its_native_config_format_on_a_finalized_fleet() {
         )
         .expect("host pin claim");
     let held = lash_core_execution::hold_process_env(
-        &lash_core_execution::ProcessEnvPorts::admitting(store.as_ref(), &registry, store.as_ref()),
+        &lash_core_execution::ProcessEnvPorts::admitting(store.as_ref(), &registry),
         &claim,
         &lash_core_execution::ProcessEnvSelection::New(env.clone()),
     )
     .await
     .expect("the native format publishes");
+    assert_eq!(
+        lash_core_execution::FleetFormatStore::fleet_format(store.as_ref()).version(),
+        FleetFormat::writable().max(),
+        "the hold wrote under this build's own fleet epoch"
+    );
     assert_eq!(held, env.stable_ref().expect("the environment's reference"));
     assert_eq!(
         lash_core_execution::FleetFormatStore::plugin_writers(store.as_ref())

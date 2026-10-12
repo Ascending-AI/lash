@@ -442,9 +442,8 @@ async fn hold_native_two(
         )
         .expect("host pin claim");
     let env_store = storage.process_env_store();
-    let fleet = storage.store();
     lash_core_execution::hold_process_env(
-        &lash_core_execution::ProcessEnvPorts::admitting(&env_store, &registry, &fleet),
+        &lash_core_execution::ProcessEnvPorts::admitting(&env_store, &registry),
         &claim,
         &lash_core_execution::ProcessEnvSelection::New(env),
     )

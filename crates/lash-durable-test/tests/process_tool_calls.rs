@@ -597,6 +597,23 @@ impl BodyReadFault {
     }
 }
 
+impl lash_core::store::FleetFormatStore for BodyReadFault {
+    fn fleet_format(&self) -> lash_core::FleetFormat {
+        self.inner.fleet_format()
+    }
+
+    fn plugin_writers(&self) -> lash_core::store::PluginWriterRangesFuture<'_> {
+        self.inner.plugin_writers()
+    }
+
+    fn provision_plugin_writers<'a>(
+        &'a self,
+        registrations: &'a [lash_core::store::plugin_writers::PluginWriterRegistration],
+    ) -> lash_core::store::PluginWriterRangesFuture<'a> {
+        self.inner.provision_plugin_writers(registrations)
+    }
+}
+
 #[async_trait::async_trait]
 impl lash_core::ProcessEnvStore for BodyReadFault {
     async fn publish_process_env(

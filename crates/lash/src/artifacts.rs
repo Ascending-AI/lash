@@ -95,7 +95,6 @@ impl HostArtifacts {
             core.backend().attachment_referrers(),
             Arc::clone(&cleanup),
             Arc::clone(&clock),
-            core.backend().session_store_factory(),
         );
         Self {
             process_env,
@@ -131,7 +130,6 @@ impl HostArtifacts {
         let ports = lash_core::ProcessEnvPorts::admitting(
             self.process_env.as_ref(),
             self.engines.components(),
-            self.definition_ports.fleet().as_ref(),
         );
         lash_core::hold_process_env(
             &ports,

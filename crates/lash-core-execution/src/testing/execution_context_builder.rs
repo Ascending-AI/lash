@@ -87,7 +87,6 @@ impl TestExecutionPorts {
             backend.attachment_referrers(),
             backend.artifact_cleanup(),
             Arc::clone(&self.clock),
-            backend.session_store_factory(),
         ));
         self
     }

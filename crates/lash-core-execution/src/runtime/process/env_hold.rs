@@ -11,7 +11,6 @@ use lash_core_store::process_env::{ProcessEnv, ProcessEnvRefusal};
 
 use super::model::{ProcessEnvRef, ProcessEnvStore, process_env_ref_for_bytes};
 use crate::plugin::ProcessComponentRegistry;
-use crate::store::FleetFormatStore;
 use crate::{ArtifactStoreError, PluginError, ReferrerClaim};
 
 /// Which environment a start holds: one stated now, admitted and published
@@ -39,13 +38,13 @@ pub enum HoldEnvError {
     Fault(PluginError),
 }
 
-/// What a hold reads and writes through: the environment store, and, for a
-/// hold that admits new environments, the installed components they are
-/// admitted against and the fleet record their writers are provisioned in.
+/// What a hold reads and writes through: the environment store (and the
+/// fleet record it publishes against), and, for a hold that admits new
+/// environments, the installed components they are admitted against.
 #[derive(Clone, Copy)]
 pub struct ProcessEnvPorts<'a> {
     store: &'a dyn ProcessEnvStore,
-    admission: Option<(&'a ProcessComponentRegistry, &'a dyn FleetFormatStore)>,
+    components: Option<&'a ProcessComponentRegistry>,
 }
 
 impl<'a> ProcessEnvPorts<'a> {
@@ -53,20 +52,19 @@ impl<'a> ProcessEnvPorts<'a> {
     pub fn published_only(store: &'a dyn ProcessEnvStore) -> Self {
         Self {
             store,
-            admission: None,
+            components: None,
         }
     }
 
     /// Ports that admit new environments against `registry`, provisioning
-    /// its components' writer ranges in `fleet`.
+    /// its components' writer ranges in `store`'s fleet record.
     pub fn admitting(
         store: &'a dyn ProcessEnvStore,
         registry: &'a ProcessComponentRegistry,
-        fleet: &'a dyn FleetFormatStore,
     ) -> Self {
         Self {
             store,
-            admission: Some((registry, fleet)),
+            components: Some(registry),
         }
     }
 }
@@ -95,13 +93,13 @@ pub async fn hold_process_env(
 ) -> Result<ProcessEnvRef, HoldEnvError> {
     match selection {
         ProcessEnvSelection::New(env) => {
-            let Some((registry, fleet)) = ports.admission else {
+            let Some(registry) = ports.components else {
                 return Err(HoldEnvError::Fault(PluginError::Session(
                     "this start path admits no new process environment".into(),
                 )));
             };
             registry.admit(env).map_err(HoldEnvError::Refused)?;
-            provision_component_writers(registry, fleet, env)
+            provision_component_writers(registry, ports.store, env)
                 .await
                 .map_err(|error| HoldEnvError::Fault(error.into()))?;
             let bytes = env.to_store_bytes().map_err(|error| {
@@ -131,23 +129,24 @@ pub async fn hold_process_env(
     }
 }
 
-/// Provision the fleet writer ranges of `registry`'s components when the
-/// record does not name one `env` names (§3.3 step 8): the components get the
+/// Provision the fleet writer ranges of `registry`'s components in the
+/// record `store` publishes against, when it does not name one `env` names
+/// (§3.3 step 8): the components get the
 /// provisioning session plugins get from their declarations, so a component
 /// writes past format 1 once the fleet permits it, and only its oldest
 /// writable format inside a rollback window. A recorded range is never moved.
 async fn provision_component_writers(
     registry: &ProcessComponentRegistry,
-    fleet: &dyn FleetFormatStore,
+    store: &dyn ProcessEnvStore,
     env: &ProcessEnv,
 ) -> Result<(), crate::StoreError> {
-    let ranges = fleet.plugin_writers().await?;
+    let ranges = store.plugin_writers().await?;
     if env
         .components()
         .iter()
         .any(|entry| ranges.permitted_writer(&entry.id().writer_key()).is_err())
     {
-        fleet
+        store
             .provision_plugin_writers(&registry.writer_registrations())
             .await?;
     }

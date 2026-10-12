@@ -369,8 +369,13 @@ impl DeclaredLaunch {
 /// bytes under a content-addressed reference, kept alive by referrer edges.
 /// Only the cleanup executor severs edges, through
 /// [`Self::end_process_env_referrer`].
+///
+/// The store answers the fleet record its publications are admitted against
+/// through [`FleetFormatStore`](crate::store::FleetFormatStore): a hold
+/// provisions its components' writer ranges in that same record, never in a
+/// second port's.
 #[async_trait::async_trait]
-pub trait ProcessEnvStore: Send + Sync {
+pub trait ProcessEnvStore: crate::store::FleetFormatStore + Send + Sync {
     /// Store `bytes` under `env_ref` if absent, verify they equal any stored
     /// bytes, and add the claim's edge, in one transaction that first takes
     /// the referrer's lock, checks its fence (`ReferrerEnded`) and arms the

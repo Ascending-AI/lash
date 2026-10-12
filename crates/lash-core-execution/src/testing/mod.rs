@@ -172,12 +172,9 @@ pub async fn publish_process_env_for_testing(
     claim: &crate::ReferrerClaim,
     env: &crate::ProcessEnv,
 ) -> Result<crate::ProcessEnvRef, crate::PluginError> {
-    /// No component is installed, so no writer range is ever provisioned.
-    struct NoFleetRecord;
-    lash_core_store::impl_current_fleet_format!(NoFleetRecord);
     let components = crate::plugin::ProcessComponentRegistry::new();
     crate::hold_process_env(
-        &crate::ProcessEnvPorts::admitting(env_store, &components, &NoFleetRecord),
+        &crate::ProcessEnvPorts::admitting(env_store, &components),
         claim,
         &crate::ProcessEnvSelection::New(env.clone()),
     )
@@ -1378,9 +1375,9 @@ pub async fn execute_effect_locally(
     }
 }
 
-/// The process-exec-env port of a context with no store: publication and
-/// acquisition are refused, a cleanup has nothing to sever, and reads find
-/// nothing.
+/// The process-exec-env port of a context with no store: publication,
+/// acquisition and writer provisioning are refused, a cleanup has nothing to
+/// sever, and reads find nothing (no fleet record among them).
 ///
 /// It keeps nothing, so it is not a persistence store: it stands where a test
 /// needs *a* port it never publishes through.
@@ -1392,6 +1389,23 @@ impl UnavailableProcessEnvStore {
         crate::ArtifactStoreError::Backend(
             "this context has no process execution environment store".into(),
         )
+    }
+}
+
+impl crate::store::FleetFormatStore for UnavailableProcessEnvStore {
+    fn fleet_format(&self) -> crate::FleetFormat {
+        crate::FleetFormat::current()
+    }
+
+    fn provision_plugin_writers<'a>(
+        &'a self,
+        _registrations: &'a [crate::store::plugin_writers::PluginWriterRegistration],
+    ) -> crate::store::PluginWriterRangesFuture<'a> {
+        Box::pin(async {
+            Err(crate::StoreError::Backend(
+                "this context has no process execution environment store".into(),
+            ))
+        })
     }
 }
 

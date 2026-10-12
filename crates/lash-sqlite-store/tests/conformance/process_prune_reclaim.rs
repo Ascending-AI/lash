@@ -34,7 +34,6 @@ lash_conformance::process_start_staging_tests!({
         lash_core_execution::StoreSet::attachment_referrers(&*backend),
         lash_core_execution::StoreSet::artifact_cleanup(&*backend),
         Arc::new(lash_core_execution::facade_support::SystemClock),
-        lash_core_execution::StoreSet::session_store_factory(&*backend),
     );
     (backend, registry, ports)
 });
@@ -55,7 +54,6 @@ lash_conformance::process_definition_tests!({
         lash_core_execution::StoreSet::attachment_referrers(&*backend),
         lash_core_execution::StoreSet::artifact_cleanup(&*backend),
         Arc::new(lash_core_execution::facade_support::SystemClock),
-        lash_core_execution::StoreSet::session_store_factory(&*backend),
     );
     (backend, registry, ports)
 });

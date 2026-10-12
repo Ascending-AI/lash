@@ -253,11 +253,9 @@ fn taken(from: &Mutex<Vec<ResolvedArtifactCleanup>>) -> Vec<ResolvedArtifactClea
 
 struct EnvStore(Arc<Applied>);
 
-/// A fleet with no recorded writer ranges: nothing here admits a new
-/// environment.
-struct NoFleetRecord;
-
-lash_core_store::impl_current_fleet_format!(NoFleetRecord);
+// A fleet with no recorded writer ranges: nothing here admits a new
+// environment.
+lash_core_store::impl_current_fleet_format!(EnvStore);
 
 #[async_trait::async_trait]
 impl ProcessEnvStore for EnvStore {
@@ -1099,7 +1097,6 @@ async fn a_prepared_frame_is_reclaimed_only_after_its_failed_commit_cannot_repla
         Arc::new(crate::attachments::NoopAttachmentReferrers),
         harness.ledger.clone(),
         Arc::new(crate::testing::TestClock::new(1)),
-        Arc::new(NoFleetRecord),
     );
     let draft = ProcessDefinitionDraft::new(
         ENGINE_KIND,
