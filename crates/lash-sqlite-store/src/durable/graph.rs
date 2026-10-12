@@ -135,10 +135,18 @@ lash_store_sql::statements! {
         insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
              SELECT value ->> 0, value ->> 1 FROM json_each(?1)";
 
-        /// Every edge from a parent in JSON `?1`: where a peel descends once
-        /// its parent is gone, read before the delete takes the edges.
-        peel_edges = "SELECT parent_hash, child_hash FROM blob_edges
-             WHERE parent_hash IN (SELECT value FROM json_each(?1))";
+        /// Deletable parents in JSON `?1` and their children, before the
+        /// delete takes their edges. Retained parents contribute no rows;
+        /// a deletable leaf contributes its parent with a NULL child.
+        peel_edges = "SELECT candidate.hash, edge.child_hash FROM blobs AS candidate
+             LEFT JOIN blob_edges AS edge ON edge.parent_hash = candidate.hash
+             WHERE candidate.hash IN (SELECT value FROM json_each(?1))
+               AND NOT EXISTS (
+                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM blob_edges AS incoming WHERE incoming.child_hash = candidate.hash
+               )";
 
         /// One level of a peel: delete every blob in JSON `?1` no root names
         /// and no edge reaches, and return each one deleted. Its edges go
@@ -595,9 +603,19 @@ fn peel_level(
         let mut statement = tx.prepare_cached(SQL.sqlite.peel_edges.sql())?;
         let mut rows = statement.query([&list])?;
         while let Some(row) = rows.next()? {
-            edges.entry(row.get(0)?).or_default().push(row.get(1)?);
+            let children = edges.entry(row.get(0)?).or_default();
+            if let Some(child) = row.get::<_, Option<String>>(1)? {
+                children.push(child);
+            }
         }
     }
+    if edges.is_empty() {
+        return Ok((0, BTreeSet::new()));
+    }
+    // Delete exactly the parents selected before this level changes any
+    // edges. A frontier may contain both a parent and its child: the child
+    // becomes deletable only after the parent goes, on the next level.
+    let list = json_array(&edges.keys().collect::<Vec<_>>());
     let gone = tx
         .prepare_cached(SQL.sqlite.peel_orphans.sql())?
         .query_map([&list], |row| row.get::<_, String>(0))?

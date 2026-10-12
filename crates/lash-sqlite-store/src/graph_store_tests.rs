@@ -276,6 +276,133 @@ law!(a_read_racing_replacement_and_its_peel_reads_one_whole_root);
 law!(an_audit_racing_commits_peels_nothing_they_rely_on);
 law!(a_reference_racing_its_roots_retirement_installs_whole_or_refuses);
 
+/// GRAPH-PEEL-WORK: retirement reads edges only from nodes it can delete.
+/// A pinned manifest and a subtree another parent reaches both stop the
+/// peel before their children; releasing the last references reclaims them.
+#[tokio::test]
+async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
+    use lash_core_store::checkpoint_graph::{
+        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
+    };
+    use lash_durable::domain::graph::ReleasePinWrite;
+    use lash_durable::{ActorKey, CommitLabel, DomainWrite, Epoch};
+
+    let tier = tier(false).await;
+    let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
+    let actor = ActorKey::session("sql-work-owner").unwrap();
+    let initial = tier.blobs().await;
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let mut encode = |tag: &str, children: &[NodeId]| {
+        let mut body = TokenWriter::new();
+        body.seq(children.len() as u64 + 1);
+        body.text(tag);
+        for child in children {
+            body.child(child.child_ref());
+        }
+        staging
+            .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(body.as_bytes()))
+            .unwrap()
+    };
+    let leaves: Vec<_> = (0..32)
+        .map(|index| encode(&format!("leaf-{index}"), &[]))
+        .collect();
+    let pinned = encode("pinned manifest", &leaves[..16]);
+    let shared = encode("shared subtree", &leaves[16..]);
+    let holder = encode("other parent", &[shared]);
+    let retired = encode("retired root", &[pinned, shared]);
+    let pin = |release: &str, root| {
+        DomainWrite::ReleasePin(ReleasePinWrite::Install {
+            release: release.into(),
+            root,
+        })
+    };
+    let retire = |release: &str, expected| {
+        DomainWrite::ReleasePin(ReleasePinWrite::Retire {
+            release: release.into(),
+            expected,
+        })
+    };
+    let mut tx = tier
+        .store
+        .begin(&actor, Epoch(identity.epoch))
+        .await
+        .unwrap();
+    tx.stage(staging.into_nodes().into_values());
+    for write in [
+        pin("manifest", pinned),
+        pin("holder", holder),
+        pin("retired", retired),
+    ] {
+        tx.write(write);
+    }
+    tier.store
+        .commit(tx, CommitLabel::new("peel.install"))
+        .await
+        .unwrap();
+
+    let mut tx = tier
+        .store
+        .begin(&actor, Epoch(identity.epoch))
+        .await
+        .unwrap();
+    tx.write(retire("retired", retired));
+    let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+        "peel.retire",
+        "sqlite",
+        tier.store.commit(tx, CommitLabel::new("peel.retire")),
+    )
+    .await;
+    answer.unwrap();
+    let stored = tier.blobs().await;
+    assert!(!stored.contains(&retired.to_hex()));
+    assert!(stored.contains(&pinned.to_hex()));
+    assert!(stored.contains(&shared.to_hex()));
+    for leaf in &leaves {
+        assert!(stored.contains(&leaf.to_hex()));
+    }
+    let edge_rows: u64 = receipt
+        .shapes
+        .iter()
+        .filter(|(sql, _)| sql.starts_with("select ") && sql.contains("main.blob_edges"))
+        .map(|(_, shape)| shape.rows_returned)
+        .sum();
+    eprintln!(
+        "GRAPH-PEEL SQL {}",
+        serde_json::to_string(&receipt).unwrap()
+    );
+    assert_eq!(edge_rows, 2, "retained descendants' edges are never read");
+
+    // Put a parent and its child in the same retirement frontier. The
+    // child's edges must be read on the next level, after the parent goes.
+    let mut tx = tier
+        .store
+        .begin(&actor, Epoch(identity.epoch))
+        .await
+        .unwrap();
+    tx.write(pin("shared", shared));
+    tier.store
+        .commit(tx, CommitLabel::new("peel.shared_pin"))
+        .await
+        .unwrap();
+    let mut tx = tier
+        .store
+        .begin(&actor, Epoch(identity.epoch))
+        .await
+        .unwrap();
+    tx.write(retire("manifest", pinned));
+    tx.write(retire("holder", holder));
+    tx.write(retire("shared", shared));
+    tier.store
+        .commit(tx, CommitLabel::new("peel.last_refs"))
+        .await
+        .unwrap();
+    assert_eq!(
+        tier.blobs().await,
+        initial,
+        "the last references reclaim the whole graph"
+    );
+}
+
 /// FIG-5912: a stored node's member of the build catalog hydrates with all
 /// it reaches, byte for byte as stored, and every node of that closure
 /// counts against each hydration limit, whether its bytes are read back or
