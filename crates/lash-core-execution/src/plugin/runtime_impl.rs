@@ -455,7 +455,12 @@ impl PluginHost {
         request: PluginSessionRequest<'_>,
     ) -> Result<Arc<PluginSession>, PluginError> {
         let session = self.defer_session(request)?;
-        // Callers of this constructor supply an admitted native snapshot.
+        let snapshot = session.capture_state();
+        for factory in self.factories() {
+            if let Some(namespace) = snapshot.plugins.get(factory.id()) {
+                super::state::validate_namespace(&namespace.values, self.data_limits.plugin_state)?;
+            }
+        }
         self.materialize_session(&session)?;
         Ok(session)
     }
@@ -505,11 +510,8 @@ impl PluginHost {
         if session.capabilities.get().is_none() {
             let authority = session.live_authority();
             let snapshot = session.capture_state();
-            for factory in self.factories() {
-                if let Some(namespace) = snapshot.plugins.get(factory.id()) {
-                    super::state::validate_namespace(&namespace.values)?;
-                }
-            }
+            // The engine installs recorded transition postimages before constructing
+            // capabilities. Current admission limits must not re-judge those results.
             self.validate_native_formats(&snapshot, &authority.plugin_config.config)?;
             let ctx = PluginSessionContext {
                 tracing: self.trace_runtime.clone(),

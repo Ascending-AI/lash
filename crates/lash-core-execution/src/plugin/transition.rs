@@ -96,7 +96,10 @@ impl PluginHost {
                         factory
                             .initialize_state(&request.owner, config)
                             .and_then(|values| {
-                                super::state::validate_namespace(&values)?;
+                                super::state::validate_namespace(
+                                    &values,
+                                    self.data_limits().plugin_state,
+                                )?;
                                 let declaration = factory.plugin_declaration();
                                 Ok(PluginNamespaceState {
                                     format_version: declaration.format_version,

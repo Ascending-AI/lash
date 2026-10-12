@@ -27,10 +27,8 @@ pub use publication::{
 };
 pub(crate) use publication::{collect_proposals, propose, propose_all, record_effect};
 
-use lash_core_store::plugin_state::{
-    PLUGIN_STATE_NAMESPACE_LIMIT, PLUGIN_STATE_VALUE_LIMIT, validate_state_key,
-};
-use lash_core_store::tool_run::SegmentOrdinal;
+use lash_core_store::plugin_state::validate_state_key_with_limit;
+use lash_core_store::tool_run::{SegmentOrdinal, StateCommandLimits};
 use lash_sansio::sync::MutexExt;
 use serde::Serialize;
 use serde_json::Value;
@@ -248,11 +246,16 @@ impl PluginStateView {
     }
 }
 
-pub(super) fn validate_namespace(values: &BTreeMap<String, Value>) -> Result<(), PluginStateError> {
+pub(super) fn validate_namespace(
+    values: &BTreeMap<String, Value>,
+    limits: StateCommandLimits,
+) -> Result<(), PluginStateError> {
     for (key, value) in values {
-        validate_state_key(key).map_err(|reason| PluginStateError::InvalidKey {
-            key: key.clone(),
-            reason,
+        validate_state_key_with_limit(key, limits.key_bytes).map_err(|reason| {
+            PluginStateError::InvalidKey {
+                key: key.clone(),
+                reason,
+            }
         })?;
         let bytes = serde_json::to_vec(value)
             .map_err(|error| PluginStateError::Encode {
@@ -260,11 +263,11 @@ pub(super) fn validate_namespace(values: &BTreeMap<String, Value>) -> Result<(),
                 message: error.to_string(),
             })?
             .len();
-        if bytes > PLUGIN_STATE_VALUE_LIMIT {
+        if bytes > limits.max_value_bytes {
             return Err(PluginStateError::ValueTooLarge {
                 key: key.clone(),
                 bytes,
-                limit: PLUGIN_STATE_VALUE_LIMIT,
+                limit: limits.max_value_bytes,
             });
         }
     }
@@ -274,10 +277,10 @@ pub(super) fn validate_namespace(values: &BTreeMap<String, Value>) -> Result<(),
             message: error.to_string(),
         })?
         .len();
-    if bytes > PLUGIN_STATE_NAMESPACE_LIMIT {
+    if bytes > limits.max_namespace_bytes {
         return Err(PluginStateError::StoreTooLarge {
             bytes,
-            limit: PLUGIN_STATE_NAMESPACE_LIMIT,
+            limit: limits.max_namespace_bytes,
         });
     }
     Ok(())

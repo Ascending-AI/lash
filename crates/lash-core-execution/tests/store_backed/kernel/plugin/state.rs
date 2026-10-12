@@ -112,4 +112,178 @@ mod tests {
             serde_json::json!(2)
         );
     }
+
+    /// FIG-6084: fresh admission and reconstruction share the host's bounds;
+    /// replay installs an already recorded candidate under a smaller policy.
+    #[tokio::test]
+    async fn host_state_limits_survive_sqlite_reopen_and_transition() {
+        use crate::plugin::{
+            PluginDeclaration, PluginSpec, PluginTransitionBase, PluginTransitionId,
+            PluginTransitionRequest, SessionAuthorityContext, StaticPluginFactory,
+        };
+        use crate::tool_run::{StateCommandLimits, StateCommandRefusal, StateResolutionOutcome};
+
+        let make_host = |limits| {
+            let mut policy = crate::runtime::RuntimeDataLimits::standard();
+            policy.plugin_state = limits;
+            crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
+                PluginDeclaration::initial("mock"),
+                PluginSpec::new(),
+            ))])
+            .with_data_limits(policy)
+        };
+        let address = |step| {
+            crate::EffectAddress::new(crate::ExecutionScope::turn("state-limits", "run"), step)
+                .unwrap()
+        };
+        let wide = serde_json::Value::String("x".repeat(64 * 1024));
+        let default_host = make_host(StateCommandLimits::PUBLISHED);
+        let default_session = default_host
+            .build_session(PluginSessionRequest::creation(
+                "state-limits",
+                SessionAuthorityContext::ambient_fixture(),
+            ))
+            .unwrap();
+        let refused = crate::publish_plugin_state(
+            &default_session,
+            "mock",
+            address("default-publish"),
+            crate::StateCommands::new().set("value", wide.clone()),
+        )
+        .await
+        .unwrap();
+        let crate::RuntimeEffectOutcome::PluginState { state, .. } = refused else {
+            panic!("the recorded publication carries its refusal");
+        };
+        assert!(matches!(
+            state.resolutions[0].outcome,
+            StateResolutionOutcome::Refused {
+                refusal: StateCommandRefusal::ValueTooLarge { limit, .. }
+            } if limit == StateCommandLimits::PUBLISHED.max_value_bytes
+        ));
+        assert!(
+            crate::plugin_state_view(&default_session, "mock")
+                .get("value")
+                .is_none()
+        );
+        drop(default_session);
+
+        let limits = StateCommandLimits {
+            max_value_bytes: 96 * 1024,
+            max_namespace_bytes: 256 * 1024,
+            max_encoded_bytes: 256 * 1024,
+            ..StateCommandLimits::PUBLISHED
+        };
+        let host = make_host(limits);
+        let plugins = host
+            .build_session(PluginSessionRequest::creation(
+                "state-limits",
+                SessionAuthorityContext::ambient_fixture(),
+            ))
+            .unwrap();
+        // Three separately admitted values also exceed the old namespace bound.
+        for key in ["value", "second", "third"] {
+            crate::publish_plugin_state(
+                &plugins,
+                "mock",
+                address(key),
+                crate::StateCommands::new().set(key, wide.clone()),
+            )
+            .await
+            .unwrap();
+        }
+        for key in ["value", "second", "third"] {
+            assert_eq!(
+                crate::plugin_state_view(&plugins, "mock").get(key),
+                Some(wide.clone())
+            );
+        }
+        let store = session_store("state-limits").await;
+        let mut runtime = crate::RuntimeSessionState {
+            session_id: "state-limits".into(),
+            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
+            ))
+        };
+        runtime.refresh_plugin_states(&plugins).unwrap();
+        crate::testing::store_fixtures::commit_runtime_state_for_test(
+            &store,
+            crate::RuntimeCommit::persisted_state_for_test(&runtime),
+            "state-limits-commit",
+        )
+        .await
+        .unwrap();
+        drop(plugins);
+        drop(host);
+
+        let loaded = load_state(&store, "state-limits").await;
+        let snapshot = loaded.plugin_state().unwrap();
+        let reopened_host = make_host(limits);
+        let reopened = reopened_host
+            .build_session(PluginSessionRequest::rematerialization(
+                "state-limits",
+                snapshot,
+                SessionAuthorityContext::ambient_fixture(),
+            ))
+            .expect("the configured bounds also admit the reopened state");
+        assert_eq!(
+            crate::plugin_state_view(&reopened, "mock").get("value"),
+            Some(wide)
+        );
+        let request = PluginTransitionRequest {
+            id: PluginTransitionId(address("transition")),
+            owner: crate::RuntimeOwner::Session("state-limits".into()),
+            base: PluginTransitionBase::Session {
+                head: crate::store::SessionHeadRef {
+                    generation: 0,
+                    revision: 0,
+                    leaf: None,
+                    checkpoint: None,
+                },
+            },
+            target: crate::store::plugin_writers::PluginAdmission::from_plugins(vec![
+                crate::store::plugin_writers::AdmittedPlugin {
+                    plugin: "mock".into(),
+                    writer: crate::FormatVersion::ONE,
+                },
+            ]),
+        };
+        let record =
+            reopened_host.transition_plugins(request.clone(), snapshot, &Default::default());
+        assert_eq!(&record.candidate().unwrap().0, snapshot);
+        let refusal = default_host.transition_plugins(request, snapshot, &Default::default());
+        assert!(matches!(
+            refusal.candidate(),
+            Err(crate::PluginError::State(crate::PluginStateError::ValueTooLarge { limit, .. }))
+                if limit == StateCommandLimits::PUBLISHED.max_value_bytes
+        ));
+
+        let namespace_host = make_host(StateCommandLimits {
+            max_namespace_bytes: 128 * 1024,
+            ..limits
+        });
+        assert!(matches!(
+            namespace_host.decode_state(snapshot),
+            Err(crate::PluginError::State(crate::PluginStateError::StoreTooLarge { limit, .. }))
+                if limit == 128 * 1024
+        ));
+
+        // Reconstruct from a recorded transition without admitting its postimage again.
+        let bytes = rmp_serde::to_vec_named(&record).unwrap();
+        let recorded = rmp_serde::from_slice(&bytes).unwrap();
+        let replay = default_host
+            .defer_session(PluginSessionRequest::rematerialization(
+                "state-limits",
+                &Default::default(),
+                SessionAuthorityContext::ambient_fixture(),
+            ))
+            .unwrap();
+        replay.adopt_plugin_transition(&recorded).unwrap();
+        replay
+            .materialize()
+            .expect("recorded postimages ignore the current admission limits");
+        assert_eq!(&replay.export_state(), snapshot);
+    }
 }

@@ -99,7 +99,7 @@ impl PluginHost {
         // A namespace this plugin owns must satisfy the store's invariants
         // as recorded, at whatever stamp: a malformed payload is refused
         // before the converter or any callback sees it.
-        super::state::validate_namespace(&namespace.values)?;
+        super::state::validate_namespace(&namespace.values, self.data_limits().plugin_state)?;
         let native = factory.plugin_declaration().format_version;
         if namespace.format_version == native {
             return Ok(namespace);
@@ -117,7 +117,7 @@ impl PluginHost {
                 record_kind: "plugin_state".into(),
                 message: error.to_string(),
             })?;
-        super::state::validate_namespace(&values)?;
+        super::state::validate_namespace(&values, self.data_limits().plugin_state)?;
         namespace.values = std::sync::Arc::new(values);
         namespace.format_version = native;
         namespace.generation = namespace.generation.checked_add(1).ok_or_else(|| {
@@ -168,7 +168,7 @@ impl PluginHost {
                     record_kind: "plugin_state".into(),
                     message: error.to_string(),
                 })?;
-            super::state::validate_namespace(&namespace.values)?;
+            super::state::validate_namespace(&namespace.values, self.data_limits().plugin_state)?;
             namespace.format_version = to;
         }
         Ok(encoded)
