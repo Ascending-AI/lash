@@ -1,3 +1,4 @@
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 BUCK2 = Path(__file__).resolve().parents[1]
 ROOT = BUCK2.parents[1]
@@ -14,6 +16,8 @@ RUNNER = BUCK2 / 'postgres_action_runner.py'
 PINNED_TREE = ROOT / '.buck2/native/postgres'
 PINNED_NSS_WRAPPER = ROOT / '.buck2/native/nss_wrapper/libnss_wrapper.so'
 SCHEMA = ROOT / 'crates/lash-postgres-store/schema.sql'
+sys.path.insert(0, str(BUCK2))
+import postgres_action_runner as runner
 
 # A stand-in server tree: `initdb` makes the data directory, and `postgres`
 # answers the startup and simple-query messages the runner sends, journalling
@@ -31,7 +35,7 @@ if os.environ.get('FAKE_INITDB_FAILS'):
 os.makedirs(data)
 """
 FAKE_POSTGRES = """#!/usr/bin/env python3
-import json, os, signal, socket, struct, sys
+import json, os, signal, socket, struct, subprocess, sys
 journal = os.environ['FAKE_POSTGRES_JOURNAL']
 def note(**record):
     with open(journal, 'a') as output:
@@ -39,6 +43,9 @@ def note(**record):
 port = next(int(arg.split('=', 1)[1]) for arg in sys.argv if arg.startswith('port='))
 def stop(number, frame):
     note(stopped=number)
+    if os.environ.get('FAKE_POSTGRES_TREE') == 'timeout':
+        return
+    os.unlink(os.path.join(data, 'postmaster.pid'))
     sys.exit(0)
 signal.signal(signal.SIGINT, stop)
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -46,6 +53,13 @@ server = socket.socket()
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind(('127.0.0.1', port))
 server.listen(8)
+data = sys.argv[sys.argv.index('-D') + 1]
+with open(os.path.join(data, 'postmaster.pid'), 'w') as output:
+    output.write(str(os.getpid()))
+if os.environ.get('FAKE_POSTGRES_TREE'):
+    # Real PostgreSQL children create their own sessions with setsid().
+    worker = subprocess.Popen([sys.executable, '-c', 'import signal, time; signal.signal(signal.SIGINT, signal.SIG_IGN); signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'], start_new_session=True)
+    note(worker=worker.pid)
 note(pid=os.getpid(), arguments=sys.argv[1:])
 def receive(connection, count):
     data = b''
@@ -208,6 +222,54 @@ class FakeServerTests(unittest.TestCase):
         finally:
             if alive(pid):
                 os.kill(pid, signal.SIGKILL)
+
+    def assert_tree_stops(self, mode):
+        # Adopt the deliberately orphaned worker so even a failing law reaps it.
+        libc = ctypes.CDLL(None, use_errno=True)
+        self.assertEqual(libc.prctl(36, 1, 0, 0, 0), 0)
+        script = (
+            'import sys\n'
+            f'sys.path.insert(0, {str(BUCK2)!r})\n'
+            'import postgres_action_runner as runner\n'
+            'runner.STOP_SECONDS = .05\n'
+            'raise SystemExit(runner.main(sys.argv[1:]))\n'
+        )
+        command = [sys.executable, '-c', script, *self.command(sys.executable, '-c', 'raise SystemExit(3)')[2:]]
+        result = subprocess.run(command, env=self.environment | {'FAKE_POSTGRES_TREE': mode}, capture_output=True, text=True, timeout=30, start_new_session=True)
+        records = self.records()
+        worker = next(record['worker'] for record in records if 'worker' in record)
+        try:
+            self.assertFalse(alive(worker), 'a postgres writer outlived shutdown and cluster removal')
+            self.assertEqual(result.returncode, 3, result.stderr)
+            self.assert_server_gone()
+        finally:
+            if alive(worker):
+                os.kill(worker, signal.SIGKILL)
+                os.waitpid(worker, 0)
+
+    def test_shutdown_timeout_reaps_every_writer_before_removing_the_cluster(self):
+        self.assert_tree_stops('timeout')
+
+    def test_an_exited_postmaster_does_not_leave_a_writer_during_cluster_removal(self):
+        self.assert_tree_stops('exited')
+
+
+class ShutdownRefusalTests(unittest.TestCase):
+    def test_an_unreaped_group_fails_explicitly_and_preserves_its_cluster(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.object(runner.tempfile, 'mkdtemp', return_value=temporary):
+                server = mock.Mock(pid=12345)
+                server.poll.return_value = 0
+                server.returncode = 0
+                data = Path(temporary) / 'data'
+                data.mkdir()
+                pidfile = data / 'postmaster.pid'
+                pidfile.write_text('12345')
+                with mock.patch.object(runner.os, 'killpg'), mock.patch.object(runner.os, 'waitpid', side_effect=ChildProcessError), mock.patch.object(runner, 'REAP_SECONDS', 0):
+                    with self.assertRaisesRegex(runner.ShutdownError, 'group 12345 or adopted descendants still exist.*retaining cluster'):
+                        with runner.cluster_directory():
+                            runner.stop(server, data)
+                self.assertEqual(pidfile.read_text(), '12345', 'shutdown refusal removed a still-writable cluster')
 
 
 @unittest.skipUnless(PINNED_TREE.is_dir() and PINNED_NSS_WRAPPER.is_file(), 'the pinned PostgreSQL is not bootstrapped in this checkout')

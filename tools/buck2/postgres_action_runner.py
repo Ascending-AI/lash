@@ -20,9 +20,12 @@ as a user its read-only image does not list. NSS_WRAPPER, the pinned
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+import ctypes
 import os
 from pathlib import Path
 import signal
+import shutil
 import socket
 import struct
 import subprocess
@@ -36,6 +39,7 @@ USER = "lash"
 DATABASE = "lash"
 READY_SECONDS = 60
 STOP_SECONDS = 5
+REAP_SECONDS = 5
 # The settings of `scripts/ci/with-service.sh pg`: the statement-count tests
 # read pg_stat_statements, applying the schema takes more locks than the
 # default table holds, and a throwaway cluster has nothing to make durable.
@@ -59,6 +63,25 @@ class ServerError(Exception):
     def __init__(self, fields: dict[str, str]):
         super().__init__(f"{fields.get('S', 'ERROR')} {fields.get('C', '')}: {fields.get('M', '')}")
         self.code = fields.get("C", "")
+
+
+class ShutdownError(RuntimeError):
+    """The cluster must be retained because shutdown was not proved complete."""
+
+
+@contextmanager
+def cluster_directory():
+    work = Path(tempfile.mkdtemp(prefix="lash-postgres-"))
+    try:
+        yield work
+    except ShutdownError:
+        # No TemporaryDirectory finalizer may remove a still-writable cluster.
+        raise
+    except BaseException:
+        shutil.rmtree(work)
+        raise
+    else:
+        shutil.rmtree(work)
 
 
 def receive(connection: socket.socket, count: int) -> bytes:
@@ -129,8 +152,10 @@ def initialize(tree: Path, nss_wrapper: Path, work: Path) -> Path:
 
 
 def start(tree: Path, data: Path, log: Path) -> tuple[subprocess.Popen, int]:
-    """Start the server as this process's child, in its process group, so
-    whatever ends the group ends the server."""
+    """Own a separate server group and adopt children if the postmaster dies."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER (Linux)
+        raise OSError(ctypes.get_errno(), "Cannot supervise postgres descendants")
     port = free_port()
     command = [str(tree / "bin/postgres"), "-D", str(data), "-c", f"port={port}"]
     for name, value in SETTINGS.items():
@@ -138,7 +163,7 @@ def start(tree: Path, data: Path, log: Path) -> tuple[subprocess.Popen, int]:
     with log.open("wb") as output:
         server = subprocess.Popen(
             command, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
-            env=dict(os.environ, LC_ALL="C", TZ="UTC"),
+            env=dict(os.environ, LC_ALL="C", TZ="UTC"), start_new_session=True,
         )
     try:
         deadline = time.monotonic() + READY_SECONDS
@@ -156,18 +181,73 @@ def start(tree: Path, data: Path, log: Path) -> tuple[subprocess.Popen, int]:
                     raise RuntimeError(f"postgres was not ready after {READY_SECONDS} s: {error}") from error
                 time.sleep(0.02)
     except BaseException:
-        stop(server)
+        stop(server, data)
         raise
 
 
-def stop(server: subprocess.Popen) -> None:
-    if server.poll() is None:
-        server.send_signal(signal.SIGINT)  # fast shutdown: sessions end now
-        try:
-            server.wait(timeout=STOP_SECONDS)
-        except subprocess.TimeoutExpired:
-            server.kill()
-            server.wait()
+def stop(server: subprocess.Popen, data: Path) -> None:
+    # start_new_session makes the recorded postmaster PID its group ID too.
+    group = server.pid
+    try:
+        if server.poll() is None:
+            try:
+                server.send_signal(signal.SIGINT)  # fast shutdown: sessions end now
+            except ProcessLookupError:
+                pass
+            try:
+                server.wait(timeout=STOP_SECONDS)
+            except subprocess.TimeoutExpired:
+                print(f"postgres_action_runner: fast shutdown timed out after {STOP_SECONDS} s; killing group {group}", file=sys.stderr)
+
+        deadline = time.monotonic() + REAP_SECONDS
+        while True:
+            # Check even after a successful postmaster exit. Kill again to
+            # catch a child forked while the first group signal was delivered.
+            try:
+                os.killpg(group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            # PostgreSQL children call setsid(), escaping the original group.
+            # The runner is a subreaper, and stop runs before the test command
+            # starts or after it has been waited: all remaining direct children
+            # are owned shutdown work. Killing adopted parents brings their
+            # children here on the next iteration, even across new sessions.
+            children = Path(f"/proc/self/task/{os.getpid()}/children").read_text().split()
+            for child in children:
+                try:
+                    os.kill(int(child), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            children_remain = True
+            if server.poll() is not None:
+                # Let Popen reap the postmaster first, then reap descendants
+                # from every group. An empty child set proves the whole tree
+                # has exited: a live descendant would have an adopted ancestor.
+                while True:
+                    try:
+                        child, _ = os.waitpid(-1, os.WNOHANG)
+                    except ChildProcessError:
+                        children_remain = False
+                        break
+                    if child == 0:
+                        break
+            try:
+                os.killpg(group, 0)
+            except ProcessLookupError:
+                if not children_remain:
+                    break
+            if time.monotonic() >= deadline:
+                raise ShutdownError(
+                    f"postgres group {group} or adopted descendants still exist {REAP_SECONDS} s after SIGKILL "
+                    f"(postmaster exit={server.returncode}); retaining cluster {data.parent}"
+                )
+            time.sleep(.01)
+
+        # SIGKILL cannot unlink PostgreSQL's lock file. Only remove the stale
+        # file after every group member, including adopted zombies, is gone.
+        (data / "postmaster.pid").unlink(missing_ok=True)
+    except OSError as error:
+        raise ShutdownError(f"cannot complete postgres group {group} shutdown: {error}; retaining cluster {data.parent}") from error
 
 
 def run(tree: Path, nss_wrapper: Path, schema: Path, command: list[str]) -> int:
@@ -183,9 +263,9 @@ def run(tree: Path, nss_wrapper: Path, schema: Path, command: list[str]) -> int:
     for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(number, forward)
     server = None
-    with tempfile.TemporaryDirectory(prefix="lash-postgres-") as raw:
-        work = Path(raw)
+    with cluster_directory() as work:
         log = work / "postgres.log"
+        data = work / "data"
         try:
             server, port = start(tree, initialize(tree, nss_wrapper, work), log)
             execute(port, "postgres", f'CREATE DATABASE "{DATABASE}"')
@@ -197,6 +277,8 @@ def run(tree: Path, nss_wrapper: Path, schema: Path, command: list[str]) -> int:
             child.append(subprocess.Popen(command, env=environment))
             code = child[0].wait()
             return 128 - code if code < 0 else code
+        except ShutdownError:
+            raise
         except (OSError, RuntimeError, ServerError) as error:
             print(f"postgres_action_runner: {error}", file=sys.stderr)
             if log.is_file():
@@ -204,7 +286,7 @@ def run(tree: Path, nss_wrapper: Path, schema: Path, command: list[str]) -> int:
             return 70
         finally:
             if server is not None:
-                stop(server)
+                stop(server, data)
 
 
 def main(argv: list[str]) -> int:

@@ -717,9 +717,12 @@ kiln test //crates/lash-postgres-store:conformance__test
   (`fsync=off`, `pg_stat_statements` preloaded), creates the `lash` database,
   applies `crates/lash-postgres-store/schema.sql` and exports
   `LASH_POSTGRES_DATABASE_URL` to the test. It stops the server and deletes
-  the cluster however the test ends; the server is a child in the test's
-  process group, so a timeout's group kill takes it too. Setup costs about
-  one second.
+  the cluster however the test ends. The server owns a separate process group;
+  the runner requests fast shutdown, kills any remaining group members, and
+  kills and reaps adopted descendants (including children in new sessions)
+  before removing the cluster. An incomplete shutdown
+  fails explicitly and retains the cluster rather than racing its writers.
+  Setup costs about one second.
 - **Sandbox.** A pool action has loopback only, a private `/tmp` and its own
   PID namespace, which is all the server needs. `initdb` looks its user up in
   the password database and the action's user is not in the image's;
