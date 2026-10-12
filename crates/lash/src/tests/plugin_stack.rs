@@ -3,6 +3,116 @@ use super::*;
 use crate::{TurnEvent, TurnInput};
 use lash_core::Backend;
 
+/// DUPLICATE-PLUGIN-ID-REFUSED: distinct provider and callback keys do not
+/// permit two factories to own one namespace.
+#[tokio::test]
+async fn duplicate_plugin_id_refused() -> Result<()> {
+    use crate::plugins::{
+        PluginComposition, PluginDeclaration, PluginDeclarationError, PluginSpec,
+    };
+    let factory = |key| {
+        Arc::new(StaticPluginFactory::new(
+            PluginDeclaration::initial("duplicate-owner"),
+            PluginSpec::new()
+                .with_tool_provider(key, Arc::new(AppTools))
+                .with_before_turn(
+                    key,
+                    Arc::new(|_| Box::pin(async { Ok(Default::default()) })),
+                ),
+        )) as Arc<dyn PluginFactory>
+    };
+    let first = factory(crate::hook_key!("first"));
+    let second = factory(crate::hook_key!("second"));
+    let result = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+    .plugin(first.clone())
+    .plugin(second.clone())
+    .build(crate::testing::runtime_lease_owner());
+    assert!(
+        matches!(result, Err(EmbedError::PluginDeclaration(PluginDeclarationError::DuplicatePluginId { id })) if id == "duplicate-owner"),
+        "duplicate plugin factories must refuse before registration"
+    );
+    let factories = vec![first, second.clone()];
+    let duplicate = PluginDeclarationError::DuplicatePluginId {
+        id: "duplicate-owner".into(),
+    };
+    assert_eq!(
+        PluginComposition::new(factories.iter().map(|factory| factory.plugin_declaration()))
+            .unwrap_err(),
+        duplicate
+    );
+    assert_eq!(
+        PluginComposition::with_builtins(
+            factories.iter().map(|factory| factory.plugin_declaration())
+        )
+        .unwrap_err(),
+        duplicate
+    );
+    assert_eq!(
+        crate::plugins::ConfigRegistry::build(&factories).unwrap_err(),
+        crate::plugins::ConfigRegistrationError::DuplicatePluginId {
+            id: "duplicate-owner".into()
+        }
+    );
+    let host = crate::plugins::PluginHost::new(
+        factories.clone(),
+        lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(Arc::new(crate::runtime::SystemClock)),
+    );
+    assert!(
+        matches!(host.build_session(lash_core::plugin::PluginSessionRequest::creation(
+        "duplicate-owner", lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+    )), Err(lash_core::PluginError::Declaration(error)) if error == duplicate)
+    );
+    assert!(matches!(host.inspect_prompt_catalog(
+        lash_core::RuntimeOwner::Session(SessionId::fixture("duplicate-owner")),
+        crate::plugins::SessionToolAccess::ambient(), Default::default(),
+    ), Err(lash_core::PluginError::Declaration(error)) if error == duplicate));
+    let record = host.transition_plugins(
+        crate::plugins::PluginTransitionRequest {
+            id: crate::plugins::PluginTransitionId(
+                lash_core::EffectAddress::new(
+                    lash_core::ExecutionScope::turn("duplicate-owner", "run"),
+                    "transition",
+                )
+                .unwrap(),
+            ),
+            owner: lash_core::RuntimeOwner::Session(SessionId::fixture("duplicate-owner")),
+            base: crate::plugins::PluginTransitionBase::Session {
+                head: lash_core::store::SessionHeadRef {
+                    generation: 0,
+                    revision: 0,
+                    leaf: None,
+                    checkpoint: None,
+                },
+            },
+            target: Default::default(),
+        },
+        &Default::default(),
+        &Default::default(),
+    );
+    assert!(
+        matches!(record.candidate(), Err(lash_core::PluginError::Declaration(error)) if error == duplicate)
+    );
+    let mut stack = crate::PluginStack::from_factories([factories[0].clone()]);
+    stack.replace(second);
+    assert_eq!(
+        PluginComposition::new(
+            stack
+                .factories()
+                .iter()
+                .map(|factory| factory.plugin_declaration())
+        )
+        .unwrap()
+        .declarations()
+        .len(),
+        1
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(

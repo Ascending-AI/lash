@@ -579,6 +579,9 @@ impl PluginDeclaration {
 #[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum PluginDeclarationError {
+    /// Two factories cannot own the same plugin namespace.
+    #[error("plugin id `{id}` is registered twice")]
+    DuplicatePluginId { id: String },
     /// The declaration names another plugin than the factory that gave it.
     #[error("plugin factory `{factory}` declares itself as `{declared}`")]
     IdMismatch { factory: String, declared: String },
@@ -613,7 +616,13 @@ impl PluginComposition {
         declarations: impl IntoIterator<Item = PluginDeclaration>,
     ) -> Result<Self, PluginDeclarationError> {
         let declarations: Vec<_> = declarations.into_iter().collect();
+        let mut ids = std::collections::BTreeSet::new();
         for declaration in &declarations {
+            if !ids.insert(declaration.id.as_str()) {
+                return Err(PluginDeclarationError::DuplicatePluginId {
+                    id: declaration.id.as_str().to_owned(),
+                });
+            }
             if !declaration
                 .readable_stream_state_formats
                 .contains(&declaration.stream_state_format)

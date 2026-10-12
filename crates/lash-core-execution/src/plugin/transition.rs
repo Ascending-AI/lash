@@ -73,6 +73,28 @@ impl PluginHost {
         state: &PluginState,
         config: &PluginConfig,
     ) -> PluginTransitionRecord {
+        if let Err(refusal) = self.composition() {
+            let namespaces = state
+                .plugins
+                .keys()
+                .map(String::as_str)
+                .chain(self.factories().iter().map(|factory| factory.id()))
+                .map(|id| {
+                    (
+                        id.to_owned(),
+                        Err(PluginError::Declaration(refusal.clone())),
+                    )
+                })
+                .collect();
+            return PluginTransitionRecord {
+                request,
+                source: super::state::state_ref(state),
+                namespaces,
+                config: Ok(config.clone()),
+                generation: None,
+                publication: None,
+            };
+        }
         let preflight = self
             .validate_state_formats(state)
             .and_then(|()| self.validate_config_formats(config));

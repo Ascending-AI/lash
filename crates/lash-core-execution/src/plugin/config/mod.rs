@@ -157,6 +157,9 @@ type RefusalOf<C> = <<C as ConfigCommand>::Owner as ConfigOwner>::Refusal;
 )]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ConfigRegistrationError {
+    /// A factory id must be unique, even if its factory registers no config.
+    #[error("plugin id `{id}` is registered twice")]
+    DuplicatePluginId { id: String },
     #[error("plugin `{plugin_id}` registered a second config owner")]
     DuplicateOwner { plugin_id: String },
     #[error("plugin `{plugin_id}` registered config command `{command}` twice")]
@@ -768,7 +771,16 @@ impl std::fmt::Debug for ConfigRegistry {
 
 impl ConfigRegistry {
     /// Collect every factory's config registration, and the core owner's.
+    /// Duplicate factory ids refuse before any registration runs.
     pub fn build(factories: &[Arc<dyn PluginFactory>]) -> Result<Self, ConfigRegistrationError> {
+        let mut ids = std::collections::BTreeSet::new();
+        for factory in factories {
+            if !ids.insert(factory.id()) {
+                return Err(ConfigRegistrationError::DuplicatePluginId {
+                    id: factory.id().to_owned(),
+                });
+            }
+        }
         let mut owners = BTreeMap::new();
         owners.insert(CORE_CONFIG_OWNER.to_string(), core::registration()?);
         for factory in factories {

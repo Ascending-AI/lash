@@ -365,6 +365,7 @@ impl PluginHost {
         mut runtime_host: crate::RuntimeHostConfig,
         process_lifecycle_available: bool,
     ) -> Result<crate::RuntimeHostConfig, PluginError> {
+        self.composition()?;
         let trace_runtime = runtime_host.tracing.clone();
         let backend = runtime_host.backend().clone();
         let ctx = super::ProcessEngineContributionContext::new(
@@ -615,6 +616,7 @@ impl PluginHost {
         ctx: &PluginSessionContext,
         state: Arc<StdMutex<PluginStateRegistry>>,
     ) -> Result<BuiltSessionContributions, PluginError> {
+        self.composition()?;
         let mut registry = state.lock_recover();
         for factory in self.factories() {
             registry
