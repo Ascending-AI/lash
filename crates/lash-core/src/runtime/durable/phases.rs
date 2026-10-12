@@ -83,6 +83,7 @@ fn encode_phase(
         delivered: drive.delivered_inputs(),
         before_turn: drive.before_turn(),
         trace: drive.trace_scope(),
+        config: drive.run_config(),
     };
     StagedPhase::of(&checkpoint, &delta.held).map_err(TurnError::Exec)
 }
@@ -428,7 +429,7 @@ pub async fn run_phases(
                     };
                     row.trace_exported |= traced;
                     boundary.committed(cx, drive.as_mut()).await?;
-                    stored.committed(drive.machine());
+                    stored.committed(drive.as_mut());
                     drive.run_changes_committed(&written);
                     drive.phase_committed().await;
                     tool_round::release_cell_emissions(cx, drive.as_mut(), held, label).await?;
@@ -688,7 +689,7 @@ pub async fn run_phases(
                     settle_model_calls(&mut tx, &session, &run, None);
                 }
                 cx.commit(tx, CommitLabel::MODEL_DONE).await?;
-                stored.committed(drive.machine());
+                stored.committed(drive.as_mut());
                 drive.run_changes_committed(&written);
                 drive.phase_committed().await;
                 tool_round::release_cell_emissions(
@@ -863,7 +864,7 @@ impl AfterModelDone {
     /// The response committed: the phase's content is stored, its run
     /// changes recorded and the working state it carried installed.
     async fn committed(self, drive: &mut dyn TurnDrive) {
-        self.stored.committed(drive.machine());
+        self.stored.committed(drive);
         drive.run_changes_committed(&self.written);
         drive.phase_committed().await;
     }

@@ -176,8 +176,10 @@ impl RuntimeDrive {
                 .turn_pipeline
                 .replay_progress_boundary(&messages, event_delta.to_vec());
         }
-        // The tool surface a sync before the checkpoint recorded: pinned
-        // again from the session's live registry.
+        // The tool surface the turn's last sync installed, as its checkpoint
+        // records it: the live registry supplies its executors only, so a
+        // live source that changed since never reaches the turn's prompts
+        // (FIG-6021).
         driver.reinstall_tool_surface().await?;
         // The session's state after the turn's last consumed cell is
         // installed before any model continuation or cell compiles.
@@ -590,6 +592,14 @@ impl TurnDrive for RuntimeDrive {
 
     fn trace_scope(&self) -> Option<lash_trace::DurableTraceScope> {
         Some(self.trace_scope.clone())
+    }
+
+    fn run_config(&self) -> Option<crate::runtime::durable::run_config::RecordedRunConfig> {
+        Some(self.driver.run_config.clone())
+    }
+
+    fn run_config_stored(&mut self, stored: &crate::runtime::durable::run_config::RunConfigStored) {
+        self.driver.run_config.stored(stored);
     }
 
     fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
@@ -1095,18 +1105,18 @@ impl RuntimeTurnDriver<'static> {
         self.prepare_machine(window, messages, 0)
     }
 
-    /// Pin the session's live tool surface again, as the turn's sync did.
+    /// Install the tool surface the turn's checkpoint records as the one its
+    /// last sync installed, over the session's live executors.
     async fn reinstall_tool_surface(&mut self) -> Result<(), TurnError> {
-        let surface = self
-            .prepare_execution_environment()
-            .await
-            .map_err(|error| match error {
-                crate::PluginError::Runtime(error) => TurnError::Runtime(error),
-                error => TurnError::Exec(format!("the tool surface did not pin: {error}")),
-            })?;
+        let recorded = match self.run_config.surface() {
+            Some(recorded) => recorded.to_vec(),
+            // A checkpoint taken before the run's first sync records none:
+            // the restored machine syncs before it offers a tool.
+            None => return Ok(()),
+        };
         let authority = &self.turn_pipeline.state().authority;
         self.session
-            .install_recorded_tool_surface(&authority.tool_access, &surface.tool_definitions)
+            .install_recorded_tool_surface(&authority.tool_access, &recorded)
             .map_err(|error| TurnError::Exec(format!("the tool surface did not install: {error}")))
     }
 }

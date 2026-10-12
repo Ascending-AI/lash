@@ -554,6 +554,10 @@ pub enum TurnOutcome {
         task: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         initial_nodes: Vec<SessionAppendNode>,
+        /// The run spec the switch's follow-on runs under, as the switch's
+        /// producer stated it (FIG-6021): the switch fact the follow-on is
+        /// mailed from.
+        next_run: crate::NextRun,
     },
     Stopped(TurnStop),
 }
@@ -678,10 +682,12 @@ impl CompletionCandidate {
                 frame_key,
                 initial_nodes,
                 task,
+                next_run,
             } => TurnOutcome::AgentFrameSwitch {
                 frame_key: frame_key.clone(),
                 task: task.clone(),
                 initial_nodes: initial_nodes.clone(),
+                next_run: next_run.clone(),
             },
         }
     }

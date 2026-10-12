@@ -268,6 +268,15 @@ impl PluginSession {
         self.host.materialize_session(self)
     }
 
+    /// Build this session's plugin contributions without readying it: no
+    /// registration and no `session_ready` callback runs, so a pure
+    /// derivation (a run's render resolution, FIG-6021) can read its
+    /// protocol driver before the session is activated.
+    /// [`materialize`](Self::materialize) readies the same contributions.
+    pub fn prepare_capabilities(self: &Arc<Self>) -> Result<(), PluginError> {
+        self.host.prepare_session(self)
+    }
+
     pub fn is_materialized(&self) -> bool {
         self.materialized.load(std::sync::atomic::Ordering::Acquire)
     }

@@ -379,7 +379,6 @@ fn assert_terminal_derivation(fault: &crate::runtime_error::RuntimeEffectControl
         Kind::LoadExecutionEnv,
         Kind::PresentToolResult,
         Kind::LanguageRuntimeValue,
-        Kind::ResolveTurnConfig,
         Kind::ResolveConfigTransaction,
         Kind::CloseRunScope,
         Kind::Process,
@@ -635,10 +634,6 @@ mod typed_refusal_causes {
             ),
             (
                 RunShapeRefusal::ReasoningWithoutLlmProfile,
-                RuntimeErrorCode::RunShapeRefused,
-            ),
-            (
-                RunShapeRefusal::ProtocolOptionsWithoutProtocol,
                 RuntimeErrorCode::RunShapeRefused,
             ),
             (

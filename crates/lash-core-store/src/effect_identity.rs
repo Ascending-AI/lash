@@ -58,10 +58,6 @@ pub enum RuntimeEffectKind {
     /// Durable admission of a turn input (ADR 0069 section 6).
     AcceptTurnInput,
 
-    /// The session config a logical turn runs under, recorded once per run
-    /// after the boundary's command drain (FIG-3600 S6, D3 §2): every replay
-    /// of the run executes under the recorded config, never the live head's.
-    ResolveTurnConfig,
     /// The base an administrative compaction summarizes and opens its frame
     /// from, recorded before its summarizer runs (FIG-4133): a redrive
     /// replays the recorded base, never the head the compaction's own commit
@@ -106,7 +102,6 @@ impl RuntimeEffectKind {
             Self::PluginCallbacks => "plugin_callbacks",
 
             Self::TraceBoundary => "trace_boundary",
-            Self::ResolveTurnConfig => "resolve_turn_config",
             Self::RecordCompactionBase => "record_compaction_base",
             Self::ResolveConfigTransaction => "resolve_config_transaction",
             Self::ReadSessionCommandRun => "read_session_command_run",

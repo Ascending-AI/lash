@@ -186,13 +186,19 @@ pub struct ProtocolBeforeLlmCallContext {
     pub processes: Arc<dyn crate::ProcessService>,
     pub state: SessionReadView,
     pub latest_prompt_usage: Option<LlmUsage>,
+    /// The spec the running turn's recorded shape resolved (FIG-6021).
+    pub run_spec: crate::RunSpec,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ProtocolLlmCallAction {
+    /// Switch to a fresh agent frame whose follow-on runs under `next_run`
+    /// ([`ProtocolBeforeLlmCallContext::run_spec`] keeps the running
+    /// turn's shape).
     SwitchAgentFrame {
         frame_key: crate::FrameKey,
         task: String,
+        next_run: Box<crate::RunSpec>,
     },
 }
 

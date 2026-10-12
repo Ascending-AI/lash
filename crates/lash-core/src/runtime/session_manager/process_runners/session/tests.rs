@@ -495,6 +495,9 @@ fn child_final_value_refuses_a_frame_switch_or_stopped_turn() {
         frame_key: crate::FrameKey::from_caller_material("next-frame").expect("frame key"),
         task: "continue elsewhere".to_string(),
         initial_nodes: Vec::new(),
+        next_run: crate::RunSpec::default()
+            .next_run()
+            .expect("the default spec encodes"),
     };
     let failure = projected_failure(project_turn(
         switched.clone(),

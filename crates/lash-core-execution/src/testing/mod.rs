@@ -884,6 +884,8 @@ pub fn tool_hook_context(
 #[derive(Clone)]
 pub struct ToolCallFixture<'run> {
     pub(crate) context: crate::tool_provider::ToolContext<'run>,
+    /// The run the call runs inside, when the test names one.
+    pub(crate) resolved_run: Option<Arc<crate::ResolvedRun>>,
 }
 
 impl ToolCallFixture<'static> {
@@ -940,6 +942,7 @@ impl ToolCallFixture<'static> {
                 direct_completions,
             )
             .build(),
+            resolved_run: None,
         }
     }
 }
@@ -961,6 +964,7 @@ impl<'run> ToolCallFixture<'run> {
         };
         Self {
             context: crate::tool_provider::ToolContext::from_dispatch(dispatch, &call).build(),
+            resolved_run: None,
         }
     }
 
@@ -1044,12 +1048,33 @@ impl<'run> ToolCallFixture<'run> {
     /// The attempt context a body executing this call under
     /// `execution_scope_id` receives. No completion key is reserved: a test
     /// harness is not the attempt coordinator.
+    /// Run the call inside a turn whose recorded shape resolved `spec` over
+    /// an ambient session config, as `AttemptContext::run_spec` reads it.
+    pub fn running(mut self, spec: crate::RunSpec) -> Self {
+        let base = crate::PersistedSessionConfig::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
+            crate::SessionToolAccess::ambient(),
+        );
+        self.resolved_run = Some(Arc::new(
+            crate::ResolvedRun::snapshot(base)
+                .with_spec(spec)
+                .expect("a fixture spec encodes"),
+        ));
+        self
+    }
+
     pub fn attempt(&self, execution_scope_id: impl Into<String>) -> crate::AttemptContext<'run> {
-        crate::AttemptContext::from_tool_context(
+        let mut attempt = crate::AttemptContext::from_tool_context(
             &self.context,
             execution_scope_id.into(),
             crate::tool_provider::AttemptCompletionSupport::NotDeclared,
-        )
+        );
+        if let Some(run) = &self.resolved_run {
+            attempt.resolved_run = Some(Arc::clone(run));
+        }
+        attempt
     }
 }
 
@@ -1060,6 +1085,7 @@ pub(crate) fn mock_attempt_context_from<'run>(
 ) -> crate::AttemptContext<'run> {
     ToolCallFixture {
         context: context.clone(),
+        resolved_run: None,
     }
     .attempt("test-turn")
 }

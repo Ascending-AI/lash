@@ -22,9 +22,12 @@ const BATCH_INPUTS: usize = 5;
 
 fn batch_spec(guidance: &str) -> crate::RunSpec {
     crate::RunSpec::overrides(crate::RunOverrides {
-        protocol_turn_options: Some(crate::ProtocolTurnOptions::from_payload(
-            serde_json::json!({ "batch": guidance }),
-        )),
+        owners: crate::OwnerRunOptions::default()
+            .with(
+                crate::RunOptionsKey::<serde_json::Value>::new("protocol"),
+                serde_json::json!({ "batch": guidance }),
+            )
+            .unwrap_or_else(|error| unreachable!("a JSON value encodes: {error}")),
         ..crate::RunOverrides::default()
     })
 }

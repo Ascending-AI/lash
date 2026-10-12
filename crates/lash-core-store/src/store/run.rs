@@ -123,6 +123,8 @@ pub enum RunCommittedOutcome {
     AgentFrameSwitch {
         frame_key: lash_sansio::FrameKey,
         task: String,
+        /// The run spec the follow-on runs under, as the switch stated it.
+        next_run: lash_sansio::NextRun,
     },
     Stopped(TurnStop),
 }
@@ -141,10 +143,14 @@ impl RunCommittedOutcome {
                 value_schema,
             },
             TurnOutcome::AgentFrameSwitch {
-                frame_key, task, ..
+                frame_key,
+                task,
+                next_run,
+                ..
             } => Self::AgentFrameSwitch {
                 frame_key: frame_key.clone(),
                 task: task.clone(),
+                next_run: next_run.clone(),
             },
             TurnOutcome::Stopped(stop) => Self::Stopped(stop.clone()),
         }
@@ -164,10 +170,15 @@ impl From<RunCommittedOutcome> for TurnOutcome {
     fn from(outcome: RunCommittedOutcome) -> Self {
         match outcome {
             RunCommittedOutcome::Finished { finish, .. } => Self::Finished(finish),
-            RunCommittedOutcome::AgentFrameSwitch { frame_key, task } => Self::AgentFrameSwitch {
+            RunCommittedOutcome::AgentFrameSwitch {
+                frame_key,
+                task,
+                next_run,
+            } => Self::AgentFrameSwitch {
                 frame_key,
                 task,
                 initial_nodes: Vec::new(),
+                next_run,
             },
             RunCommittedOutcome::Stopped(stop) => Self::Stopped(stop),
         }

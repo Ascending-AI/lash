@@ -110,11 +110,13 @@ pub fn check_steering_run_spec(
 /// The steering verdict over `turn_id` when the running run resolved under
 /// spec hash `running` (`None` = the default spec), read in the admitting
 /// transaction for the run kinds whose starting input is not filed under
-/// the turn's id as a source key (FIG-3877): the follow-on the head owes,
-/// which runs under the shape its fact recorded at the switch, and the
-/// current position of a queued run, which resolves under the spec its
-/// member inputs carry. The turn is running, so a steering spec must equal
-/// the recorded shape — there is no delivered escape.
+/// the turn's id as a source key (FIG-3877): a queued-headed run, which
+/// starts from no input and runs the default spec. A frame switch's
+/// follow-on is no such run: its task is mailed as an input filed under its
+/// run's id and carrying the spec the switch stated (FIG-6021), so
+/// [`check_steering_run_spec`] judges it like any sourced run. The turn is
+/// running, so a steering spec must equal the recorded shape — there is no
+/// delivered escape.
 pub fn check_running_run_spec(
     session_id: &SessionId,
     turn_id: &TurnId,

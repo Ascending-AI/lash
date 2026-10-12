@@ -25,6 +25,7 @@ pub mod node;
 mod phase_root;
 pub mod phases;
 mod publication_window;
+pub mod run_config;
 pub mod services;
 pub mod session;
 pub mod session_close;

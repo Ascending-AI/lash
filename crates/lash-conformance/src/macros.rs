@@ -134,6 +134,7 @@ macro_rules! runtime_persistence_tests {
             (pending_turn_inputs_source_keys_order_cancel_and_cross_session, "root"),
             (pending_turn_input_duplicate_input_id, "root"),
             (run_specs_join_the_submission_digest_and_intern_once, "run-specs"),
+            (run_spec_bytes_are_reclaimed_once_no_unsettled_input_names_them, "run-spec-reclaim"),
             (a_turn_input_batch_enqueues_new_ids_contiguously_in_request_order, "turn-input-batches"),
             (a_resent_turn_input_batch_answers_its_existing_ids_and_enqueues_the_rest, "turn-input-batch-retries"),
             (a_conflict_or_a_repeated_id_refuses_the_whole_turn_input_batch, "turn-input-batch-refusals"),

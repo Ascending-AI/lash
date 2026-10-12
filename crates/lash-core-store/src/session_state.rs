@@ -1053,11 +1053,17 @@ impl RuntimeSessionState {
     /// revision it was admitted under (FIG-4379): inside a run, the run's
     /// recorded admission; otherwise the head's.
     pub fn admitted_plugin_config(&self) -> crate::AdmittedPluginConfig {
-        let revision = self
-            .authority
-            .run_view()
-            .map_or(self.config_revision, |view| view.run.base().config_revision);
-        crate::AdmittedPluginConfig::new(self.authority.plugin_config.clone(), revision)
+        match self.authority.run_view() {
+            Some(view) => crate::AdmittedPluginConfig::new(
+                self.authority.plugin_config.clone(),
+                view.run.base().config_revision,
+            )
+            .derived_by(view.run.spec_hash().cloned()),
+            None => crate::AdmittedPluginConfig::new(
+                self.authority.plugin_config.clone(),
+                self.config_revision,
+            ),
+        }
     }
 
     /// The protocol turn options the installed config view runs under: a
@@ -1271,16 +1277,17 @@ pub mod facade_ops {
                 fallback_policy.clone()
             };
             // The process captures the configuration its creator runs under:
-            // a running run's admitted view, or the head's (FIG-4379).
+            // a running run's resolved view with the capability refs its
+            // spec bound, or the head's (FIG-4379, FIG-6021).
             let mut spec = crate::ProcessExecutionEnvSpec::new(
                 self.admitted_plugin_config(),
                 policy,
                 self.authority.tool_access.clone(),
             );
-            spec.render = self
-                .authority
-                .run_view()
-                .and_then(|view| view.run.render.clone());
+            if let Some(view) = self.authority.run_view() {
+                spec.render = view.run.render.clone();
+                spec.capabilities = view.run.capabilities().clone();
+            }
             spec
         }
     }

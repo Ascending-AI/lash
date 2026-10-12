@@ -360,17 +360,21 @@ impl ToolOutcome {
         Self::from_output(crate::ToolCallOutput::finish(value))
     }
 
-    /// Switches the caller to a fresh agent frame. The tool must declare the
+    /// Switches the caller to a fresh agent frame whose follow-on runs under
+    /// `next_run` ([`AttemptContext::run_spec`](crate::AttemptContext::run_spec)
+    /// to keep the running turn's shape). The tool must declare the
     /// SwitchAgentFrame control.
     pub fn switch_agent_frame(
         frame_key: crate::FrameKey,
         task: impl Into<String>,
         initial_nodes: Vec<crate::SessionAppendNode>,
+        next_run: crate::NextRun,
     ) -> Self {
         Self::from_output(crate::ToolCallOutput::switch_agent_frame(
             frame_key,
             task,
             initial_nodes,
+            next_run,
         ))
     }
 

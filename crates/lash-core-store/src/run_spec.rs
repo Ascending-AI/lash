@@ -1,21 +1,24 @@
-//! The shape an accepted input runs under (FIG-3838, D5).
+//! The shape an accepted input runs under (FIG-3838, D5; FIG-6021).
 //!
 //! Every accepted input carries a [`RunSpec`]: a registered run definition,
-//! the context data that definition reads, and one-shot overrides of the
-//! session config. The empty default spec is "the session config": it adds
+//! the context data that definition reads, one-shot overrides of the
+//! session config, and the typed run options it states for the session's
+//! plugin owners. The empty default spec is "the session config": it adds
 //! nothing to an input's row or its submission digest, so an omitted spec
 //! and an explicit default are the same submission.
 //!
 //! A non-default spec is interned per session under its [`RunSpecHash`]: the
 //! input row names the hash and the session's spec table holds the canonical
-//! bytes once. The hash is part of the input's submission digest, so a
-//! same-id retry with a different spec is a conflict.
+//! bytes while an open input names them. The hash is part of the input's
+//! submission digest, so a same-id retry with a different spec is a
+//! conflict.
 //!
-//! The shift resolves a run's spec exactly once, against the run's config
-//! snapshot taken after the boundary's command drain, and records the result
-//! as the run's [`ResolvedRun`]. Every replay and worker hop reads the
-//! record; the resolver never runs again for a recorded run. Overrides shape
-//! that run only: they never reach the sticky session config.
+//! A run resolves its spec once, before its first durable use, against the
+//! run's config snapshot taken after the boundary's command drain, and its
+//! first phase commit records the result, spec included, as the run's
+//! [`ResolvedRun`] in the turn's checkpoint. A resume or a cancel of a
+//! committed run reads that record and never resolves again. Overrides and
+//! options shape that run only: they never reach the sticky session config.
 //!
 //! A claim never mixes specs: the next-turn prefix stops at the first input
 //! whose spec differs from its head's. Steering joins the running run's
@@ -23,7 +26,7 @@
 //! explicit spec is refused before acceptance.
 
 use crate::session_graph::PersistedSessionConfig;
-use crate::{GenerationOptions, LlmProfileKey, ProtocolTurnOptions, ReasoningSelection};
+use crate::{GenerationOptions, LlmProfileKey, ReasoningSelection};
 
 /// Family version of the [`RunSpecHash`] preimage and of the canonical spec
 /// bytes it hashes.
@@ -138,6 +141,13 @@ impl ContractRef {
 /// bound under, the exact binding the worker resolves, and the binding's own
 /// data (D5). Everything here is serializable — a live object cannot ride a
 /// spec.
+///
+/// A ref is recorded intent, not a checked binding (FIG-6021): the run
+/// records it with its shape, and the host's deferred tool resolver receives
+/// it unchanged on every resolution the run, its resumed turns and the
+/// processes it starts ask for. Lash does not check before execution that
+/// the worker can bind it; a ref the resolver cannot serve answers that one
+/// resolution as unavailable.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CapabilityRef {
     pub contract: ContractRef,
@@ -151,14 +161,162 @@ pub struct CapabilityRef {
 // `ResolvedRun`'s `Eq` requires.
 impl Eq for CapabilityRef {}
 
+/// The key a plugin crate exports for its config owner's typed run options
+/// (FIG-6021): the owner's namespace, which is its plugin's id, and the
+/// type that owner decodes. Registration checks the key names the
+/// registering plugin, so a payload set under a plugin's own key reaches
+/// that plugin's owner as its own type.
+pub struct RunOptionsKey<T> {
+    owner: &'static str,
+    _options: std::marker::PhantomData<fn() -> T>,
+}
+
+impl<T> RunOptionsKey<T> {
+    /// The key of the owner of namespace `owner`, whose run options are `T`.
+    pub const fn new(owner: &'static str) -> Self {
+        Self {
+            owner,
+            _options: std::marker::PhantomData,
+        }
+    }
+
+    /// The owner's namespace.
+    pub const fn owner(&self) -> &'static str {
+        self.owner
+    }
+}
+
+impl<T> Clone for RunOptionsKey<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for RunOptionsKey<T> {}
+
+impl<T> std::fmt::Debug for RunOptionsKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RunOptionsKey").field(&self.owner).finish()
+    }
+}
+
+/// Run options that did not encode as their owner's payload.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("the run options for config owner `{owner}` do not encode: {message}")]
+pub struct RunOptionsEncodeError {
+    pub owner: String,
+    pub message: String,
+}
+
+/// What a run states for the config owners it addresses (FIG-6021): each
+/// owner's typed run options, set through that owner's [`RunOptionsKey`]
+/// and carried in serialized form. Only the owner decodes and applies its
+/// entry, over the namespace the run's snapshot records; nothing else
+/// merges it. An absent entry inherits the namespace; a present one, empty
+/// or not, is the run's statement and part of its spec's identity.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerRunOptions {
+    entries: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+impl OwnerRunOptions {
+    /// State `options` for the owner `key` names, replacing what was stated
+    /// for it before.
+    ///
+    /// # Errors
+    ///
+    /// [`RunOptionsEncodeError`] when `options` does not serialize.
+    pub fn set<T: serde::Serialize>(
+        &mut self,
+        key: RunOptionsKey<T>,
+        options: T,
+    ) -> Result<(), RunOptionsEncodeError> {
+        let encoded = serde_json::to_value(options).map_err(|error| RunOptionsEncodeError {
+            owner: key.owner.to_string(),
+            message: error.to_string(),
+        })?;
+        self.entries.insert(key.owner.to_string(), encoded);
+        Ok(())
+    }
+
+    /// These options with `options` stated for the owner `key` names.
+    ///
+    /// # Errors
+    ///
+    /// [`RunOptionsEncodeError`] when `options` does not serialize.
+    pub fn with<T: serde::Serialize>(
+        mut self,
+        key: RunOptionsKey<T>,
+        options: T,
+    ) -> Result<Self, RunOptionsEncodeError> {
+        self.set(key, options)?;
+        Ok(self)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Each addressed owner with its serialized options, in owner order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &serde_json::Value)> {
+        self.entries
+            .iter()
+            .map(|(owner, options)| (owner.as_str(), options))
+    }
+
+    /// The serialized options stated for `owner`.
+    pub fn get(&self, owner: &str) -> Option<&serde_json::Value> {
+        self.entries.get(owner)
+    }
+}
+
+impl serde::Serialize for OwnerRunOptions {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.entries.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for OwnerRunOptions {
+    /// A stored statement names each owner once: a duplicate key is
+    /// refused, never resolved by keeping either value.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Entries;
+        impl<'de> serde::de::Visitor<'de> for Entries {
+            type Value = OwnerRunOptions;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a map of config owner ids to run options")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut entries = std::collections::BTreeMap::new();
+                while let Some((owner, options)) = map.next_entry::<String, serde_json::Value>()? {
+                    if entries.contains_key(&owner) {
+                        return Err(serde::de::Error::custom(format!(
+                            "config owner `{owner}` is stated twice"
+                        )));
+                    }
+                    entries.insert(owner, options);
+                }
+                Ok(OwnerRunOptions { entries })
+            }
+        }
+        deserializer.deserialize_map(Entries)
+    }
+}
+
 /// One-shot overrides of the session config for the run that runs an
 /// input. Each field left `None` keeps the run's snapshot value.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunOverrides {
     /// The model this run executes, by the host's key. The run resolves it once,
     /// when it records its shape: the registry mints the binding then, and
-    /// every replay reads the recorded binding. The snapshot's reasoning
-    /// stays unless [`Self::reasoning`] is set too.
+    /// the run's checkpoint keeps the recorded binding. The snapshot's
+    /// reasoning stays unless [`Self::reasoning`] is set too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<LlmProfileKey>,
     /// The reasoning this run executes its model with.
@@ -166,21 +324,20 @@ pub struct RunOverrides {
     pub reasoning: Option<ReasoningSelection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<GenerationOptions>,
-    /// The options this run states for the session's protocol (a code mode
-    /// render, say): the protocol owner's typed run options,
-    /// which that owner alone applies to its recorded namespace. A snapshot
-    /// that records no protocol plugin refuses them.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub protocol_turn_options: Option<ProtocolTurnOptions>,
     /// The tool authority this run executes under, whole: the tools it is
     /// granted ([`SessionToolAccess::restricted`](crate::SessionToolAccess::restricted))
     /// and the names it hides, in place of the session's for this run only.
     /// It is the one-shot form of the core `set_tool_access` command: it is
-    /// recorded with the run's shape, so every replay and a cold reopen of the
-    /// run see the same grants, and it never reaches the sticky config, so
+    /// recorded with the run's shape, so a resume or a cold reopen of the
+    /// run sees the same grants, and it never reaches the sticky config, so
     /// a later run that states none runs under the session's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_access: Option<crate::SessionToolAccess>,
+    /// The typed run options this run states for the session's config
+    /// owners, protocol and host plugins alike (FIG-6021). A statement for
+    /// an owner the run's snapshot records no namespace for is refused.
+    #[serde(default, skip_serializing_if = "OwnerRunOptions::is_empty")]
+    pub owners: OwnerRunOptions,
 }
 
 impl RunOverrides {
@@ -196,16 +353,16 @@ impl RunOverrides {
         self.model.is_none()
             && self.reasoning.is_none()
             && self.generation.is_none()
-            && self.protocol_turn_options.is_none()
             && self.tool_access.is_none()
+            && self.owners.is_empty()
     }
 
-    /// Apply these overrides to `config`, the run's snapshot. An override
-    /// key is resolved through `models` here, once; a reasoning override
-    /// applies to whichever model the run ends up with. An override of
-    /// either has the pair the run would record judged against the recorded
-    /// capability. The protocol options are applied apart, by their owner
-    /// ([`apply_protocol_options`]).
+    /// Apply these overrides' core fields to `config`, the run's snapshot.
+    /// An override key is resolved through `models` here, once; a reasoning
+    /// override applies to whichever model the run ends up with. An
+    /// override of either has the pair the run would record judged against
+    /// the recorded capability. The owners' options are applied apart, by
+    /// their owners ([`apply_owner_options`]).
     fn apply(
         &self,
         config: &mut PersistedSessionConfig,
@@ -247,19 +404,16 @@ impl RunOverrides {
     }
 }
 
-/// Lay one statement of a run's protocol `options` over the protocol
-/// namespace `config` holds, through its `owner`.
-fn apply_protocol_options(
+/// Lay one statement of a run's `options` for `owner` over the namespace
+/// `config` records for it, through `owners`.
+fn apply_owner_options(
     config: &mut PersistedSessionConfig,
-    options: &ProtocolTurnOptions,
-    owner: &dyn RunOptionsOwner,
+    owner: &str,
+    options: &serde_json::Value,
+    owners: &dyn RunOptionsOwner,
 ) -> Result<(), RunResolveError> {
-    let Some(protocol) = config.plugin_config.protocol_plugin_id() else {
-        return Err(RunShapeRefusal::ProtocolOptionsWithoutProtocol.into());
-    };
-    let protocol = protocol.to_string();
-    let applied = owner
-        .apply_run_options(&config.plugin_config, &protocol, options)
+    let applied = owners
+        .apply_run_options(&config.plugin_config, owner, options)
         .map_err(|fault| match fault {
             crate::config_transaction::ConfigFault::Refused(refusal) => {
                 RunResolveError::Refused(RunShapeRefusal::Owner { refusal })
@@ -268,25 +422,26 @@ fn apply_protocol_options(
                 RunResolveError::RecordedCorrupt(corrupt)
             }
         })?;
-    config.plugin_config.insert(protocol, applied);
+    config.plugin_config.insert(owner.to_string(), applied);
     Ok(())
 }
 
-/// The owner of the session's protocol namespace, as a spec's resolution
-/// meets it: the one party that lays a run's stated options over the
-/// recorded namespace. The session's config registry implements it.
+/// The config owners of a session, as a spec's resolution meets them: the
+/// parties that each lay a run's stated options over their own recorded
+/// namespace. The session's config registry implements it.
 pub trait RunOptionsOwner: Send + Sync {
-    /// `config`'s `protocol` namespace with the run's `options` applied.
+    /// `config`'s `owner` namespace with the run's serialized `options`
+    /// applied by that namespace's owner, which alone decodes them.
     fn apply_run_options(
         &self,
         config: &crate::PluginConfig,
-        protocol: &str,
-        options: &ProtocolTurnOptions,
+        owner: &str,
+        options: &serde_json::Value,
     ) -> Result<serde_json::Value, crate::config_transaction::ConfigFault>;
 }
 
-/// The owners of a session whose deployment registers none: protocol options
-/// a run states name an owner nobody registers, and are refused as such.
+/// The owners of a session whose deployment registers none: options a run
+/// states name an owner nobody registers, and are refused as such.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoRunOptionsOwner;
 
@@ -294,11 +449,11 @@ impl RunOptionsOwner for NoRunOptionsOwner {
     fn apply_run_options(
         &self,
         _config: &crate::PluginConfig,
-        protocol: &str,
-        _options: &ProtocolTurnOptions,
+        owner: &str,
+        _options: &serde_json::Value,
     ) -> Result<serde_json::Value, crate::config_transaction::ConfigFault> {
         Err(crate::config_transaction::ConfigRefusal {
-            owner: protocol.to_string(),
+            owner: owner.to_string(),
             at: crate::config_transaction::RefusalSite::Candidate,
             reason: crate::config_transaction::ConfigRefusalReason::UnknownOwner,
         }
@@ -435,12 +590,6 @@ pub enum RunShapeRefusal {
     /// The spec sets a reasoning selection for a session with no model.
     #[error("a reasoning override needs a model, and the session has selected none")]
     ReasoningWithoutLlmProfile,
-    /// The spec states protocol turn options for a session that records no
-    /// protocol plugin.
-    #[error(
-        "run overrides state protocol turn options, but the session records no protocol plugin"
-    )]
-    ProtocolOptionsWithoutProtocol,
     /// The protocol refused to resolve the run's render.
     #[error("the run's render was refused: {refusal}")]
     Render { refusal: RenderRefusal },
@@ -456,8 +605,7 @@ pub enum RunResolveError {
     /// The spec is refused, on any attempt.
     #[error(transparent)]
     Refused(#[from] RunShapeRefusal),
-    /// The protocol namespace the snapshot recorded does not read as its
-    /// owner's type.
+    /// A namespace the snapshot recorded does not read as its owner's type.
     #[error(transparent)]
     RecordedCorrupt(crate::config_transaction::RecordedNamespaceCorrupt),
     #[error("the spec could not be encoded: {0}")]
@@ -467,9 +615,11 @@ pub enum RunResolveError {
 /// The shape one accepted input runs under.
 ///
 /// Explicit overrides win over the definition's output, which wins over the
-/// run's config snapshot. The default spec (no definition, no context, no
-/// overrides) resolves to the snapshot itself.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+/// run's config snapshot; an owner applies the definition's options for it
+/// first, then the explicit ones. The default spec (no definition, no
+/// context, no overrides) resolves to the snapshot itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<DefinitionRef>,
@@ -481,10 +631,10 @@ pub struct RunSpec {
     #[serde(default, skip_serializing_if = "RunOverrides::is_empty_boxed")]
     pub overrides: Box<RunOverrides>,
     /// Durable capability refs, keyed by the slot they fill (D5). They are
-    /// recorded data: a worker binds them by exact id, and dynamic capability
-    /// calls arrive with their own journaled protocol. The run's recorded
+    /// recorded data: a worker binds them by exact id. The run's recorded
     /// refs reach the host's deferred tool resolver with every resolution
-    /// the run asks for, so it grants by the run, not the process.
+    /// the run asks for, and a process the run starts captures them, so a
+    /// host grants by the run that authorized the work.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
 }
@@ -560,15 +710,15 @@ impl RunSpec {
     /// Resolve this spec against `snapshot`, the run's config after the
     /// boundary's command drain. `definition` is what the spec's registered
     /// definition produced over its context (`None` without a definition).
-    /// `models` mints the binding of an override key, and `owner` applies
-    /// the stated protocol options: the definition's first, then the spec's
-    /// own over them.
+    /// `models` mints the binding of an override key, and `owners` apply
+    /// the stated run options: for each owner, the definition's first, then
+    /// the spec's own over them.
     pub fn resolve(
         &self,
         snapshot: &PersistedSessionConfig,
         definition: Option<RunOverrides>,
         models: &dyn crate::provider::LlmProfiles,
-        owner: &dyn RunOptionsOwner,
+        owners: &dyn RunOptionsOwner,
     ) -> Result<ResolvedRun, RunResolveError> {
         let mut config = snapshot.clone();
         let definition = definition.unwrap_or_default();
@@ -577,23 +727,37 @@ impl RunSpec {
             model: overrides.model.clone().or(definition.model),
             reasoning: overrides.reasoning.clone().or(definition.reasoning),
             generation: overrides.generation.clone().or(definition.generation),
-            protocol_turn_options: None,
             tool_access: overrides.tool_access.clone().or(definition.tool_access),
+            owners: OwnerRunOptions::default(),
         }
         .apply(&mut config, models)?;
-        for options in [
-            definition.protocol_turn_options.as_ref(),
-            overrides.protocol_turn_options.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            apply_protocol_options(&mut config, options, owner)?;
+        for (owner, options) in definition.owners.iter().chain(overrides.owners.iter()) {
+            apply_owner_options(&mut config, owner, options, owners)?;
         }
-        let mut run = ResolvedRun::snapshot(snapshot.clone()).with_config(config);
-        run.spec = self.hash()?;
-        run.capabilities = self.capabilities.clone();
-        Ok(run)
+        Ok(ResolvedRun::snapshot(snapshot.clone())
+            .with_spec(self.clone())?
+            .with_config(config))
+    }
+
+    /// This spec as a frame switch carries it to its follow-on
+    /// ([`NextRun`](lash_sansio::NextRun)).
+    ///
+    /// # Errors
+    ///
+    /// The serializer's, for a spec that does not encode.
+    pub fn next_run(&self) -> Result<lash_sansio::NextRun, serde_json::Error> {
+        Ok(lash_sansio::NextRun::from_encoded(serde_json::to_value(
+            self,
+        )?))
+    }
+
+    /// The spec a frame switch's `next_run` carries.
+    ///
+    /// # Errors
+    ///
+    /// The deserializer's, for a carried spec that is not one.
+    pub fn from_next_run(next_run: &lash_sansio::NextRun) -> Result<Self, serde_json::Error> {
+        serde_json::from_value(next_run.encoded().clone())
     }
 }
 
@@ -622,14 +786,8 @@ impl std::fmt::Display for RunSpecHash {
     }
 }
 
-/// A run's recorded shape: what its spec resolved to, once.
-///
-/// It is the run's config record. The first execution of the run resolves
-/// its spec against the snapshot and records this; every replay, redrive and
-/// worker hop reads it back, so a later config command, a redeploy of the
-/// definition, or a fresh worker never changes the shape a recorded run executes
-/// under. Its config is the run's execution view only: commits keep writing
-/// the sticky session config.
+/// The render a run's results present with: the protocol's renderer and its
+/// resolved parameters, recorded with the run's shape.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedRender {
@@ -649,26 +807,34 @@ impl RecordedRender {
     }
 }
 
+/// A run's recorded shape: what its spec resolved to, once (FIG-6021).
+///
+/// The run's first phase commit records it in the turn's checkpoint, before
+/// the turn's first durable effect. A resume, a cancel and a worker hop of
+/// the committed run read it back, so a later config command, a redeploy of
+/// the definition, an owner or a renderer, or a fresh worker never changes
+/// the shape a recorded run executes under. Its config is the run's
+/// execution view only: commits keep writing the sticky session config.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(from = "ResolvedRunFields")]
+#[serde(try_from = "ResolvedRunFields")]
 pub struct ResolvedRun {
     /// The run's snapshot: the session config after the boundary's command
     /// drain, which the spec resolved against. Its revision is the config
     /// revision the run was admitted under.
     base: PersistedSessionConfig,
-    /// The spec the run resolved; `None` for the default spec.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub spec: Option<RunSpecHash>,
+    /// The spec the run resolved, whole: the default spec for a run of
+    /// wakes, a default send or a default follow-on.
+    #[serde(default, skip_serializing_if = "RunSpec::is_default")]
+    spec: RunSpec,
     /// The config the run executes under when its spec changed the snapshot;
     /// `None` when it runs under the snapshot itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     resolved: Option<Box<PersistedSessionConfig>>,
-    /// The capability refs the spec's slots named, recorded with the shape so
-    /// a replay binds the same refs (FIG-3877).
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<RecordedRender>,
+    /// The hash `spec` interns under; derived, never stored.
+    #[serde(skip)]
+    spec_hash: Option<RunSpecHash>,
 }
 
 #[derive(serde::Deserialize)]
@@ -676,25 +842,23 @@ pub struct ResolvedRun {
 struct ResolvedRunFields {
     base: PersistedSessionConfig,
     #[serde(default)]
-    spec: Option<RunSpecHash>,
+    spec: RunSpec,
     #[serde(default)]
     resolved: Option<Box<PersistedSessionConfig>>,
-    #[serde(default)]
-    capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
     #[serde(default)]
     render: Option<RecordedRender>,
 }
 
-impl From<ResolvedRunFields> for ResolvedRun {
-    fn from(fields: ResolvedRunFields) -> Self {
-        let mut run = Self::snapshot(fields.base);
+impl TryFrom<ResolvedRunFields> for ResolvedRun {
+    type Error = serde_json::Error;
+
+    fn try_from(fields: ResolvedRunFields) -> Result<Self, Self::Error> {
+        let mut run = Self::snapshot(fields.base).with_spec(fields.spec)?;
         if let Some(config) = fields.resolved {
             run = run.with_config(*config);
         }
-        run.spec = fields.spec;
-        run.capabilities = fields.capabilities;
         run.render = fields.render;
-        run
+        Ok(run)
     }
 }
 
@@ -703,11 +867,22 @@ impl ResolvedRun {
     pub fn snapshot(base: PersistedSessionConfig) -> Self {
         Self {
             base,
-            spec: None,
+            spec: RunSpec::default(),
             resolved: None,
-            capabilities: std::collections::BTreeMap::new(),
             render: None,
+            spec_hash: None,
         }
+    }
+
+    /// Record `spec` as the spec this run resolved.
+    ///
+    /// # Errors
+    ///
+    /// The serializer's, for a spec that does not encode.
+    pub fn with_spec(mut self, spec: RunSpec) -> Result<Self, serde_json::Error> {
+        self.spec_hash = spec.hash()?;
+        self.spec = spec;
+        Ok(self)
     }
 
     /// Set the execution config, retaining an override only when it differs.
@@ -721,6 +896,23 @@ impl ResolvedRun {
         &self.base
     }
 
+    /// The spec the run resolved, as it was accepted.
+    pub fn spec(&self) -> &RunSpec {
+        &self.spec
+    }
+
+    /// The hash the run's spec interns under; `None` for the default spec.
+    pub fn spec_hash(&self) -> Option<&RunSpecHash> {
+        self.spec_hash.as_ref()
+    }
+
+    /// The capability refs the spec's slots named.
+    pub fn capabilities(&self) -> &std::collections::BTreeMap<SlotId, CapabilityRef> {
+        &self.spec.capabilities
+    }
+
+    /// Whether the run states anything beyond the session config: an
+    /// override or run option that changed the snapshot.
     pub fn has_override(&self) -> bool {
         self.resolved.is_some()
     }
@@ -737,13 +929,16 @@ impl ResolvedRun {
     ) -> Result<Self, E> {
         let base = map(self.base)?;
         let config = self.resolved.map(|config| map(*config)).transpose()?;
-        let mut run = Self::snapshot(base);
+        let mut run = Self {
+            base,
+            spec: self.spec,
+            resolved: None,
+            render: self.render,
+            spec_hash: self.spec_hash,
+        };
         if let Some(config) = config {
             run = run.with_config(config);
         }
-        run.spec = self.spec;
-        run.capabilities = self.capabilities;
-        run.render = self.render;
         Ok(run)
     }
 
@@ -754,8 +949,9 @@ impl ResolvedRun {
 }
 
 /// A registered run definition: a pure, deterministic function from the
-/// run's config snapshot and the spec's context to overrides. It does no
-/// I/O; live resources are bound on the worker by id.
+/// run's config snapshot and the spec's context to overrides and owner run
+/// options. It does no I/O; live resources are bound on the worker by id.
+/// It runs once per run, at resolution, never on a resume.
 pub trait RunDefinition: Send + Sync {
     fn reference(&self) -> DefinitionRef;
 

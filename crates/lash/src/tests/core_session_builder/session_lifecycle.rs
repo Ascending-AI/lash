@@ -223,8 +223,14 @@ struct SwitchFrame;
 
 #[async_trait]
 impl crate::tools::StaticToolExecute for SwitchFrame {
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         lash_core::ToolOutcome::turn_control(lash_core::TurnControl::SwitchAgentFrame {
+            next_run: call
+                .context
+                .run_spec()
+                .expect("a tool body runs inside a turn")
+                .next_run()
+                .expect("the turn's spec encodes"),
             frame_key: lash_core::FrameKey::from_caller_material("patched-frame")
                 .expect("non-empty caller material"),
             initial_nodes: Vec::new(),

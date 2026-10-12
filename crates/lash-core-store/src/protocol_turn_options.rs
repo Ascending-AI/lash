@@ -4,9 +4,9 @@
 //! The protocol's namespace is recorded in the session's
 //! [`PluginConfig`](crate::PluginConfig) like every other owner's; this type
 //! is how protocol code reads it, derived wherever it is consumed and never
-//! stored beside it. It serializes as the bare value. A run's overrides
-//! carry the same type for what the run states: the protocol owner's typed
-//! run options, which only that owner decodes and applies (FIG-4652).
+//! stored beside it. It serializes as the bare value. What a run states for
+//! the protocol is that owner's typed run options, carried like any owner's
+//! ([`OwnerRunOptions`](crate::OwnerRunOptions), FIG-6021).
 
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,

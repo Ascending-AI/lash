@@ -428,11 +428,6 @@ pub enum RuntimeEffectCommand {
         phase: crate::plugin::RecordedCallbackPhase,
     },
 
-    /// Resolve the shape `run` runs under (FIG-3600 S6, FIG-3838): once per
-    /// run, keyed by it, so every redrive replays the recorded shape.
-    ResolveTurnConfig {
-        run: crate::TurnId,
-    },
     /// Record the base an administrative compaction (`compact_context`)
     /// summarizes and opens its frame from (FIG-4133): the head and the frame
     /// current when it starts, before its summarizer runs. Keyed by the
@@ -547,7 +542,6 @@ impl RuntimeEffectCommand {
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
 
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
-            Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
             Self::ResolveConfigTransaction { .. } => RuntimeEffectKind::ResolveConfigTransaction,
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
@@ -1005,11 +999,6 @@ pub enum RuntimeEffectOutcome {
         result: Result<Vec<crate::plugin::RecordedTurnContribution>, crate::PluginError>,
     },
 
-    /// The run's recorded shape: its spec resolved against its snapshot
-    /// of the durable head's config (FIG-3838).
-    ResolveTurnConfig {
-        resolved: Box<crate::ResolvedRun>,
-    },
     /// The base an administrative compaction recorded before its summarizer
     /// ran.
     RecordCompactionBase {

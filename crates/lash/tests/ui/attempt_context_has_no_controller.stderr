@@ -30,4 +30,10 @@ error[E0599]: no method named `runtime_dispatch` found for reference `&AttemptCo
  --> tests/ui/attempt_context_has_no_controller.rs:8:21
   |
 8 |     let _ = context.runtime_dispatch();
-  |                     ^^^^^^^^^^^^^^^^ method not found in `&AttemptContext<'_>`
+  |                     ^^^^^^^^^^^^^^^^
+  |
+help: there is a method `run_spec` with a similar name
+  |
+8 -     let _ = context.runtime_dispatch();
+8 +     let _ = context.run_spec();
+  |

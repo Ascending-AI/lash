@@ -331,11 +331,19 @@ struct SwitchFrame {
 
 #[async_trait::async_trait]
 impl lash::tools::StaticToolExecute for SwitchFrame {
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        // The follow-on runs under the switching turn's own spec.
+        let next_run = call
+            .context
+            .run_spec()
+            .expect("a tool body runs inside a turn")
+            .next_run()
+            .expect("the turn's spec encodes");
         ToolOutcome::switch_agent_frame(
             lash_core::FrameKey::from_caller_material("execution-state-frame").unwrap(),
             self.task.to_owned(),
             Vec::new(),
+            next_run,
         )
         .into()
     }
@@ -467,6 +475,11 @@ impl lash_core::ToolProvider for RotatingTools {
                     lash_core::FrameKey::from_caller_material("rotated-surface").unwrap(),
                     ROTATED_TASK.to_owned(),
                     Vec::new(),
+                    call.context
+                        .run_spec()
+                        .expect("a tool body runs inside a turn")
+                        .next_run()
+                        .expect("the turn's spec encodes"),
                 )
             }
             "new_after_rotation" => ToolOutcome::finish(lash_core::ToolValue::untrusted_json(

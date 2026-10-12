@@ -43,6 +43,7 @@ lash-plugin-standard-compaction = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-vm-client = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }

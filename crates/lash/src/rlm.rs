@@ -133,10 +133,12 @@ pub use lash_protocol_rlm::{
     StaleGlobalsPage, ToolCatalogueDisclosure, discovered_tool_doc, discovery_text,
     tool_catalogue_disclosure,
 };
-/// The RLM protocol's config owner and its command (FIG-4379).
+/// The RLM protocol's config owner and its command (FIG-4379), and the key
+/// a send states its run options under
+/// ([`SendBuilder::options`](crate::SendBuilder::options), FIG-6021).
 pub use lash_protocol_rlm::{
-    RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedBehaviour, RlmRecordedConfig,
-    RlmRenderRefusal, RlmRunOptions, SetRlmRender,
+    RLM_RUN_OPTIONS, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedBehaviour,
+    RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions, SetRlmRender,
 };
 /// The code-mode prompt sections (ADR 0133): the keys the protocol
 /// registers its sections under, and its built-in intro.

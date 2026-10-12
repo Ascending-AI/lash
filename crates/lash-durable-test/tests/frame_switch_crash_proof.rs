@@ -83,12 +83,20 @@ struct SwitchFrame;
 
 #[async_trait::async_trait]
 impl StaticToolExecute for SwitchFrame {
-    async fn execute(&self, _call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        // The follow-on runs under the switching turn's own spec.
+        let next_run = call
+            .context
+            .run_spec()
+            .expect("a tool body runs inside a turn")
+            .next_run()
+            .expect("the turn's spec encodes");
         ToolOutcome::switch_agent_frame(
             lash_core::FrameKey::from_caller_material("frame-switch-law")
                 .expect("non-empty caller material"),
             TASK.to_owned(),
             Vec::new(),
+            next_run,
         )
         .into()
     }

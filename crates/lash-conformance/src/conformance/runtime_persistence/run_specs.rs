@@ -13,9 +13,12 @@ use pretty_assertions::assert_eq;
 /// A spec whose protocol options state `shape`: two shapes are two specs.
 fn spec_with_shape(shape: &str) -> crate::RunSpec {
     crate::RunSpec::overrides(crate::RunOverrides {
-        protocol_turn_options: Some(crate::ProtocolTurnOptions::from_payload(
-            serde_json::json!({ "shape": shape }),
-        )),
+        owners: crate::OwnerRunOptions::default()
+            .with(
+                crate::RunOptionsKey::<serde_json::Value>::new("protocol"),
+                serde_json::json!({ "shape": shape }),
+            )
+            .unwrap_or_else(|error| unreachable!("a JSON value encodes: {error}")),
         ..crate::RunOverrides::default()
     })
 }
@@ -128,4 +131,70 @@ pub async fn run_specs_join_the_submission_digest_and_intern_once(store: Arc<dyn
         .await
         .expect("an identical retry after settlement answers the original");
     assert_eq!(settled_retry.input_id, first.input_id);
+}
+
+/// A8 (FIG-6021): a spec's bytes are read only when its run resolves, so a
+/// session's vacuum reclaims them once no unsettled input names the hash. An
+/// open input keeps its spec, and an identical retry before the reclaim is
+/// answered with the original acceptance; once the input settles, the vacuum
+/// deletes the bytes.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn run_spec_bytes_are_reclaimed_once_no_unsettled_input_names_them(
+    store: Arc<dyn RuntimeStore>,
+) {
+    let session_id = SessionId::from("run-spec-reclaim");
+    let shaped = spec_with_shape("reclaimable");
+    let hash = shaped
+        .hash()
+        .expect("hash the spec")
+        .expect("a non-default spec has a hash");
+    let draft = || {
+        pending_next_turn_input_draft(&session_id, "shaped")
+            .with_source_key("host:reclaim")
+            .with_run_spec(shaped.clone())
+    };
+    let accepted = store
+        .enqueue_pending_turn_input(draft())
+        .await
+        .expect("admit an input under a spec");
+    store
+        .vacuum(&session_id)
+        .await
+        .expect("vacuum with the input open");
+    assert_eq!(
+        store
+            .load_run_spec(&session_id, &hash)
+            .await
+            .expect("read the interned spec"),
+        Some(shaped.clone()),
+        "an open input keeps its spec's bytes"
+    );
+    let retry = store
+        .enqueue_pending_turn_input(draft())
+        .await
+        .expect("an identical retry before the reclaim");
+    assert_eq!(
+        retry.input_id, accepted.input_id,
+        "the retry recovers the original acceptance"
+    );
+
+    store
+        .cancel_pending_turn_input(&session_id, &accepted.input_id)
+        .await
+        .expect("settle the input");
+    store
+        .vacuum(&session_id)
+        .await
+        .expect("vacuum with nothing naming the spec");
+    assert_eq!(
+        store
+            .load_run_spec(&session_id, &hash)
+            .await
+            .expect("read the reclaimed spec"),
+        None,
+        "nothing names the spec: its bytes are reclaimed"
+    );
 }

@@ -461,7 +461,8 @@ impl TokenCodec for ToolCancellation {
 }
 
 /// Turn controls: Finish 0 (its value and the schema it settled under, as
-/// a tree), SwitchAgentFrame 1 (frame key, initial nodes as a tree, task).
+/// a tree), SwitchAgentFrame 1 (frame key, initial nodes as a tree, task,
+/// the follow-on's run spec as a tree).
 impl TokenCodec for TurnControl {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
@@ -483,11 +484,13 @@ impl TokenCodec for TurnControl {
                 frame_key,
                 initial_nodes,
                 task,
+                next_run,
             } => {
-                out.sum(1, 3);
+                out.sum(1, 4);
                 encode_tree(frame_key, out);
                 encode_tree(initial_nodes, out);
                 out.text(task);
+                encode_tree(next_run, out);
             }
         }
     }
@@ -507,11 +510,12 @@ impl TokenCodec for TurnControl {
                 })
             }
             1 => {
-                TokenReader::expect_fields(fields, 3)?;
+                TokenReader::expect_fields(fields, 4)?;
                 Ok(Self::SwitchAgentFrame {
                     frame_key: decode_tree(input)?,
                     initial_nodes: decode_tree(input)?,
                     task: input.text()?.to_owned(),
+                    next_run: decode_tree(input)?,
                 })
             }
             other => Err(unsupported(other)),

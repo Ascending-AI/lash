@@ -35,7 +35,6 @@ impl RuntimeEffectControllerError {
             RunShapeRefusal::Definition { .. }
             | RunShapeRefusal::Owner { .. }
             | RunShapeRefusal::ReasoningWithoutLlmProfile
-            | RunShapeRefusal::ProtocolOptionsWithoutProtocol
             | RunShapeRefusal::Render { .. } => RuntimeErrorCode::RunShapeRefused,
         };
         let mut error = Self::new(code, refusal.to_string());

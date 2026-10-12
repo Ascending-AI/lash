@@ -114,10 +114,10 @@ pub struct RuntimeExecutionContext<'run> {
     /// The admitted logical Run owning a foreground cell, independent of
     /// the effect scope of a process-owned session shift.
     logical_run: Option<crate::TurnAddress>,
-    /// The capability refs the logical Run's recorded shape names, by slot
-    /// (`RunSpec::capabilities`): empty outside a run, or for a run whose
-    /// spec names none.
-    run_capabilities: Arc<std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef>>,
+    /// The logical Run's recorded shape (FIG-6021), spec included: what a
+    /// switch its tools produce passes back to inherit the run's shape.
+    /// `None` outside a run, as in a process's execution.
+    resolved_run: Option<Arc<crate::ResolvedRun>>,
     facts: crate::plugin::ExecutionFacts,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     process_execution: Option<RuntimeProcessExecution>,
@@ -478,7 +478,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             chronological_projection: Arc::clone(&self.chronological_projection),
             turn_context: self.turn_context.clone(),
             logical_run: self.logical_run.clone(),
-            run_capabilities: Arc::clone(&self.run_capabilities),
+            resolved_run: self.resolved_run.clone(),
             facts: self.facts.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             process_execution: self.process_execution.clone(),
@@ -752,20 +752,31 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.logical_run.as_ref()
     }
 
-    /// Bind the capability refs the logical Run's recorded shape names.
-    pub fn with_run_capabilities(
-        mut self,
-        capabilities: std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef>,
-    ) -> Self {
-        self.run_capabilities = Arc::new(capabilities);
+    /// Bind the logical Run's recorded shape.
+    pub fn with_resolved_run(mut self, run: Arc<crate::ResolvedRun>) -> Self {
+        self.resolved_run = Some(run);
         self
     }
 
-    /// The capability refs the logical Run's recorded shape names, by slot.
+    /// The logical Run's recorded shape; `None` outside a run.
+    pub fn resolved_run(&self) -> Option<&Arc<crate::ResolvedRun>> {
+        self.resolved_run.as_ref()
+    }
+
+    /// The spec the logical Run's recorded shape resolved; `None` outside a
+    /// run.
+    pub fn run_spec(&self) -> Option<&crate::RunSpec> {
+        self.resolved_run.as_deref().map(crate::ResolvedRun::spec)
+    }
+
+    /// The capability refs this execution binds, by slot: the ones its
+    /// logical Run's recorded spec names, or the ones a process captured
+    /// from the run that created it (FIG-6021). Both reach it through its
+    /// execution environment.
     pub fn run_capabilities(
         &self,
     ) -> &std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef> {
-        &self.run_capabilities
+        &self.execution_env_spec.capabilities
     }
 
     /// The complete turn-cancel trio for one wait built from this execution:

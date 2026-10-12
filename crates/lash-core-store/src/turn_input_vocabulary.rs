@@ -17,9 +17,10 @@ const LASH_TURN_INPUT_DOMAIN_VERSION: &str = "lash-turn-input/v2";
 const LASH_KEYED_TURN_INPUT_DOMAIN_VERSION: &str = "lash-keyed-turn-input/v1";
 
 pub use crate::run_spec::{
-    BindingId, CapabilityRef, ContractRef, DefinitionRef, NoRunOptionsOwner, RecordedRender,
-    RenderFault, RenderRefusal, ResolvedRun, RunDefinition, RunDefinitionRefusal, RunDefinitions,
-    RunOptionsOwner, RunOverrides, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, SlotId,
+    BindingId, CapabilityRef, ContractRef, DefinitionRef, NoRunOptionsOwner, OwnerRunOptions,
+    RecordedRender, RenderFault, RenderRefusal, ResolvedRun, RunDefinition, RunDefinitionRefusal,
+    RunDefinitions, RunOptionsEncodeError, RunOptionsKey, RunOptionsOwner, RunOverrides,
+    RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, SlotId,
 };
 use crate::{CheckpointKind, PluginMessage, SessionId, TurnId};
 use std::any::Any;

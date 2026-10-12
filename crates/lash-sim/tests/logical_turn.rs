@@ -70,6 +70,11 @@ impl ToolProvider for SeedSwitchTool {
                     .expect("non-empty caller material"),
                 "run seeded follow-on".to_string(),
                 self.initial_nodes.clone(),
+                call.context
+                    .run_spec()
+                    .expect("a tool body runs inside a turn")
+                    .next_run()
+                    .expect("the turn's spec encodes"),
             )
         })
         .await
@@ -447,6 +452,11 @@ impl ToolProvider for BoundedSwitchTools {
                     "sim.bounded.seed",
                     json!({"index": index}),
                 )],
+                call.context
+                    .run_spec()
+                    .expect("a tool body runs inside a turn")
+                    .next_run()
+                    .expect("the turn's spec encodes"),
             )
         })
         .await

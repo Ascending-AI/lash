@@ -530,6 +530,12 @@ impl PluginHost {
         Ok(())
     }
 
+    pub(super) fn prepare_session(&self, session: &Arc<PluginSession>) -> Result<(), PluginError> {
+        let _materialization = session.materialization_lock.lock_recover();
+        session.validate_recorded_admission()?;
+        self.prepare_session_capabilities(session)
+    }
+
     fn prepare_session_capabilities(
         &self,
         session: &Arc<PluginSession>,

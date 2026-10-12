@@ -65,6 +65,10 @@ pub enum EmbedError {
     /// The host must choose how to handle a missing tool source.
     #[error("tool source policy is required; provide .tool_source_policy(...)")]
     MissingToolSourcePolicy,
+    #[error(transparent)]
+    /// Returned when run options a send states for a config owner do not
+    /// serialize (FIG-6021). Nothing is accepted.
+    RunOptionsEncode(#[from] lash_core::RunOptionsEncodeError),
     /// The host must state every execution bound the runtime enforces. They
     /// are its spend decision; the named preset is
     /// `ExecutionBudgets::recommended()`.
@@ -434,6 +438,7 @@ impl EmbedError {
             | Self::MissingMaxToolCalls
             | Self::MissingNoProgressBudget
             | Self::MissingToolSourcePolicy
+            | Self::RunOptionsEncode(_)
             | Self::MissingExecutionBudgets
             | Self::MissingDeltaCoalescing
             | Self::SessionTurnStartUnspecified { .. }
@@ -494,6 +499,7 @@ impl EmbedError {
             | Self::MissingMaxToolCalls
             | Self::MissingNoProgressBudget
             | Self::MissingToolSourcePolicy
+            | Self::RunOptionsEncode(_)
             | Self::MissingExecutionBudgets
             | Self::MissingDeltaCoalescing
             | Self::SessionTurnStartUnspecified { .. }

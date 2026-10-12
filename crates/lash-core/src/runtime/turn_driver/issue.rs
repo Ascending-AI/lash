@@ -22,7 +22,6 @@ pub(crate) async fn issue_effect(
         | RuntimeEffectCommand::Direct { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment
         | RuntimeEffectCommand::Checkpoint { .. }
-        | RuntimeEffectCommand::ResolveTurnConfig { .. }
         | RuntimeEffectCommand::RecordCompactionBase { .. }
         | RuntimeEffectCommand::TraceBoundary { .. } => cx.turn_effect(envelope, local).await,
         RuntimeEffectCommand::ResolveConfigTransaction { .. }

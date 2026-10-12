@@ -92,18 +92,28 @@ impl RuntimeEffectLocalRunner for NativeTransitionRunner {
 }
 
 impl crate::runtime::LashRuntime {
-    /// Build the session a turn run (fresh or resumed) runs in, under the
-    /// host's [`ToolSourcePolicy`](crate::ToolSourcePolicy): under `Require`
-    /// a run whose restore would lose a recorded member is refused, typed,
-    /// before anything is installed (FIG-5134). Its preparation's terminal
-    /// error ends the run as `Refused`, in the run's own commit.
-    pub(in crate::runtime) async fn materialize_turn_session(
+    /// Record the plugin transition a turn run (fresh or resumed) runs
+    /// under, before its configuration is resolved or installed: the
+    /// resident config is then the run's snapshot. Nothing is activated
+    /// (FIG-6021): [`Self::activate_turn_session`] builds the session after.
+    pub(in crate::runtime) async fn transition_turn_plugins(
         &mut self,
         scoped_effect_controller: &crate::ActorContext,
     ) -> Result<(), crate::RuntimeError> {
+        self.transition_run_plugins(scoped_effect_controller).await
+    }
+
+    /// Build the session a turn run runs in over its recorded transition,
+    /// under the host's [`ToolSourcePolicy`](crate::ToolSourcePolicy): under
+    /// `Require` a run whose restore would lose a recorded member is
+    /// refused, typed, before anything is installed (FIG-5134). Its
+    /// preparation's terminal error ends the run as `Refused`, in the run's
+    /// own commit.
+    pub(in crate::runtime) async fn activate_turn_session(
+        &mut self,
+    ) -> Result<(), crate::RuntimeError> {
         let policy = self.host.core.control.tool_source_policy;
-        self.materialize_run_session(scoped_effect_controller, policy)
-            .await?;
+        self.activate_run_session(policy).await?;
         self.deliver_undelivered_config_change().await;
         Ok(())
     }
@@ -124,8 +134,10 @@ impl crate::runtime::LashRuntime {
         Ok(())
     }
 
-    /// Publish the native plugin view before resolving a run's protocol config.
-    /// A deferred session supplies no driver or renderer until this activation.
+    /// Publish the native plugin view, then activate the session over it.
+    /// A turn run resolves its configuration between the two halves
+    /// (FIG-6021), from the transition's config and the built, unreadied
+    /// contributions.
     ///
     /// Every run, store-backed or not, records the transition from its
     /// head's namespaces to the plugin set this build admits before any
@@ -146,6 +158,18 @@ impl crate::runtime::LashRuntime {
         &mut self,
         scoped_effect_controller: &crate::ActorContext,
         policy: crate::ToolSourcePolicy,
+    ) -> Result<(), crate::RuntimeError> {
+        self.transition_run_plugins(scoped_effect_controller)
+            .await?;
+        self.activate_run_session(policy).await
+    }
+
+    /// The transition half of [`Self::materialize_run_session`]: the run's
+    /// plugin namespaces recorded and published to the resident authority,
+    /// with no capability built or readied.
+    async fn transition_run_plugins(
+        &mut self,
+        scoped_effect_controller: &crate::ActorContext,
     ) -> Result<(), crate::RuntimeError> {
         if self.session.is_some() {
             return Ok(());
@@ -205,6 +229,20 @@ impl crate::runtime::LashRuntime {
             }
         }
         self.state.authority.plugin_config = (*plugins.admitted_plugin_config().config).clone();
+        Ok(())
+    }
+
+    /// The activation half of [`Self::materialize_run_session`]: the session
+    /// built, readied and restored over the recorded transition.
+    async fn activate_run_session(
+        &mut self,
+        policy: crate::ToolSourcePolicy,
+    ) -> Result<(), crate::RuntimeError> {
+        if self.session.is_some() {
+            return Ok(());
+        }
+        let plugin_error =
+            |error| crate::RuntimeEffectControllerError::from(error).into_runtime_error();
         self.require_tool_sources(policy)?;
         Box::pin(self.materialize_published_session())
             .await

@@ -144,7 +144,7 @@ pub use tool_declaration::{
 };
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason, CancelOrigin, CancelRequest,
-    ModelToolReturn, ModelToolReturnPart, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    ModelToolReturn, ModelToolReturnPart, NextRun, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
     ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureCause, ToolFailureClass,
     ToolFailureSource, ToolIntentIdentity, ToolIntentKind, ToolValue, ToolView, ToolViewBlock,
     ToolViewMeta, TurnControl, format_tool_output_content, tool_result_text,

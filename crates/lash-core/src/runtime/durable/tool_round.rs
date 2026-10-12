@@ -283,7 +283,7 @@ pub(super) async fn run(
             }
             committed?;
             *unsettled = false;
-            stored.committed(drive.machine());
+            stored.committed(&mut *drive);
             drive.run_changes_committed(&written);
             drive.phase_committed().await;
             release_cell_emissions(cx, drive, held, CommitLabel::MODEL_DONE).await?;

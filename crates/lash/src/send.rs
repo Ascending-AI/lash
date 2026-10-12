@@ -31,9 +31,7 @@ use tokio::sync::mpsc;
 
 use crate::durable_session::DurableSession;
 use crate::error::{EmbedError, Result, SendError};
-use crate::support::{
-    LashSession, ProtocolTurnOptions, TurnActivity, TurnActivitySink, TurnInput, TurnOutcome,
-};
+use crate::support::{LashSession, TurnActivity, TurnActivitySink, TurnInput, TurnOutcome};
 use crate::turn::{TurnOutput, TurnReport};
 use lash_core::{GenerationOptions, LlmProfileKey, ReasoningSelection, RunSpec};
 
@@ -218,7 +216,9 @@ async fn refuse_unservable_selection(context: &SendContext, spec: &RunSpec) -> R
 /// session config as it stands when the input's run starts, after every
 /// config command queued ahead of that boundary. [`run`](Self::run) and the
 /// one-shot setters shape this input's run only; nothing they set reaches
-/// the session config. Inputs whose specs differ never share a turn.
+/// the session config. The run resolves its shape once, and its first
+/// phase records it, so a resume or a cancel of the run executes the same
+/// shape. Inputs whose specs differ never share a turn.
 #[must_use = "a SendBuilder does nothing until awaited"]
 pub struct SendBuilder {
     pub(crate) target: SendTarget,
@@ -228,6 +228,8 @@ pub struct SendBuilder {
     pub(crate) run_spec: RunSpec,
     pub(crate) pin: bool,
     pub(crate) trace: SendTraceContext,
+    /// The first run options that did not serialize, refused at acceptance.
+    pub(crate) options_error: Option<lash_core::RunOptionsEncodeError>,
 }
 
 /// The trace context a send links its input to.
@@ -281,6 +283,7 @@ impl SendBuilder {
             run_spec: RunSpec::default(),
             pin: false,
             trace: SendTraceContext::Ambient,
+            options_error: None,
         }
     }
 
@@ -382,13 +385,29 @@ impl SendBuilder {
         self
     }
 
-    /// The options this input's run states for the session's protocol:
-    /// the protocol owner's typed run options (`StandardRunOptions`,
-    /// `RlmTurnOptions`), which that owner applies over the session's
-    /// recorded namespace. Options the owner's type does not admit refuse
-    /// the run's shape. Setting them again replaces them.
-    pub fn protocol_turn_options(mut self, options: ProtocolTurnOptions) -> Self {
-        self.run_spec.overrides.protocol_turn_options = Some(options);
+    /// The typed run options this input's run states for one config owner,
+    /// protocol or host plugin alike, under the [`RunOptionsKey`](lash_core::RunOptionsKey)
+    /// that owner's plugin crate exports (FIG-6021). The owner applies them
+    /// over the namespace the run's snapshot records, field by field as it
+    /// defines; nothing else merges them. A run states them for this input
+    /// only: they never reach the session config, and a later send that
+    /// states none runs under the session's own namespace.
+    ///
+    /// Setting them again for the same owner replaces them. Options are
+    /// part of the spec, so they join the input's submission digest, split
+    /// it from inputs under other specs, and an input steered into a running
+    /// turn must leave its spec default to join that turn. An owner the
+    /// run's snapshot records no namespace for, or options its type does not
+    /// admit, refuse the run's shape typed; options that do not serialize
+    /// refuse the send at acceptance ([`EmbedError::RunOptionsEncode`](crate::EmbedError::RunOptionsEncode)).
+    pub fn options<T: serde::Serialize>(
+        mut self,
+        key: lash_core::RunOptionsKey<T>,
+        options: T,
+    ) -> Self {
+        if let Err(error) = self.run_spec.overrides.owners.set(key, options) {
+            self.options_error.get_or_insert(error);
+        }
         self
     }
 
@@ -436,7 +455,11 @@ impl SendBuilder {
             run_spec,
             pin,
             trace,
+            options_error,
         } = self;
+        if let Some(error) = options_error {
+            return Err(error.into());
+        }
         // The caller's context is snapshotted once, here, on the first poll
         // and before the first await: nothing later changes the edge.
         let parent = trace.into_context(&target);
@@ -1345,6 +1368,9 @@ mod tests {
                         .expect("frame key"),
                     task: "next task".into(),
                     initial_nodes: Vec::new(),
+                    next_run: lash_core::RunSpec::default()
+                        .next_run()
+                        .expect("the default spec encodes"),
                 },
                 TurnStatus::Answered,
             ),

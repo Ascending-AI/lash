@@ -84,7 +84,11 @@ pub trait ConfigOwner: Send + Sync + 'static {
     /// than the recorded namespace. What only creation or a config command
     /// may set (a pin, the prompt config, FIG-4589) is no field of it, so a
     /// run that states one does not decode, whatever value it states. An
-    /// owner whose namespace no run overrides uses [`NoRunOptions`].
+    /// owner whose namespace no run overrides uses [`NoRunOptions`]; one that
+    /// takes options registers through
+    /// [`ConfigRegistrar::owner_with_run_options`] with the
+    /// [`RunOptionsKey`](crate::RunOptionsKey) its crate exports, which is
+    /// how a send addresses them (FIG-6021).
     type RunOptions: ConfigWire;
 
     /// The namespace a session being created records: the creator's input
@@ -115,13 +119,13 @@ pub trait ConfigOwner: Send + Sync + 'static {
     ) -> Result<Self::Recorded, Self::Refusal>;
 }
 
-/// The run options of an owner whose namespace no run overrides: the empty
-/// object, and nothing else.
+/// The run options of an owner whose namespace no run overrides: a type with
+/// no value, so no send can state options for that owner, and a stored
+/// payload addressed to it never decodes (FIG-6021).
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize, schemars::JsonSchema,
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-#[serde(deny_unknown_fields)]
-pub struct NoRunOptions {}
+pub enum NoRunOptions {}
 
 /// One allowed change to an owner's namespace.
 pub trait ConfigCommand: ConfigWire {
@@ -167,6 +171,10 @@ pub enum ConfigRegistrationError {
     ForeignCommand { plugin_id: String, command: String },
     #[error("no plugin may own the reserved config owner id `{owner}`")]
     ReservedOwner { owner: String },
+    #[error(
+        "plugin `{plugin_id}` registered its config owner under the run options key of `{key}`"
+    )]
+    ForeignRunOptionsKey { plugin_id: String, key: String },
 }
 
 /// Where a factory registers its config owner and commands. The namespace is
@@ -184,8 +192,33 @@ impl ConfigRegistrar {
         }
     }
 
-    /// Register this plugin's config owner.
-    pub fn owner<O: ConfigOwner>(&mut self, owner: O) -> Result<(), ConfigRegistrationError> {
+    /// Register this plugin's config owner, whose namespace no run
+    /// overrides.
+    pub fn owner<O>(&mut self, owner: O) -> Result<(), ConfigRegistrationError>
+    where
+        O: ConfigOwner<RunOptions = NoRunOptions>,
+    {
+        self.register_owner(owner)
+    }
+
+    /// Register this plugin's config owner with the key its crate exports
+    /// for the owner's run options: the key must name this plugin, so a
+    /// payload a send states under it reaches this owner as its own type.
+    pub fn owner_with_run_options<O: ConfigOwner>(
+        &mut self,
+        owner: O,
+        key: crate::RunOptionsKey<O::RunOptions>,
+    ) -> Result<(), ConfigRegistrationError> {
+        if key.owner() != self.owner_id {
+            return Err(ConfigRegistrationError::ForeignRunOptionsKey {
+                plugin_id: self.owner_id.clone(),
+                key: key.owner().to_string(),
+            });
+        }
+        self.register_owner(owner)
+    }
+
+    fn register_owner<O: ConfigOwner>(&mut self, owner: O) -> Result<(), ConfigRegistrationError> {
         if self.owner.is_some() {
             return Err(ConfigRegistrationError::DuplicateOwner {
                 plugin_id: self.owner_id.clone(),
@@ -1106,35 +1139,39 @@ impl ConfigRegistry {
         })
     }
 
-    /// The protocol namespace a run executes under: the one `config`
-    /// recorded with the run's stated `options` applied by the protocol's
-    /// owner, as its typed run options. Nothing else lays a run's options
-    /// over a namespace.
+    /// The namespace `owner` a run executes under: the one `config`
+    /// recorded with the run's stated `options` applied by that namespace's
+    /// owner, as its typed run options (FIG-6021). Nothing else lays a run's
+    /// options over a namespace. The core owner takes no run options, and an
+    /// owner `config` records no namespace for refuses them: options never
+    /// create a namespace.
     pub fn apply_run_options(
         &self,
         config: &PluginConfig,
-        protocol: &str,
-        options: &crate::ProtocolTurnOptions,
+        owner: &str,
+        options: &serde_json::Value,
     ) -> Result<serde_json::Value, ConfigFault> {
-        let config = super::formats::decode_config_for(&self.factories, config)
-            .map_err(|refusal| format_fault(refusal, RefusalSite::Candidate))?;
-        let refuse = |reason| refused(protocol, RefusalSite::Candidate, reason);
+        let refuse = |reason| refused(owner, RefusalSite::Candidate, reason);
         let registered = self
             .owners
-            .get(protocol)
+            .get(owner)
+            .filter(|_| owner != CORE_CONFIG_OWNER)
             .ok_or_else(|| refuse(ConfigRefusalReason::UnknownOwner))?;
+        let config = super::formats::decode_config_for(&self.factories, config)
+            .map_err(|refusal| format_fault(refusal, RefusalSite::Candidate))?;
         let recorded = config
-            .get(protocol)
+            .get(owner)
             .ok_or_else(|| refuse(ConfigRefusalReason::UnrecordedNamespace))?;
-        registered
-            .owner
-            .apply_run_options(protocol, recorded, &options.payload)
+        registered.owner.apply_run_options(owner, recorded, options)
     }
 
-    /// Validate a run's config that a run override derived from the
-    /// session's `base`: every namespace the override changed is judged by
-    /// its owner against its recorded value, so an overlay cannot set what
-    /// the owner does not admit.
+    /// Validate a run's config that a run's overrides or options derived
+    /// from the session's `base`, as a config transaction's candidate is:
+    /// every owner with a recorded namespace judges the complete candidate,
+    /// changed or not, so a run's change to one namespace or to the core
+    /// cannot break another owner's invariant (FIG-6021). A run whose spec
+    /// changes nothing executes the session's own config, which its last
+    /// transaction already judged, and is not judged again.
     pub fn validate_derived(
         &self,
         base: &crate::PersistedSessionConfig,
@@ -1156,14 +1193,12 @@ impl ConfigRegistry {
             plugin_config: &derived.plugin_config,
         };
         for (owner, value) in derived.plugin_config.iter() {
-            let recorded = base.plugin_config.get(owner);
-            if recorded == Some(value) {
-                continue;
-            }
             let Some(registered) = self.owners.get(owner.as_str()) else {
                 continue;
             };
-            registered.owner.validate(owner, value, recorded, &facts)?;
+            registered
+                .owner
+                .validate(owner, value, base.plugin_config.get(owner), &facts)?;
         }
         Ok(())
     }
@@ -1195,10 +1230,10 @@ impl crate::RunOptionsOwner for ConfigRegistry {
     fn apply_run_options(
         &self,
         config: &PluginConfig,
-        protocol: &str,
-        options: &crate::ProtocolTurnOptions,
+        owner: &str,
+        options: &serde_json::Value,
     ) -> Result<serde_json::Value, ConfigFault> {
-        Self::apply_run_options(self, config, protocol, options)
+        Self::apply_run_options(self, config, owner, options)
     }
 }
 

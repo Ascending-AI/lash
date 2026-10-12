@@ -450,6 +450,8 @@ pub use attachments::{
     AttachmentStoreFailureClass, AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment,
     StoredBlobRef,
 };
+/// The run spec a frame switch's follow-on runs under (FIG-6021).
+pub use lash_core_execution::NextRun;
 pub use lash_core_execution::turn_stop_from_tool_control;
 pub use lash_sansio::llm::attachment_delivery::ProviderFileScope;
 pub use lash_sansio::llm::types::{
@@ -627,7 +629,7 @@ pub use runtime::{
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
     LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LlmStreamRecord,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork,
-    NoRunOptionsOwner, NonTerminalProcessPage, PROCESS_EFFECT_OCCURRENCE_CAP,
+    NoRunOptionsOwner, NonTerminalProcessPage, OwnerRunOptions, PROCESS_EFFECT_OCCURRENCE_CAP,
     PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
     PROCESS_EVENT_VOCABULARY_VERSION, ParentEndPlan, PendingTurnInput, PendingTurnInputBatch,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
@@ -668,10 +670,10 @@ pub use runtime::{
     RecordedKeys, RecordedRefusal, RecordedRender, RefusedWriteRange, RenderFault, RenderRefusal,
     Resolution, ResolveOutcome, ResolvedProcessDefinition, ResolvedRun, RetainedRevision,
     Retention, RunAggregateWakePolicy, RunDefinition, RunDefinitionRefusal, RunDefinitions,
-    RunOptionsOwner, RunOverrides, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash,
-    RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RunOptionsEncodeError, RunOptionsKey, RunOptionsOwner, RunOverrides, RunResolveError,
+    RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution, RuntimeCheckpointComponents,
+    RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
     RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionAuthority,
     RuntimeSessionState, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,

@@ -279,6 +279,19 @@ pub trait TurnDrive: Send {
     /// with its checkpoint, and a resume's admission reads it back: the turn
     /// is admitted once, and every node's records of it share its trace
     /// (FIG-5363). `None` for a drive that admits no trace scope.
+    /// The configuration the turn's run resolved and the tool surface it
+    /// installed last (FIG-6021). Every phase commits it with its checkpoint,
+    /// staging only what no earlier phase stored, and a resume and a cancel
+    /// restore serve it: no configuration producer runs once a phase has
+    /// committed. `None` for a drive that resolves no configuration.
+    fn run_config(&self) -> Option<super::run_config::RecordedRunConfig> {
+        None
+    }
+
+    /// Record that a phase committed the nodes `stored` names of
+    /// [`run_config`](Self::run_config).
+    fn run_config_stored(&mut self, _stored: &super::run_config::RunConfigStored) {}
+
     fn trace_scope(&self) -> Option<lash_trace::DurableTraceScope> {
         None
     }
@@ -1092,10 +1105,10 @@ pub struct ComposedCall {
 
 /// What a phase row's checkpoint holds: the machine's saved turn, the
 /// steering input its checkpoints delivered, which the phase bound to the
-/// run, and the turn's before-turn decisions and retained trace scope, which
-/// a resume serves. It carries no plugin state: the run's changed namespaces
-/// are rows of their own (FIG-5301). Encoded by the phase runner, its
-/// owner, as its PhaseRoot.
+/// run, and the turn's before-turn decisions, retained trace scope and
+/// recorded run configuration, which a resume serves. It carries no plugin
+/// state: the run's changed namespaces are rows of their own (FIG-5301).
+/// Encoded by the phase runner, its owner, as its PhaseRoot.
 pub struct PhaseCheckpoint {
     /// The machine's checkpoint with the content it names.
     pub saved: SavedTurn<HostTurnProtocol>,
@@ -1111,6 +1124,11 @@ pub struct PhaseCheckpoint {
     /// before the first phase commit, the turn's admission record holds it
     /// (FIG-5395).
     pub trace: Option<lash_trace::DurableTraceScope>,
+    /// The configuration the run resolved before its first durable effect
+    /// and the tool surface it installed last ([`TurnDrive::run_config`]),
+    /// which a resume and a cancel restore serve instead of resolving again
+    /// (FIG-6021). `None` for a drive that resolves no configuration.
+    pub config: Option<super::run_config::RecordedRunConfig>,
 }
 
 impl PhaseCheckpoint {
@@ -1149,14 +1167,17 @@ impl PhaseCheckpoint {
 }
 
 /// What a resumed turn's preparation serves from its checkpoint instead of
-/// deciding again: its before-turn callback decisions (ADR 0133 §6) and the
-/// trace scope its admission retained, so no before-turn callback runs and
-/// no admission is proposed once a phase has committed.
+/// deciding again: its before-turn callback decisions (ADR 0133 §6), the
+/// trace scope its admission retained, and the run's recorded
+/// configuration (FIG-6021), so no before-turn callback runs, no admission
+/// is proposed and no configuration is resolved once a phase has committed.
 pub struct RecordedPreparation {
     /// The before-turn callback decisions.
     pub before_turn: Vec<crate::plugin::RecordedTurnContribution>,
     /// The retained trace scope; `None` for a drive that retains none.
     pub trace: Option<lash_trace::DurableTraceScope>,
+    /// The run's resolved shape and installed tool surface.
+    pub config: super::run_config::RecordedRunConfig,
 }
 
 /// A turn restored from its rows: the machine, the effect it re-delivers,
@@ -1415,19 +1436,29 @@ impl<'a> TurnRestore<'a> {
     }
 
     /// What the turn's checkpoint records for preparing the resumed turn:
-    /// its before-turn callback decisions and its retained trace scope, so no
-    /// before-turn callback runs and no admission is proposed once a phase
-    /// has committed (ADR 0133 §6, FIG-5363).
+    /// its before-turn callback decisions, its retained trace scope and its
+    /// run's recorded configuration, so no before-turn callback runs, no
+    /// admission is proposed and no configuration is resolved once a phase
+    /// has committed (ADR 0133 §6, FIG-5363, FIG-6021).
     ///
     /// # Errors
     ///
-    /// [`TurnRestoreError`] when the row holds no checkpoint or it does not
-    /// decode.
+    /// [`TurnRestoreError`] when the row holds no checkpoint, it does not
+    /// decode, or it records no run configuration.
     pub async fn recorded_preparation(&mut self) -> Result<RecordedPreparation, TurnRestoreError> {
+        let run = self.row.run.clone();
         let phase = self.phase().await?;
+        let config = phase
+            .config
+            .clone()
+            .ok_or_else(|| TurnRestoreError::Undecodable {
+                run,
+                reason: "the turn checkpoint records no run configuration".to_owned(),
+            })?;
         Ok(RecordedPreparation {
             before_turn: phase.before_turn.clone(),
             trace: phase.trace.clone(),
+            config,
         })
     }
 
@@ -1475,7 +1506,7 @@ impl<'a> TurnRestore<'a> {
         self.cx.probe().checkpoint_restored(&row.session, &row.run);
         let mut machine = TurnMachine::restore_from_checkpoint(config, saved, window)?;
         // The turn's next phase builds on the content this one stored.
-        stored.committed(&mut machine);
+        stored.restored(&mut machine);
         let pending = next_work(&mut machine);
         Ok(RestoredTurn {
             machine,

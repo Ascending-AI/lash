@@ -108,7 +108,7 @@ impl PluginFactory for TestProtocolFactory {
     /// standard fake registers no config.
     fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
         if self.decode_code_create_options {
-            reg.owner(TestCodeConfigOwner)?;
+            reg.owner_with_run_options(TestCodeConfigOwner, crate::RunOptionsKey::new(self.id))?;
         }
         Ok(())
     }

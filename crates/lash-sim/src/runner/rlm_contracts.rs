@@ -366,6 +366,9 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
                             .expect("non-empty caller material"),
                         "continue".to_string(),
                         initial_nodes,
+                        lash_core::RunSpec::default()
+                            .next_run()
+                            .expect("the default spec encodes"),
                     ),
                 )],
             ))),

@@ -18,8 +18,8 @@ pub use config::{
     RlmRecordedBehaviour, UnsetBound, UnsetChannel,
 };
 pub use config_owner::{
-    RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedConfig, RlmRenderRefusal,
-    RlmRunOptions, SetRlmRender,
+    RLM_RUN_OPTIONS, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedConfig,
+    RlmRenderRefusal, RlmRunOptions, SetRlmRender,
 };
 pub use config_types::{ExecutionBounds, InstructionBound, MemoryBound};
 pub use factory::RlmProtocolPluginFactory;

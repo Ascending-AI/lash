@@ -64,6 +64,8 @@ mod sim;
 
 #[path = "support/matrix.rs"]
 mod matrix;
+#[path = "vertical_crash_proof/run_config.rs"]
+mod run_config;
 
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use matrix::MatrixTestExt as _;

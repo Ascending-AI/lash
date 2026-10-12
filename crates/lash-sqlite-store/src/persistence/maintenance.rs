@@ -39,6 +39,17 @@ impl StoreMaintenance for SqliteStore {
                         .sql(),
                     params![session_id.as_str()],
                 )?;
+                // A run's spec bytes are read only to resolve its shape:
+                // once no unsettled input names a spec, nothing reads it
+                // again (FIG-6021). The write transaction serializes this
+                // against every enqueue that would reuse the row.
+                crate::conn::cached_execute(tx,
+                    crate::turn_ingress::turn_ingress_sql()
+                        .run_specs
+                        .delete_unnamed
+                        .sql(),
+                    params![session_id.as_str()],
+                )?;
                 // Cancellation rows include unresolved recovery intent. They
                 // remain until session deletion, which is the only safe
                 // reclamation boundary without terminal correlation.

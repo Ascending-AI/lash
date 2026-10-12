@@ -290,6 +290,7 @@ pub(super) fn turn_effect_executor(
         trace: driver.trace.clone(),
         admitted_body: driver.admitted_body.take(),
         model_attempt: driver.model_attempt,
+        run_config: driver.run_config.clone(),
     };
     lash_core_execution::core_internal::owned_runner_executor(
         Box::new(LocalTurnEffectRunner {

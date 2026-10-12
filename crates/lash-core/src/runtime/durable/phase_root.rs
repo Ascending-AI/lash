@@ -9,7 +9,9 @@
 //! checkpoint needs. A phase stages only the blobs its machine's checkpoint
 //! added (FIG-5955): the others an earlier phase of the turn stored, and the
 //! root requires them by the node the machine was told each is stored as.
-//! The root's checkpoint text is the phase's JSON without its content.
+//! The root's checkpoint text is the phase's JSON without its content. The
+//! run's recorded configuration rides beside it as TurnContent nodes the
+//! root names, staged by the first phase that holds them (FIG-6021).
 
 use lash_core_store::checkpoint_graph::{
     EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
@@ -19,6 +21,7 @@ use lash_sansio::{
     CheckpointContentPin, CheckpointContentRef, SavedTurn, TurnCheckpoint, TurnCheckpointContent,
 };
 
+use super::run_config::{RecordedRunConfig, RunConfigStored};
 use super::session::PhaseCheckpoint;
 use crate::HostTurnProtocol;
 
@@ -47,16 +50,37 @@ struct PhaseRead {
     trace: Option<lash_trace::DurableTraceScope>,
 }
 
-/// Kind 33's body: the checkpoint text, and each content blob the
-/// checkpoint names by its digest, ascending.
+/// Kind 33's body: the checkpoint text, each content blob the checkpoint
+/// names by its digest, ascending, and the nodes of the run's recorded
+/// configuration: its resolved shape and its installed tool surface.
 struct PhaseRootBody {
     checkpoint: String,
     content: Vec<(String, NodeId)>,
+    run: Option<NodeId>,
+    surface: Option<NodeId>,
+}
+
+fn encode_node(node: Option<&NodeId>, out: &mut TokenWriter) {
+    match node {
+        None => out.none(),
+        Some(node) => {
+            out.some();
+            node.encode(out);
+        }
+    }
+}
+
+fn decode_node(input: &mut TokenReader<'_>) -> Result<Option<NodeId>, TokenError> {
+    if input.option()? {
+        Ok(Some(NodeId::decode(input)?))
+    } else {
+        Ok(None)
+    }
 }
 
 impl TokenCodec for PhaseRootBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
+        out.seq(4);
         out.text(&self.checkpoint);
         out.seq(self.content.len() as u64);
         for (digest, node) in &self.content {
@@ -64,10 +88,12 @@ impl TokenCodec for PhaseRootBody {
             out.text(digest);
             node.encode(out);
         }
+        encode_node(self.run.as_ref(), out);
+        encode_node(self.surface.as_ref(), out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
+        input.expect_struct(4)?;
         let checkpoint = input.text()?.to_owned();
         let count = input.seq()?;
         let mut content = Vec::new();
@@ -79,6 +105,8 @@ impl TokenCodec for PhaseRootBody {
         Ok(Self {
             checkpoint,
             content,
+            run: decode_node(input)?,
+            surface: decode_node(input)?,
         })
     }
 }
@@ -107,14 +135,25 @@ pub(super) struct StagedPhase {
 
 /// The blobs a staged phase added, each by the node it is stored as: what
 /// its machine is told once the phase's commit is acknowledged
-/// ([`lash_sansio::TurnMachine::checkpoint_stored`]).
+/// ([`lash_sansio::TurnMachine::checkpoint_stored`]), and the nodes of its
+/// run's configuration it added, which its drive is told.
 #[must_use = "the machine is told what its committed phase stored"]
-pub(super) struct PhaseStored(Vec<(CheckpointContentRef, CheckpointContentPin)>);
+pub(super) struct PhaseStored {
+    content: Vec<(CheckpointContentRef, CheckpointContentPin)>,
+    config: RunConfigStored,
+}
 
 impl PhaseStored {
-    /// Tell `machine` the phase is stored.
-    pub(super) fn committed(self, machine: &mut crate::TurnMachine) {
-        machine.checkpoint_stored(self.0);
+    /// Tell `drive`, and its machine, the phase is stored.
+    pub(super) fn committed(self, drive: &mut dyn super::session::TurnDrive) {
+        drive.machine().checkpoint_stored(self.content);
+        drive.run_config_stored(&self.config);
+    }
+
+    /// Tell `machine`, restored from this phase, what the phase stored: its
+    /// configuration's nodes came back with the checkpoint.
+    pub(super) fn restored(self, machine: &mut crate::TurnMachine) {
+        machine.checkpoint_stored(self.content);
     }
 }
 
@@ -131,6 +170,18 @@ impl StagedPhase {
         held: &[(CheckpointContentRef, CheckpointContentPin)],
     ) -> Result<Self, String> {
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let refused = |error: GraphRefusal| format!("the turn checkpoint does not stage: {error}");
+        let config = checkpoint
+            .config
+            .as_ref()
+            .map(|config| {
+                config.stage(|text| {
+                    staging
+                        .encode_value(NodeKind::TURN_CONTENT, &ContentText(text))
+                        .map_err(refused)
+                })
+            })
+            .transpose()?;
         let text = serde_json::to_string(&PhaseText {
             checkpoint: &checkpoint.saved.checkpoint,
             delivered: &checkpoint.delivered,
@@ -138,7 +189,6 @@ impl StagedPhase {
             trace: &checkpoint.trace,
         })
         .map_err(|error| format!("the turn checkpoint does not encode: {error}"))?;
-        let refused = |error: GraphRefusal| format!("the turn checkpoint does not stage: {error}");
         let mut content = Vec::new();
         let mut stored = Vec::new();
         for (digest, bytes) in checkpoint.saved.content.iter() {
@@ -160,17 +210,28 @@ impl StagedPhase {
                 &PhaseRootBody {
                     checkpoint: text,
                     content,
+                    run: config.as_ref().map(|config| config.run),
+                    surface: config.as_ref().and_then(|config| config.surface),
                 },
             )
             .map_err(refused)?;
+        let mut held_nodes = held
+            .iter()
+            .map(|(_, pin)| NodeId(*pin.as_bytes()))
+            .collect::<Vec<_>>();
+        let mut config_stored = RunConfigStored::default();
+        if let Some(config) = config {
+            held_nodes.extend(config.held);
+            config_stored = config.stored;
+        }
         Ok(Self {
             root,
             staging,
-            held: held
-                .iter()
-                .map(|(_, pin)| NodeId(*pin.as_bytes()))
-                .collect(),
-            stored: PhaseStored(stored),
+            held: held_nodes,
+            stored: PhaseStored {
+                content: stored,
+                config: config_stored,
+            },
         })
     }
 
@@ -208,7 +269,13 @@ pub(super) fn restaged_text(
     let root = staging
         .encode_value(NodeKind::PHASE_ROOT, &body)
         .map_err(|error| error.to_string())?;
-    for (_, node) in &body.content {
+    for node in body
+        .content
+        .iter()
+        .map(|(_, node)| node)
+        .chain(body.run.iter())
+        .chain(body.surface.iter())
+    {
         tx.require(*node);
     }
     tx.stage_all(staging);
@@ -244,6 +311,24 @@ pub(super) fn load(
             .map_err(|error| error.to_string())?;
         stored.push((digest, CheckpointContentPin::new(node.0)));
     }
+    let mut node_text = |node: NodeId| {
+        decoder
+            .child_kind(root, node, &[NodeKind::TURN_CONTENT])
+            .map_err(text)?;
+        let ContentText(body) = decoder.decode(node, NodeKind::TURN_CONTENT).map_err(text)?;
+        Ok::<_, String>((node, body))
+    };
+    let config = match body.run {
+        None => None,
+        Some(run) => {
+            let run = node_text(run)?;
+            let surface = body.surface.map(&mut node_text).transpose()?;
+            Some(RecordedRunConfig::load(
+                (run.0, &run.1),
+                surface.as_ref().map(|(node, text)| (*node, text.as_str())),
+            )?)
+        }
+    };
     Ok((
         PhaseCheckpoint {
             saved: SavedTurn {
@@ -253,7 +338,11 @@ pub(super) fn load(
             delivered: read.delivered,
             before_turn: read.before_turn,
             trace: read.trace,
+            config,
         },
-        PhaseStored(stored),
+        PhaseStored {
+            content: stored,
+            config: RunConfigStored::default(),
+        },
     ))
 }

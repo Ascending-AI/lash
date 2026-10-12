@@ -103,6 +103,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// pin's: a re-sent attempt streams under an observation key of its own
     /// (`abandoned_stream::model_stream_key`).
     pub(super) model_attempt: u32,
+    /// The configuration the turn's run executes under, as its checkpoint
+    /// records it: the resolved shape, and the tool surface the latest
+    /// environment sync installed (FIG-6021).
+    pub(super) run_config: crate::runtime::durable::run_config::RecordedRunConfig,
     /// The lifetime this value is bound to; the context it carries is `'static`.
     pub(crate) run: std::marker::PhantomData<&'a ()>,
 }

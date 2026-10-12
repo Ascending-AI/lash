@@ -45,13 +45,6 @@ impl<'run> RuntimeTurnDriver<'run> {
             .turn_pipeline
             .state()
             .process_execution_env_spec(&self.policy.policy);
-        let run_capabilities = self
-            .turn_pipeline
-            .state()
-            .authority
-            .run_view()
-            .map(|view| view.run.capabilities.clone())
-            .unwrap_or_default();
         self.session
             .code_execution_context(
                 &self.session_id,
@@ -87,7 +80,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                         self.session_id.clone(),
                         self.logical_run(),
                     ))
-                    .with_run_capabilities(run_capabilities)
+                    .with_resolved_run(self.run_config.shared_run())
                     .with_recorded_turn_cancel(self.children_stop.clone())
                     .with_opener_state(self.opener_state.clone())
                     .with_turn_cancel_scope(self.turn_cancel_scope())

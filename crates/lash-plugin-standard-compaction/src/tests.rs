@@ -794,6 +794,9 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
             frame_key,
             task: "continue the task".to_string(),
             initial_nodes: Vec::new(),
+            next_run: lash_core::RunSpec::default()
+                .next_run()
+                .expect("the default spec encodes"),
         }),
         sessions: Arc::new(MockSessionManager::default()),
         plugin_config: Default::default(),

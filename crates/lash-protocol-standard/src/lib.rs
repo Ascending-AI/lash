@@ -63,6 +63,10 @@ use serde_json::Value;
 /// session spec's plugin options, and the owner of its config commands.
 pub const STANDARD_PROTOCOL_PLUGIN_ID: &str = "standard_protocol";
 
+/// The key a send states [`StandardRunOptions`] under (FIG-6021).
+pub const STANDARD_RUN_OPTIONS: lash_core::RunOptionsKey<StandardRunOptions> =
+    lash_core::RunOptionsKey::new(STANDARD_PROTOCOL_PLUGIN_ID);
+
 /// The execution section of the prompt, naming `batch` and its maximum only
 /// when the sugar is offered, and the `finishing` tools the turn is offered
 /// when only a control call ends the session's turns.
@@ -512,9 +516,12 @@ impl PluginFactory for StandardProtocolPluginFactory {
         &self,
         registrar: &mut ConfigRegistrar,
     ) -> Result<(), ConfigRegistrationError> {
-        registrar.owner(StandardConfigOwner {
-            behaviour: self.config.recorded_behaviour(),
-        })?;
+        registrar.owner_with_run_options(
+            StandardConfigOwner {
+                behaviour: self.config.recorded_behaviour(),
+            },
+            STANDARD_RUN_OPTIONS,
+        )?;
         registrar.command::<SetStandardRender>(|recorded, command| {
             Ok(OwnerChange {
                 recorded: StandardRecordedConfig {

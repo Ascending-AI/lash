@@ -454,6 +454,7 @@ impl TurnBoundary {
             frame_key,
             task,
             initial_nodes,
+            ..
         } = outcome
         else {
             return Ok(());

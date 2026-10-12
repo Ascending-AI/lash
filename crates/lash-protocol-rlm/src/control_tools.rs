@@ -213,11 +213,19 @@ fn continue_as_switch_frame(
         context.call_id(),
     );
     let initial_nodes = crate::rlm_seed_initial_nodes(seed, context.fleet_format());
+    // The follow-on continues this request under the running turn's own
+    // recorded shape: its one-shot overrides and options carry over.
+    let next_run = context
+        .run_spec()
+        .ok_or_else(|| "continue_as runs only inside a turn".to_string())?
+        .next_run()
+        .map_err(|err| format!("continue_as {err}"))?;
 
     Ok(TurnControl::SwitchAgentFrame {
         frame_key,
         initial_nodes,
         task,
+        next_run,
     })
 }
 
@@ -425,6 +433,7 @@ mod tests {
         )
         .processes(processes)
         .call_id(lash_core::ToolCallId::fixture(tool_call_id))
+        .running(lash_core::RunSpec::default())
         .owner_as(lash_core::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("test-session"),
             agent_frame_id: lash_core::facade_support::frame_node_id(

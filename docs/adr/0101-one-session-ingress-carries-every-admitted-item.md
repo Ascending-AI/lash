@@ -483,6 +483,61 @@ The capability refs a `RunSpec` names are recorded with the shape too, and
 reach the host's deferred tool resolver, with the session and the run, on
 every resolution the run asks for.
 
+Addendum (FIG-6021): a run's configuration is resolved once and recorded in
+its turn checkpoint.
+
+- **Recorded once.** A run resolves its spec once, before its first durable
+  effect, against its snapshot. The snapshot is the resident config after the
+  boundary's command drain and the run's plugin transition: the head's
+  namespaces, plus this build's initial values for any namespace the head
+  does not record. Resolution is a plain derivation. Its owners come from the
+  host's config registrations and its render from the built, unreadied
+  plugin contributions; no session is activated first. Every phase checkpoint
+  (the `PhaseRoot`) names the result, the whole `ResolvedRun` with its spec,
+  and the tool surface the run's latest environment sync installed. Each is a
+  content-addressed `TurnContent` node, staged only by the phase that first
+  holds it and counted against that commit's budget. A resume, a lost
+  acknowledgement and a cancel read the record and resolve nothing. A redeploy
+  of the definition, an owner or a renderer, or a changed live tool source,
+  never reshapes a committed run. A crash before the first phase commit leaves
+  nothing recorded, so the next owner derives the shape again. The model
+  binding stays lazy: a cancel needs neither the run's definition nor its
+  model.
+- **Owner run options.** A send states typed options for any config owner,
+  protocol or host plugin, under the `RunOptionsKey<T>` that owner's crate
+  exports (`SendBuilder::options(key, value)`). Registration refuses a key
+  that names another plugin. An owner whose `RunOptions` is `NoRunOptions`
+  has no value a send could state. The owner alone applies its options:
+  first a definition's, then the explicit ones, over the namespace the
+  snapshot records. Options for an unregistered owner refuse the run's shape
+  as `UnknownOwner`, and options for an owner whose namespace the snapshot
+  lacks as `UnrecordedNamespace`.
+- **Validation scope.** A run whose spec changes its snapshot is judged whole,
+  as a config transaction's candidate is: every owner with a recorded
+  namespace validates the complete candidate, changed or not. The run's
+  candidate tool catalog is validated too. A run that changes nothing executes
+  the session's own config, which the transaction that wrote it already
+  judged, so it is not judged again. Otherwise a deploy that tightens one
+  owner would refuse every default run of every session it already holds,
+  rather than only runs that state something new.
+- **Bindings.** A recorded capability ref is data. The host's deferred tool
+  resolver binds it when the run asks for a tool, and a ref the resolver
+  cannot serve answers that one resolution as unavailable. Lash does not
+  check before execution that each ref is bindable. The guarantee is that the
+  ref reaches the resolver unchanged on every resolution the run makes, a
+  resumed turn and a process the run starts included.
+- **Frame switches.** A frame switch states its follow-on's spec
+  (`TurnControl::SwitchAgentFrame::next_run`). A tool reads the running
+  turn's recorded spec as `cx.run_spec()`, and its whole recorded shape as
+  `cx.resolved_run()`, so inheriting the shape means passing that spec back.
+  The follow-on interns the spec in the switch's own commit.
+- **Processes.** A process captures the creating run's resolved config: its
+  effective plugin config with the spec hash that derived it, its tool
+  access, its render and its capability refs. A process restart reads that
+  capture, never the session's later config.
+- **Spec storage.** A spec's interned bytes are read only at resolution. The
+  session's vacuum reclaims them once no unsettled input names the hash.
+
 Evidence: `crates/lash-core-store/src/session_policy.rs`,
 `crates/lash-core-store/src/run_spec.rs`,
 `crates/lash-conformance/src/conformance/runtime_persistence/run_specs.rs`.
@@ -491,7 +546,7 @@ not current proof of tool resolution across redrive.
 
 ### A6. Everything on a sent input is durable data
 
-Prompt context, protocol turn options, and run-spec data cross ingress as
+Prompt context, owner run options, and run-spec data cross ingress as
 serializable values. A live callback or plugin object cannot supply durable
 turn input.
 

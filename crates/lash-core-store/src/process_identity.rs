@@ -410,18 +410,28 @@ pub fn process_id_for_test(label: &str) -> ProcessId {
     ProcessId::fixture(label)
 }
 
+/// The configuration a process runs under, captured when it is created
+/// (FIG-6021): the resolved configuration of the run that created it — its
+/// effective plugin configuration with the spec hash that derived it, its
+/// tool authority and render — and the capability refs that run's spec
+/// bound. Every runtime built for the process, after a restart or for a
+/// nested start, reads this snapshot and never the session's later config.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessExecutionEnvSpec {
     /// The plugin configuration the process's creator ran under, at its
-    /// config revision: every runtime built for the process reads it
-    /// (FIG-4379).
+    /// config revision and with the spec hash that derived it (FIG-4379).
     pub plugin_config: crate::AdmittedPluginConfig,
     pub policy: crate::SessionPolicy,
     /// The tool authority captured at creation and used by every process runtime.
     pub tool_access: crate::SessionToolAccess,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::run_spec::RecordedRender>,
+    /// The capability refs the creating run's spec bound, which the
+    /// process's deferred tool resolutions receive as that run's did.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub capabilities:
+        std::collections::BTreeMap<crate::run_spec::SlotId, crate::run_spec::CapabilityRef>,
 }
 impl ProcessExecutionEnvSpec {
     /// Constructs a `ProcessExecutionEnvSpec` for protocol and process-engine implementors running a durable process.
@@ -435,6 +445,7 @@ impl ProcessExecutionEnvSpec {
             policy,
             tool_access,
             render: None,
+            capabilities: std::collections::BTreeMap::new(),
         }
     }
 

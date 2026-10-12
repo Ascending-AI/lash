@@ -866,8 +866,9 @@ pub trait TurnInputStore: Send + Sync {
     ) -> Result<TurnInputAdmission, StoreError>;
 
     /// The run spec `session_id` interned under `hash`, if it holds one
-    /// (FIG-3838). Spec rows are immutable and live until their session is
-    /// deleted.
+    /// (FIG-3838). Spec rows are immutable; a run reads its spec once, when
+    /// it resolves its shape, and the session's vacuum reclaims a row once
+    /// no unsettled input names it (FIG-6021).
     async fn load_run_spec(
         &self,
         session_id: &SessionId,
@@ -1111,7 +1112,8 @@ pub trait QueuedWorkStore: Send + Sync {
 #[async_trait::async_trait]
 pub trait StoreMaintenance: Send + Sync {
     /// Physically delete tombstoned graph-node rows and prune terminal
-    /// pending-turn-input evidence rows of `session_id`. See [`VacuumReport`].
+    /// pending-turn-input evidence rows of `session_id`, and reclaim the run
+    /// specs no unsettled input of it names (FIG-6021). See [`VacuumReport`].
     ///
     /// Vacuum never affects replay. Terminal pending-turn-input rows are
     /// admission evidence, not replay state: a replayed turn executes the shift

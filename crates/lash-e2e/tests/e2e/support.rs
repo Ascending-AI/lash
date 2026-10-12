@@ -164,6 +164,7 @@ fn settled_reads_the_host_native_turn_outcome() {
                 frame_key: lash::FrameKey::from_caller_material("e2e-outcome-law").unwrap(),
                 task: "next frame".into(),
                 initial_nodes: Vec::new(),
+                next_run: lash::RunSpec::default().next_run().unwrap(),
             },
             "completed",
             None,

@@ -120,6 +120,10 @@ pub struct RlmCreateConfig(#[schemars(with = "serde_json::Value")] pub RlmCreate
 #[serde(transparent)]
 pub struct RlmRunOptions(#[schemars(with = "serde_json::Value")] pub RlmTurnOptions);
 
+/// The key a send states [`RlmRunOptions`] under (FIG-6021).
+pub const RLM_RUN_OPTIONS: lash_core::RunOptionsKey<RlmRunOptions> =
+    lash_core::RunOptionsKey::new(super::RLM_PROTOCOL_PLUGIN_ID);
+
 /// Why the RLM owner refused a candidate.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
@@ -290,7 +294,7 @@ pub(crate) fn register(
     registrar: &mut ConfigRegistrar,
     owner: RlmConfigOwner,
 ) -> Result<(), ConfigRegistrationError> {
-    registrar.owner(owner)?;
+    registrar.owner_with_run_options(owner, RLM_RUN_OPTIONS)?;
     registrar.command::<SetRlmRender>(|recorded, command| {
         let render = RlmRenderPatch {
             print: command.print,

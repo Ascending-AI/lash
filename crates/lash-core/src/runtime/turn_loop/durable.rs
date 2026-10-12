@@ -1,8 +1,9 @@
 //! A turn the session actor runs (ADR 0132 §4; L3, FIG-5172): everything
 //! the turn holds in memory, prepared from committed state alone. The
 //! session's head, the rows its run took and the configuration its run
-//! recorded; nothing here commits, and the phase runner drives what it
-//! returns.
+//! recorded in its checkpoint, or resolves once before its first phase
+//! commits it (FIG-6021); nothing here commits, and the phase runner drives
+//! what it returns.
 
 use super::*;
 
@@ -30,15 +31,18 @@ pub(in crate::runtime) struct DurableTurn {
 
 impl LashRuntime {
     /// Prepare run `run` of this session for the session actor: install the
-    /// run's recorded configuration, materialize its admitted input over the
-    /// head, apply the before-turn decisions and the attachment-omission
-    /// policies, and build the driver that answers the turn's effects under
+    /// run's configuration, materialize its admitted input over the head,
+    /// apply the before-turn decisions and the attachment-omission policies,
+    /// and build the driver that answers the turn's effects under
     /// `controller`, the turn's own claimed context. `admissions` are the
-    /// rows the run took. A fresh turn runs its before-turn callbacks under
-    /// `admitted_trace`, the trace scope its `turn.admit` retained, whose
-    /// export it owes; a resumed one passes what its checkpoint recorded as
-    /// `recorded`: no callback runs, and it reads the retained trace scope
-    /// back (FIG-5363, FIG-5395). No preparation proposes an admission.
+    /// rows the run took. A fresh turn resolves its configuration after its
+    /// plugin transition and before its session is activated, and runs its
+    /// before-turn callbacks under `admitted_trace`, the trace scope its
+    /// `turn.admit` retained, whose export it owes; its first phase commit
+    /// records all of it. A resumed one passes what its checkpoint recorded
+    /// as `recorded`: no configuration is resolved and no callback runs, and
+    /// it reads the retained trace scope back (FIG-5363, FIG-5395,
+    /// FIG-6021). No preparation proposes an admission.
     #[expect(
         clippy::expect_used,
         reason = "the runtime session is installed for the whole preparation"
@@ -60,14 +64,20 @@ impl LashRuntime {
             .and_then(|admitted| admitted.inputs.first())
             .and_then(|input| input.run_spec.clone());
         let attachments = self.bind_turn_attachments(controller)?;
-        self.materialize_turn_session(controller).await?;
-        self.resolve_turn_config(controller, run, admitted_run_spec.as_ref())
-            .await?;
-        Self::emit_physical_turn_start(observer, controller, run, self.tool_restore_report.take());
-        let (recorded_before_turn, retained_trace) = match recorded {
-            Some(recorded) => (Some(recorded.before_turn), recorded.trace),
-            None => (None, admitted_trace),
+        self.transition_turn_plugins(controller).await?;
+        let (recorded_before_turn, retained_trace, run_config) = match recorded {
+            Some(recorded) => (Some(recorded.before_turn), recorded.trace, recorded.config),
+            None => (
+                None,
+                admitted_trace,
+                crate::runtime::durable::run_config::RecordedRunConfig::resolved(
+                    self.resolve_run(admitted_run_spec.as_ref()).await?,
+                ),
+            ),
         };
+        self.activate_turn_session().await?;
+        self.apply_turn_config(run_config.run())?;
+        Self::emit_physical_turn_start(observer, controller, run, self.tool_restore_report.take());
         let tracing = &self.host.core.tracing;
         // An admission that traced nothing leaves the turn untraced.
         let retained_trace = retained_trace.unwrap_or_else(|| {
@@ -387,6 +397,7 @@ impl LashRuntime {
             trace: turn_trace,
             admitted_body: None,
             model_attempt: 1,
+            run_config,
         });
         Ok(DurableTurn {
             driver,

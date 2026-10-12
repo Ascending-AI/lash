@@ -156,7 +156,6 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::PresentToolResult
                 | RuntimeEffectKind::LanguageRuntimeValue
                 | RuntimeEffectKind::TransitionPlugins
-                | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::ResolveConfigTransaction
                 | RuntimeEffectKind::CloseRunScope
                 | RuntimeEffectKind::Process

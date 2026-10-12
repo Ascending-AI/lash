@@ -178,17 +178,20 @@ impl ToolCallOutput {
         })
     }
 
-    /// Switch the caller to a fresh agent frame. The tool must declare
+    /// Switch the caller to a fresh agent frame whose follow-on runs under
+    /// `next_run`. The tool must declare
     /// [`TurnControlKind::SwitchAgentFrame`](crate::TurnControlKind::SwitchAgentFrame).
     pub fn switch_agent_frame(
         frame_key: crate::FrameKey,
         task: impl Into<String>,
         initial_nodes: Vec<crate::SessionAppendNode>,
+        next_run: NextRun,
     ) -> Self {
         Self::turn_control(TurnControl::SwitchAgentFrame {
             frame_key,
             initial_nodes,
             task: task.into(),
+            next_run,
         })
     }
 
@@ -905,13 +908,37 @@ pub enum TurnControl {
         value_schema: Option<crate::JsonSchema>,
     },
     /// End the turn by switching to a fresh agent frame that starts on
-    /// `task` with `initial_nodes`.
+    /// `task` with `initial_nodes`, its follow-on running under `next_run`.
     SwitchAgentFrame {
         frame_key: crate::FrameKey,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         initial_nodes: Vec<crate::SessionAppendNode>,
         task: String,
+        next_run: NextRun,
     },
+}
+
+/// The run spec a frame switch's follow-on runs under (FIG-6021), in its
+/// serialized form. The spec type belongs to the store vocabulary above
+/// this crate, which converts it both ways; the sans-io core carries it
+/// unread. The producer of the switch states it whole: inheriting the
+/// switching run's shape is passing that run's recorded spec back, and a
+/// different spec is exactly that spec. The switch's commit mails the
+/// follow-on under it, so every retry of that commit mails the same one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct NextRun(Value);
+
+impl NextRun {
+    /// The serialized spec `spec`, as the store vocabulary encodes it.
+    pub fn from_encoded(spec: Value) -> Self {
+        Self(spec)
+    }
+
+    /// The serialized spec, for the store vocabulary to decode.
+    pub fn encoded(&self) -> &Value {
+        &self.0
+    }
 }
 
 impl TurnControl {

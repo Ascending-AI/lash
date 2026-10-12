@@ -167,6 +167,7 @@ impl RuntimeTurnDriver<'_> {
                     processes: self.session_services.process_service(),
                     state: self.checkpoint_state_view(messages, protocol_iteration),
                     latest_prompt_usage: last_call_usage,
+                    run_spec: self.run_config.run().spec().clone(),
                 },
                 request,
             )

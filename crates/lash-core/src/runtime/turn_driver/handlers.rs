@@ -69,11 +69,22 @@ impl RuntimeTurnDriver<'_> {
             .await
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
         match decision {
-            Ok(Some(crate::ProtocolLlmCallAction::SwitchAgentFrame { frame_key, task })) => {
+            Ok(Some(crate::ProtocolLlmCallAction::SwitchAgentFrame {
+                frame_key,
+                task,
+                next_run,
+            })) => {
+                let next_run = next_run.next_run().map_err(|error| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::RecordEncodingFailed,
+                        format!("the frame switch's run spec does not encode: {error}"),
+                    )
+                })?;
                 machine.finish_with_outcome(crate::TurnOutcome::AgentFrameSwitch {
                     frame_key,
                     task,
                     initial_nodes: Vec::new(),
+                    next_run,
                 });
                 Ok(false)
             }
@@ -354,6 +365,9 @@ impl RuntimeTurnDriver<'_> {
                         ),
                     }
                 })?;
+            // The turn's next phase records the surface its model calls
+            // offer, which a resume reinstalls instead of the live one.
+            self.run_config.install_surface(&tool_surface);
         }
         self.handle_machine_response(machine, Response::ExecutionEnvironmentSynced { id, result })?;
         Ok(())

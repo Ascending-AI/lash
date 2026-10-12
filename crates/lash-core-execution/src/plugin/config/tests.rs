@@ -27,15 +27,29 @@ struct CounterCreate {
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CounterRefusal {
-    PastLimit { limit: u32 },
-    OverHundred { count: u32 },
+    PastLimit {
+        limit: u32,
+    },
+    OverHundred {
+        count: u32,
+    },
+    /// Another counter holds the reserved count [`RESERVED`].
+    Reserved {
+        by: String,
+    },
 }
+
+/// A count only one counter of a session may hold: every counter judges the
+/// others' namespaces against it, so a change to one counter can break
+/// another, unchanged one.
+const RESERVED: u32 = 99;
 
 impl std::fmt::Display for CounterRefusal {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PastLimit { limit } => write!(formatter, "past the limit {limit}"),
             Self::OverHundred { count } => write!(formatter, "{count} is over 100"),
+            Self::Reserved { by } => write!(formatter, "counter `{by}` holds {RESERVED}"),
         }
     }
 }
@@ -64,10 +78,18 @@ impl ConfigOwner for CounterOwner {
         &self,
         value: &CounterConfig,
         _base: Option<&CounterConfig>,
-        _facts: &CandidateFacts<'_>,
+        facts: &CandidateFacts<'_>,
     ) -> Result<(), CounterRefusal> {
         if value.count > 100 {
             return Err(CounterRefusal::OverHundred { count: value.count });
+        }
+        if value.count == RESERVED {
+            return Ok(());
+        }
+        for (owner, namespace) in facts.plugin_config.iter() {
+            if namespace.get("count") == Some(&serde_json::json!(RESERVED)) {
+                return Err(CounterRefusal::Reserved { by: owner.clone() });
+            }
         }
         Ok(())
     }
@@ -114,6 +136,8 @@ impl ConfigCommand for Increment {
 
 struct CounterFactory {
     id: &'static str,
+    /// The owner the run options key it registers names: its own id.
+    options_key: &'static str,
     reductions: Arc<AtomicUsize>,
 }
 
@@ -121,6 +145,7 @@ impl CounterFactory {
     fn new(id: &'static str) -> Self {
         Self {
             id,
+            options_key: id,
             reductions: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -141,7 +166,7 @@ impl PluginFactory for CounterFactory {
     }
 
     fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
-        reg.owner(CounterOwner)?;
+        reg.owner_with_run_options(CounterOwner, crate::RunOptionsKey::new(self.options_key))?;
         let reductions = Arc::clone(&self.reductions);
         reg.command::<Increment>(move |recorded, command| {
             reductions.fetch_add(1, Ordering::SeqCst);
@@ -593,9 +618,7 @@ fn framework_refusals_are_their_own_reasons_and_never_the_owners_data() {
 fn run_options_are_the_owners_typed_options_and_only_the_owner_applies_them() {
     let (registry, _, _) = counters();
     let base = head(&registry, 0);
-    let options = |payload: serde_json::Value| crate::ProtocolTurnOptions::from_payload(payload);
-    let apply =
-        |payload| registry.apply_run_options(&base.plugin_config, "first", &options(payload));
+    let apply = |payload| registry.apply_run_options(&base.plugin_config, "first", &payload);
 
     assert_eq!(
         apply(serde_json::json!({ "count": 7, "limit": 9 })).expect("applied"),
@@ -636,11 +659,7 @@ fn run_options_are_the_owners_typed_options_and_only_the_owner_applies_them() {
     );
 
     assert_eq!(
-        registry.apply_run_options(
-            &base.plugin_config,
-            "nobody",
-            &options(serde_json::json!({})),
-        ),
+        registry.apply_run_options(&base.plugin_config, "nobody", &serde_json::json!({})),
         Err(ConfigFault::Refused(ConfigRefusal {
             owner: "nobody".to_string(),
             at: RefusalSite::Candidate,
@@ -652,14 +671,44 @@ fn run_options_are_the_owners_typed_options_and_only_the_owner_applies_them() {
             registry.apply_run_options(
                 &base.plugin_config,
                 CORE_CONFIG_OWNER,
-                &options(serde_json::json!({})),
+                &serde_json::json!({}),
             ),
+            Err(ConfigFault::Refused(ConfigRefusal {
+                reason: ConfigRefusalReason::UnknownOwner,
+                ..
+            }))
+        ),
+        "the core share is no owner a run's options apply to"
+    );
+    let (protocol, mut namespaces) = base.plugin_config.clone().into_recorded_parts();
+    namespaces.remove("first");
+    let unrecorded = crate::PluginConfig::from_recorded_parts(protocol, namespaces);
+    assert!(
+        matches!(
+            registry.apply_run_options(&unrecorded, "first", &serde_json::json!({ "count": 1 })),
             Err(ConfigFault::Refused(ConfigRefusal {
                 reason: ConfigRefusalReason::UnrecordedNamespace,
                 ..
             }))
         ),
-        "the core share is no namespace a run's options apply to"
+        "options for an owner the run's base records no namespace for are refused"
+    );
+}
+
+/// FIG-6021: an owner's run options are keyed by its own plugin id, so a
+/// factory that registers its owner under another plugin's key is refused
+/// at registration, before any send could address the wrong owner.
+#[test]
+fn an_owner_registered_under_another_plugins_options_key_is_refused() {
+    let mut foreign = CounterFactory::new("first");
+    foreign.options_key = "second";
+    let factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(foreign)];
+    assert_eq!(
+        ConfigRegistry::build(&factories).err(),
+        Some(ConfigRegistrationError::ForeignRunOptionsKey {
+            plugin_id: "first".to_string(),
+            key: "second".to_string(),
+        })
     );
 }
 
@@ -1000,4 +1049,41 @@ fn config_namespaces_are_written_in_the_admissions_recorded_format() {
         publish(&formatted_admission(2)).0,
         (2, serde_json::json!({ "count": 2, "label": "root" }))
     );
+}
+
+/// WHOLE-CANDIDATE (FIG-6021): a run's derived config is judged whole, as a
+/// transaction's candidate is. A run whose options change one counter is
+/// refused by the other counter, whose own namespace the run left unchanged;
+/// a run that changes nothing is not judged again.
+#[test]
+fn an_unchanged_owner_judges_a_runs_change_to_another_owner() {
+    let (registry, _, _) = counters();
+    let base = head(&registry, 0);
+    let mut derived = base.clone();
+    derived.plugin_config.insert(
+        "first",
+        registry
+            .apply_run_options(
+                &base.plugin_config,
+                "first",
+                &serde_json::json!({ "count": RESERVED, "limit": 100 }),
+            )
+            .expect("the first counter applies its options"),
+    );
+    let ConfigFault::Refused(refusal) = registry
+        .validate_derived(&base, &derived)
+        .expect_err("the unchanged second counter refuses")
+    else {
+        panic!("a refusal, not corruption");
+    };
+    assert_eq!(refusal.owner, "second");
+    assert_eq!(
+        refusal.owner_refusal::<CounterRefusal>(),
+        Some(CounterRefusal::Reserved {
+            by: "first".to_string()
+        })
+    );
+    registry
+        .validate_derived(&base, &base)
+        .expect("a run that changes nothing executes the judged config");
 }

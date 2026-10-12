@@ -91,7 +91,7 @@ These classes refine I0's routing table in `substrate-seams.md` (which method ow
 | 18 | `RestoreRunMaterial` | deleted | the fold reads committed records (`RunFold::material`, V0) |
 | 19 | `AdmitShift` | needs a phase record | L3s; V0 covers the admit shape (`turn.admit`) |
 | 20 | `DrawRunStart` | needs a phase record | L3s |
-| 21 | `ResolveTurnConfig` | pure once recorded | L3s writes it into the admission row |
+| 21 | `ResolveTurnConfig` | deleted | FIG-6021: a run resolves its shape once, as a plain derivation before its first phase; every phase checkpoint (`PhaseRoot`) records the `ResolvedRun` and the installed tool surface, and a resume or cancel reads them back |
 | 22 | `RecordCompactionBase` | needs a phase record | L3: `turn.prepare` |
 | 23 | `RenderCompactionPrompt` | deleted | FIG-5259: the compaction call composes its `Compaction` sections, and its snapshot and request template commit with its admission at `completion.start`; a redrive resends the stored template, filling its attachment slots afresh (ADR 0135) (ADR 0133 §8) |
 | 24 | `ResolveConfigTransaction` | needs a phase record | L3: under the session epoch |

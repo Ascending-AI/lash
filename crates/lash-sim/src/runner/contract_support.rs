@@ -645,6 +645,7 @@ pub(super) fn turn_outcome_contract_json(
             frame_key,
             initial_nodes,
             task,
+            ..
         } => json!({
             "kind": "agent_frame_switch",
             "frame_key": frame_key,

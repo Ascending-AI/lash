@@ -208,19 +208,36 @@ impl PluginConfig {
 /// what a process captured with its execution environment, or the head's
 /// outside any run. Hooks read their configuration from this, never from
 /// the session's current head.
+///
+/// The revision names the session config the configuration derives from;
+/// the spec hash names what a run stated over it. Two runs at one revision
+/// execute the same configuration exactly when their spec hashes agree
+/// (FIG-6021).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdmittedPluginConfig {
     /// The session config revision this configuration was recorded under.
     pub revision: u64,
+    /// The run spec whose options derived this configuration from that
+    /// revision's; `None` for the session's own configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec: Option<crate::run_spec::RunSpecHash>,
     pub config: Arc<PluginConfig>,
 }
 impl AdmittedPluginConfig {
     pub fn new(config: PluginConfig, revision: u64) -> Self {
         Self {
             revision,
+            spec: None,
             config: Arc::new(config),
         }
+    }
+
+    /// This configuration as run spec `spec` derived it.
+    #[must_use]
+    pub fn derived_by(mut self, spec: Option<crate::run_spec::RunSpecHash>) -> Self {
+        self.spec = spec;
+        self
     }
 
     /// Decode the namespace `plugin_id` recorded, if any.

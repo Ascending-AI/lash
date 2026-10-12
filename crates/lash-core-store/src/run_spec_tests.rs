@@ -59,14 +59,14 @@ impl RunOptionsOwner for MapOwner {
         &self,
         config: &crate::PluginConfig,
         protocol: &str,
-        options: &ProtocolTurnOptions,
+        options: &serde_json::Value,
     ) -> Result<serde_json::Value, crate::config_transaction::ConfigFault> {
         let mut namespace = config
             .get(protocol)
             .and_then(serde_json::Value::as_object)
             .cloned()
             .unwrap_or_default();
-        let Some(stated) = options.payload.as_object() else {
+        let Some(stated) = options.as_object() else {
             return Err(crate::config_transaction::ConfigRefusal {
                 owner: protocol.to_string(),
                 at: crate::config_transaction::RefusalSite::Candidate,
@@ -80,6 +80,16 @@ impl RunOptionsOwner for MapOwner {
         namespace.extend(stated.clone());
         Ok(serde_json::Value::Object(namespace))
     }
+}
+
+/// The key a test states the `protocol` owner's map options under.
+const PROTOCOL: RunOptionsKey<serde_json::Value> = RunOptionsKey::new("protocol");
+
+/// `options` stated for the `protocol` owner.
+fn protocol_options(options: serde_json::Value) -> OwnerRunOptions {
+    OwnerRunOptions::default()
+        .with(PROTOCOL, options)
+        .expect("a JSON value encodes")
 }
 
 fn recorded(key: &str) -> RecordedLlmProfile {
@@ -212,7 +222,7 @@ fn a_spec_hash_is_canonical_over_option_key_order() {
     let backward: serde_json::Value = serde_json::from_str(r#"{ "b": 2, "a": 1 }"#).expect("json");
     let spec = |options| {
         RunSpec::overrides(RunOverrides {
-            protocol_turn_options: Some(ProtocolTurnOptions::from_payload(options)),
+            owners: protocol_options(options),
             ..RunOverrides::default()
         })
     };
@@ -261,7 +271,7 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
     let resolved = spec
         .resolve(&snapshot(), None, &catalog(), &MapOwner)
         .expect("resolve");
-    assert_eq!(resolved.capabilities, spec.capabilities);
+    assert_eq!(resolved.capabilities(), &spec.capabilities);
     assert_eq!(
         resolved.config(),
         &snapshot(),
@@ -311,7 +321,8 @@ fn a_model_only_override_mints_the_key_once_and_keeps_the_snapshot_reasoning() {
         ReasoningSelection::Effort("low".to_string()),
         "a key alone keeps the snapshot's reasoning"
     );
-    assert_eq!(resolved.spec, spec.hash().expect("hash"));
+    assert_eq!(resolved.spec_hash().cloned(), spec.hash().expect("hash"));
+    assert_eq!(resolved.spec(), &spec, "the run records its whole spec");
     assert_eq!(resolved.base().config_revision, 7);
 }
 
@@ -419,18 +430,14 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
         definition: Some(DefinitionRef::new("review", 1)),
         context: serde_json::Value::Null,
         overrides: Box::new(RunOverrides {
-            protocol_turn_options: Some(ProtocolTurnOptions::from_payload(
-                serde_json::json!({ "replace": "explicit" }),
-            )),
+            owners: protocol_options(serde_json::json!({ "replace": "explicit" })),
             ..RunOverrides::default()
         }),
         ..RunSpec::default()
     };
     let definition = RunOverrides {
         model: Some(LlmProfileKey::new("definition-model")),
-        protocol_turn_options: Some(ProtocolTurnOptions::from_payload(
-            serde_json::json!({ "replace": "definition", "added": true }),
-        )),
+        owners: protocol_options(serde_json::json!({ "replace": "definition", "added": true })),
         ..RunOverrides::default()
     };
     let resolved = spec
@@ -477,4 +484,87 @@ fn a_redundant_resolved_override_normalizes_to_the_snapshot() {
         })
         .unwrap();
     assert_eq!(normalized, run);
+}
+
+/// A7 (FIG-6021): a process captures the resolved config of the run that
+/// creates it, never the session's: the run's options in its plugin config
+/// with the spec hash that derived them, its narrowed tool access, and the
+/// capability refs its spec bound. A restart reads the stored capture, and a
+/// later session config change reaches neither it nor what it binds.
+#[test]
+fn a_process_captures_its_runs_resolved_config_across_a_restart_and_later_config() {
+    use crate::session_state::facade_ops::RuntimeSessionStateFacadeOps;
+
+    let narrowed = crate::SessionToolAccess::restricted(Vec::new()).expect("no resident tools");
+    let mut spec = RunSpec::overrides(RunOverrides {
+        tool_access: Some(narrowed.clone()),
+        owners: protocol_options(serde_json::json!({ "replace": "run" })),
+        ..RunOverrides::default()
+    });
+    spec.capabilities.insert(
+        SlotId::new("search"),
+        CapabilityRef {
+            contract: ContractRef::new("search", 1),
+            binding: BindingId::new("search:team"),
+            args: serde_json::Value::Null,
+        },
+    );
+    let resolved = spec
+        .resolve(&snapshot(), None, &catalog(), &MapOwner)
+        .expect("resolve");
+    let mut state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+        crate::NoProgressBudget::bounded(12),
+    ));
+    state.install_run_view(&resolved);
+    let captured = state.process_execution_env_spec(&state.policy);
+    let restarted = crate::ProcessExecutionEnvSpec::from_store_bytes(
+        &captured.to_store_bytes().expect("encode env"),
+    )
+    .expect("decode env");
+    assert_eq!(restarted, captured, "a restart reads the stored capture");
+    assert_eq!(
+        restarted.plugin_config.config.get("protocol"),
+        Some(&serde_json::json!({ "keep": 1, "replace": "run" })),
+        "the run's options, not the session's namespace"
+    );
+    assert_eq!(restarted.plugin_config.revision, 7);
+    assert_eq!(restarted.plugin_config.spec, spec.hash().expect("hash"));
+    assert_eq!(restarted.tool_access, narrowed);
+    assert_eq!(restarted.capabilities, spec.capabilities);
+
+    // The run ends and the session's config moves on.
+    state.take_run_view().expect("the run's view");
+    state
+        .authority
+        .plugin_config
+        .insert("protocol", serde_json::json!({ "replace": "later" }));
+    state.config_revision += 1;
+    let later = state.process_execution_env_spec(&state.policy);
+    assert_ne!(later, captured, "a later start captures the later config");
+    assert_eq!(later.plugin_config.spec, None);
+    assert!(later.capabilities.is_empty());
+    assert_eq!(
+        crate::ProcessExecutionEnvSpec::from_store_bytes(
+            &captured.to_store_bytes().expect("encode env"),
+        )
+        .expect("decode env"),
+        restarted,
+        "the running process's capture is unchanged by the later config"
+    );
+}
+
+/// OWNER-ADMISSION (FIG-6021): a stored spec states each owner once; a spec
+/// naming one twice is refused when it decodes, not silently resolved.
+#[test]
+fn a_spec_naming_one_owner_twice_does_not_decode() {
+    let duplicated = r#"{"overrides":{"owners":{"protocol":{"a":1},"protocol":{"a":2}}}}"#;
+    let refused = RunSpec::from_canonical_json(duplicated).expect_err("a duplicate owner");
+    assert!(
+        refused.to_string().contains("protocol"),
+        "the refusal names the owner: {refused}"
+    );
+    let unknown = r#"{"overrides":{"protocol_turn_options":{"a":1}}}"#;
+    RunSpec::from_canonical_json(unknown).expect_err("the removed protocol-only field");
 }

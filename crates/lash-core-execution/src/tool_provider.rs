@@ -214,9 +214,27 @@ pub struct AttemptContext<'run> {
     /// runtime dispatch.
     tool_catalog: Option<Arc<crate::ToolCatalog>>,
     definition_engines: crate::ProcessEngineRegistry,
+    pub(crate) resolved_run: Option<Arc<crate::ResolvedRun>>,
 }
 
 impl<'run> AttemptContext<'run> {
+    /// The spec the running turn's recorded shape resolved, read from the
+    /// run's recorded preparation and never rebuilt from live config
+    /// (FIG-6021). A tool that switches the agent frame passes it back to
+    /// run the follow-on under the same shape, or states another spec.
+    /// `None` outside a turn.
+    pub fn run_spec(&self) -> Option<&crate::RunSpec> {
+        self.resolved_run.as_deref().map(crate::ResolvedRun::spec)
+    }
+
+    /// The running turn's recorded shape, read-only (FIG-6021): the snapshot
+    /// it resolved against, its spec, the config it executes under and its
+    /// recorded render, as its recorded preparation holds them and never
+    /// rebuilt from live config. `None` outside a turn.
+    pub fn resolved_run(&self) -> Option<&crate::ResolvedRun> {
+        self.resolved_run.as_deref()
+    }
+
     pub fn fleet_format(&self) -> crate::FleetFormat {
         self.fleet_format
     }
@@ -308,6 +326,11 @@ impl<'run> AttemptContext<'run> {
                 .runtime_dispatch
                 .as_ref()
                 .map(|dispatch| Arc::clone(&dispatch.tool_catalog)),
+            resolved_run: context
+                .runtime_execution_context
+                .as_ref()
+                .and_then(crate::RuntimeExecutionContext::resolved_run)
+                .cloned(),
         }
     }
 
@@ -1390,7 +1413,11 @@ mod tests {
         let context = tool_context_under_scope(crate::AdmittedScope::process(
             crate::process_id_for_test("worker"),
         ));
-        let attempt = crate::testing::ToolCallFixture { context }.attempt("attempt-scope");
+        let attempt = crate::testing::ToolCallFixture {
+            context,
+            resolved_run: None,
+        }
+        .attempt("attempt-scope");
         assert!(
             attempt.start_cx().is_err(),
             "a process opener without its lineage has no start context"

@@ -149,17 +149,14 @@ async fn send(
     core: &lash::LashCore,
     session: &str,
     input: &str,
-    options: Option<lash::runtime::ProtocolTurnOptions>,
+    options: impl FnOnce(lash::SendBuilder) -> lash::SendBuilder,
 ) -> lash::TurnOutput {
     let session = core
         .session(session_id(session))
         .open()
         .await
         .expect("the session opens");
-    let mut send = session.send(lash::TurnInput::text(input));
-    if let Some(options) = options {
-        send = send.protocol_turn_options(options);
-    }
+    let send = options(session.send(lash::TurnInput::text(input)));
     tokio::time::timeout(WATCHDOG, send.output())
         .await
         .unwrap_or_else(|_| panic!("deadlock watchdog: the turn `{input}` never settled"))
@@ -371,7 +368,7 @@ async fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reop
         ))
         .await
         .expect("the session is created");
-    send(&core, SESSION, "first", None).await;
+    send(&core, SESSION, "first", std::convert::identity).await;
     assert_eq!(model.calls(), 2);
     assert_eq!(renderer.first.load(Ordering::SeqCst), 2);
     assert_eq!(renderer.first_limit.load(Ordering::SeqCst), 140);
@@ -391,7 +388,7 @@ async fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reop
     )
     .await;
     renderer.mode.store(1, Ordering::SeqCst);
-    send(&core, SESSION, "second", None).await;
+    send(&core, SESSION, "second", std::convert::identity).await;
     assert_eq!(renderer.first.load(Ordering::SeqCst), 2);
     assert_eq!(renderer.second.load(Ordering::SeqCst), 1);
     assert_eq!(renderer.second_limit.load(Ordering::SeqCst), 120);
@@ -403,17 +400,14 @@ async fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reop
     );
     assert!(format!("{:?}", model.request(3)).contains("[output cut:"));
 
-    send(
-        &core,
-        SESSION,
-        "run-spec",
-        Some(
-            lash::runtime::ProtocolTurnOptions::typed(lash::standard::StandardRunOptions {
+    send(&core, SESSION, "run-spec", |send| {
+        send.options(
+            lash::standard::STANDARD_RUN_OPTIONS,
+            lash::standard::StandardRunOptions {
                 render: Some(standard_render(100)),
-            })
-            .expect("the run's render options encode"),
-        ),
-    )
+            },
+        )
+    })
     .await;
     assert_eq!(renderer.second.load(Ordering::SeqCst), 2);
     assert_eq!(renderer.second_limit.load(Ordering::SeqCst), 100);
@@ -426,7 +420,7 @@ async fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reop
     core.shutdown().await.expect("the core shuts down");
 
     let core = standard_core(&backend, &model, &renderer, &tool, "second-build");
-    send(&core, SESSION, "reopened", None).await;
+    send(&core, SESSION, "reopened", std::convert::identity).await;
     assert_eq!(renderer.first.load(Ordering::SeqCst), 2);
     assert_eq!(
         renderer.second.load(Ordering::SeqCst),
@@ -592,7 +586,7 @@ async fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_
         ))
         .await
         .expect("the session is created");
-    send(&core, SESSION, "first", None).await;
+    send(&core, SESSION, "first", std::convert::identity).await;
     assert_eq!(renderer.first.load(Ordering::SeqCst), 2);
     assert_eq!(model.calls(), 2);
     let first_history = model.request(1);
@@ -619,7 +613,7 @@ async fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_
     )
     .await;
     renderer.mode.store(1, Ordering::SeqCst);
-    send(&core, SESSION, "second", None).await;
+    send(&core, SESSION, "second", std::convert::identity).await;
     assert_eq!(renderer.first.load(Ordering::SeqCst), 2);
     assert_eq!(renderer.second.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -645,17 +639,14 @@ async fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_
         "{latest_observation}"
     );
 
-    send(
-        &core,
-        SESSION,
-        "run-spec",
-        Some(
-            lash::runtime::ProtocolTurnOptions::typed(lash::rlm::RlmTurnOptions {
+    send(&core, SESSION, "run-spec", |send| {
+        send.options(
+            lash::rlm::RLM_RUN_OPTIONS,
+            lash::rlm::RlmRunOptions(lash::rlm::RlmTurnOptions {
                 render: Some(print_cap(2)),
-            })
-            .expect("the run's render options encode"),
-        ),
-    )
+            }),
+        )
+    })
     .await;
     assert_eq!(renderer.second.load(Ordering::SeqCst), 2);
     assert_eq!(
@@ -676,7 +667,7 @@ async fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_
         2,
         "second-build",
     );
-    send(&core, SESSION, "reopened", None).await;
+    send(&core, SESSION, "reopened", std::convert::identity).await;
     assert_eq!(
         stable_bytes(&model.request(6).messages[..prefix_len]),
         prefix,

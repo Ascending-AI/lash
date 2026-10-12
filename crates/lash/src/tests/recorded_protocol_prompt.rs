@@ -438,7 +438,12 @@ async fn a_run_options_prompt_is_refused(stores: Arc<dyn lash_core::StoreSet>) -
     ] {
         let refused = session
             .send(crate::TurnInput::text("options this run cannot state"))
-            .protocol_turn_options(lash_core::ProtocolTurnOptions::from_payload(stated))
+            .options(
+                lash_core::RunOptionsKey::<serde_json::Value>::new(
+                    crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+                ),
+                stated,
+            )
             .output()
             .await
             .expect_err(what);
@@ -458,9 +463,10 @@ async fn a_run_options_prompt_is_refused(stores: Arc<dyn lash_core::StoreSet>) -
         .send(crate::TurnInput::text(
             "a run that states its render options",
         ))
-        .protocol_turn_options(lash_core::ProtocolTurnOptions::typed(
+        .options(
+            crate::standard::STANDARD_RUN_OPTIONS,
             crate::standard::StandardRunOptions::default(),
-        )?)
+        )
         .output()
         .await?;
     let requests = requests_of(&served, ID);
@@ -506,9 +512,10 @@ async fn an_rlm_run_options_prompt_is_refused() -> Result<()> {
         .await?;
     let refused = session
         .send(crate::TurnInput::text("a prompt for this run"))
-        .protocol_turn_options(lash_core::ProtocolTurnOptions::from_payload(
+        .options(
+            lash_core::RunOptionsKey::<serde_json::Value>::new(crate::rlm::RLM_PROTOCOL_PLUGIN_ID),
             serde_json::json!({ "prompt": { "intro": COMMANDED } }),
-        ))
+        )
         .output()
         .await
         .expect_err("a run cannot state the session's prompt");

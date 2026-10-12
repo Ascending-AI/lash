@@ -1,5 +1,5 @@
-//! The outcomes of a session's own steps: an accepted turn input, its
-//! turn-config resolution (S6), its scope close (S7) and a session's close.
+//! The outcomes of a session's own steps: an accepted turn input, its scope
+//! close (S7) and a session's close.
 
 use super::{RuntimeEffectControllerError, RuntimeEffectOutcome};
 use crate::RuntimeEffectKind;
@@ -22,18 +22,6 @@ impl RuntimeEffectOutcome {
             Self::CloseRunScope => Ok(()),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::CloseRunScope,
-                other.kind(),
-            )),
-        }
-    }
-
-    pub fn into_resolve_turn_config(
-        self,
-    ) -> Result<crate::ResolvedRun, RuntimeEffectControllerError> {
-        match self {
-            Self::ResolveTurnConfig { resolved } => Ok(*resolved),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::ResolveTurnConfig,
                 other.kind(),
             )),
         }

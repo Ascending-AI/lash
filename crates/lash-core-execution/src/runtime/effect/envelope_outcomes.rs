@@ -132,7 +132,6 @@ impl RuntimeEffectOutcome {
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
 
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
-            Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
             Self::ResolveConfigTransaction { .. } => RuntimeEffectKind::ResolveConfigTransaction,
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,

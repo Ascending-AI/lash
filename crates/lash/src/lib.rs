@@ -148,12 +148,15 @@ pub mod config {
 /// )?;
 /// ```
 ///
-/// A run's options are [`StandardRunOptions`].
+/// A run's options are [`StandardRunOptions`], which a send states under
+/// [`STANDARD_RUN_OPTIONS`](standard::STANDARD_RUN_OPTIONS)
+/// ([`SendBuilder::options`](crate::SendBuilder::options), FIG-6021).
 pub mod standard {
     pub use lash_protocol_standard::{
-        STANDARD_PROTOCOL_PLUGIN_ID, SetStandardRender, StandardConfigOwner, StandardConfigRefusal,
-        StandardRecordedBehaviour, StandardRecordedConfig, StandardRenderRefusal,
-        StandardRunOptions, StandardTurnOptions, section_keys as standard_section_keys,
+        STANDARD_PROTOCOL_PLUGIN_ID, STANDARD_RUN_OPTIONS, SetStandardRender, StandardConfigOwner,
+        StandardConfigRefusal, StandardRecordedBehaviour, StandardRecordedConfig,
+        StandardRenderRefusal, StandardRunOptions, StandardTurnOptions,
+        section_keys as standard_section_keys,
     };
 }
 pub mod render {
@@ -306,12 +309,14 @@ pub use lash_core::store::SessionHeadOwner;
 /// [`durable::DurableBackendBuilder`] builds.
 pub use lash_core::{Backend, StoreBindingId, StoreSet};
 /// The shape a sent input runs under (FIG-3838): a [`RunSpec`] set on
-/// [`SendBuilder::run`], or through its one-shot setters, and the
-/// [`RunDefinition`]s a [`LashCoreBuilder`] registers for specs to name.
+/// [`SendBuilder::run`], or through its one-shot setters, the typed run
+/// options a send states for a config owner under the [`RunOptionsKey`] its
+/// plugin crate exports (FIG-6021), and the [`RunDefinition`]s a
+/// [`LashCoreBuilder`] registers for specs to name.
 pub use lash_core::{
-    BindingId, CapabilityRef, ContractRef, DefinitionRef, NoRunOptionsOwner, RenderRefusal,
-    RunDefinition, RunDefinitionRefusal, RunOptionsOwner, RunOverrides, RunResolveError,
-    RunShapeRefusal, RunSpec, SlotId,
+    BindingId, CapabilityRef, ContractRef, DefinitionRef, NoRunOptionsOwner, OwnerRunOptions,
+    RenderRefusal, RunDefinition, RunDefinitionRefusal, RunOptionsEncodeError, RunOptionsKey,
+    RunOptionsOwner, RunOverrides, RunResolveError, RunShapeRefusal, RunSpec, SlotId,
 };
 /// Lash's identity for one tool call (ADR 0117): what a tool keys its
 /// idempotency on, through [`tools::AttemptContext::call_id`].
@@ -443,7 +448,7 @@ pub mod tools {
     /// Turn flow control constructed by tool implementors; attach it with
     /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
     pub use lash_core::{
-        FinishDeclaration, ToolControl, TurnControl, TurnControlKind, TurnControls,
+        FinishDeclaration, NextRun, ToolControl, TurnControl, TurnControlKind, TurnControls,
     };
     /// A finish tool: its call ends the turn with its whole input as the
     /// turn's value, typed by the schema it is built with.

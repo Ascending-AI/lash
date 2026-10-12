@@ -1508,6 +1508,12 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
                     ),
                     initial_nodes: Vec::new(),
                     task: "finish in a fresh frame".into(),
+                    next_run: call
+                        .context
+                        .run_spec()
+                        .expect("a tool body runs inside a turn")
+                        .next_run()
+                        .expect("the turn's spec encodes"),
                 })
                 .into()
             }

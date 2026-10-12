@@ -303,25 +303,37 @@ pub fn frame_task_run(frame_key: &crate::FrameKey) -> TurnId {
 
 /// The mail a turn's `turn.commit` sends its own session for `outcome`: a
 /// frame switch's task, as the session's next-turn input under its
-/// follow-on's run ([`frame_task_run`]), so the switch, its new frame and
-/// its follow-on commit together (ADR 0101 §3). Any other outcome mails
-/// nothing. `agent_frame_switches` is the switching run's admitted depth;
-/// the mailed input retains its successor depth through owner changes.
+/// follow-on's run ([`frame_task_run`]) and the run spec the switch stated
+/// (FIG-6021), so the switch, its new frame and its follow-on commit
+/// together (ADR 0101 §3), and every retry of that commit mails the same
+/// follow-on. Any other outcome mails nothing. `agent_frame_switches` is the
+/// switching run's admitted depth; the mailed input retains its successor
+/// depth through owner changes.
 ///
 /// # Errors
 ///
-/// [`SessionMailError::Undecodable`] when the input does not encode.
+/// [`SessionMailError::Undecodable`] when the input or its spec does not
+/// encode.
 pub fn follow_on_mail(
     session: &SessionId,
     outcome: &crate::TurnOutcome,
     agent_frame_switches: u32,
 ) -> Result<Option<SessionMailWrite>, SessionMailError> {
     let crate::TurnOutcome::AgentFrameSwitch {
-        frame_key, task, ..
+        frame_key,
+        task,
+        next_run,
+        ..
     } = outcome
     else {
         return Ok(None);
     };
+    let run_spec = crate::RunSpec::from_next_run(next_run).map_err(|error| {
+        SessionMailError::Undecodable(format!(
+            "the follow-on spec of frame {}: {error}",
+            frame_key.as_str()
+        ))
+    })?;
     let run = frame_task_run(frame_key);
     let mut input = crate::TurnInput::text(task.clone());
     input.agent_frame_switches = agent_frame_switches.saturating_add(1);
@@ -334,7 +346,8 @@ pub fn follow_on_mail(
         session,
         run.as_str(),
     ))
-    .with_source_key(run.as_str());
+    .with_source_key(run.as_str())
+    .with_run_spec(run_spec);
     let draft_json = serde_json::to_string(&draft).map_err(|error| {
         SessionMailError::Undecodable(format!(
             "the follow-on of frame {}: {error}",

@@ -35,6 +35,11 @@ impl PostgresStore {
     async fn vacuum_tombstones(&self, session_id: &SessionId) -> Result<VacuumReport, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+        // The session's write lock, which every enqueue takes before it
+        // interns a spec, taken before any row this pass deletes: an
+        // admission that reuses a spec row commits its input before the
+        // reclaim below reads the inputs (FIG-6021).
+        super::lock_session_history_mutation_tx(&mut tx, session_id).await?;
         // `lash_deleted_sessions` is deliberately exempt: it is permanent
         // identity evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
         let removed_node_count = crate::observed_sql::query(
@@ -71,6 +76,18 @@ impl PostgresStore {
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
+        // A run's spec bytes are read only to resolve its shape: once no
+        // unsettled input names a spec, nothing reads it again (FIG-6021).
+        crate::observed_sql::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .run_specs
+                .delete_unnamed
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .execute(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)?;
         // Cancellation rows include unresolved recovery intent. They remain
         // until session deletion, which is the only safe reclamation boundary
         // without terminal correlation.

@@ -36,7 +36,14 @@ struct SwitchFrame(Arc<OnceLock<lash::LashCore>>, &'static str);
 
 #[async_trait::async_trait]
 impl StaticToolExecute for SwitchFrame {
-    async fn execute(&self, _call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        // The follow-on runs under the switching turn's own spec.
+        let next_run = call
+            .context
+            .run_spec()
+            .expect("a tool body runs inside a turn")
+            .next_run()
+            .expect("the turn's spec encodes");
         if let Some(core) = self.0.get() {
             let session = core
                 .session(lash::SessionId::try_from(self.1.to_owned()).expect("a session id"))
@@ -53,6 +60,7 @@ impl StaticToolExecute for SwitchFrame {
             lash_core::FrameKey::from_caller_material(self.1).expect("non-empty caller material"),
             TASK.to_owned(),
             Vec::new(),
+            next_run,
         )
         .into()
     }
