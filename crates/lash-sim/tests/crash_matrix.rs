@@ -65,8 +65,10 @@ crash_matrix! {
     a_pressure_frame_cut_at_every_label_opens_once_and_its_turn_runs_in_it => Pressure;
 }
 
-/// A stale-epoch cut at `cell.snapshot+admit` runs no body on the old owner:
-/// its admission commits, its node pauses past its lease, and the new owner
+/// A stale-epoch cut at the cell's first save, which commits the model
+/// response that asked for it with the call's admission
+/// (`model.done+cell.snapshot+admit`, FIG-6000), runs no body on the old
+/// owner: its admission commits, its node pauses past its lease, and the new owner
 /// restores from the snapshot and settles the started `Once` `Interrupted`.
 /// The old owner's acknowledged admission reaches it only past its
 /// self-stop deadline, so the body never starts there, nor anywhere.
@@ -76,7 +78,7 @@ async fn a_stale_epoch_cut_at_a_cell_admission_runs_no_body_on_the_old_owner() {
         let worlds = RefCell::new(Vec::new());
         let report = Matrix::new()
             .faults(&[Fault::StaleEpoch])
-            .labels(&[CommitLabel::CELL_SNAPSHOT_ADMIT])
+            .labels(&[CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT])
             .run_test(|| {
                 let deployment = Deployment::new(Case::Cell, seed, Dialect::SqliteMemory);
                 worlds.borrow_mut().push(Arc::clone(deployment.world()));

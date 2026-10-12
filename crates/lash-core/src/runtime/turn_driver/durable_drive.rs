@@ -666,6 +666,19 @@ impl TurnDrive for RuntimeDrive {
         Ok(())
     }
 
+    fn hold_response(&mut self, held: crate::HeldResponse) -> bool {
+        let carries = self
+            .driver
+            .session
+            .plugins()
+            .code_executor()
+            .is_some_and(|executor| executor.carries_held_response());
+        if carries {
+            self.driver.held_response = Some(held);
+        }
+        carries
+    }
+
     fn answered_cell_end_held(&self, id: crate::EffectId) -> bool {
         self.driver
             .answered_cell_end

@@ -247,6 +247,16 @@ pub trait CodeExecutorPlugin: Send + Sync {
         false
     }
 
+    /// Whether this executor's cells commit the model response that asked
+    /// for them with their first save, when their turn holds it
+    /// ([`RuntimeExecutionContext::held_response`], FIG-6000): the save
+    /// carries the held writes, and the cell publishes nothing before a
+    /// commit holds them. An executor that does not commits the response
+    /// on its own before the cell starts, as `model.done`.
+    fn carries_held_response(&self) -> bool {
+        false
+    }
+
     /// The view of `records`, one cell's tool call records in call order,
     /// that a turn keeps of the cell: the executor's one bound on how many
     /// records and how much of each output a cell's round retains, with the

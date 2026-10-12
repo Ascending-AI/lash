@@ -185,6 +185,19 @@ pub struct Saved {
     pub ledger: EffectLedger,
 }
 
+/// How a run's first save that carried its turn's held model response
+/// ended (FIG-6000).
+#[derive(Debug)]
+pub enum FirstPark {
+    /// The save committed with the response.
+    Saved(Saved),
+    /// The turn accepted an `Immediate` cancel (or its session's close)
+    /// before the save: either the save's open read it, and nothing
+    /// committed, or the commit read it under its fence, and nothing it
+    /// admitted starts. The turn stops on the cell.
+    Stopped,
+}
+
 /// A run's state at its latest park, as a machine resumes from it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParkedState {
@@ -361,6 +374,8 @@ enum SavePhase<'a> {
     Parked {
         state: WholeState,
         releases: &'a ReleaseGraph,
+        /// The model response a fresh run's first park commits (FIG-6000).
+        response: Option<&'a lash_core_execution::HeldResponse>,
     },
     Ended {
         end: End,
@@ -418,6 +433,14 @@ fn ledger_of(
     EffectLedger::restored(pending, released, membership.next_park).map_err(refused)
 }
 
+/// The save a commit that carried no held response made.
+fn saved(park: FirstPark) -> Result<Saved, QuietPointRefusal> {
+    match park {
+        FirstPark::Saved(saved) => Ok(saved),
+        FirstPark::Stopped => Err(refused("a save that carries no response stopped")),
+    }
+}
+
 fn staging() -> GraphStaging {
     GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)))
 }
@@ -435,6 +458,34 @@ impl DurableSnapshotStore {
         save: ParkSave<'_>,
         host: &dyn KernelEffects,
     ) -> Result<Saved, QuietPointRefusal> {
+        self.commit_parked(save, host, None).await.and_then(saved)
+    }
+
+    /// Commit `save`, a fresh run's first park, with the model response
+    /// its turn holds for it (FIG-6000), in one transaction labelled
+    /// `model.done+cell.snapshot+admit`. The save's open reads the turn's
+    /// accepted cancel: an `Immediate` one, or the session's close, stops
+    /// the cell with nothing committed. One its commit reads under its
+    /// fence leaves the save committed and starts nothing it admitted.
+    ///
+    /// # Errors
+    ///
+    /// As [`commit_park`](Self::commit_park); the response stays held.
+    pub async fn commit_first_park(
+        &self,
+        save: ParkSave<'_>,
+        host: &dyn KernelEffects,
+        response: &lash_core_execution::HeldResponse,
+    ) -> Result<FirstPark, QuietPointRefusal> {
+        self.commit_parked(save, host, Some(response)).await
+    }
+
+    async fn commit_parked(
+        &self,
+        save: ParkSave<'_>,
+        host: &dyn KernelEffects,
+        response: Option<&lash_core_execution::HeldResponse>,
+    ) -> Result<FirstPark, QuietPointRefusal> {
         let ParkSave {
             document,
             state,
@@ -447,7 +498,11 @@ impl DurableSnapshotStore {
             host,
             &document,
             ledger,
-            SavePhase::Parked { state, releases },
+            SavePhase::Parked {
+                state,
+                releases,
+                response,
+            },
             admit,
             with,
         )
@@ -478,6 +533,7 @@ impl DurableSnapshotStore {
             save.with,
         )
         .await
+        .and_then(saved)
     }
 
     /// The parked root of a run whose end its consumer commits (FIG-5999):
@@ -531,7 +587,11 @@ impl DurableSnapshotStore {
         phase: SavePhase<'_>,
         admit: Vec<EffectAdmission>,
         with: Vec<DomainWrite>,
-    ) -> Result<Saved, QuietPointRefusal> {
+    ) -> Result<FirstPark, QuietPointRefusal> {
+        let response = match phase {
+            SavePhase::Parked { response, .. } => response,
+            SavePhase::Ended { .. } => None,
+        };
         let mut members = self.members.lock().await;
         if matches!(phase, SavePhase::Ended { .. }) {
             if ledger.executions().next().is_some() {
@@ -594,6 +654,17 @@ impl DurableSnapshotStore {
         }
         let expected = self.revision().await?;
         let mut tx = self.cx.begin().await.map_err(refused)?;
+        // The response the turn held commits first, as `model.done` would
+        // have, in this transaction: unless the turn stops at once.
+        if let Some(response) = response {
+            if response.stops_at(&tx) {
+                return Ok(FirstPark::Stopped);
+            }
+            let held = response
+                .writes()
+                .ok_or_else(|| refused("a first save carries a response its turn holds"))?;
+            tx.append(held);
+        }
         // A sleep is a timer wait of the run's scope, pinned with the park
         // that admits it: the owner that holds only sleeps releases until
         // the earliest, and the scope's end revokes them.
@@ -734,7 +805,9 @@ impl DurableSnapshotStore {
             .map_err(refused)?;
         let mut parked = BTreeSet::new();
         let (status, state, format, membership) = match phase {
-            SavePhase::Parked { state, releases } => {
+            SavePhase::Parked {
+                state, releases, ..
+            } => {
                 let membership = book.membership(&ledger).map_err(refused)?;
                 for write in book.retire_unnamed(&self.exec, &membership) {
                     tx.write(write);
@@ -811,12 +884,20 @@ impl DurableSnapshotStore {
             tx.require(read);
         }
         tx.write(write);
-        let label = if admitted.is_empty() {
+        let label = if response.is_some() {
+            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
+        } else if admitted.is_empty() {
             CommitLabel::CELL_SNAPSHOT
         } else {
             CommitLabel::CELL_SNAPSHOT_ADMIT
         };
-        self.commit(tx, label, &mut members).await?;
+        let committed = self.commit(tx, label, &mut members).await?;
+        // What the cell published while the response was held is
+        // published now, before anything it admitted starts.
+        if let Some(response) = response {
+            response.committed(label);
+        }
+        let stopped = response.is_some_and(|response| response.stops_in(&committed));
         *self
             .stored
             .lock()
@@ -829,12 +910,15 @@ impl DurableSnapshotStore {
         if let Some((_, _, namespaces, bodies)) = &changes {
             bodies.run_changes_committed(namespaces);
         }
-        if !admitted.is_empty() {
+        if !admitted.is_empty() && !stopped {
             members.admitted(&admitted).map_err(refused)?;
         }
         let rev = SnapshotRev(expected.map_or(1, |held| held.rev.0 + 1));
         *self.held() = Some(Some(HeldRoot { rev, root }));
-        Ok(Saved { rev, root, ledger })
+        if stopped {
+            return Ok(FirstPark::Stopped);
+        }
+        Ok(FirstPark::Saved(Saved { rev, root, ledger }))
     }
 
     /// Pins the helper release `state` pins: the store installs a release's

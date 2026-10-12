@@ -828,8 +828,7 @@ fn uncut_labels(script: Script) -> Vec<CommitLabel> {
         vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
-            CommitLabel::MODEL_DONE,
-            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::CELL_SNAPSHOT,
             CommitLabel::TURN_COMMIT,
@@ -837,15 +836,13 @@ fn uncut_labels(script: Script) -> Vec<CommitLabel> {
             CommitLabel::COMPLETION_START,
             CommitLabel::PRESSURE_FRAME,
             CommitLabel::MODEL_START,
-            CommitLabel::MODEL_DONE,
-            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::CELL_SNAPSHOT,
             CommitLabel::TURN_COMMIT,
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
-            CommitLabel::MODEL_DONE,
-            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::CELL_SNAPSHOT,
             CommitLabel::TURN_COMMIT,
@@ -1207,8 +1204,9 @@ fn usage_session() -> SessionId {
 /// FIG-5352 and FIG-5389: an RLM turn whose model call reports a prompt past
 /// the compaction threshold, cut at every label, commits that call's prompt
 /// and total usage. The next turn's pressure hook compacts, and a pass that
-/// resumes the turn after its committed `model.done` keeps the usage its
-/// checkpoint carries.
+/// resumes the turn after the commit of its model response, which its
+/// cell's first save carries (`model.done+cell.snapshot+admit`, FIG-6000),
+/// keeps the usage its checkpoint carries.
 #[tokio::test]
 async fn a_turn_killed_at_every_label_commits_its_last_calls_prompt_usage() {
     let report = Matrix::new()
@@ -1223,7 +1221,10 @@ async fn a_turn_killed_at_every_label_commits_its_last_calls_prompt_usage() {
         .run_test(PromptUsage::new)
         .await;
     report.assert_held();
-    for label in [CommitLabel::MODEL_DONE, CommitLabel::TURN_COMMIT] {
+    for label in [
+        CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
+        CommitLabel::TURN_COMMIT,
+    ] {
         assert!(
             report.labels().contains(&label),
             "the matrix never cut {label}"

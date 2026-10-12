@@ -22,7 +22,7 @@ mod tool_attempt;
 pub(crate) mod tool_execution;
 
 pub(crate) use execution_context::runtime_ops;
-pub use execution_context::{CellEndHandoff, EndedCell, RuntimeExecutionContext};
+pub use execution_context::{CellEndHandoff, EndedCell, HeldResponse, RuntimeExecutionContext};
 pub use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutionTracing};
 pub(crate) use execution_context::{
     attach_process_invocation_correlation, attach_process_lineage,

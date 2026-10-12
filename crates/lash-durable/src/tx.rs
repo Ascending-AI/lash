@@ -219,6 +219,19 @@ impl ActorTx {
         self
     }
 
+    /// Carry `held`, a transaction of the same actor that was never
+    /// submitted: its domain writes after the ones recorded here, its staged
+    /// nodes and the stored nodes it requires. Its open read, fence and
+    /// mailbox position are this transaction's own.
+    pub fn append(&mut self, held: Self) -> &mut Self {
+        self.domain.extend(held.domain);
+        for (id, node) in held.graph {
+            self.graph.entry(id).or_insert(node);
+        }
+        self.reads.extend(held.reads);
+        self
+    }
+
     /// Stage everything `staging` made.
     pub fn stage_all(&mut self, staging: GraphStaging) -> &mut Self {
         self.stage(staging.into_nodes().into_values())

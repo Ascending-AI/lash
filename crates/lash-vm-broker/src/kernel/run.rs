@@ -40,7 +40,7 @@ use super::graph::{FrozenRequest, Projections};
 use super::ledger::{AdmittedEffect, EffectLedger};
 use super::state::{GraphStateFailure, ReleaseGraph, WholeState};
 use super::store::{
-    AdmitAs, AdmittedCall, Checkpoint, EffectAdmission, HostParts, ParkSave, ParkedState,
+    AdmitAs, AdmittedCall, Checkpoint, EffectAdmission, FirstPark, HostParts, ParkSave, ParkedState,
 };
 use crate::effects::{MemberDraft, ParentFault};
 use crate::identity::CodeCallIdentities;
@@ -117,6 +117,14 @@ pub trait KernelEffects: Projections + Send + Sync {
 
     /// The save that staged the host's state committed.
     fn host_committed(&self) {}
+
+    /// The model response that asked for this run, while its turn holds it
+    /// uncommitted for the run's first save (FIG-6000): that save commits it
+    /// in the same transaction. The response commits on its own once the
+    /// run's first stretch outlasts one slice.
+    fn held_response(&self) -> Option<&lash_core_execution::HeldResponse> {
+        None
+    }
 }
 
 /// One run's machine, wherever it executes. Between calls the run is at a
@@ -496,7 +504,14 @@ impl KernelBroker<'_> {
         // machine that only waits gives its worker back and is rebuilt
         // from this.
         let mut resting: Option<ParkedState> = None;
-        let (machine, mut ledger) = match self.store.checkpoint(&document, self.effects).await? {
+        let checkpoint = self.store.checkpoint(&document, self.effects).await?;
+        // A held response rides only a fresh run's first save, within its
+        // first slice: a run that saved already commits it on its own.
+        let mut held = self.effects.held_response();
+        if checkpoint.is_some() {
+            self.commit_response_alone(&mut held).await?;
+        }
+        let (machine, mut ledger) = match checkpoint {
             Some(Checkpoint::Ended { end, .. }) => {
                 return Ok(KernelEnd::Ended { end, owed: None });
             }
@@ -518,7 +533,12 @@ impl KernelBroker<'_> {
                 }
             };
             let park = match running.run(self.slice, cancel.is_cancelled()).await? {
-                Step::Slice => continue,
+                // The first stretch outlasts its slice: the response the
+                // turn held commits now, and the run goes on.
+                Step::Slice => {
+                    self.commit_response_alone(&mut held).await?;
+                    continue;
+                }
                 Step::Ended(end) => {
                     if let Some(ended) = machine.take() {
                         ended.release().await?;
@@ -549,20 +569,35 @@ impl KernelBroker<'_> {
                     .admissions(&ledger, requests, &outstanding, &live)
                     .await?;
                 let state = running.export(&binding).await?;
-                let committed = self
-                    .store
-                    .commit_park(
-                        ParkSave {
-                            document,
-                            state: state.clone(),
-                            releases: machines.releases()?,
-                            ledger,
-                            admit,
-                            with: Vec::new(),
-                        },
-                        self.effects,
-                    )
-                    .await?;
+                let save = ParkSave {
+                    document,
+                    state: state.clone(),
+                    releases: machines.releases()?,
+                    ledger,
+                    admit,
+                    with: Vec::new(),
+                };
+                let committed = match held.take() {
+                    Some(response) => match self
+                        .store
+                        .commit_first_park(save, self.effects, response)
+                        .await?
+                    {
+                        FirstPark::Saved(saved) => saved,
+                        // The turn's cancel stopped the cell at its first
+                        // save: nothing it admitted starts, and the turn,
+                        // which drops this run, stops where it would have
+                        // before the cell started.
+                        FirstPark::Stopped => {
+                            if let Some(stopped) = machine.take() {
+                                stopped.release().await?;
+                            }
+                            response.stop();
+                            return std::future::pending().await;
+                        }
+                    },
+                    None => self.store.commit_park(save, self.effects).await?,
+                };
                 saved = true;
                 ledger = committed.ledger;
                 let book = self.store.admitted_waits(&ledger)?;
@@ -575,6 +610,8 @@ impl KernelBroker<'_> {
             if ledger.pending().next().is_none() {
                 return Err(KernelFailure::Stalled);
             }
+            // The run waits on its effects: nothing is held across a wait.
+            self.commit_response_alone(&mut held).await?;
             // Once the run waits only on parked rows, with its state saved
             // as it stands, its worker is another run's to use: a process
             // this run awaits may need it (FIG-4275).
@@ -624,6 +661,22 @@ impl KernelBroker<'_> {
                 ledger.consume(&outcome.identity);
             }
         }
+    }
+
+    /// Commit the response the turn holds for this run on its own, as
+    /// `model.done`, when it is still held: the run is about to save
+    /// without it, or to run past its first slice.
+    async fn commit_response_alone(
+        &self,
+        held: &mut Option<&lash_core_execution::HeldResponse>,
+    ) -> Result<(), KernelFailure> {
+        if let Some(response) = held.take() {
+            response
+                .commit_alone(self.store.context())
+                .await
+                .map_err(|error| QuietPointRefusal(error.to_string()))?;
+        }
+        Ok(())
     }
 
     /// How each of a park's requests is admitted: an effect as the

@@ -832,15 +832,19 @@ async fn prove(shape: Shape, tier: Tier) {
         ["a", "b"],
         "each turn follows its scripted owner"
     );
-    let mut expected = vec![
+    // A cell's first save commits the model response that asked for it
+    // (FIG-6000).
+    let response = if shape == Shape::Cell {
+        CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
+    } else {
+        CommitLabel::MODEL_DONE
+    };
+    let expected = vec![
         CommitLabel::MODEL_START,
-        CommitLabel::MODEL_DONE,
+        response,
         CommitLabel::ROUND_OUTCOME,
         CommitLabel::TURN_COMMIT,
     ];
-    if shape == Shape::Cell {
-        expected.push(CommitLabel::CELL_SNAPSHOT_ADMIT);
-    }
     for label in expected {
         assert!(
             report.labels().contains(&label),

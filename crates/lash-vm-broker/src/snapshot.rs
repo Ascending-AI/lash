@@ -177,14 +177,14 @@ impl DurableSnapshotStore {
         tx: lash_durable::ActorTx,
         label: CommitLabel,
         members: &mut Members,
-    ) -> Result<(), QuietPointRefusal> {
+    ) -> Result<lash_durable::ActorCommit, QuietPointRefusal> {
         members.forget();
         *self
             .latest
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         match self.cx.commit(tx, label).await {
-            Ok(_) => Ok(()),
+            Ok(committed) => Ok(committed),
             Err(error) => {
                 *self.held() = None;
                 self.stored

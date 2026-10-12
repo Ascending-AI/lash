@@ -1935,11 +1935,14 @@ async fn prove_under(turn: Turn, tier: Tier, cut_labels: &[CommitLabel], faults:
     );
     report.assert_held();
     let expected = if cut_labels.is_empty() {
-        vec![
-            CommitLabel::MODEL_DONE,
-            turn.outcome_label(),
-            CommitLabel::TURN_COMMIT,
-        ]
+        // A cell's first save commits the model response that asked for it
+        // (FIG-6000).
+        let response = if turn.code() {
+            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
+        } else {
+            CommitLabel::MODEL_DONE
+        };
+        vec![response, turn.outcome_label(), CommitLabel::TURN_COMMIT]
     } else {
         cut_labels.to_vec()
     };
@@ -2082,7 +2085,8 @@ async fn a_member_never_observes_another_members_uncommitted_state(tier: Tier) {
 }
 
 /// A code cell member's plugin-state change, cut at any commit of its cell
-/// (its admission or its outcome), or at the next `model.start`, which
+/// (its admission, which commits the model response that asked for it,
+/// FIG-6000, or its outcome), or at the next `model.start`, which
 /// consumes the cell's answer and reclaims its records with its root
 /// (FIG-5999), is the session's committed value once the turn resumes: the
 /// value of the call's committed outcome, the one the model was shown
@@ -2093,7 +2097,7 @@ async fn a_cell_members_state_change_survives_a_cut_after_its_outcome(tier: Tier
         Turn::StateCell,
         tier,
         &[
-            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::MODEL_START,
         ],

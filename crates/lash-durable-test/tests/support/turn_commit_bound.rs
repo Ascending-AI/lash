@@ -2,17 +2,13 @@
 
 use super::*;
 
-/// Each of these boundaries precedes a consumer of recorded cell state.
-const CELL_BOUNDARIES: [(CommitLabel, &str); 2] = [
-    (
-        CommitLabel::MODEL_DONE,
-        "the VM enters from the recorded model response",
-    ),
-    (
-        CommitLabel::ROUND_OUTCOME,
-        "the VM consumes only a recorded tool outcome",
-    ),
-];
+/// Each of these boundaries precedes a consumer of recorded cell state. The
+/// model response a cell enters from commits with the cell's first save
+/// (FIG-6000).
+const CELL_BOUNDARIES: [(CommitLabel, &str); 1] = [(
+    CommitLabel::ROUND_OUTCOME,
+    "the VM consumes only a recorded tool outcome",
+)];
 const TRACE_BOUNDARIES: [(CommitLabel, &str); 1] = [(
     CommitLabel::ROUND_TRACED,
     "FIG-5452: acknowledge exported tool admissions across owner replacement",

@@ -380,13 +380,23 @@ impl RuntimeTurnDriver<'_> {
         code: String,
         event_tx: &TurnObserver,
     ) -> Result<CellExit, RuntimeError> {
+        // The model response that asked for the cell, while the turn holds
+        // it for the cell's first save: nothing of the cell reaches the
+        // host's stream or trace before a commit holds it (FIG-6000).
+        let held = self.held_response.take();
+        let cell_tx = &HeldObservations {
+            inner: event_tx,
+            held: held.as_ref(),
+        };
         let code_correlation_id = TurnActivityId::new(format!("code:{id:?}"));
         let iteration = machine.protocol_iteration();
         if self.trace.is_observed() {
             let content = self.trace.content();
-            self.emit_trace(iteration, || lash_trace::TraceEvent::ExecCodeStarted {
-                code: content.capture(|| code.clone()),
-                code_chars: code.chars().count(),
+            self.emit_cell_trace(held.as_ref(), iteration, || {
+                lash_trace::TraceEvent::ExecCodeStarted {
+                    code: content.capture(|| code.clone()),
+                    code_chars: code.chars().count(),
+                }
             });
         }
         let invocation = match self.turn_effect_invocation(machine, id, RuntimeEffectKind::ExecCode)
@@ -395,7 +405,7 @@ impl RuntimeTurnDriver<'_> {
             Err(err) => {
                 let message = err.to_string();
                 self.turn_observations.observe(
-                    event_tx,
+                    cell_tx,
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockStarted {
@@ -406,7 +416,7 @@ impl RuntimeTurnDriver<'_> {
                     },
                 );
                 self.turn_observations.observe(
-                    event_tx,
+                    cell_tx,
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
@@ -435,7 +445,7 @@ impl RuntimeTurnDriver<'_> {
             crate::engine::ReplayKey::new(format!("{cell_key}:code")),
         );
         code_observations.observe(
-            event_tx,
+            cell_tx,
             crate::engine::ObservedEvent::Activity {
                 correlation_id: Some(code_correlation_id.clone()),
                 event: TurnEvent::CodeBlockStarted {
@@ -451,9 +461,11 @@ impl RuntimeTurnDriver<'_> {
         let cell_started = self.host.core.clock.now();
         self.answered_cell_end = None;
         drop(self.cell_end.take());
+        self.held_response.clone_from(&held);
         let invoked = self
             .invoke_turn_exec_effect(machine, invocation, code.clone(), event_tx)
             .await;
+        self.held_response = None;
         // What the cell left of its end, whether it answers with its result
         // or with a failure met after it ended.
         self.answered_cell_end = self.cell_end.take().map(|ended| (id, ended));
@@ -465,7 +477,7 @@ impl RuntimeTurnDriver<'_> {
                 // the shift decides nothing from it, so it reports 0 rather
                 // than take a live timestamp (FIG-3672 P6b).
                 code_observations.observe(
-                    event_tx,
+                    cell_tx,
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
@@ -536,7 +548,7 @@ impl RuntimeTurnDriver<'_> {
         match &result {
             Ok(output) => {
                 code_observations.observe(
-                    event_tx,
+                    cell_tx,
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
@@ -557,7 +569,7 @@ impl RuntimeTurnDriver<'_> {
             }
             Err(error) => {
                 code_observations.observe(
-                    event_tx,
+                    cell_tx,
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
@@ -604,18 +616,20 @@ impl RuntimeTurnDriver<'_> {
                     })
                     .collect::<Vec<_>>();
                 let content = self.trace.content();
-                self.emit_trace(iteration, || lash_trace::TraceEvent::ExecCodeCompleted {
-                    duration_ms: cell_duration_ms,
-                    output: content.capture(|| observations_text.clone()),
-                    output_chars: observations_text.chars().count(),
-                    observation_count: output.prints.len(),
-                    observation_projections: observation_projections.clone(),
-                    error: output.error().cloned(),
-                    terminal_finish: content.capture(|| output.finish_value().cloned()),
-                    tool_calls,
+                self.emit_cell_trace(held.as_ref(), iteration, || {
+                    lash_trace::TraceEvent::ExecCodeCompleted {
+                        duration_ms: cell_duration_ms,
+                        output: content.capture(|| observations_text.clone()),
+                        output_chars: observations_text.chars().count(),
+                        observation_count: output.prints.len(),
+                        observation_projections: observation_projections.clone(),
+                        error: output.error().cloned(),
+                        terminal_finish: content.capture(|| output.finish_value().cloned()),
+                        tool_calls,
+                    }
                 });
                 if !observation_projections.is_empty() {
-                    self.emit_trace(iteration, || {
+                    self.emit_cell_trace(held.as_ref(), iteration, || {
                         lash_trace::TraceEvent::ObservationProjection {
                             projections: observation_projections,
                         }
@@ -625,9 +639,11 @@ impl RuntimeTurnDriver<'_> {
         } else if let Err(error) = &result
             && self.trace.is_observed()
         {
-            self.emit_trace(iteration, || lash_trace::TraceEvent::ExecCodeFailed {
-                reason: error.reason,
-                error: error.message.clone(),
+            self.emit_cell_trace(held.as_ref(), iteration, || {
+                lash_trace::TraceEvent::ExecCodeFailed {
+                    reason: error.reason,
+                    error: error.message.clone(),
+                }
             });
         }
         // A cancelled tool call ended the cell as an uncatchable host terminal,
@@ -657,6 +673,50 @@ impl RuntimeTurnDriver<'_> {
         }
         self.handle_machine_response(machine, Response::ExecResult { id, result })?;
         Ok(CellExit::Answered)
+    }
+}
+
+/// The host stream a cell publishes on: once a commit holds the model
+/// response that asked for the cell, now unless its turn still holds it
+/// (FIG-6000).
+struct HeldObservations<'a> {
+    inner: &'a TurnObserver,
+    held: Option<&'a crate::HeldResponse>,
+}
+
+impl crate::engine::ObservationSink for HeldObservations<'_> {
+    fn observe(&self, observation: crate::engine::ShiftObservation) {
+        match self.held {
+            Some(held) => {
+                let inner = self.inner.clone();
+                held.after_commit(Box::new(move || inner.observe(observation)));
+            }
+            None => self.inner.observe(observation),
+        }
+    }
+}
+
+impl RuntimeTurnDriver<'_> {
+    /// [`emit_trace`](Self::emit_trace) for a cell: once a commit holds the
+    /// model response that asked for it, now unless `held` still holds it
+    /// (FIG-6000).
+    fn emit_cell_trace(
+        &self,
+        held: Option<&crate::HeldResponse>,
+        protocol_iteration: usize,
+        event: impl FnOnce() -> lash_trace::TraceEvent,
+    ) {
+        let Some(held) = held else {
+            self.emit_trace(protocol_iteration, event);
+            return;
+        };
+        if !self.trace.is_observed() {
+            return;
+        }
+        let trace = self.trace.clone();
+        let context = self.trace_context(protocol_iteration);
+        let event = event();
+        held.after_commit(Box::new(move || trace.observe(|| (context, event))));
     }
 }
 

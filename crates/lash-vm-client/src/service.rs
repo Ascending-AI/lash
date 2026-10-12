@@ -321,6 +321,12 @@ pub mod runtime_ops {
         fn release_retained(&self) -> impl Future<Output = ()> + Send;
 
         fn pool_accounted(&self) -> impl Future<Output = Result<WorkerPool, PoolError>> + Send;
+
+        /// Whether this execution would have a worker now, with no wait in
+        /// the pool's queue: it kept the worker that lowered its document,
+        /// or the pool has one idle, or room to start one (FIG-6000). A
+        /// read of the moment: another execution may take the worker first.
+        fn worker_ready(&self) -> bool;
     }
 
     #[doc(hidden)]
@@ -356,6 +362,25 @@ pub mod runtime_ops {
             // A reset that fails has discarded the worker; the execution's
             // answer is already decided.
             let _ = tokio::task::spawn_blocking(move || checkout.release()).await;
+        }
+
+        fn worker_ready(&self) -> bool {
+            let kept = self.retained.as_ref().is_some_and(|slot| {
+                slot.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_some()
+            });
+            if kept {
+                return true;
+            }
+            let pool = self
+                .pool
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            pool.as_ref().is_none_or(|pool| {
+                let stats = pool.stats();
+                stats.idle > 0 || stats.workers < self.config.max_workers
+            })
         }
 
         async fn pool_accounted(&self) -> Result<WorkerPool, PoolError> {

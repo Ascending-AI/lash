@@ -108,6 +108,10 @@ impl CommitLabel {
     // VM (V0, then L7).
     /// `cell.snapshot+admit`: A snapshot, its broker ledger and the admission of the operations it issued.
     pub const CELL_SNAPSHOT_ADMIT: Self = Self::new("cell.snapshot+admit");
+    /// `model.done+cell.snapshot+admit`: A model response and the first
+    /// snapshot of the cell it asked for, with its ledger and admissions,
+    /// fused (FIG-6000).
+    pub const MODEL_DONE_CELL_SNAPSHOT_ADMIT: Self = Self::new("model.done+cell.snapshot+admit");
     /// `cell.inject`: An outcome injected into a cell.
     pub const CELL_INJECT: Self = Self::new("cell.inject");
     /// `cell.snapshot`: A quiet-point snapshot that admits nothing.
@@ -163,7 +167,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 48] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -200,6 +204,7 @@ impl CommitLabel {
         Self::PROCESS_TERMINAL,
         Self::CASCADE_BATCH,
         Self::CELL_SNAPSHOT_ADMIT,
+        Self::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
         Self::CELL_INJECT,
         Self::CELL_SNAPSHOT,
         Self::SESSION_CLOSE_BEGIN,

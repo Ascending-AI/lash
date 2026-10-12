@@ -722,16 +722,19 @@ impl V0 {
         // P4: no hidden replay. A cell's program is entered fresh only by an
         // owner that found no snapshot: once more for each first snapshot
         // that did not commit, and once more when the owner running it was
-        // lost before any snapshot committed.
+        // lost before any snapshot committed. The first snapshot commits
+        // the model response that asked for the cell (FIG-6000).
+        let admits = |label: CommitLabel| {
+            label == CommitLabel::CELL_SNAPSHOT_ADMIT
+                || label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
+        };
         let unsnapshotted = trace
             .iter()
-            .filter(|write| {
-                write.point.label == CommitLabel::CELL_SNAPSHOT_ADMIT && !write.committed()
-            })
+            .filter(|write| admits(write.point.label) && !write.committed())
             .count();
-        let first_snapshot = trace.iter().position(|write| {
-            write.point.label == CommitLabel::CELL_SNAPSHOT_ADMIT && write.committed()
-        });
+        let first_snapshot = trace
+            .iter()
+            .position(|write| admits(write.point.label) && write.committed());
         let lost_before_snapshot = cut
             .filter(|cut| cut.fault.kills() || cut.fault == Fault::Zombie)
             .and_then(|cut| {
@@ -1052,8 +1055,7 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
         Protocol::Code | Protocol::Archived => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
-            CommitLabel::MODEL_DONE,
-            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::MODEL_START,
             CommitLabel::TURN_COMMIT,
@@ -1077,14 +1079,14 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::SESSION_RELEASE,
         ],
         Protocol::Large(_) => unreachable!("the large-value law runs its turn uncut"),
+        // The second cell never saves: the response that asked for it
+        // commits with the model start that consumes its answer (FIG-6000).
         Protocol::Working(_) => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
-            CommitLabel::MODEL_DONE,
-            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::MODEL_START,
-            CommitLabel::MODEL_DONE,
             CommitLabel::MODEL_START,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
@@ -1544,7 +1546,9 @@ impl Installs {
                 new += node.bytes.len();
             }
         }
-        if label == CommitLabel::CELL_SNAPSHOT_ADMIT {
+        if label == CommitLabel::CELL_SNAPSHOT_ADMIT
+            || label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
+        {
             self.parks.push(new);
         }
     }

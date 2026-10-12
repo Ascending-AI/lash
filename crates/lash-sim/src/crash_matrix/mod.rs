@@ -70,7 +70,10 @@ pub enum Case {
     /// [`Self::Cell`] with the node killed inside the operation's body, its
     /// session served with a host plugin's callback: its cell's end is
     /// recorded on its own, where [`Self::Cell`]'s commits with the commit
-    /// that consumes the cell's answer (FIG-5999).
+    /// that consumes the cell's answer (FIG-5999). Its cell computes past
+    /// its first slice before its call, so the model response commits on
+    /// its own, where [`Self::Cell`]'s commits with the cell's first save
+    /// (FIG-6000).
     CellKilled,
     /// A process's steps, its pinned key resolved by the host, its bounded
     /// wait on another process and its terminal's cascade.

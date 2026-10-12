@@ -1,12 +1,16 @@
 //! The cell seam: one turn, behind the facade on the production driver,
 //! whose model writes a TypeScript cell that calls the `Once` tool
-//! `ext_write`; the cell snapshots with the
-//! operation's admission (`cell.snapshot+admit`), the body runs, its outcome
+//! `ext_write`; the cell snapshots with the model response that asked for it
+//! and the operation's admission (`model.done+cell.snapshot+admit`,
+//! FIG-6000), the body runs, its outcome
 //! commits (`round.outcome`), the cell finishes from its snapshot, its end
 //! commits with the model call that consumes its answer, and the model
 //! answers with its result.
 //!
-//! The killed variant holds the operation's first body forever and the host
+//! The killed variant's cell computes past its first slice first, so the
+//! model response commits on its own (`model.done`) and the cell snapshots
+//! with the operation's admission (`cell.snapshot+admit`); it holds the
+//! operation's first body forever and the host
 //! kills the node running it, then restarts it: another owner reaps the
 //! dead one, restores the turn and finds the operation started without an
 //! outcome, so it injects `Interrupted` into the cell (`cell.inject`), never
@@ -91,8 +95,12 @@ impl Workload for CellCase {
         // while no snapshot of the cell is committed, so a second one only
         // when the cut fell before the first snapshot committed.
         let trace = nodes.script().trace();
+        // The cell's first snapshot commits the model response that asked
+        // for it (FIG-6000).
         let first_snapshot = trace.iter().position(|write| {
-            write.point.label == CommitLabel::CELL_SNAPSHOT_ADMIT && write.committed()
+            (write.point.label == CommitLabel::CELL_SNAPSHOT_ADMIT
+                || write.point.label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT)
+                && write.committed()
         });
         let cut_at = cut.and_then(|cut| {
             trace

@@ -423,6 +423,10 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
         self.state.execution_state_dirty()
     }
 
+    fn carries_held_response(&self) -> bool {
+        true
+    }
+
     /// The session's recorded presentation bound: at most
     /// `max_tool_call_records` records, each output's scalars cut at
     /// `max_inline_scalar_bytes`.

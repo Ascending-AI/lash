@@ -57,7 +57,9 @@ use super::tool_round::{self, RoundExit};
 use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel, turn_trace};
 use crate::plugin::prompt::{admission_record, load_admitted_call};
-use crate::{ActorContext, Effect, HostTurnProtocol, SessionStreamEvent, TurnMachine};
+use crate::{
+    ActorContext, Effect, HeldResponse, HostTurnProtocol, SessionStreamEvent, TurnMachine,
+};
 use lash_sansio::llm::types::AdmittedSend;
 use lash_sansio::{CheckpointDelta, SessionId, TurnId};
 use std::sync::Arc;
@@ -429,7 +431,7 @@ pub async fn run_phases(
                     stored.committed(drive.machine());
                     drive.run_changes_committed(&written);
                     drive.phase_committed().await;
-                    tool_round::release_cell_emissions(cx, drive.as_mut(), held).await?;
+                    tool_round::release_cell_emissions(cx, drive.as_mut(), held, label).await?;
                     unsettled = true;
                     if !resent {
                         calls = pin.call;
@@ -464,17 +466,21 @@ pub async fn run_phases(
                 }
                 model = None;
                 // `model.done`: the model's answer is the cell the checkpoint
-                // re-delivers, committed before the cell starts. A restore
-                // re-delivers the cell, which resumes from its own latest
-                // snapshot, never the model call; the cell its row already
-                // names commits nothing again.
+                // re-delivers, committed before the cell starts or with its
+                // first save. A restore re-delivers the cell, which resumes
+                // from its own latest snapshot, never the model call; the
+                // cell its row already names commits nothing again.
                 let cell = RunSeq(id.0);
                 let named = matches!(row.phase, UnfinishedPhase::Tools { run, .. } if run == cell);
+                let mut held = None;
                 if !named || carry.is_some() || answered_cell.is_some() {
+                    // A turn that owes nothing of an earlier step holds the
+                    // response for the cell's first save (FIG-6000).
+                    let holds = carry.is_none() && answered_cell.is_none();
                     if let Some(present) = carry.take() {
                         present.write(&mut tx);
                     }
-                    let held = tool_round::consume_answered_cell(
+                    let emissions = tool_round::consume_answered_cell(
                         cx,
                         drive.as_mut(),
                         &mut tx,
@@ -498,17 +504,65 @@ pub async fn run_phases(
                         },
                         iteration: iteration(drive.machine()),
                     }));
-                    if std::mem::take(&mut unsettled) {
+                    if unsettled {
                         settle_model_calls(&mut tx, &session, &run, None);
                     }
-                    cx.commit(tx, CommitLabel::MODEL_DONE).await?;
-                    stored.committed(drive.machine());
-                    drive.run_changes_committed(&written);
-                    drive.phase_committed().await;
-                    tool_round::release_cell_emissions(cx, drive.as_mut(), held).await?;
+                    let response = HeldResponse::holding(
+                        tx,
+                        turn_cancel::immediate_in,
+                        turn_cancel::stops_at_once,
+                    );
+                    let after = AfterModelDone { stored, written };
+                    if holds && drive.hold_response(response.clone()) {
+                        held = Some((response, after));
+                    } else {
+                        response
+                            .commit_alone(cx)
+                            .await
+                            .map_err(TurnError::Durable)?;
+                        unsettled = false;
+                        after.committed(drive.as_mut()).await;
+                        tool_round::release_cell_emissions(
+                            cx,
+                            drive.as_mut(),
+                            emissions,
+                            CommitLabel::MODEL_DONE,
+                        )
+                        .await?;
+                    }
+                } else {
+                    drop(tx);
                 }
-                let cell = drive.exec_cell(cx, id, CodeCell { language, code });
-                match turn_cancel::unless_cancelled(cx, cell).await? {
+                let ran = {
+                    let cell = drive.exec_cell(cx, id, CodeCell { language, code });
+                    let stopped = held.as_ref().map(|(response, _)| response.clone());
+                    tokio::select! {
+                        biased;
+                        ran = turn_cancel::unless_cancelled(cx, cell) => ran?,
+                        // The turn's cancel stopped the cell at its first
+                        // save, which admitted nothing.
+                        () = async {
+                            match &stopped {
+                                Some(response) => response.stopped().await,
+                                None => std::future::pending().await,
+                            }
+                        } => None,
+                    }
+                };
+                // Where the held response committed: with the cell's first
+                // save, or on its own before the cell waited or ran past
+                // its first slice. A cell that answered without saving
+                // leaves it to the commit that consumes its answer.
+                let unconsumed = match held {
+                    Some((response, after)) if response.committed_as().is_some() => {
+                        unsettled = false;
+                        after.committed(drive.as_mut()).await;
+                        None
+                    }
+                    Some((response, _)) => Some(response),
+                    None => None,
+                };
+                match ran {
                     Some(ran) => {
                         if ran? == CellExit::Suspended {
                             return Ok(PhaseExit::Suspended { due: None });
@@ -517,8 +571,14 @@ pub async fn run_phases(
                         // or not: its working state is the turn's from the
                         // commit that consumes its answer.
                         let calls = drive.answered_cell_calls();
-                        let held = drive.answered_cell_end_held(id).then(Vec::new);
-                        answered_cell = Some(tool_round::AnsweredCell { id, calls, held });
+                        let held = (drive.answered_cell_end_held(id) || unconsumed.is_some())
+                            .then(Vec::new);
+                        answered_cell = Some(tool_round::AnsweredCell {
+                            id,
+                            calls,
+                            held,
+                            response: unconsumed,
+                        });
                     }
                     None => {
                         drive.stop_cell();
@@ -530,6 +590,7 @@ pub async fn run_phases(
                                 id,
                                 calls,
                                 held: None,
+                                response: None,
                             });
                         }
                         let request = cx.begin().await?.turn_cancel().cloned();
@@ -612,7 +673,13 @@ pub async fn run_phases(
                 stored.committed(drive.machine());
                 drive.run_changes_committed(&written);
                 drive.phase_committed().await;
-                tool_round::release_cell_emissions(cx, drive.as_mut(), held).await?;
+                tool_round::release_cell_emissions(
+                    cx,
+                    drive.as_mut(),
+                    held,
+                    CommitLabel::MODEL_DONE,
+                )
+                .await?;
                 drive
                     .local(cx, Effect::ReportToolCalls { id, completed })
                     .await?;
@@ -636,8 +703,14 @@ pub async fn run_phases(
                 // turn held of the cell's emissions goes first.
                 if let Some(cell) = &mut answered_cell {
                     drive.finishing_cell_calls(&cell.calls);
-                    let held = cell.held.take().unwrap_or_default();
-                    tool_round::release_cell_emissions(cx, drive.as_mut(), held).await?;
+                    let held = cell.take_emissions();
+                    tool_round::release_cell_emissions(
+                        cx,
+                        drive.as_mut(),
+                        held,
+                        CommitLabel::TURN_COMMIT,
+                    )
+                    .await?;
                 }
                 // The turn commits, and its run answers, the outcome the
                 // model produced.
@@ -758,6 +831,23 @@ pub async fn run_phases(
                 }
             }
         }
+    }
+}
+
+/// What followed `model.done`'s acknowledgement, kept for whichever commit
+/// holds the response: its own, or the cell's first save (FIG-6000).
+struct AfterModelDone {
+    stored: super::phase_root::PhaseStored,
+    written: Vec<lash_durable::domain::TurnNamespaceWrite>,
+}
+
+impl AfterModelDone {
+    /// The response committed: the phase's content is stored, its run
+    /// changes recorded and the working state it carried installed.
+    async fn committed(self, drive: &mut dyn TurnDrive) {
+        self.stored.committed(drive.machine());
+        drive.run_changes_committed(&self.written);
+        drive.phase_committed().await;
     }
 }
 

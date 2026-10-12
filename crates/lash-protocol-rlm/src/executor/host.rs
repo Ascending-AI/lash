@@ -709,6 +709,10 @@ impl KernelEffects for CellHost<'_> {
             graph.installed.extend(staged);
         }
     }
+
+    fn held_response(&self) -> Option<&lash_core::HeldResponse> {
+        self.ctx.held_response()
+    }
 }
 
 impl Projections for CellHost<'_> {

@@ -65,6 +65,10 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     /// turn (FIG-5999). The turn driver is the only caller.
     #[must_use]
     fn with_cell_end(self, handoff: super::CellEndHandoff) -> Self;
+    /// This context with `held` as the model response its cell's first
+    /// save carries (FIG-6000). The turn driver is the only caller.
+    #[must_use]
+    fn with_held_response(self, held: Option<super::HeldResponse>) -> Self;
 
     /// The opener state this context incorporates against and hands groups to.
     #[must_use]
@@ -107,6 +111,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
             cell_end: super::CellEndHandoff::default(),
+            held_response: None,
             incorporation_ledger: Arc::default(),
             tool_requests: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
@@ -174,6 +179,11 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
 
     fn with_cell_end(mut self, handoff: super::CellEndHandoff) -> Self {
         self.cell_end = handoff;
+        self
+    }
+
+    fn with_held_response(mut self, held: Option<super::HeldResponse>) -> Self {
+        self.held_response = held;
         self
     }
     fn opener_state(&self) -> OpenerState {

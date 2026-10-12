@@ -9,12 +9,16 @@
 //! world's ledger before anything else; under [`TurnScript::CellKilled`] its
 //! first entry holds forever, and the host kills the node that runs it.
 //!
-//! A [`TurnScript::Cell`] session's turn runs no callback but its
-//! protocol's, so its cell's end commits with the commit that consumes the
-//! cell's answer (FIG-5999). A [`TurnScript::CellKilled`] session is served
-//! with a host plugin's checkpoint callback ([`Watch`]), which may read
-//! what the cell left, so its cell's end is recorded on its own
-//! (`cell.snapshot`) before the cell answers.
+//! A [`TurnScript::Cell`] session's cell reaches its first save within its
+//! first slice, so that save commits the model response that asked for the
+//! cell (`model.done+cell.snapshot+admit`, FIG-6000); and its turn runs no
+//! callback but its protocol's, so its cell's end commits with the commit
+//! that consumes the cell's answer (FIG-5999). A [`TurnScript::CellKilled`]
+//! session's cell first computes past its slice, so the response commits on
+//! its own (`model.done`) and the cell's first save is
+//! `cell.snapshot+admit`; and it is served with a host plugin's checkpoint
+//! callback ([`Watch`]), which may read what the cell left, so its cell's
+//! end is recorded on its own (`cell.snapshot`) before the cell answers.
 
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::{Arc, Weak};
@@ -40,10 +44,21 @@ use super::world::{BodyEntry, World};
 /// The model every cell session names.
 const MODEL: &str = "lash-sim-cell-model";
 
-/// The cell the model writes for `session`: one `Once` tool call naming it.
+/// The charge units one slice of a [`TurnScript::CellKilled`] cell's run
+/// may spend.
+const KILLED_SLICE: u64 = 20_000;
+
+/// The cell the model writes for `session`: one `Once` tool call naming it,
+/// which a [`TurnScript::CellKilled`] session's cell makes after a stretch
+/// many times [`KILLED_SLICE`] long.
 fn cell(session: &str) -> String {
+    let stretch = if session.starts_with(&format!("{}-", TurnScript::CellKilled.name())) {
+        "let n = 0;\nfor (let i = 0; i < 20000; i++) { n = n + i; }\n"
+    } else {
+        ""
+    };
     format!(
-        "<typescript>\nconst written = await tools.{EXT_WRITE}({{ x: 7, session: \"{session}\" }});\nconsole.log(written);\n</typescript>"
+        "<typescript>\n{stretch}const written = await tools.{EXT_WRITE}({{ x: 7, session: \"{session}\" }});\nconsole.log(written);\n</typescript>"
     )
 }
 
@@ -137,7 +152,7 @@ fn core(
                 .build(),
             lash::rlm::CellDialect::typescript(),
         )
-        .with_worker_service(untimed_workers(clock)),
+        .with_worker_service(untimed_workers(clock, watched.then_some(KILLED_SLICE))),
     )
     .serve_sessions(false)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -211,9 +226,13 @@ pub async fn send(core: &lash::LashCore, session: &SessionId, run: &TurnId) -> R
 /// flight. The checkout deadline and the no-response watchdog are wall
 /// time too: on a loaded host they fail a cell's setup retryably, and the
 /// retried attempt enters the program again with no cut to account for it.
-fn untimed_workers(clock: &Arc<SimClock>) -> lash::vm::WorkerService {
+/// With `slice`, a run returns to its broker every `slice` charge units.
+fn untimed_workers(clock: &Arc<SimClock>, slice: Option<u64>) -> lash::vm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config = lash::vm::WorkerService::default().config().clone();
+    if let Some(slice) = slice {
+        config.tuning.slice = slice;
+    }
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;

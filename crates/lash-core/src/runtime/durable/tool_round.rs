@@ -286,7 +286,7 @@ pub(super) async fn run(
             stored.committed(drive.machine());
             drive.run_changes_committed(&written);
             drive.phase_committed().await;
-            release_cell_emissions(cx, drive, held).await?;
+            release_cell_emissions(cx, drive, held, CommitLabel::MODEL_DONE).await?;
             // The candidates are selected: their exports are discharged
             // before any body runs, so an owner that takes the round over
             // exports none again.
@@ -437,9 +437,31 @@ pub(super) struct AnsweredCell {
     /// a successor that loses that commit runs the cell to its end again.
     /// `None` for a cell whose end is recorded.
     pub(super) held: Option<Vec<Effect>>,
+    /// The model response that asked for the cell, which no save of the
+    /// cell carried (FIG-6000): the commit that consumes the cell's answer
+    /// commits it, and what the cell published waits for that commit. A
+    /// successor that loses it sends the model call again.
+    pub(super) response: Option<crate::HeldResponse>,
+}
+
+/// What the turn held of an answered cell's publications for the commit
+/// that consumes its answer: its own, kept while its model response was
+/// held (FIG-6000), then the emissions the turn derived from its answer.
+#[derive(Default)]
+pub(super) struct CellEmissions {
+    response: Option<crate::HeldResponse>,
+    effects: Vec<Effect>,
 }
 
 impl AnsweredCell {
+    /// What the turn held of the cell's publications, taken.
+    pub(super) fn take_emissions(&mut self) -> CellEmissions {
+        CellEmissions {
+            response: self.response.take(),
+            effects: self.held.take().unwrap_or_default(),
+        }
+    }
+
     /// Keeps `effect` for the commit that consumes the cell's answer, when
     /// the cell's end is held and `effect` is an emission; else hands it
     /// back.
@@ -454,16 +476,20 @@ impl AnsweredCell {
     }
 }
 
-/// Run what the turn held of an answered cell's emissions
-/// ([`AnsweredCell::held`]): after the commit that consumed the answer, or
-/// before a commit that ends the turn, whose finish drains the turn's
-/// activity first.
+/// Publish what the turn held of an answered cell's publications
+/// ([`CellEmissions`]), for the commit labelled `label` that consumes the
+/// answer: after it, or before a commit that ends the turn, whose finish
+/// drains the turn's activity first.
 pub(super) async fn release_cell_emissions(
     cx: &ActorContext,
     drive: &mut dyn TurnDrive,
-    held: Vec<Effect>,
+    held: CellEmissions,
+    label: CommitLabel,
 ) -> Result<(), TurnError> {
-    for effect in held {
+    if let Some(response) = held.response {
+        response.committed(label);
+    }
+    for effect in held.effects {
         drive.local(cx, effect).await?;
     }
     Ok(())
@@ -515,12 +541,12 @@ pub(super) async fn consume_answered_cell(
     row: &TurnRow,
     answered: &mut Option<AnsweredCell>,
     working: bool,
-) -> Result<Vec<Effect>, TurnError> {
+) -> Result<CellEmissions, TurnError> {
     let Some(cell) = answered.as_mut() else {
-        return Ok(Vec::new());
+        return Ok(CellEmissions::default());
     };
     let id = cell.id;
-    let held = cell.held.take().unwrap_or_default();
+    let held = cell.take_emissions();
     report_answered_cell(tx, row, answered)?;
     drive.consume_cell(cx, tx, id, working).await?;
     Ok(held)

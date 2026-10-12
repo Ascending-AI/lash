@@ -370,10 +370,22 @@ pub trait TurnDrive: Send {
         &mut self,
     ) -> Result<Arc<dyn lash_core_execution::runtime::actor::round::RoundTools>, TurnError>;
 
+    /// Hand `held`, the model response that asked for the cell this drive
+    /// runs next, to the cell's first save (FIG-6000): `false` when the
+    /// cell's executor commits nothing with it, and the turn commits it on
+    /// its own before the cell starts.
+    fn hold_response(&mut self, held: crate::HeldResponse) -> bool {
+        let _ = held;
+        false
+    }
+
     /// Run the code cell of effect `id` from its latest snapshot, or from the
     /// start, to its end, and answer the machine. The cell files its
-    /// snapshots under its own execution; `model.done` committed the turn's
-    /// `Tools` phase that re-delivers it before it started.
+    /// snapshots under its own execution. The turn's `Tools` phase that
+    /// re-delivers it committed before it started (`model.done`), or commits
+    /// with the cell's first save, or, for a response the turn held
+    /// ([`hold_response`](Self::hold_response)) that no save carried, with
+    /// the commit that consumes the cell's answer.
     ///
     /// # Errors
     ///

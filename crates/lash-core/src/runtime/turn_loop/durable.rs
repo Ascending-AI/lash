@@ -362,6 +362,7 @@ impl LashRuntime {
             answered_cell_calls: Default::default(),
             cell_end: Default::default(),
             answered_cell_end: None,
+            held_response: None,
             host: self.host.clone(),
             turn_id: run.clone(),
             scoped_effect_controller: controller.clone(),

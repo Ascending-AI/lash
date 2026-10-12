@@ -78,6 +78,12 @@ pub(super) fn immediate_in(tx: &lash_durable::ActorTx) -> bool {
         || close_requested_in(tx)
 }
 
+/// Whether `request`, a cancel a commit read under its fence, stops the turn
+/// at once.
+pub(super) fn stops_at_once(request: &lash_durable::domain::TurnCancelRequest) -> bool {
+    request.mode == TurnCancelMode::Immediate
+}
+
 /// Whether the session holds a close request its actor has not drained, as
 /// of `tx`'s open read.
 pub(super) fn close_requested_in(tx: &lash_durable::ActorTx) -> bool {
@@ -210,6 +216,7 @@ async fn stopped_cell(
         id,
         calls,
         held: None,
+        response: None,
     }))
 }
 
@@ -305,8 +312,14 @@ async fn end(
             stopped.finishing_cell_calls(&cell.calls);
             // The stop's commit drains the turn's activity first: what the
             // turn held of the cell's emissions goes before it.
-            let held = cell.held.take().unwrap_or_default();
-            super::tool_round::release_cell_emissions(cx, stopped.as_mut(), held).await?;
+            let held = cell.take_emissions();
+            super::tool_round::release_cell_emissions(
+                cx,
+                stopped.as_mut(),
+                held,
+                CommitLabel::TURN_CANCEL,
+            )
+            .await?;
         }
         let commit =
             stop_commit(cx, stopped.as_mut(), evidence.clone(), heads, &row.session).await?;

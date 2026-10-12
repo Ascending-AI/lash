@@ -120,7 +120,7 @@ pub async fn run(run: &Run<'_>) -> Result<()> {
             let operation = if tx.label == "model.start" && parks == run.cell_parks {
                 ends += 1;
                 "cell.end"
-            } else if tx.label == "cell.snapshot+admit" {
+            } else if crate::turns::is_park(tx.label) {
                 parks += 1;
                 "cell.park"
             } else if tx.label == "turn.commit" {

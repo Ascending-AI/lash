@@ -39,6 +39,9 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// What the cell that last answered the machine left for the commit
     /// that consumes its answer.
     pub(super) answered_cell_end: Option<(crate::EffectId, crate::EndedCell)>,
+    /// The model response that asked for the cell the turn runs next, held
+    /// for the cell's first save (FIG-6000), until that cell runs.
+    pub(super) held_response: Option<crate::HeldResponse>,
     pub(super) host: RuntimeHost,
     pub(super) scoped_effect_controller: ActorContext,
     pub(super) session_id: SessionId,

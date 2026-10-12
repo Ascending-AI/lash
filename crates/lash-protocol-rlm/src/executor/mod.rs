@@ -523,6 +523,22 @@ async fn run_cell(
     snapshots: &Arc<lash_vm_broker::DurableSnapshotStore>,
     resumed: Option<envelope::ResumedCell>,
 ) -> ExecResponse {
+    // The model response the turn holds for the cell's first save is not
+    // held across a wait for a worker: it commits on its own first
+    // (FIG-6000).
+    if let Some(held) = ctx.held_response()
+        && !services.workers.worker_ready()
+        && let Err(error) = held.commit_alone(ctx.actor_context()).await
+    {
+        let message = format!("the model response that asked for the cell did not commit: {error}");
+        ctx.record_nested_effect_error(
+            lash_core::RuntimeEffectControllerError::retryable_response_derivation(message.clone()),
+        );
+        return exec_setup_failure(lash_core::CellFailure::new(
+            lash_core::CellFailureKind::Host,
+            message,
+        ));
+    }
     state.begin_code_execution();
     let workers = services.workers.begin_execution();
     let services = CellServices {
@@ -1199,7 +1215,7 @@ fn exec_response_from(collected: &CellHostLedgers, result: lash_core::CellOutcom
 }
 
 fn emit_step_trace(ctx: &RuntimeExecutionContext<'_>, result: Result<(), &str>) {
-    let Some(invocation) = ctx.parent_invocation() else {
+    let Some(invocation) = ctx.parent_invocation().cloned() else {
         return;
     };
     let Some(step_index) = invocation.attribution.protocol_iteration else {
@@ -1209,14 +1225,30 @@ fn emit_step_trace(ctx: &RuntimeExecutionContext<'_>, result: Result<(), &str>) 
         return;
     };
     let tracing = lash_core::plugin::PluginExecutionTrace::new(standing);
+    let failure = result.err().map(str::to_owned);
+    let emit = move || step_trace(&tracing, &invocation, step_index, failure.as_deref());
+    // Nothing of the cell is traced before a commit holds the model
+    // response that asked for it (FIG-6000).
+    match ctx.held_response() {
+        Some(held) => held.after_commit(Box::new(emit)),
+        None => emit(),
+    }
+}
+
+fn step_trace(
+    tracing: &lash_core::plugin::PluginExecutionTrace,
+    invocation: &lash_core::RuntimeInvocation,
+    step_index: usize,
+    failure: Option<&str>,
+) {
     tracing.emit(|| {
         let context = lash_core::facade_support::trace_context_for_runtime_invocation(
             tracing.trace_runtime().base_context().clone(),
             invocation,
         );
-        let outcome = match result {
-            Ok(()) => lash_trace::TraceProgramStepOutcome::Ok,
-            Err(diagnostic) => lash_trace::TraceProgramStepOutcome::Failure {
+        let outcome = match failure {
+            None => lash_trace::TraceProgramStepOutcome::Ok,
+            Some(diagnostic) => lash_trace::TraceProgramStepOutcome::Failure {
                 diagnostic: tracing
                     .trace_runtime()
                     .limits()

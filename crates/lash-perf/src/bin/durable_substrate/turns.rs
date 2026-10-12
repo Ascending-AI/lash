@@ -278,6 +278,14 @@ struct ResumeSample {
     commit_us: u64,
 }
 
+/// Whether a commit labelled `label` is a cell's park: its admission, or
+/// its first, which commits the model response that asked for the cell
+/// (FIG-6000).
+pub(crate) fn is_park(label: &str) -> bool {
+    label == CommitLabel::CELL_SNAPSHOT_ADMIT.as_str()
+        || label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT.as_str()
+}
+
 fn held_checkpoint(transactions: &[Transaction], actor: &ActorKey) -> usize {
     let actor = actor.to_string();
     transactions
@@ -468,7 +476,7 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
                         .contains_key(&lash_core_store::checkpoint_graph::NodeKind::CELL_END.0)
                     {
                         "cell.end"
-                    } else if block.label == "cell.snapshot+admit" {
+                    } else if is_park(block.label) {
                         "cell.park"
                     } else {
                         "cell.quiet_snapshot"
@@ -574,10 +582,7 @@ pub async fn counted(run: &Run<'_>, case: &Case) -> Result<()> {
                 .iter()
                 .filter(|tx| tx.label == "round.outcome")
                 .count();
-            let parks = owned
-                .iter()
-                .filter(|tx| tx.label == "cell.snapshot+admit")
-                .count();
+            let parks = owned.iter().filter(|tx| is_park(tx.label)).count();
             let ends = owned
                 .iter()
                 .filter(|tx| tx.by_kind.contains_key(&NodeKind::CELL_END.0))

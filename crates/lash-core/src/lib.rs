@@ -723,9 +723,9 @@ pub(crate) use session_model::plugin_runtime_protocol_event;
 pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
 pub use session::{
-    CellEndHandoff, EndedCell, ExecRequest, ExecutionEnvironmentSyncError, RuntimeExecutionContext,
-    SessionError, ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind,
-    tool_dispatch_surface,
+    CellEndHandoff, EndedCell, ExecRequest, ExecutionEnvironmentSyncError, HeldResponse,
+    RuntimeExecutionContext, SessionError, ToolDispatchSurface, ToolSurfaceDrift,
+    ToolSurfaceDriftKind, tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

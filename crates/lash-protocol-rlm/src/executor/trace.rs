@@ -17,10 +17,15 @@ use lash_trace::{
     TraceRuntimeSubject, WorkflowDocumentEntry, WorkflowDocumentRef,
 };
 
+#[derive(Clone)]
 pub(super) struct CellTrace {
     tracing: PluginExecutionTrace,
     language: String,
     identity: TraceLanguageExecutionIdentity,
+    /// The model response that asked for the cell, while its turn holds
+    /// it: nothing of the cell is traced before a commit holds it
+    /// (FIG-6000).
+    held: Option<lash_core::HeldResponse>,
 }
 
 impl CellTrace {
@@ -66,6 +71,7 @@ impl CellTrace {
                 engine_execution_id: ctx.engine_execution_id().map(str::to_owned),
                 generation,
             },
+            held: ctx.held_response().cloned(),
         })
     }
 
@@ -122,7 +128,19 @@ impl CellTrace {
         });
     }
 
+    /// Trace `payload` once a commit holds the cell's model response: now,
+    /// unless its turn still holds it.
     fn emit(&self, payload: TraceLanguageExecutionPayload) {
+        match &self.held {
+            Some(held) => {
+                let trace = self.clone();
+                held.after_commit(Box::new(move || trace.emit_now(payload)));
+            }
+            None => self.emit_now(payload),
+        }
+    }
+
+    fn emit_now(&self, payload: TraceLanguageExecutionPayload) {
         use TraceLanguageExecutionPayload as Payload;
         let (suffix, node) = match &payload {
             Payload::ExecutionStarted => ("started".to_owned(), None),

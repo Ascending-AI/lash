@@ -42,9 +42,10 @@ fn records(dir: &Path, kind: &str) -> anyhow::Result<Vec<serde_json::Value>> {
 }
 
 /// Each of the cell's ten awaits commits its park with the operation's
-/// admission and settles one round outcome; the cell's end commits with the
-/// commit that consumes its answer (FIG-5999), so it is no park. The bench
-/// reports every park as a block and the batch's counters.
+/// admission and settles one round outcome; the first park also commits the
+/// model response that asked for the cell (FIG-6000); the cell's end commits
+/// with the commit that consumes its answer (FIG-5999), so it is no park.
+/// The bench reports every park as a block and the batch's counters.
 #[tokio::test]
 async fn a_cell_settles_every_scripted_await_and_reports_each_park() {
     let dir = tempfile::tempdir().unwrap();
@@ -63,11 +64,17 @@ async fn a_cell_settles_every_scripted_await_and_reports_each_park() {
         .iter()
         .map(|block| block["label"].as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(labels, vec!["cell.snapshot+admit".to_owned(); 10]);
+    let mut parks = vec!["cell.snapshot+admit".to_owned(); 10];
+    parks[0] = "model.done+cell.snapshot+admit".to_owned();
+    assert_eq!(labels, parks);
     let batches = records(dir.path(), "batch").unwrap();
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0]["transactions"]["round.outcome"], 10);
-    assert_eq!(batches[0]["transactions"]["cell.snapshot+admit"], 10);
+    assert_eq!(
+        batches[0]["transactions"]["model.done+cell.snapshot+admit"],
+        1
+    );
+    assert_eq!(batches[0]["transactions"]["cell.snapshot+admit"], 9);
     let summaries = records(dir.path(), "summary").unwrap();
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0]["blocks"], 10);
