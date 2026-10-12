@@ -870,9 +870,8 @@ mod tests {
         config.deadlines.serialization = Duration::from_millis(5);
         let codec = FrameCodec::new(config.protocol.decode);
         let (pipe, mut parent) = UnixStream::pair().expect("pipe");
-        let embedding = crate::embedding::Embedder::kernel()
-            .and_then(crate::embedding::Embedder::finish)
-            .expect("embedding");
+        let embedding = crate::embedding::tests::typescript_only(&config.tuning)
+            .expect("a TypeScript embedding");
         let mut server =
             Server::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding).expect("server");
         read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1)).expect("ready");
@@ -900,9 +899,8 @@ mod tests {
         config.protocol.decode.max_frame_bytes = 1024;
         let codec = FrameCodec::new(config.protocol.decode);
         let (pipe, mut parent) = UnixStream::pair().expect("pipe");
-        let embedding = crate::embedding::Embedder::kernel()
-            .and_then(crate::embedding::Embedder::finish)
-            .expect("embedding");
+        let embedding = crate::embedding::tests::typescript_only(&config.tuning)
+            .expect("a TypeScript embedding");
         let mut server =
             Server::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding).expect("server");
         let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
