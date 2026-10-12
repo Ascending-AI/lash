@@ -154,7 +154,7 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
             .await;
 
     let output = super::facade_turns::send(&session, "reason in two parts").await;
-    let read_view = output.result.state.read_view();
+    let read_view = session.read().await.expect("committed read").expect("head");
     let durable = read_view
         .messages()
         .iter()

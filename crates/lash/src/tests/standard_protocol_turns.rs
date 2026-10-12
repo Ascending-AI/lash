@@ -80,7 +80,7 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
         .expect("the turn answers");
     assert!(output.is_success(), "{output:?}");
 
-    let read_view = output.result.state.read_view();
+    let read_view = session.read().await.expect("committed read").expect("head");
     let assistant_messages = read_view
         .messages()
         .iter()
@@ -236,7 +236,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
         );
     }
 
-    let read_view = output.result.state.read_view();
+    let read_view = session.read().await.expect("committed read").expect("head");
     let tool_call_contents = read_view
         .messages()
         .iter()
@@ -638,7 +638,7 @@ async fn persisted_provider_parts(
         .await
         .expect("the turn answers");
     assert!(output.is_success(), "{output:?}");
-    let read_view = output.result.state.read_view();
+    let read_view = session.read().await.expect("committed read").expect("head");
     let parts = read_view
         .messages()
         .iter()

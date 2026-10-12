@@ -23,7 +23,7 @@ use std::task::{Context, Poll};
 
 use futures_util::Stream;
 use futures_util::future::BoxFuture;
-use lash_core::facade_support::{DurableSessionOps, RuntimeHandle};
+use lash_core::facade_support::DurableSessionOps;
 use lash_core::runtime::{TurnInputAcceptanceReceipt, TurnInputIngress};
 use lash_core::{InputId, LiveReplayStore, SessionId, TurnId};
 use lash_sansio::sync::MutexExt;
@@ -48,8 +48,7 @@ use follow::{Subject, Tap};
 /// The session a send, a handle or a cancel is bound to.
 #[derive(Clone)]
 pub(crate) enum SendTarget {
-    /// An open session: answers also bring its resident runtime to the
-    /// committed head.
+    /// An open session: outcome reads leave its resident runtime alone.
     Live(LashSession),
     /// A Durable Session: no runtime to refresh.
     Durable(DurableSession),
@@ -71,40 +70,10 @@ pub(crate) struct SendParts {
     pub(crate) models: Arc<dyn lash_core::LlmProfiles>,
 }
 
-/// A target's parts, with the open session's runtime when there is one.
+/// The parts an outcome follower needs. Session state has its own read API.
 pub(crate) struct SendContext {
     pub(crate) parts: SendParts,
-    live: Option<RuntimeHandle>,
-}
-
-impl SendContext {
-    /// Bring the open session's resident runtime to the committed head, so
-    /// its reads reflect what the engine ran. A Durable Session has none.
-    async fn refresh(&self) -> Result<()> {
-        let Some(runtime) = &self.live else {
-            return Ok(());
-        };
-        let writer = runtime.writer();
-        let mut resident = writer.lock().await;
-        resident.adopt_committed_head().await?;
-        // A cancelled operation can invalidate resident state without moving
-        // the head. Restore its services before publishing the host's reads.
-        resident.reload_invalidated_resident_session_state().await?;
-        runtime.adopt_observation_from(&resident);
-        Ok(())
-    }
-
-    /// The session's state as of the committed head, read from the store:
-    /// the session's turns run on its actor, so an open session's resident
-    /// runtime holds the state it opened with, not what its runs committed.
-    async fn session_snapshot(&self) -> Result<lash_core::SessionSnapshot> {
-        lash_core::store::load_stored_session_snapshot(&self.parts.store)
-            .await
-            .map_err(EmbedError::Store)?
-            .ok_or_else(|| EmbedError::UnknownSession {
-                session_id: self.parts.session_id.clone(),
-            })
-    }
+    live: bool,
 }
 
 impl SendTarget {
@@ -119,11 +88,11 @@ impl SendTarget {
         match self {
             Self::Live(session) => Ok(SendContext {
                 parts: session.durable().send_parts().await?,
-                live: Some(session.runtime.clone()),
+                live: true,
             }),
             Self::Durable(durable) => Ok(SendContext {
                 parts: durable.send_parts().await?,
-                live: None,
+                live: false,
             }),
         }
     }
@@ -200,7 +169,16 @@ async fn refuse_unservable_selection(context: &SendContext, spec: &RunSpec) -> R
             Some(lash_core::LlmProfileConfig::new(model).with_reasoning(reasoning))
         }
         (minted, reasoning) => {
-            let recorded = context.session_snapshot().await?.policy.model;
+            let recorded = context
+                .parts
+                .store
+                .load_session_head_meta()
+                .await?
+                .ok_or_else(|| EmbedError::UnknownSession {
+                    session_id: context.parts.session_id.clone(),
+                })?
+                .config
+                .model;
             match (minted, recorded) {
                 (Some(model), recorded) => Some(lash_core::LlmProfileConfig {
                     model,

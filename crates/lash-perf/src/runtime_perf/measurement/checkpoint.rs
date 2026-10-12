@@ -1054,7 +1054,17 @@ impl EmbedRun {
                             turn_index + 1
                         )
                     })?;
-                    validate_runtime_perf_turn(scenario, turn_index, &turn)?;
+                    validate_runtime_perf_turn(
+                        scenario,
+                        turn_index,
+                        &turn,
+                        &session
+                            .durable()
+                            .read()
+                            .await?
+                            .ok_or_else(|| anyhow::anyhow!("missing committed head"))?
+                            .to_snapshot(),
+                    )?;
                     Ok(TurnRun {
                         value: (),
                         tail: TurnTail {
@@ -1068,7 +1078,15 @@ impl EmbedRun {
             .await?;
         }
 
-        let read_view = run.export(async { Ok(session.read_view()) }).await?;
+        let read_view = run
+            .export(async {
+                session
+                    .durable()
+                    .read()
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("missing committed head"))
+            })
+            .await?;
 
         Ok(run.finish(RunTail {
             session_nodes: store.graph_node_count(),

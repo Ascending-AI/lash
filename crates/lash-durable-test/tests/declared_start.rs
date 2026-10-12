@@ -1500,14 +1500,20 @@ async fn declared_start_rejects_foreign_or_reused_serialized_identity_before_lau
         let Some(world) = World::new(tier, &format!("unbound-{name}"), shape).await else {
             return;
         };
-        let output = world.run().await;
-        let called = served::calls(&output);
+        world.run().await;
+        let view = world
+            .session
+            .read()
+            .await
+            .expect("committed read")
+            .expect("head");
+        let called = served::calls(&view);
         let record = called
             .iter()
             .find(|called| called.provider_call_id == call)
             .unwrap_or_else(|| panic!("{name}: the forged call is in the transcript: {called:#?}"));
         let call_id = record.call_id.clone().expect("the forged call has an id");
-        let answered = served::results(&output)
+        let answered = served::results(&view)
             .into_iter()
             .find(|answered| answered.call_id.as_ref() == Some(&call_id))
             .unwrap_or_else(|| panic!("{name}: the forged call has a result"));

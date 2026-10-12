@@ -485,10 +485,8 @@ async fn session(core: &lash::LashCore, id: &str) -> lash::LashSession {
 
 /// What each cell of the session `output` ends in finished with, oldest
 /// first.
-fn cell_finishes(output: &lash::TurnOutput) -> Vec<serde_json::Value> {
-    output
-        .result
-        .state
+fn cell_finishes(view: &lash::persistence::SessionReadView) -> Vec<serde_json::Value> {
+    view.to_snapshot()
         .session_graph
         .nodes
         .iter()
@@ -641,7 +639,16 @@ async fn a_session_cell_parked_by_build_n_is_claimed_migrated_and_resumed_by_bui
     .expect("the later turn ends within a minute")
     .expect("the later turn");
     assert!(later.is_success(), "the later turn: {later:?}");
-    let finishes = cell_finishes(&later);
+    let finishes = cell_finishes(
+        &new.session(lash::SessionId::fixture(SESSION))
+            .durable()
+            .await
+            .expect("durable session")
+            .read()
+            .await
+            .expect("committed read")
+            .expect("head"),
+    );
     assert_eq!(
         finishes.get(1),
         Some(&serde_json::json!(42)),
@@ -817,7 +824,18 @@ async fn an_idle_process_and_an_idle_session_are_swept_by_build_n_plus_1_and_rea
     .expect("the closing build's turn");
     assert!(read.is_success(), "the closing build's turn: {read:?}");
     assert_eq!(
-        cell_finishes(&read).last(),
+        cell_finishes(
+            &closing
+                .session(lash::SessionId::fixture(SESSION))
+                .durable()
+                .await
+                .expect("durable session")
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head")
+        )
+        .last(),
         Some(&serde_json::json!(8)),
         "the closing build called the function the session saved under build N"
     );
@@ -882,7 +900,21 @@ async fn the_closing_build_refuses_to_start_while_a_session_is_unmigrated_and_st
     .expect("the closing build's turn ends within a minute")
     .expect("the closing build's turn");
     assert!(read.is_success(), "the closing build's turn: {read:?}");
-    assert_eq!(cell_finishes(&read).last(), Some(&serde_json::json!(42)));
+    assert_eq!(
+        cell_finishes(
+            &closing
+                .session(lash::SessionId::fixture(SESSION))
+                .durable()
+                .await
+                .expect("durable session")
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head")
+        )
+        .last(),
+        Some(&serde_json::json!(42))
+    );
 }
 
 /// FIG-5787: `lashctl kernel-migration list` names a session whose open
@@ -1202,7 +1234,16 @@ async fn a_session_cell_parked_under_the_earlier_helpers_resumes_on_the_build_th
     .expect("the later turn ends within a minute")
     .expect("the later turn");
     assert!(later.is_success(), "the later turn: {later:?}");
-    let finishes = cell_finishes(&later);
+    let finishes = cell_finishes(
+        &new.session(lash::SessionId::fixture(SESSION))
+            .durable()
+            .await
+            .expect("durable session")
+            .read()
+            .await
+            .expect("committed read")
+            .expect("head"),
+    );
     assert_eq!(
         finishes.first(),
         Some(&serde_json::json!([2, 4])),
@@ -1255,7 +1296,17 @@ async fn a_saved_function_holding_an_earlier_helper_identity_is_called_in_a_new_
     .expect("the turn");
     assert!(called.is_success(), "the turn: {called:?}");
     assert_eq!(
-        cell_finishes(&called).last(),
+        cell_finishes(
+            &new.session(lash::SessionId::fixture(SESSION))
+                .durable()
+                .await
+                .expect("durable session")
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head")
+        )
+        .last(),
         Some(&serde_json::json!([2, 4]))
     );
 }

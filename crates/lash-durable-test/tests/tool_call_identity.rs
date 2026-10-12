@@ -233,8 +233,8 @@ fn probe(call_id: &str, tool: &str, args: serde_json::Value) -> lash_core::llm::
 }
 
 /// The labels the transcript's tool results answered, in order.
-fn answered_labels(output: &lash::TurnOutput) -> Vec<String> {
-    served::results(output)
+fn answered_labels(view: &lash::persistence::SessionReadView) -> Vec<String> {
+    served::results(view)
         .iter()
         .map(|answered| {
             answered.value()["label"]
@@ -265,7 +265,7 @@ async fn repeated_provider_id_across_turns_is_distinct(tier: Tier) {
         served::assert_answered(name, &output);
         answered.push(name.to_owned());
         assert_eq!(
-            answered_labels(&output),
+            answered_labels(&session.read().await.expect("committed read").expect("head")),
             answered,
             "{name}: each turn's call answered for itself"
         );
@@ -299,7 +299,7 @@ async fn same_scope_completion_collision(tier: Tier) {
         .await;
     served::assert_answered(name, &output);
     assert_eq!(
-        answered_labels(&output),
+        answered_labels(&world.read(name).await),
         vec!["first", "second"],
         "each deferred call settles with its own resolution"
     );
@@ -353,7 +353,7 @@ async fn reported_failure_retry_preserves_call_id(tier: Tier) {
         "every attempt of one call saw one call id: {executions:?}"
     );
     assert_eq!(
-        answered_labels(&output),
+        answered_labels(&world.read(name).await),
         vec!["retried"],
         "the retry's success is the call's outcome"
     );
@@ -373,9 +373,8 @@ async fn head(world: &World, session: &str) -> lash_core::store::SessionHeadMeta
 }
 
 /// The settled session's history nodes, by id.
-fn nodes(output: &lash::TurnOutput) -> BTreeMap<String, serde_json::Value> {
-    let graph =
-        serde_json::to_value(&output.result.state.session_graph).expect("the graph encodes");
+fn nodes(view: &lash::persistence::SessionReadView) -> BTreeMap<String, serde_json::Value> {
+    let graph = serde_json::to_value(&view.to_snapshot().session_graph).expect("the graph encodes");
     graph["nodes"]
         .as_array()
         .expect("the graph's nodes")
@@ -402,7 +401,7 @@ async fn one_turn_commits_history_once_and_never_replaces_existing_nodes(tier: T
     let seed = world.send(&session, "history-seed").await;
     served::assert_answered("seed", &seed);
     let before = head(&world, session_name).await;
-    let prefix = nodes(&seed);
+    let prefix = nodes(&session.read().await.expect("committed read").expect("head"));
 
     world.script(
         "history-progress",
@@ -429,7 +428,7 @@ async fn one_turn_commits_history_once_and_never_replaces_existing_nodes(tier: T
         before.head_revision + 1,
         "the turn commits the session's history once"
     );
-    let grown = nodes(&progress);
+    let grown = nodes(&session.read().await.expect("committed read").expect("head"));
     for (id, node) in &prefix {
         assert_eq!(
             grown.get(id),
@@ -501,7 +500,10 @@ async fn suspended_tool_keeps_turn_and_history_head_until_resolution(tier: Tier)
         "the resolved turn commits once"
     );
     witness.only("suspended");
-    assert_eq!(answered_labels(&output), vec!["suspended"]);
+    assert_eq!(
+        answered_labels(&session.read().await.expect("committed read").expect("head")),
+        vec!["suspended"]
+    );
     world.shutdown().await;
 }
 
@@ -590,7 +592,7 @@ async fn fork_inherits_history_without_execution_queues_waits_or_journals(tier: 
         "the same call at the same position of a fork is another call"
     );
     assert_eq!(
-        answered_labels(&forked),
+        answered_labels(&branch.read().await.expect("committed read").expect("head")),
         vec!["same", "same"],
         "the fork's transcript holds its source's call and its own"
     );
@@ -664,7 +666,7 @@ async fn retry_into_a_park(tier: Tier, records: &Arc<Records>) -> Option<(World,
             .all(|execution| execution.call_id == executions[0].call_id),
         "every attempt of one call saw one call id: {executions:?}"
     );
-    assert_eq!(answered_labels(&output), vec!["laddered"]);
+    assert_eq!(answered_labels(&world.read(name).await), vec!["laddered"]);
     Some((world, executions))
 }
 

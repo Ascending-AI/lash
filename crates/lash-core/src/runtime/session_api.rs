@@ -697,57 +697,50 @@ impl LashRuntime {
                 "accepted session command lost its persistent store",
             )
         })?;
-        let still_pending = store
-            .list_queued_work()
+        // A recorded answer needs neither the open queue nor session state.
+        // Probe it first so unrelated queued documents are never loaded for
+        // an already settled command.
+        let mut completion = store
+            .queued_work_batch_completion(&handle.receipt.batch_id)
             .await
-            .map_err(super::runtime_error_from_store_commit)?
-            .iter()
-            .any(|batch| batch.batch_id == handle.receipt.batch_id);
-        if !still_pending {
-            let Some(completion) = store
-                .queued_work_batch_completion(&handle.receipt.batch_id)
+            .map_err(super::runtime_error_from_store_commit)?;
+        if completion.is_none() {
+            let still_pending = store
+                .list_queued_work()
                 .await
                 .map_err(super::runtime_error_from_store_commit)?
-            else {
-                return Ok(crate::runtime::SessionCommandSettlement::Cancelled(
+                .iter()
+                .any(|batch| batch.batch_id == handle.receipt.batch_id);
+            if still_pending {
+                return Ok(crate::runtime::SessionCommandSettlement::Pending(
                     handle.receipt,
                 ));
-            };
-            // Settling only reads: the command run that committed a config
-            // change delivered it to the session's observers (FIG-5333).
-            self.refresh_session_graph_from_store()
+            }
+            // A settlement can commit between the first probe and the queue
+            // read. Read its evidence again before calling it cancelled.
+            completion = store
+                .queued_work_batch_completion(&handle.receipt.batch_id)
                 .await
-                .map_err(runtime_error_from_session_command_refresh)?;
-            // The refresh adopts the durable head, which already carries
-            // this command's committed values — or newer ones from a
-            // later writer (head-authoritative adoption, FIG-1875). Every
-            // successful refresh path either confirms the resident state
-            // already carries the drain commit or fully hydrates the
-            // head, and probe failures propagate as errors, so there is
-            // no edge that needs the patch re-published residently.
-            // Reapplying it here would overwrite a newer settled head
-            // with this command's older values, resident-only.
-            Ok(
-                match completion
-                    .command_outcomes
-                    .get(&handle.receipt.batch_id)
-                    .cloned()
-                {
-                    // A command that settles with an outcome answers what it
-                    // settled as, on whichever runtime applied it (FIG-4201,
-                    // FIG-4202).
-                    Some(outcome) => crate::runtime::SessionCommandSettlement::Applied {
-                        receipt: handle.receipt,
-                        outcome,
-                    },
-                    None => crate::runtime::SessionCommandSettlement::Durable(handle.receipt),
-                },
-            )
-        } else {
-            Ok(crate::runtime::SessionCommandSettlement::Pending(
-                handle.receipt,
-            ))
+                .map_err(super::runtime_error_from_store_commit)?;
         }
+        let Some(completion) = completion else {
+            return Ok(crate::runtime::SessionCommandSettlement::Cancelled(
+                handle.receipt,
+            ));
+        };
+        Ok(
+            match completion
+                .command_outcomes
+                .get(&handle.receipt.batch_id)
+                .cloned()
+            {
+                Some(outcome) => crate::runtime::SessionCommandSettlement::Applied {
+                    receipt: handle.receipt,
+                    outcome,
+                },
+                None => crate::runtime::SessionCommandSettlement::Durable(handle.receipt),
+            },
+        )
     }
 
     /// Submit `command` to the session's command lane and return as soon as
@@ -774,8 +767,8 @@ impl LashRuntime {
         Ok(receipt)
     }
 
-    /// Wait for the command `receipt` names to settle, and adopt the durable
-    /// head it settled on. `Pending` when the engine has not settled it yet;
+    /// Read the command `receipt`'s settlement without loading session state.
+    /// `Pending` when the engine has not settled it yet;
     /// the command stays durable and settles later. Callers that need a
     /// settled result await the session actor outside this runtime's writer lock.
     pub async fn settle_session_command(
@@ -1233,26 +1226,6 @@ struct RuntimeCommitAdmissionError(RuntimeError);
 impl From<crate::StoreError> for RuntimeCommitAdmissionError {
     fn from(error: crate::StoreError) -> Self {
         Self(super::runtime_error_from_store_commit(error))
-    }
-}
-
-fn runtime_error_from_session_command_refresh(error: SessionError) -> RuntimeError {
-    let deleted_session_id = match &error {
-        SessionError::Store {
-            source: crate::StoreError::SessionDeleted { session_id },
-            ..
-        } => Some(session_id.clone()),
-        _ => None,
-    };
-    let runtime_error = RuntimeError::new(
-        RuntimeErrorCode::SessionCommandPostShiftRefresh,
-        error.to_string(),
-    );
-    match deleted_session_id {
-        Some(session_id) => {
-            runtime_error.with_cause(crate::RuntimeErrorCause::SessionDeleted { session_id })
-        }
-        None => runtime_error,
     }
 }
 

@@ -365,7 +365,12 @@ pub(super) async fn run_once_trace_jsonl(
                         turn_index + 1
                     )
                 })?;
-                validate_runtime_perf_turn(scenario, turn_index, &turn)?;
+                validate_runtime_perf_turn(
+                    scenario,
+                    turn_index,
+                    &turn,
+                    &runtime.export_state().await?,
+                )?;
                 Ok(TurnRun {
                     value: (),
                     tail: TurnTail {
@@ -401,7 +406,7 @@ pub(super) async fn run_once_trace_jsonl(
 
     let state = run
         .export(async {
-            let state = runtime.export_state().await;
+            let state = runtime.export_state().await?;
             Ok(state)
         })
         .await?;

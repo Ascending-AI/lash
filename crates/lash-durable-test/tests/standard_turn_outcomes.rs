@@ -139,7 +139,7 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty(ti
         "{:?}",
         output.result.errors
     );
-    let view = output.result.state.read_view();
+    let view = session.read().await.expect("committed read").expect("head");
     let replies = view
         .messages()
         .iter()
@@ -362,7 +362,7 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
         TurnEvent::Finished { tool_name, value }
             if tool_name == "terminal_tool_0" && *value == serde_json::json!("first")
     ));
-    let view = output.result.state.read_view();
+    let view = session.read().await.expect("committed read").expect("head");
     let replies = view
         .messages()
         .iter()
@@ -516,7 +516,7 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
         ]
     );
     assert_eq!(streamed_prose(&output), "Intro paragraph.## Heading");
-    let view = output.result.state.read_view();
+    let view = session.read().await.expect("committed read").expect("head");
     let reply = view
         .messages()
         .iter()
@@ -1141,7 +1141,14 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
     let turn_one = world.send(&session, "return the array").await;
     served::assert_answered("the array turn", &turn_one);
     assert!(
-        lash_sansio::messages_are_prompt_resume_safe(turn_one.result.state.read_view().messages()),
+        lash_sansio::messages_are_prompt_resume_safe(
+            session
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head")
+                .messages()
+        ),
         "an attachment-bearing tool value commits a resume-safe transcript"
     );
 
@@ -1219,7 +1226,12 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
     let turn_three = world.send(&session, "turn three input").await;
     served::assert_answered("the turn after the cancel", &turn_three);
     assert!(lash_sansio::messages_are_prompt_resume_safe(
-        turn_three.result.state.read_view().messages()
+        session
+            .read()
+            .await
+            .expect("committed read")
+            .expect("head")
+            .messages()
     ));
     world.shutdown().await;
 }

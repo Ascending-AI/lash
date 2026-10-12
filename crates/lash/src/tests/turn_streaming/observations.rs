@@ -752,10 +752,7 @@ async fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Resul
             .iter()
             .all(|activity| !matches!(activity.event, TurnEvent::ModelAttemptReset { .. }))
     );
-    let rlm_marker_records = first
-        .result
-        .state
-        .read_view()
+    let rlm_marker_records = session.durable().read().await?.expect("head")
         .active_events()
         .iter()
         .filter(|record| match record {

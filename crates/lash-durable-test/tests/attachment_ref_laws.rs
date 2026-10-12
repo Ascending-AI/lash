@@ -347,10 +347,12 @@ async fn send(url: bool, tools: bool) -> Sent {
     .unwrap()
     .unwrap();
     assert!(output.is_success(), "{output:?}");
-    let history = output
-        .result
-        .state
-        .read_view()
+    let history = session
+        .durable()
+        .read()
+        .await
+        .unwrap()
+        .unwrap()
         .messages()
         .iter()
         .flat_map(|message| message.parts.iter())

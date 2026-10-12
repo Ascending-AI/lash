@@ -502,7 +502,6 @@ pub(super) async fn follow(
                 Resolution::OperationSettled { run, outcome } => {
                     adoption.adopt(run.clone(), tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;
-                    ctx.refresh().await?;
                     return Ok(Followed::Answered(Box::new(
                         SendOutcome::OperationSettled {
                             run,
@@ -515,7 +514,6 @@ pub(super) async fn follow(
                     adoption.adopt(run.clone(), tap).await;
                     await_outcome_activity(ctx, &mut adoption, &mut observation, tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;
-                    ctx.refresh().await?;
                     let observed = observed_before || !adoption.collected.is_empty();
                     return finish_settled(
                         ctx,
@@ -556,7 +554,6 @@ pub(super) async fn follow(
                     return Err(EmbedError::Runtime(fault));
                 }
                 resolution @ (Resolution::Withdrawn | Resolution::NotAccepted) => {
-                    ctx.refresh().await?;
                     let gaps = observation.gaps;
                     return Ok(Followed::Answered(Box::new(match resolution {
                         Resolution::Withdrawn => SendOutcome::Withdrawn { gaps },
@@ -664,7 +661,7 @@ pub(super) async fn follow(
 /// instead. Each floor read is one keyed read of the input's status, which
 /// answers its binding, its withdrawal and its session's fault at once.
 fn at_floor(ctx: &SendContext, subject: &Subject, adoption: &Adoption) -> bool {
-    matches!(subject, Subject::Input(_)) && adoption.run.is_none() && ctx.live.is_none()
+    matches!(subject, Subject::Input(_)) && adoption.run.is_none() && !ctx.live
 }
 
 async fn next_event(
@@ -844,20 +841,6 @@ pub(super) async fn durable_report(
                 format!("turn report token usage overflows {}", overflow.counter()),
             ))
         })?;
-    let state = lash_core::store::load_session_window_state(
-        &ctx.parts.store,
-        lash_core::store::WindowSelector::Terminal(run.clone()),
-    )
-    .await
-    .map_err(EmbedError::Store)?
-    .ok_or_else(|| {
-        EmbedError::Store(lash_core::StoreError::StoredDataCorrupt {
-            record_kind: "RunTerminalWindow",
-            message: format!("settled run `{run}` has no recorded session window"),
-        })
-    })?
-    .state
-    .to_snapshot();
     let (tool_calls, omitted) =
         lash_core::runtime::durable::services::RuntimeTurnServices::recorded_tool_calls(
             &ctx.parts.effect_host,
@@ -880,7 +863,6 @@ pub(super) async fn durable_report(
         _ => Default::default(),
     };
     Ok(TurnReport {
-        state,
         outcome,
         usage,
         llm_calls,

@@ -811,14 +811,6 @@ mod tests {
             lash::TurnReport {
                 cancel_input_outcome: Default::default(),
                 acceptance: None,
-                state: lash_core::SessionSnapshot::new(
-                    lash_core::SessionId::from("session"),
-                    lash_core::SessionPolicy::new(
-                        lash_core::TurnBudget::Unbounded,
-                        lash_core::MaxToolCalls::new(1024),
-                        lash_core::NoProgressBudget::bounded(12),
-                    ),
-                ),
                 outcome,
                 usage: Default::default(),
                 llm_calls: Vec::new(),

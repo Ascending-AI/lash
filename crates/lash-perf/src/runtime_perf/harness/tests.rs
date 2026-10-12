@@ -32,7 +32,12 @@ async fn rlm_globals_keeps_fixed_session_projection_across_real_turns() {
                     CancellationToken::new(),
                 )
                 .await?;
-            validate_runtime_perf_turn(RuntimePerfScenario::RlmGlobals, 1, &turn)
+            validate_runtime_perf_turn(
+                RuntimePerfScenario::RlmGlobals,
+                1,
+                &turn,
+                &runtime.export_state().await?,
+            )
         }),
     )
     .await
@@ -64,7 +69,13 @@ async fn a_dropped_runtime_frees_its_in_process_lane() {
                 )
                 .await
                 .expect("run a benchmark turn");
-            validate_runtime_perf_turn(scenario, turn, &report).expect("a valid benchmark turn");
+            validate_runtime_perf_turn(
+                scenario,
+                turn,
+                &report,
+                &runtime.export_state().await.expect("committed state"),
+            )
+            .expect("a valid benchmark turn");
         }
         let lane = Arc::downgrade(&runtime.store());
         drop(runtime);
@@ -98,7 +109,12 @@ async fn large_print_fixture_finishes_with_projection_evidence() {
                     CancellationToken::new(),
                 )
                 .await?;
-            validate_runtime_perf_turn(RuntimePerfScenario::RlmLargePrint, 0, &turn)?;
+            validate_runtime_perf_turn(
+                RuntimePerfScenario::RlmLargePrint,
+                0,
+                &turn,
+                &runtime.export_state().await?,
+            )?;
             assert_eq!(
                 turn.tool_calls
                     .iter()
@@ -142,7 +158,13 @@ async fn large_catalog_fixture_reaches_the_scripted_provider() {
     }
     let turn = handle.output().await.expect("catalog output").result;
     assert!(
-        validate_runtime_perf_turn(scenario, 0, &turn).is_ok(),
+        validate_runtime_perf_turn(
+            scenario,
+            0,
+            &turn,
+            &runtime.export_state().await.expect("committed state")
+        )
+        .is_ok(),
         "outcome={:?}; failures={failures:?}",
         turn.outcome
     );

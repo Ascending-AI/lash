@@ -804,7 +804,8 @@ async fn a_presentation_step_presents_every_native_round_call(tier: Tier) {
         )
         .await;
     served::assert_answered("the presented turn", &output);
-    let results = served::results(&output);
+    let view = world.read(NAME).await;
+    let results = served::results(&view);
     for provider_call_id in ["presented-at-once", "presented-after-park"] {
         let result = results
             .iter()

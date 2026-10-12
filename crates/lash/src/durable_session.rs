@@ -498,10 +498,35 @@ impl DurableSession {
     /// [`failure_evidence`](Self::failure_evidence). `Ok(None)` means the
     /// catalog has no readable committed state for this id.
     pub async fn read(&self) -> Result<Option<crate::persistence::SessionReadView>> {
+        self.read_window(lash_core::store::WindowSelector::Current)
+            .await
+    }
+
+    /// Read the committed window the settled logical `run` ended on, even
+    /// after later runs advance the head. This loads state only on explicit
+    /// request; the run's outcome never loads it.
+    ///
+    /// `Ok(None)` means no terminal window is retained for this run. A run
+    /// still executing or parked has no terminal window; use [`read`](Self::read)
+    /// for the current committed head.
+    pub async fn read_run(
+        &self,
+        run: &crate::RunId,
+    ) -> Result<Option<crate::persistence::SessionReadView>> {
+        self.read_window(lash_core::store::WindowSelector::Terminal(
+            run.clone().into(),
+        ))
+        .await
+    }
+
+    async fn read_window(
+        &self,
+        selector: lash_core::store::WindowSelector,
+    ) -> Result<Option<crate::persistence::SessionReadView>> {
         let Some(store) = self.store_if_present().await? else {
             return Ok(None);
         };
-        lash_core::store::load_session_read_view(store)
+        lash_core::store::load_session_read_view(store, selector)
             .await
             .map(|view| {
                 view.map(|view| view.with_transcript_decoders(self.transcript_decoders.clone()))

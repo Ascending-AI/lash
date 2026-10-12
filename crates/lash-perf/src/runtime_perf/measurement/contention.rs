@@ -91,7 +91,17 @@ async fn run_writer_operation(
                     CancellationToken::new(),
                 )
                 .await?;
-            validate_runtime_perf_turn(scenario, ordinal, &turn)?;
+            validate_runtime_perf_turn(
+                scenario,
+                ordinal,
+                &turn,
+                &session
+                    .durable()
+                    .read()
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("missing committed head"))?
+                    .to_snapshot(),
+            )?;
         }
     }
     Ok(())
@@ -336,7 +346,7 @@ pub(crate) async fn run_once_writer_contention(
     let phase_profile = contention_phase_profile(&metric_samples_ms);
     let export_before_alloc = allocator_stats();
     let export_started = Instant::now();
-    let state = runtime.export_state().await;
+    let state = runtime.export_state().await?;
     let export_state_ms = elapsed_ms(export_started);
     let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
     let after_export_memory = process_memory_sample();
@@ -448,7 +458,7 @@ pub(crate) async fn run_once_async_process_settlement(
             CancellationToken::new(),
         )
         .await?;
-    validate_runtime_perf_turn(scenario, 0, &turn)?;
+    validate_runtime_perf_turn(scenario, 0, &turn, &runtime.export_state().await?)?;
     let parent_return_ms = elapsed_ms(run_started);
     control.wait_for_pending(children).await;
     let spawn_ms = elapsed_ms(run_started);
@@ -522,7 +532,7 @@ pub(crate) async fn run_once_async_process_settlement(
 
     let export_before_alloc = allocator_stats();
     let export_started = Instant::now();
-    let state = runtime.export_state().await;
+    let state = runtime.export_state().await?;
     let export_state_ms = elapsed_ms(export_started);
     let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
     let after_export_memory = process_memory_sample();

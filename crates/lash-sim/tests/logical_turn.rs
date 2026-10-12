@@ -370,15 +370,18 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
         &SessionId::from("logical-turn-sim"),
         frame_key.as_str(),
     );
-    for output in [&second_output, &follow_on] {
-        assert_eq!(
-            output.result.state.current_frame_node_id.as_deref(),
-            Some(frame_node_id.as_str()),
-            "every run after the switch runs on the switched frame"
-        );
-    }
+    let snapshot = session
+        .read()
+        .await
+        .expect("committed read")
+        .expect("head")
+        .to_snapshot();
     assert_eq!(
-        canonical_seed_nodes(&follow_on.result.state, frame_node_id.as_str()),
+        snapshot.current_frame_node_id.as_deref(),
+        Some(frame_node_id.as_str())
+    );
+    assert_eq!(
+        canonical_seed_nodes(&snapshot, frame_node_id.as_str()),
         expected_seed_nodes,
         "the switch's seed nodes open the new frame"
     );
@@ -795,9 +798,12 @@ await control.finish({ baton: baton });
             .and_then(Value::as_str),
         Some("rlm-sim-seed")
     );
-    let observed_nodes = terminal
-        .result
-        .state
+    let observed_nodes = session
+        .read()
+        .await
+        .expect("committed read")
+        .expect("head")
+        .to_snapshot()
         .session_graph
         .nodes
         .iter()

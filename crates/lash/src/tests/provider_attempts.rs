@@ -9,13 +9,9 @@ use lash_core::{MessageRole, TurnEvent};
 use lash_sansio::ReportedFailure;
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
-/// Every committed part's content of `output`'s session.
-fn committed_contents(output: &crate::TurnOutput) -> Vec<String> {
-    output
-        .result
-        .state
-        .read_view()
-        .messages()
+/// Every committed part's content in an explicitly read session view.
+fn committed_contents(view: &lash_core::SessionReadView) -> Vec<String> {
+    view.messages()
         .iter()
         .flat_map(|message| message.parts.iter())
         .map(|part| part.content().to_string())
@@ -116,7 +112,7 @@ async fn cancelled_provider_stream_does_not_commit_partial_output() {
         "the partial text stays observable as live activity"
     );
     assert!(
-        committed_contents(&output)
+        committed_contents(&session.read().await.expect("committed read").expect("head"))
             .iter()
             .all(|content| !content.contains(PARTIAL)),
         "a cancelled streamed partial is never committed"
@@ -200,7 +196,7 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
     assert_eq!(output.assistant_message(), Some("success"));
     assert!(output.result.tool_calls.is_empty());
     assert!(
-        committed_contents(&output)
+        committed_contents(&session.read().await.expect("committed read").expect("head"))
             .iter()
             .all(|content| !content.contains("must_not_run"))
     );
@@ -375,7 +371,7 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
             .all(|activity| !matches!(activity.event, TurnEvent::ModelAttemptReset { .. }))
     );
     assert!(
-        committed_contents(&output)
+        committed_contents(&session.read().await.expect("committed read").expect("head"))
             .iter()
             .all(|content| !content.contains("discarded")),
         "a failed partial response is preview output, not committed history"
@@ -460,10 +456,11 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
         (1, 1)
     );
     assert!(
-        follow_up
-            .result
-            .state
-            .read_view()
+        session
+            .read()
+            .await
+            .expect("committed read")
+            .expect("head")
             .messages()
             .iter()
             .filter(|message| message.role != MessageRole::System)

@@ -16,6 +16,80 @@ mod arrival;
 mod pins;
 mod replay_lag;
 
+/// FIG-6017: settled answers read only run evidence. Session windows are
+/// loaded only when the host explicitly asks for a committed-head view.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn settled_outcomes_do_not_load_session_windows() -> Result<()> {
+    use lash_core::testing::runtime_helpers::LayeredBackend;
+    use lash_core::testing::{Script, StoreOp};
+
+    let reads = Script::new();
+    let fixture = fixture_over(1, |backend| {
+        LayeredBackend::over(backend)
+            .map_session_store_factory(|inner| reads.wrap("outcome-reader", inner))
+            .into_backend()
+    })
+    .await?;
+    let session = fixture
+        .core
+        .session(SessionId::fixture("result-only"))
+        .created()
+        .await
+        .open()
+        .await?;
+    let handle = session.send(TurnInput::text("first")).await?;
+    let input = handle.input_id().clone();
+    handle.output().await?;
+    let run = session
+        .attach(input.clone())
+        .run()
+        .await?
+        .expect("settled run");
+    session.send(TurnInput::text("later")).output().await?;
+    // Stop the engine so its own activation reads cannot affect the count.
+    fixture.core.shutdown().await?;
+    let before = reads.calls(StoreOp::load_session_window);
+    for outcome in [
+        session.attach(input.clone()).outcome().await?,
+        session.durable().attach(input).outcome().await?,
+        session.run(run.clone().into()).outcome().await?,
+        session.durable().run(run.clone().into()).outcome().await?,
+    ] {
+        assert_eq!(
+            outcome
+                .output()
+                .and_then(|output| output.assistant_message()),
+            Some("echo: first")
+        );
+    }
+    assert_eq!(
+        reads.calls(StoreOp::load_session_window),
+        before,
+        "reading a settled result loaded an unrequested session window"
+    );
+    let ended = session
+        .durable()
+        .read_run(&run.into())
+        .await?
+        .expect("terminal window");
+    assert_eq!(
+        ended.turn_index(),
+        1,
+        "the explicit run read is pinned to its terminal"
+    );
+    let view = session.durable().read().await?.expect("committed head");
+    assert_eq!(
+        view.turn_index(),
+        2,
+        "the ordinary read answers the committed head"
+    );
+    assert!(
+        reads.calls(StoreOp::load_session_window) > before,
+        "the explicit state read exercises the counting seam"
+    );
+    Ok(())
+}
+
 /// The text the scripted provider holds its answer on until released.
 const HELD: &str = "held until released";
 
@@ -114,7 +188,7 @@ async fn reaches(counter: &AtomicUsize, count: usize, what: &str) {
 
 /// A run's report is rebuilt from the store for every follower: the turn
 /// runs on the session's actor, never in the sender's process, so no live
-/// report is held for it. A second follower answers the same outcome, state
+/// report is held for it. A second follower answers the same outcome
 /// and acceptance as the first, marked Durable, and its sealed call activity
 /// stays transportable (D1 §1.5 3b, risk R1; ADR 0132 §3).
 async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<()> {
@@ -155,10 +229,6 @@ async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<
             .activities
             .iter()
             .any(|activity| matches!(activity.event, crate::TurnEvent::ModelCallRecorded { .. }))
-    );
-    assert_eq!(
-        durable.result.state.turn_index,
-        live.result.state.turn_index
     );
     assert_eq!(
         durable
@@ -205,93 +275,8 @@ async fn a_reattached_follower_answers_the_same_durable_report() -> Result<()> {
     assert_eq!(first.status(), crate::TurnStatus::Cancelled);
     assert_eq!(first.result.source, crate::ReportSource::Durable);
     // The sealed calls a follower watched stay its own evidence; the
-    // terminal and the session state beside it are the store's.
+    // terminal is the store's.
     assert_eq!(again.result.outcome, first.result.outcome);
-    assert_eq!(
-        serde_json::to_value(&again.result.state)?,
-        serde_json::to_value(&first.result.state)?,
-        "a reattached follower answers another session state"
-    );
-    Ok(())
-}
-
-/// D-RUNREPORT: a terminal owns its state even after another run commits.
-async fn a_durable_report_is_pinned_to_its_terminal() -> Result<()> {
-    for cancelled in [false, true] {
-        let fixture = fixture(1).await?;
-        let session = fixture
-            .core
-            .session(SessionId::fixture("pinned-report"))
-            .created()
-            .await
-            .durable()
-            .await?;
-        let handle = session
-            .send(TurnInput::text(if cancelled { HELD } else { "first" }))
-            .id(crate::TurnId::fixture("first-run"))
-            .await?;
-        let input = handle.input_id().clone();
-        if cancelled {
-            drop(handle);
-            provider_called(&fixture, 1).await;
-            session.attach(input.clone()).cancel().await?;
-            // Consume cancellation's live call activity before the two
-            // durable followers: observed calls belong to their follower.
-            session.attach(input.clone()).output().await?;
-        } else {
-            handle.output().await?;
-        }
-        let first = session.attach(input.clone()).output().await?;
-        session
-            .send(TurnInput::text("later"))
-            .id(crate::TurnId::fixture("later-run"))
-            .await?
-            .output()
-            .await?;
-        let again = session.attach(input).output().await?;
-        assert_eq!(
-            serde_json::to_string(&first.result)?,
-            serde_json::to_string(&again.result)?,
-            "a later commit changed an old run's report (cancelled={cancelled})"
-        );
-    }
-    Ok(())
-}
-
-/// FIG-5931: a terminal names its window by reference, and that reference is
-/// a root: after later turns and a host collection, which releases the
-/// revision the run ended on, the run's durable report is unchanged.
-async fn a_durable_report_reads_its_window_after_a_collection() -> Result<()> {
-    let fixture = fixture(1).await?;
-    let session = fixture
-        .core
-        .session(SessionId::fixture("collected-report"))
-        .created()
-        .await
-        .durable()
-        .await?;
-    let handle = session
-        .send(TurnInput::text("first"))
-        .id(crate::TurnId::fixture("first-run"))
-        .await?;
-    let input = handle.input_id().clone();
-    handle.output().await?;
-    let first = session.attach(input.clone()).output().await?;
-    for later in ["second", "third"] {
-        session.send(TurnInput::text(later)).await?.output().await?;
-    }
-    fixture
-        .core
-        .store_factory
-        .gc_unreachable()
-        .await
-        .expect("the host collection completes");
-    let again = session.attach(input).output().await?;
-    assert_eq!(
-        serde_json::to_string(&first.result)?,
-        serde_json::to_string(&again.result)?,
-        "a collection changed an old run's report"
-    );
     Ok(())
 }
 
@@ -1701,16 +1686,6 @@ macro_rules! send_handle_laws {
     ($engine:ident) => {
         mod $engine {
             use super::*;
-
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_durable_report_is_pinned_to_its_terminal() -> Result<()> {
-                super::a_durable_report_is_pinned_to_its_terminal().await
-            }
-
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_durable_report_reads_its_window_after_a_collection() -> Result<()> {
-                super::a_durable_report_reads_its_window_after_a_collection().await
-            }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn graphless_session_reads_are_identical() -> Result<()> {

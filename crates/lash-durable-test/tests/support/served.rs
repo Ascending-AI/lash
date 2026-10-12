@@ -490,6 +490,19 @@ impl World {
         self.send(&session, name).await
     }
 
+    /// Read the committed head explicitly for transcript and graph laws.
+    pub async fn read(&self, name: &str) -> lash::persistence::SessionReadView {
+        self.core
+            .session(lash::SessionId::try_from(name.to_owned()).expect("session id"))
+            .durable()
+            .await
+            .expect("durable session")
+            .read()
+            .await
+            .expect("committed read")
+            .expect("head")
+    }
+
     /// The serving node dies and a new core `builder` makes over the same
     /// database serves in its place, under the boot `boot`: what it knows of
     /// any session it reads back from the store.
@@ -550,8 +563,7 @@ impl Answered {
 }
 
 /// Every tool call of the settled session's transcript, in order.
-pub fn calls(output: &lash::TurnOutput) -> Vec<Called> {
-    let view = output.result.state.read_view();
+pub fn calls(view: &lash::persistence::SessionReadView) -> Vec<Called> {
     view.messages()
         .iter()
         .flat_map(|message| message.parts.iter())
@@ -567,9 +579,8 @@ pub fn calls(output: &lash::TurnOutput) -> Vec<Called> {
 }
 
 /// Every tool result of the settled session's transcript, in order.
-pub fn results(output: &lash::TurnOutput) -> Vec<Answered> {
-    let called = calls(output);
-    let view = output.result.state.read_view();
+pub fn results(view: &lash::persistence::SessionReadView) -> Vec<Answered> {
+    let called = calls(view);
     view.messages()
         .iter()
         .flat_map(|message| message.parts.iter())

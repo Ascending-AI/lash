@@ -501,24 +501,25 @@ impl BenchmarkRuntime {
         clippy::expect_used,
         reason = "the benchmark session is taken by set_up before state can be exported"
     )]
-    pub(crate) async fn export_state(&self) -> SessionSnapshot {
-        self.session
-            .as_ref()
-            .expect("benchmark session")
-            .admin()
-            .state()
-            .export()
-            .await
+    pub(crate) async fn export_state(&self) -> anyhow::Result<SessionSnapshot> {
+        let session = self.session.as_ref().expect("benchmark session");
+        Ok(session
+            .durable()
+            .read()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("benchmark session has no committed head"))?
+            .to_snapshot())
     }
 }
 pub(crate) fn validate_runtime_perf_turn(
     scenario: RuntimePerfScenario,
     turn_index: usize,
     turn: &lash::TurnReport,
+    state: &SessionSnapshot,
 ) -> anyhow::Result<()> {
     let expected = "runtime perf benchmark ok";
-    let diagnostics = runtime_perf_turn_diagnostics(turn);
-    if !rlm_trajectory_errors(turn).is_empty() {
+    let diagnostics = runtime_perf_turn_diagnostics(turn, state);
+    if !rlm_trajectory_errors(state).is_empty() {
         anyhow::bail!(
             "runtime perf scenario {} turn {} surfaced code mode execution error:\n{}",
             scenario.name(),
@@ -606,8 +607,8 @@ pub(crate) fn validate_runtime_perf_turn(
     }
 }
 
-fn rlm_trajectory_errors(turn: &lash::TurnReport) -> Vec<CellRecord> {
-    rlm_trajectory_entries(turn)
+fn rlm_trajectory_errors(state: &SessionSnapshot) -> Vec<CellRecord> {
+    rlm_trajectory_entries(state)
         .into_iter()
         .filter(|entry| {
             entry
@@ -618,8 +619,8 @@ fn rlm_trajectory_errors(turn: &lash::TurnReport) -> Vec<CellRecord> {
         .collect()
 }
 
-fn rlm_trajectory_entries(turn: &lash::TurnReport) -> Vec<CellRecord> {
-    turn.state
+fn rlm_trajectory_entries(state: &SessionSnapshot) -> Vec<CellRecord> {
+    state
         .read_view()
         .active_events()
         .iter()
@@ -642,7 +643,7 @@ fn rlm_trajectory_entries(turn: &lash::TurnReport) -> Vec<CellRecord> {
         .collect()
 }
 
-fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
+fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport, state: &SessionSnapshot) -> String {
     let mut out = String::new();
     if !turn.errors.is_empty() {
         let _ = writeln!(out, "turn_errors:");
@@ -661,7 +662,7 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
         }
     }
 
-    let entries = rlm_trajectory_entries(turn);
+    let entries = rlm_trajectory_entries(state);
     let errors = entries
         .iter()
         .filter(|entry| {

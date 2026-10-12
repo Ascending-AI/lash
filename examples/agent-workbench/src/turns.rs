@@ -724,6 +724,11 @@ pub(crate) async fn settle_workbench_turn(
         }
         Err(error) => return Err(AppError::runtime(error)),
     };
+    session
+        .observe()
+        .snapshot()
+        .await
+        .map_err(AppError::runtime)?;
     let targets = session
         .durable()
         .pending_turn_inputs()
@@ -798,8 +803,13 @@ pub(crate) async fn record_turn_output_for_profile(
         turn_state.settle_terminal();
         streamed_prose
     };
-    let transcript = session
-        .read_view()
+    let observation = session
+        .observe()
+        .snapshot()
+        .await
+        .map_err(AppError::internal)?;
+    let transcript = observation
+        .read_view
         .transcript()
         .map_err(AppError::internal)?;
     let assistant_text = transcript

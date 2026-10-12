@@ -435,28 +435,42 @@ async fn run_provider_turn_task(
     )
     .await
     .map_err(runtime_error)?;
+    let acceptance = output
+        .result
+        .acceptance
+        .as_ref()
+        .ok_or_else(|| FixedScriptRunnerError::Assertion("missing turn acceptance".into()))?;
+    let run = session
+        .attach(acceptance.input_id.clone())
+        .run()
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .ok_or_else(|| FixedScriptRunnerError::Assertion("missing settled run binding".into()))?;
+    let snapshot = session
+        .read_run(&run.into())
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
+        .to_snapshot();
     let assistant_message = output.assistant_message().unwrap_or_default().to_string();
-    let read_view = output.result.state.read_view();
-    let graph_node_count = output.result.state.session_graph.nodes.len();
+    let read_view = snapshot.read_view();
+    let graph_node_count = snapshot.session_graph.nodes.len();
     let transcript_message_count = read_view.messages().len();
     let provider_exchange_count = transport_exchanges(transport.as_ref())?.len();
-    let graph_invariant = runtime_graph_invariant_facts(&output.result.state.session_graph);
-    let agent_frame_invariant = runtime_agent_frame_invariant_facts(&output.result.state);
+    let graph_invariant = runtime_graph_invariant_facts(&snapshot.session_graph);
+    let agent_frame_invariant = runtime_agent_frame_invariant_facts(&snapshot);
     let usage_invariant = runtime_usage_invariant_facts(&output.result, &output.activities);
     let final_value_invariant =
         runtime_final_value_invariant_facts(&output.result, &output.activities);
     if !output.is_success() {
         return Err(FixedScriptRunnerError::Assertion(format!(
             "runtime turn `{}` did not succeed; turn_index={} outcome={:?} activities={:?}",
-            event.boundary_id,
-            output.result.state.turn_index,
-            output.result.outcome,
-            output.activities
+            event.boundary_id, snapshot.turn_index, output.result.outcome, output.activities
         )));
     }
     let observation = RuntimeTurnObservation {
-        session_id: output.result.state.session_id.clone(),
-        turn_index: output.result.state.turn_index,
+        session_id: snapshot.session_id.clone(),
+        turn_index: snapshot.turn_index,
         assistant_message: assistant_message.clone(),
         graph_node_count,
         transcript_message_count,
@@ -483,8 +497,8 @@ async fn run_provider_turn_task(
             "runtime invariants failed for `{}`: {message}; success={} session_id={} turn_index={} graph_nodes={} transcript_messages={} activities={}",
             event.boundary_id,
             output.is_success(),
-            output.result.state.session_id,
-            output.result.state.turn_index,
+            snapshot.session_id,
+            snapshot.turn_index,
             graph_node_count,
             transcript_message_count,
             output.activities.len()

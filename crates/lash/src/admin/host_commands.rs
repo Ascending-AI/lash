@@ -34,6 +34,9 @@ impl SessionCommandAdmin {
     /// its receipt (FIG-4202): applied with its typed outcome, a refusal
     /// among them; or cancelled when it was withdrawn. Dropping this
     /// await withdraws nothing: the command stays durable and settles.
+    /// This reads only the settlement. Read the committed session head
+    /// explicitly with [`DurableSession::read`](crate::DurableSession::read)
+    /// or [`ObservableSession::snapshot`](crate::ObservableSession::snapshot).
     pub async fn settle(
         &self,
         receipt: lash_core::facade_support::SessionCommandReceipt,
@@ -44,12 +47,10 @@ impl SessionCommandAdmin {
             let settlement = {
                 let writer = self.context.runtime.writer();
                 let mut runtime = writer.lock().await;
-                let settlement = runtime
+                runtime
                     .settle_session_command(receipt.clone())
                     .await
-                    .map_err(EmbedError::from)?;
-                self.context.runtime.publish_from(&runtime).await;
-                settlement
+                    .map_err(EmbedError::from)?
             };
             let pending = matches!(
                 settlement,
@@ -108,12 +109,10 @@ impl SessionCommandAdmin {
     ) -> Result<lash_core::runtime::SessionCommandSettlement> {
         let writer = self.context.runtime.writer();
         let mut runtime = writer.lock().await;
-        let status = runtime
+        runtime
             .settle_session_command(receipt)
             .await
-            .map_err(EmbedError::from)?;
-        self.context.runtime.publish_from(&runtime).await;
-        Ok(status)
+            .map_err(EmbedError::from)
     }
 
     /// Refuse a host operation on a command of another session than this

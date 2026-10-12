@@ -12,7 +12,9 @@ pub struct SessionStateAdmin {
 }
 
 impl SessionStateAdmin {
-    /// Exports the session's current state as a snapshot.
+    /// Export this handle's resident state. Read the committed head explicitly
+    /// with [`DurableSession::read`](crate::DurableSession::read) or
+    /// [`ObservableSession::snapshot`](crate::ObservableSession::snapshot).
     pub async fn export(&self) -> lash_core::SessionSnapshot {
         self.context.runtime.observe().read_view.to_snapshot()
     }

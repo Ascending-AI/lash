@@ -379,17 +379,24 @@ await task.fail({ reason: "parent observed child failure" });
         .refresh_background_graph()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let snapshot = session
+        .durable()
+        .read()
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
+        .to_snapshot();
     let recorded = events.snapshot().await;
     let process_observations = agent_contract_process_observations(&core).await?;
     let process_facts = agent_contract_process_facts(&process_observations);
     let graph_facts =
-        agent_contract_graph_facts(&graph_store.graphs(&core).await, &result.state.session_id);
+        agent_contract_graph_facts(&graph_store.graphs(&core).await, &snapshot.session_id);
     let failure = agent_failed_child_activity_facts(&result, &recorded);
     let payload = json!({
         "execution_api": "lash::LashCore facade",
         "provider_kind": "lash_runtime agent failed child graph",
-        "session_id": result.state.session_id,
-        "turn_index": result.state.turn_index,
+        "session_id": snapshot.session_id,
+        "turn_index": snapshot.turn_index,
         "done": true,
         "turn_outcome": turn_outcome_contract_json(&result.outcome),
         "final_value": Value::Null,
@@ -548,6 +555,13 @@ async fn facade_final_value_execution_inner(
         final_value == expected_final_value,
         "facade final value execution produced an unexpected semantic value",
     )?;
+    let snapshot = session
+        .durable()
+        .read()
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
+        .to_snapshot();
     let recorded = events.snapshot().await;
     let final_value_events = events.final_value_events().await;
     let assistant_prose_delta_count = events.assistant_prose_delta_count().await;
@@ -572,8 +586,8 @@ async fn facade_final_value_execution_inner(
     Ok(json!({
         "execution_api": "lash::LashCore facade",
         "provider_kind": provider_kind,
-        "session_id": result.state.session_id,
-        "turn_index": result.state.turn_index,
+        "session_id": snapshot.session_id,
+        "turn_index": snapshot.turn_index,
         "done": true,
         "turn_outcome": {
             "kind": "finished",
@@ -658,6 +672,7 @@ async fn facade_agent_process_execution_with_options(
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     agent_process_execution_result(
+        &session,
         &core,
         &graph_store,
         result,
@@ -792,6 +807,7 @@ await control.finish({ recovered: true });
         "atomic_attempt_count": tools.attempt_count(),
     });
     agent_process_execution_result(
+        &session,
         &core,
         &graph_store,
         result,
@@ -957,6 +973,7 @@ async fn wait_for_contract_durable_input_park(
 // result, expectations, and projection flags are all required and distinct.
 #[allow(clippy::too_many_arguments)]
 async fn agent_process_execution_result(
+    session: &lash::LashSession,
     core: &lash::LashCore,
     graph_store: &ContractGraphs,
     result: lash::TurnReport,
@@ -966,6 +983,13 @@ async fn agent_process_execution_result(
     extra: Option<(&'static str, Value)>,
     include_process_events: bool,
 ) -> Result<Value, FixedScriptRunnerError> {
+    let snapshot = session
+        .durable()
+        .read()
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
+        .to_snapshot();
     let final_value = result
         .finished()
         .map(|(_, value)| value)
@@ -1009,12 +1033,12 @@ async fn agent_process_execution_result(
         Vec::new()
     };
     let graph_facts =
-        agent_contract_graph_facts(&graph_store.graphs(core).await, &result.state.session_id);
+        agent_contract_graph_facts(&graph_store.graphs(core).await, &snapshot.session_id);
     let mut payload = json!({
         "execution_api": "lash::LashCore facade",
         "provider_kind": provider_kind,
-        "session_id": result.state.session_id,
-        "turn_index": result.state.turn_index,
+        "session_id": snapshot.session_id,
+        "turn_index": snapshot.turn_index,
         "done": true,
         "turn_outcome": {
             "kind": "finished",

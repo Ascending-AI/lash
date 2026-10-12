@@ -568,7 +568,11 @@ fn leaves_in(value: &serde_json::Value, into: &mut Vec<usize>) {
 /// The leaf answers the consumer read, in the order it read them: the
 /// transcript's tool results (a wrapper's rows in member order) on the
 /// standard protocol, the cell's final value on a cell.
-fn replies(producer: Producer, output: &lash::TurnOutput) -> Vec<usize> {
+fn replies(
+    producer: Producer,
+    output: &lash::TurnOutput,
+    view: &lash::persistence::SessionReadView,
+) -> Vec<usize> {
     let mut replies = Vec::new();
     if producer.code() {
         let value = output
@@ -583,7 +587,7 @@ fn replies(producer: Producer, output: &lash::TurnOutput) -> Vec<usize> {
             .unwrap_or(serde_json::Value::Null);
         leaves_in(&value, &mut replies);
     } else {
-        for answered in served::results(output) {
+        for answered in served::results(view) {
             leaves_in(&answered.value(), &mut replies);
         }
     }
@@ -618,6 +622,7 @@ fn assert_activation_shape(
     width: usize,
     scenario: &Scenario,
     output: &lash::TurnOutput,
+    view: &lash::persistence::SessionReadView,
 ) {
     served::assert_answered(context, output);
     let started = scenario.started().into_iter().collect::<BTreeSet<_>>();
@@ -648,7 +653,7 @@ fn assert_activation_shape(
         "{context}: every leaf answers exactly once"
     );
     assert_eq!(
-        replies(producer, output),
+        replies(producer, output, view),
         (0..width).collect::<Vec<_>>(),
         "{context}: the consumer reads the answers in call order however they settled"
     );
@@ -678,7 +683,14 @@ async fn tool_group_members_start_before_any_finishes(tier: Tier) {
                 let plan = vec![Route::Leaf; width];
                 let (scenario, output) =
                     run_group(&producers, producer, &name, &plan, true, BTreeMap::new()).await;
-                assert_activation_shape(&name, producer, width, &scenario, &output);
+                assert_activation_shape(
+                    &name,
+                    producer,
+                    width,
+                    &scenario,
+                    &output,
+                    &producers.world.read(&name).await,
+                );
             }
 
             // Every route the producer reaches, siblings of one group.
@@ -692,21 +704,35 @@ async fn tool_group_members_start_before_any_finishes(tier: Tier) {
                 .collect::<Vec<_>>();
             let (scenario, output) =
                 run_group(&producers, producer, &name, &plan, true, BTreeMap::new()).await;
-            assert_activation_shape(&name, producer, plan.len(), &scenario, &output);
+            assert_activation_shape(
+                &name,
+                producer,
+                plan.len(),
+                &scenario,
+                &output,
+                &producers.world.read(&name).await,
+            );
 
             // The differential: the same program without the rendezvous.
             let plan = vec![Route::Leaf; 8];
             let gated = format!("{label}-differential-gated");
             let (scenario, concurrent) =
                 run_group(&producers, producer, &gated, &plan, true, BTreeMap::new()).await;
-            assert_activation_shape(&gated, producer, 8, &scenario, &concurrent);
+            assert_activation_shape(
+                &gated,
+                producer,
+                8,
+                &scenario,
+                &concurrent,
+                &producers.world.read(&gated).await,
+            );
             let free = format!("{label}-differential-free");
             let (_, serial_safe) =
                 run_group(&producers, producer, &free, &plan, false, BTreeMap::new()).await;
             served::assert_answered(&free, &serial_safe);
             assert_eq!(
-                replies(producer, &concurrent),
-                replies(producer, &serial_safe),
+                replies(producer, &concurrent, &producers.world.read(&gated).await),
+                replies(producer, &serial_safe, &producers.world.read(&free).await),
                 "{label}: the rendezvous changes the schedule, not the answers"
             );
         }
@@ -819,7 +845,14 @@ async fn tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(tier: Ti
             .world
             .run(&at, served::spec(LIMIT), producer.script(&at, &plan))
             .await;
-        assert_activation_shape(&at, producer, LIMIT, &scenario, &output);
+        assert_activation_shape(
+            &at,
+            producer,
+            LIMIT,
+            &scenario,
+            &output,
+            &producers.world.read(&at).await,
+        );
         assert_eq!(
             refusals(&producers.world, &at),
             Vec::<String>::new(),
@@ -1105,8 +1138,11 @@ fn members(tool: &str, values: &[&str]) -> serde_json::Value {
 }
 
 /// The results answered under `provider_call_id`.
-fn answered_under(output: &lash::TurnOutput, provider_call_id: &str) -> Vec<served::Answered> {
-    served::results(output)
+fn answered_under(
+    view: &lash::persistence::SessionReadView,
+    provider_call_id: &str,
+) -> Vec<served::Answered> {
+    served::results(view)
         .into_iter()
         .filter(|answered| answered.provider_call_id == provider_call_id)
         .collect()
@@ -1140,13 +1176,13 @@ fn failed(answered: &served::Answered) -> bool {
 /// Every call the transcript holds is one the model issued, and every
 /// result pairs with one: a member is named under its wrapper and is no
 /// call of its own.
-fn assert_no_member_is_a_call(context: &str, output: &lash::TurnOutput) {
-    let uncorrelated = served::calls(output)
+fn assert_no_member_is_a_call(context: &str, view: &lash::persistence::SessionReadView) {
+    let uncorrelated = served::calls(view)
         .iter()
         .filter(|call| call.provider_call_id.is_empty())
         .map(|call| format!("call of {}", call.tool))
         .chain(
-            served::results(output)
+            served::results(view)
                 .into_iter()
                 .filter(|answered| answered.provider_call_id.is_empty())
                 .map(|answered| format!("result of {}", answered.tool)),
@@ -1200,6 +1236,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
     let context = "batch-admission";
     let output = world.run(context, served::spec(1024), script).await;
     served::assert_answered(context, &output);
+    let view = world.read(context).await;
 
     for value in &full {
         assert_eq!(
@@ -1251,7 +1288,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         "{context}: every member is admitted on its own"
     );
 
-    let wfull = answered_under(&output, "wfull");
+    let wfull = answered_under(&view, "wfull");
     assert_eq!(wfull.len(), 1, "{context}: one result per wrapper");
     let wfull_rows = rows(&wfull[0]);
     assert_eq!(wfull_rows.len(), CEILING);
@@ -1263,7 +1300,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         "{context}: every full row answers in member order: {wfull_rows:?}"
     );
     for refused in ["wover", "wempty", "wmalformed"] {
-        let wrapper = answered_under(&output, refused);
+        let wrapper = answered_under(&view, refused);
         assert_eq!(wrapper.len(), 1, "{context}: `{refused}` answers once");
         assert!(
             failed(&wrapper[0]),
@@ -1271,7 +1308,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
             wrapper[0]
         );
     }
-    let mixed = answered_under(&output, "wmixed");
+    let mixed = answered_under(&view, "wmixed");
     assert_eq!(
         mixed.len(),
         2,
@@ -1294,7 +1331,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
     // the boundary: the first call keeps it, the later takes a correlation
     // id, and both are recorded.
     let same = ["native-1", "native-2"].map(|value| {
-        let called = served::calls(&output)
+        let called = served::calls(&view)
             .into_iter()
             .filter(|call| call.tool == "echo" && call.args["value"] == value)
             .collect::<Vec<_>>();
@@ -1309,7 +1346,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         same[1].starts_with("lashcall_"),
         "{context}: the repeated provider id is repaired to a correlation id: {same:?}"
     );
-    assert_no_member_is_a_call(context, &output);
+    assert_no_member_is_a_call(context, &view);
     world.shutdown().await;
 
     // Withheld, `batch` is an unknown tool: nothing expands, nothing runs.
@@ -1329,12 +1366,13 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         )
         .await;
     served::assert_answered(context, &output);
+    let view = world.read(context).await;
     assert_eq!(
         witness.executed("echo", "hidden"),
         0,
         "{context}: nothing expands"
     );
-    let wrapper = answered_under(&output, "w");
+    let wrapper = answered_under(&view, "w");
     assert_eq!(wrapper.len(), 1);
     assert!(
         failed(&wrapper[0]) && rows(&wrapper[0]).is_empty(),
@@ -1376,6 +1414,7 @@ async fn standard_rounds_and_batches_use_the_run(tier: Tier) {
         )
         .await;
     served::assert_answered(context, &output);
+    let view = world.read(context).await;
     for value in ["scalar", "native", "first"] {
         assert_eq!(witness.executed("echo", value), 1, "{context}: {value}");
     }
@@ -1391,7 +1430,7 @@ async fn standard_rounds_and_batches_use_the_run(tier: Tier) {
         5,
         "{context}: equal operands remain distinct calls"
     );
-    let batch = served::calls(&output)
+    let batch = served::calls(&view)
         .into_iter()
         .find(|call| call.provider_call_id == "batch")
         .expect("the wrapper's call is in the transcript");
@@ -1411,7 +1450,7 @@ async fn standard_rounds_and_batches_use_the_run(tier: Tier) {
             "{context}: a leaf's identity uses its original member index"
         );
     }
-    let wrapper = answered_under(&output, "batch");
+    let wrapper = answered_under(&view, "batch");
     assert_eq!(wrapper.len(), 1);
     assert_eq!(
         rows(&wrapper[0]),
@@ -1424,7 +1463,7 @@ async fn standard_rounds_and_batches_use_the_run(tier: Tier) {
         ],
         "{context}: preparation failures keep their original source slots"
     );
-    assert_no_member_is_a_call(context, &output);
+    assert_no_member_is_a_call(context, &view);
     world.shutdown().await;
 }
 
@@ -1447,8 +1486,9 @@ async fn batch_folds_to_one_transcript_call(tier: Tier) {
         )
         .await;
     served::assert_answered(context, &output);
+    let view = world.read(context).await;
     assert_eq!(
-        served::calls(&output)
+        served::calls(&view)
             .into_iter()
             .map(|call| (call.provider_call_id, call.tool, call.replay_item))
             .collect::<Vec<_>>(),
@@ -1462,7 +1502,7 @@ async fn batch_folds_to_one_transcript_call(tier: Tier) {
         ],
         "{context}: the assistant turn keeps the provider's calls and replay metadata"
     );
-    let results = served::results(&output);
+    let results = served::results(&view);
     assert_eq!(
         results
             .iter()
@@ -1493,7 +1533,7 @@ async fn batch_folds_to_one_transcript_call(tier: Tier) {
         vec!["a", "b", "c"],
         "{context}: rows in member order"
     );
-    assert_no_member_is_a_call(context, &output);
+    assert_no_member_is_a_call(context, &view);
     world.shutdown().await;
 }
 

@@ -57,12 +57,13 @@ pub async fn load_stored_session_snapshot(
         .map(|loaded| loaded.state.to_snapshot()))
 }
 
-/// The canonical read-only view of the session's current frame and relation.
+/// The canonical read-only view of the selected session window and relation.
 /// Failure evidence is paged through the history store separately.
 pub async fn load_session_read_view(
     store: &SessionStore,
+    selector: WindowSelector,
 ) -> Result<Option<crate::SessionReadView>, StoreError> {
-    let Some(read) = store.load_session_window(WindowSelector::Current).await? else {
+    let Some(read) = store.load_session_window(selector).await? else {
         return Ok(None);
     };
     validate_window_session(store.session_id(), &read)?;

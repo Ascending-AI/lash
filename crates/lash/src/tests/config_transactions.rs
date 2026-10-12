@@ -22,6 +22,70 @@ fn budget(turns: usize) -> crate::config::ConfigTransaction {
     })
 }
 
+/// FIG-6017: settled answers load neither the head nor unrelated queued work.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn settled_commands_and_config_do_not_load_session_windows() -> Result<()> {
+    use lash_core::testing::runtime_helpers::LayeredBackend;
+    use lash_core::testing::{Script, StoreOp};
+
+    let reads = Script::new();
+    let backend = LayeredBackend::over(sqlite_memory_store_backend().await)
+        .map_session_store_factory(|inner| reads.wrap("settlement-reader", inner))
+        .into_backend();
+    let core = standard_core_over(backend);
+    let session = opened(&core, "settlement-only").await?;
+    let config = session.admin().config();
+    let base = config.revision().await?;
+    let crate::config::ConfigSettlement::Pending(receipt) = config
+        .submit(crate::config::ConfigWrite::new("budget", base), budget(7))
+        .await?
+    else {
+        panic!("the transaction is submitted durably");
+    };
+    // Await the committed evidence through the undecorated durable port,
+    // then stop the engine to isolate the host's reads from activation.
+    let store = core.backend().session_store_factory();
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            if store
+                .queued_work_batch_completion(&receipt.session_id, &receipt.batch_id)
+                .await
+                .expect("command completion")
+                .is_some()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the engine settles the command");
+    core.shutdown().await?;
+    let before = reads.calls(StoreOp::load_session_window);
+    let queue_reads = reads.calls(StoreOp::list_queued_work);
+    assert!(matches!(config.settle(receipt.clone()).await?,
+        crate::config::ConfigSettlement::Settled(crate::config::ConfigTransactionOutcome::Applied { revision, .. })
+        if revision == base + 1));
+    assert!(matches!(
+        session.admin().commands().settle(receipt).await?,
+        lash_core::runtime::SessionCommandSettlement::Applied { .. }
+    ));
+    assert_eq!(
+        reads.calls(StoreOp::load_session_window),
+        before,
+        "settlement loaded an unrequested session window"
+    );
+    assert_eq!(
+        reads.calls(StoreOp::list_queued_work),
+        queue_reads,
+        "a recorded settlement loaded unrelated queued work"
+    );
+    let view = session.durable().read().await?.expect("committed head");
+    assert_eq!(view.policy().turn_budget, crate::TurnBudget::bounded(7));
+    assert!(reads.calls(StoreOp::load_session_window) > before);
+    Ok(())
+}
+
 /// A resubmission under one id with the same content is the same command:
 /// it names the first one's receipt and settles as it did. The same id with
 /// other content, or written against another revision, is refused
@@ -78,6 +142,7 @@ async fn a_resubmitted_transaction_reuses_its_receipt_and_refuses_changed_conten
         "the one command applies once"
     );
     assert_eq!(config.revision().await?, base + 1);
+    session.observe().snapshot().await?;
     assert_eq!(
         session.policy_snapshot().turn_budget,
         crate::TurnBudget::bounded(7)

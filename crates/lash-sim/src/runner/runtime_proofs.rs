@@ -42,10 +42,17 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
         )
         .await?
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let snapshot = session
+        .durable()
+        .read()
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
+        .to_snapshot();
     let assistant_message = output.assistant_message().unwrap_or_default().to_string();
     let runtime_ok = output.is_success()
-        && output.result.state.session_id == "sim-runtime-session"
-        && output.result.state.turn_index == 1;
+        && snapshot.session_id == "sim-runtime-session"
+        && snapshot.turn_index == 1;
     let provider_ok = assistant_message == "Runtime scripted answer.";
     let provider_exchange_count = transport_exchanges(transport.as_ref())?.len();
     require(
@@ -62,8 +69,8 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
         schema: "lash.sim.runtime-facade-proof.v1",
         name: "standard-facade-openai-compatible-scripted-turn",
         provider_kind,
-        session_id: output.result.state.session_id,
-        turn_index: output.result.state.turn_index,
+        session_id: snapshot.session_id,
+        turn_index: snapshot.turn_index,
         assistant_message,
         provider_exchange_count,
         runtime_invariant: runtime_provider_turn(
@@ -401,8 +408,15 @@ pub(crate) async fn prove_pending_tool_completion_on(
         final_ok,
         "pending tool completion did not resume the turn to the scripted final answer",
     )?;
-    let session_id = result.state.session_id.clone();
-    let turn_index = result.state.turn_index;
+    let snapshot = session
+        .durable()
+        .read()
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
+        .to_snapshot();
+    let session_id = snapshot.session_id.clone();
+    let turn_index = snapshot.turn_index;
 
     Ok(PendingToolCompletionProof {
         schema: "lash.sim.pending-tool-completion-proof.v1",
@@ -513,9 +527,9 @@ pub(super) async fn run_final_value_turn(
     engine: &crate::backend::SimEngine,
     events: Arc<RuntimeProofRecordingEvents>,
     workers: Option<lash_vm_client::service::Service>,
-) -> Result<lash::Result<lash::TurnOutput>, FixedScriptRunnerError> {
+) -> Result<(lash::Result<lash::TurnOutput>, lash::LashSession), FixedScriptRunnerError> {
     let (_core, session) = final_value_session(engine, workers).await?;
-    engine
+    let output = engine
         .run_turn(
             &session,
             "sim-final-value-turn",
@@ -524,7 +538,8 @@ pub(super) async fn run_final_value_turn(
                 Ok(session.send(lash::TurnInput::text("produce a semantic final value")))
             }),
         )
-        .await
+        .await?;
+    Ok((output, session))
 }
 
 pub(super) async fn final_value_session(
@@ -575,10 +590,17 @@ pub(super) async fn prove_final_value_semantic_channel()
 -> Result<FinalValueSemanticProof, FixedScriptRunnerError> {
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED).await?;
-    let result = run_final_value_turn(&engine, events.clone(), None)
-        .await?
+    let (output, session) = run_final_value_turn(&engine, events.clone(), None).await?;
+    let result = output
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .result;
+    let snapshot = session
+        .durable()
+        .read()
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
+        .to_snapshot();
     let final_value = result
         .finished()
         .map(|(_, value)| value)
@@ -596,7 +618,7 @@ pub(super) async fn prove_final_value_semantic_channel()
     // FIG-1493 (01b5274f02) commits one marked reply for value-terminated
     // turns. Its rendered text coexists with the typed outcome and event;
     // it does not replace either semantic channel.
-    let read_view = result.state.read_view();
+    let read_view = snapshot.read_view();
     let replies = read_view
         .messages()
         .iter()
@@ -636,8 +658,8 @@ pub(super) async fn prove_final_value_semantic_channel()
     Ok(FinalValueSemanticProof {
         schema: "lash.sim.final-value-semantic-proof.v1",
         name: "rlm-turn-final-value-semantic-channel",
-        session_id: result.state.session_id,
-        turn_index: result.state.turn_index,
+        session_id: snapshot.session_id,
+        turn_index: snapshot.turn_index,
         final_value,
         final_value_event_count: final_value_events.len(),
         assistant_prose_delta_count,

@@ -1068,6 +1068,9 @@ impl LashSession {
             .map_err(EmbedError::Runtime)
     }
 
+    /// This handle's resident view. Outcome reads do not refresh it.
+    /// Read the committed head with [`DurableSession::read`] or
+    /// [`ObservableSession::snapshot`] explicitly.
     pub fn read_view(&self) -> SessionReadView {
         self.runtime.observe().read_view.clone()
     }

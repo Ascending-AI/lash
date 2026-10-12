@@ -28,7 +28,7 @@ pub(super) trait DeploymentViewExt {
         let Some(view) = self.live_view(session_id).await? else {
             return Ok(None);
         };
-        crate::store::load_session_read_view(&view).await
+        crate::store::load_session_read_view(&view, crate::store::WindowSelector::Current).await
     }
 
     async fn is_deleted(&self, session_id: &SessionId) -> Result<bool, StoreError>;

@@ -544,7 +544,13 @@ mod tests {
                 value: json!("settled")
             })
         );
-        assert_eq!(turn.result.state.turn_index, 1);
+        let read_view = session
+            .durable()
+            .read()
+            .await
+            .expect("committed read")
+            .expect("head");
+        assert_eq!(read_view.turn_index(), 1);
         assert_eq!(transport.call_count(), 1);
         assert_eq!(
             transport.selections(),
@@ -571,7 +577,6 @@ mod tests {
             GenerationOptionOutcome::SuppressedProtocolOwned
         );
 
-        let read_view = turn.result.state.read_view();
         let transcript = read_view.transcript().expect("valid committed history");
         assert_eq!(
             transcript

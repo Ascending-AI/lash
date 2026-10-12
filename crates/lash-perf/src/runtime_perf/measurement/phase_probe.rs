@@ -693,7 +693,12 @@ async fn run_once_inner(
                             );
                         }
                     } else {
-                        validate_runtime_perf_turn(scenario, turn_index, &turn)?;
+                        validate_runtime_perf_turn(
+                            scenario,
+                            turn_index,
+                            &turn,
+                            &runtime.export_state().await?,
+                        )?;
                     }
                     if let Some(variant) = catalog_variant {
                         let observation = runtime.finish_tool_catalog_observation();
@@ -749,9 +754,14 @@ async fn run_once_inner(
     let state = executed
         .export(async {
             let state = if let Some(session) = &deep_session {
-                session.admin().state().export().await
+                session
+                    .durable()
+                    .read()
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("missing committed head"))?
+                    .to_snapshot()
             } else {
-                runtime.export_state().await
+                runtime.export_state().await?
             };
             Ok(state)
         })

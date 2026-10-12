@@ -1,7 +1,7 @@
 use lash_sansio::TurnId;
 
 use crate::support::{
-    Arc, LlmCallRecord, LlmUsage, SessionSnapshot, ToolCallRecord, TurnActivity, TurnActivitySink,
+    Arc, LlmCallRecord, LlmUsage, ToolCallRecord, TurnActivity, TurnActivitySink,
     TurnExecutionMetrics, TurnOutcome, async_trait,
 };
 
@@ -16,10 +16,16 @@ pub(crate) fn fresh_turn_id() -> TurnId {
     TurnId::from_uuid(uuid::Uuid::new_v4().as_u128())
 }
 
+/// A settled turn's result, without session state.
+///
+/// Read the committed head explicitly through
+/// [`DurableSession::read`](crate::DurableSession::read) or
+/// [`ObservableSession::snapshot`](crate::ObservableSession::snapshot).
+/// Those reads answer the current committed head, which may include later
+/// turns; this report remains the named run's result. For state as of a
+/// settled run, use [`DurableSession::read_run`](crate::DurableSession::read_run).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TurnReport {
-    /// Final runtime state for the turn.
-    pub state: SessionSnapshot,
     /// Cancellation evidence, when the turn was cancelled, rides this outcome
     /// — read it with [`TurnReport::cancellation`]. Runtime and provider
     /// stop causes ride the same terminal: read [`TurnReport::error_cause`].
@@ -85,7 +91,7 @@ pub enum ReportSource {
     /// turn's own account.
     #[default]
     Live,
-    /// Assembled from the stored outcome, session state and input acceptance.
+    /// Assembled from the stored outcome and input acceptance.
     /// Tool records are read from the run's recorded calls. Model calls retain
     /// the sealed records this follower observed, and usage sums the reported
     /// usage of their attempts. Unavailable history is reported as gaps, so

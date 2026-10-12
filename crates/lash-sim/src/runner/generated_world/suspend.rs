@@ -325,8 +325,19 @@ impl GeneratedRuntimeWorld {
         let completed_after = turn.events.tool_completed_count().await;
         let activities = turn.events.snapshot().await;
         let assistant_message = result.assistant_message().unwrap_or_default().to_string();
-        let read_view = result.state.read_view();
-        let graph_invariant = runtime_graph_invariant_facts(&result.state.session_graph);
+        let snapshot = turn
+            .core
+            .session(SessionId::fixture(event.actor_alias.clone()))
+            .durable()
+            .await
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+            .read()
+            .await
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+            .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
+            .to_snapshot();
+        let read_view = snapshot.read_view();
+        let graph_invariant = runtime_graph_invariant_facts(&snapshot.session_graph);
         let usage_invariant = runtime_usage_invariant_facts(result, &activities);
         let resumed_after_completion = completed_after > completed_before
             && matches!(
@@ -353,7 +364,7 @@ impl GeneratedRuntimeWorld {
                 "completed_event_count_after_resolution": completed_after,
                 "final_assistant_message": assistant_message,
             },
-            "graph_node_count": result.state.session_graph.nodes.len(),
+            "graph_node_count": snapshot.session_graph.nodes.len(),
             "transcript_message_count": read_view.messages().len(),
             "runtime_invariant_facts": {
                 "graph": graph_invariant,

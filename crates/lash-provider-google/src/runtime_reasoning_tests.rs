@@ -168,7 +168,7 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
             _ => None,
         })
         .collect::<Vec<_>>();
-    let read_view = output.result.state.read_view();
+    let read_view = session.read().await.expect("committed read").expect("head");
     let durable = read_view
         .messages()
         .iter()
@@ -259,7 +259,7 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
             _ => None,
         })
         .collect::<Vec<_>>();
-    let read_view = output.result.state.read_view();
+    let read_view = session.read().await.expect("committed read").expect("head");
     let durable = read_view
         .messages()
         .iter()

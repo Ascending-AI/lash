@@ -113,10 +113,8 @@ async fn wait_edges_waits_for_condition_past_former_deadline(backend: Backend) {
     assert!(waiting.await.is_empty());
 }
 
-fn last_cell_finish(output: &TurnOutput) -> Option<serde_json::Value> {
-    output
-        .result
-        .state
+fn last_cell_finish(view: &lash::persistence::SessionReadView) -> Option<serde_json::Value> {
+    view.to_snapshot()
         .session_graph
         .nodes
         .iter()
@@ -323,7 +321,17 @@ async fn cold_reopen_globals_across_turns(backend: Backend) {
         responses.lock_recover().is_empty(),
         "each of the two turns consumes one scripted response"
     );
-    assert_eq!(last_cell_finish(&second), Some(serde_json::json!(7)));
+    assert_eq!(
+        last_cell_finish(
+            &second_session
+                .durable()
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head")
+        ),
+        Some(serde_json::json!(7))
+    );
     let after_start = wait_edges(&fixture, |edges| {
         edges
             .iter()
@@ -477,7 +485,17 @@ async fn continue_as_carries_only_seeded_definition(backend: Backend) {
         .await
         .expect("new-frame turn");
     assert!(result.is_success());
-    assert_eq!(last_cell_finish(&result), Some(serde_json::json!(11)));
+    assert_eq!(
+        last_cell_finish(
+            &session
+                .durable()
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head")
+        ),
+        Some(serde_json::json!(11))
+    );
 }
 
 /// A context-pressure hook that opens a frame seeded with an RLM seed once
@@ -549,7 +567,15 @@ async fn a_pressure_seed_carries_its_module_into_the_new_frame(backend: Backend)
         .await
         .expect("binding turn");
     assert!(bound.is_success(), "binding: {bound:?}");
-    let definition = last_cell_finish(&bound).expect("the cell finished with the definition");
+    let definition = last_cell_finish(
+        &session
+            .durable()
+            .read()
+            .await
+            .expect("committed read")
+            .expect("head"),
+    )
+    .expect("the cell finished with the definition");
     let before = wait_edges(&fixture, |edges| frame_artifacts(edges).len() == 1).await;
     let module_ref = frame_artifacts(&before)
         .into_iter()
@@ -570,7 +596,17 @@ async fn a_pressure_seed_carries_its_module_into_the_new_frame(backend: Backend)
         .await
         .expect("the pressure frame's turn");
     assert!(seeded.is_success(), "seeded turn: {seeded:?}");
-    assert_eq!(last_cell_finish(&seeded), Some(serde_json::json!(13)));
+    assert_eq!(
+        last_cell_finish(
+            &session
+                .durable()
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head")
+        ),
+        Some(serde_json::json!(13))
+    );
     let after = wait_edges(&fixture, |edges| {
         let frame: Vec<_> = edges
             .iter()
@@ -598,7 +634,17 @@ async fn a_pressure_seed_carries_its_module_into_the_new_frame(backend: Backend)
         .await
         .expect("the reopened turn");
     assert!(result.is_success(), "reopened turn: {result:?}");
-    assert_eq!(last_cell_finish(&result), Some(serde_json::json!(13)));
+    assert_eq!(
+        last_cell_finish(
+            &session
+                .durable()
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head")
+        ),
+        Some(serde_json::json!(13))
+    );
 }
 
 async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
@@ -686,7 +732,16 @@ async fn carried_definition_id_retains_the_closure_across_frame_switch(backend: 
         .await
         .expect("create turn");
     assert!(first.is_success(), "{first:?}");
-    let id_json = last_cell_finish(&first).expect("definition output")["id"].clone();
+    let id_json = last_cell_finish(
+        &session
+            .durable()
+            .read()
+            .await
+            .expect("committed read")
+            .expect("head"),
+    )
+    .expect("definition output")["id"]
+        .clone();
     let id = lash_core::ProcessDefinitionId::from_tagged_json(&id_json).expect("id");
     let before = wait_edges(&fixture, |edges| {
         edges.len() == 1 && edges[0].kind == "frame_environment"
@@ -719,7 +774,17 @@ async fn carried_definition_id_retains_the_closure_across_frame_switch(backend: 
     );
     let switched = send_through(&session, "switch").await.expect("switch");
     assert!(switched.is_success(), "{switched:?}");
-    assert_eq!(last_cell_finish(&switched), Some(id_json));
+    assert_eq!(
+        last_cell_finish(
+            &session
+                .durable()
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head")
+        ),
+        Some(id_json)
+    );
     wait_edges(&fixture, |edges| {
         edges.len() == 1
             && edges[0].kind == "frame_environment"
@@ -767,7 +832,15 @@ async fn uncarried_frame_switch_loses_an_uncarried_definition(backend: Backend) 
         .expect("create");
     assert!(first.is_success(), "{first:?}");
     let id = lash_core::ProcessDefinitionId::from_tagged_json(
-        &last_cell_finish(&first).expect("definition output")["id"],
+        &last_cell_finish(
+            &session
+                .durable()
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head"),
+        )
+        .expect("definition output")["id"],
     )
     .expect("id");
     let before = wait_edges(&fixture, |edges| {
@@ -819,7 +892,15 @@ async fn host_pin_keeps_a_definition_across_an_uncarried_switch(backend: Backend
         .expect("create");
     assert!(first.is_success(), "{first:?}");
     let id = lash_core::ProcessDefinitionId::from_tagged_json(
-        &last_cell_finish(&first).expect("definition output")["id"],
+        &last_cell_finish(
+            &session
+                .durable()
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head"),
+        )
+        .expect("definition output")["id"],
     )
     .expect("id");
     let before = wait_edges(&fixture, |edges| {
@@ -944,7 +1025,17 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value(backend: Ba
         "a created definition survives cold reopen: {second:?}"
     );
     assert!(responses.lock_recover().is_empty());
-    assert_eq!(last_cell_finish(&second), Some(serde_json::json!(42)));
+    assert_eq!(
+        last_cell_finish(
+            &second_session
+                .durable()
+                .read()
+                .await
+                .expect("committed read")
+                .expect("head")
+        ),
+        Some(serde_json::json!(42))
+    );
     let after_start = wait_edges(&fixture, |edges| {
         edges.iter().any(|edge| {
             edge.kind == "frame_environment"
@@ -1086,7 +1177,15 @@ async fn saved_function_process(
         .await
         .expect("starting turn");
     assert!(started.is_success(), "the starting turn: {started:?}");
-    let handle = last_cell_finish(&started).expect("the cell answers with the handle");
+    let handle = last_cell_finish(
+        &session
+            .durable()
+            .read()
+            .await
+            .expect("committed read")
+            .expect("head"),
+    )
+    .expect("the cell answers with the handle");
     let process_id = handle
         .get("process_id")
         .and_then(serde_json::Value::as_str)
