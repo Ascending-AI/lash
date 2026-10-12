@@ -22,9 +22,9 @@ fn budget(turns: usize) -> crate::config::ConfigTransaction {
     })
 }
 
-/// FIG-6017: settled answers load neither the head nor unrelated queued work.
+/// FIG-6032: settled answers adopt the current head without scanning unrelated queued work.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn settled_commands_and_config_do_not_load_session_windows() -> Result<()> {
+async fn settled_commands_and_config_adopt_the_current_head() -> Result<()> {
     use lash_core::testing::runtime_helpers::LayeredBackend;
     use lash_core::testing::{Script, StoreOp};
 
@@ -70,19 +70,28 @@ async fn settled_commands_and_config_do_not_load_session_windows() -> Result<()>
         session.admin().commands().settle(receipt).await?,
         lash_core::runtime::SessionCommandSettlement::Applied { .. }
     ));
-    assert_eq!(
-        reads.calls(StoreOp::load_session_window),
-        before,
-        "settlement loaded an unrequested session window"
+    let after_settlement = reads.calls(StoreOp::load_session_window);
+    assert!(
+        after_settlement > before,
+        "settlement adopts the current durable session window"
     );
     assert_eq!(
         reads.calls(StoreOp::list_queued_work),
         queue_reads,
         "a recorded settlement loaded unrelated queued work"
     );
+    assert_eq!(
+        session.policy_snapshot().turn_budget,
+        crate::TurnBudget::bounded(7),
+        "settlement publishes the current durable head"
+    );
+    let before_explicit_read = reads.calls(StoreOp::load_session_window);
     let view = session.durable().read().await?.expect("committed head");
     assert_eq!(view.policy().turn_budget, crate::TurnBudget::bounded(7));
-    assert!(reads.calls(StoreOp::load_session_window) > before);
+    assert!(
+        reads.calls(StoreOp::load_session_window) > before_explicit_read,
+        "an explicit durable read loads the requested session window"
+    );
     Ok(())
 }
 

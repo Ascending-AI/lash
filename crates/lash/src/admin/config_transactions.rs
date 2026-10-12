@@ -171,9 +171,8 @@ impl SessionConfigAdmin {
     }
 
     /// Wait for the transaction `receipt` names to settle, and read how it
-    /// settled. Session state is a separate explicit read through
-    /// [`DurableSession::read`](crate::DurableSession::read) or
-    /// [`ObservableSession::snapshot`](crate::ObservableSession::snapshot).
+    /// settled, adopting and publishing the current durable head into this
+    /// open session.
     pub async fn settle(
         &self,
         receipt: lash_core::runtime::SessionCommandReceipt,

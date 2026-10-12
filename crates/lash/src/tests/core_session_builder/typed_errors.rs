@@ -526,6 +526,17 @@ async fn a_retried_admin_mutation_with_the_same_host_key_applies_once() {
         )
         .await
         .expect("retry settles");
+    let committed = session
+        .durable()
+        .read()
+        .await
+        .expect("read committed append")
+        .expect("the session has a head");
+    assert_eq!(
+        committed.messages().len(),
+        1,
+        "the retry retains exactly one durable append"
+    );
     let snapshot = state.export().await;
     assert_eq!(
         snapshot

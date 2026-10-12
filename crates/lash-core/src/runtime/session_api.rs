@@ -767,18 +767,33 @@ impl LashRuntime {
         Ok(receipt)
     }
 
-    /// Read the command `receipt`'s settlement without loading session state.
-    /// `Pending` when the engine has not settled it yet;
+    /// Read the command `receipt`'s settlement and adopt the current durable
+    /// head once it settled. `Pending` when the engine has not settled it yet;
     /// the command stays durable and settles later. Callers that need a
     /// settled result await the session actor outside this runtime's writer lock.
     pub async fn settle_session_command(
         &mut self,
         receipt: crate::SessionCommandReceipt,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
-        self.await_session_command_settlement(crate::runtime::SessionCommandSettlementHandle {
-            receipt,
-        })
-        .await
+        let settlement = self
+            .await_session_command_settlement(crate::runtime::SessionCommandSettlementHandle {
+                receipt,
+            })
+            .await?;
+        if matches!(
+            settlement,
+            crate::runtime::SessionCommandSettlement::Applied { .. }
+                | crate::runtime::SessionCommandSettlement::Durable(_)
+        ) {
+            // Receipt lookup reads only the recorded answer. Settlement on
+            // this open runtime also owes head adoption: later commands or
+            // writers may have superseded the receipt's committed values.
+            // Never replay those values over the current durable head.
+            self.refresh_session_graph_from_store()
+                .await
+                .map_err(runtime_error_from_session_command_refresh)?;
+        }
+        Ok(settlement)
     }
 
     pub async fn drain_next_session_command_with_cancellation(
@@ -1226,6 +1241,19 @@ struct RuntimeCommitAdmissionError(RuntimeError);
 impl From<crate::StoreError> for RuntimeCommitAdmissionError {
     fn from(error: crate::StoreError) -> Self {
         Self(super::runtime_error_from_store_commit(error))
+    }
+}
+
+fn runtime_error_from_session_command_refresh(error: SessionError) -> RuntimeError {
+    match error {
+        SessionError::Store { source, .. } => super::runtime_error_from_store_commit(source),
+        SessionError::Plugin(error) => {
+            crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+        }
+        error => RuntimeError::new(
+            RuntimeErrorCode::SessionCommandPostShiftRefresh,
+            error.to_string(),
+        ),
     }
 }
 

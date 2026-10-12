@@ -34,9 +34,8 @@ impl SessionCommandAdmin {
     /// its receipt (FIG-4202): applied with its typed outcome, a refusal
     /// among them; or cancelled when it was withdrawn. Dropping this
     /// await withdraws nothing: the command stays durable and settles.
-    /// This reads only the settlement. Read the committed session head
-    /// explicitly with [`DurableSession::read`](crate::DurableSession::read)
-    /// or [`ObservableSession::snapshot`](crate::ObservableSession::snapshot).
+    /// A settled command adopts and publishes the current durable head into
+    /// this open session, including changes committed by later writers.
     pub async fn settle(
         &self,
         receipt: lash_core::facade_support::SessionCommandReceipt,
@@ -44,14 +43,7 @@ impl SessionCommandAdmin {
         let pacing = self.context.target.observer_pacing().admin;
         let mut pause = pacing.initial();
         loop {
-            let settlement = {
-                let writer = self.context.runtime.writer();
-                let mut runtime = writer.lock().await;
-                runtime
-                    .settle_session_command(receipt.clone())
-                    .await
-                    .map_err(EmbedError::from)?
-            };
+            let settlement = self.status(receipt.clone()).await?;
             let pending = matches!(
                 settlement,
                 lash_core::runtime::SessionCommandSettlement::Pending(_)
@@ -107,12 +99,14 @@ impl SessionCommandAdmin {
         &self,
         receipt: lash_core::runtime::SessionCommandReceipt,
     ) -> Result<lash_core::runtime::SessionCommandSettlement> {
-        let writer = self.context.runtime.writer();
-        let mut runtime = writer.lock().await;
-        runtime
-            .settle_session_command(receipt)
+        self.context
+            .with_writer(async |runtime: &mut LashRuntime| {
+                runtime
+                    .settle_session_command(receipt)
+                    .await
+                    .map_err(EmbedError::from)
+            })
             .await
-            .map_err(EmbedError::from)
     }
 
     /// Refuse a host operation on a command of another session than this
