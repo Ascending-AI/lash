@@ -891,3 +891,5 @@ pub use tool_intent_outcome::{
 pub type CompletedToolCall = lash_sansio::CompletedToolCall<ToolIntentExecutionOutcome>;
 /// The host protocol's response to an execution effect.
 pub type Response = lash_sansio::Response<ToolIntentExecutionOutcome>;
+
+pub use crate::backend::ProcessAuthorityReads;

@@ -230,6 +230,15 @@ impl std::error::Error for StoreFault {}
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {
+    /// A process authority read found the retained prune tombstone.
+    #[error(
+        "process authority is no longer retained ({terminal_label}, pruned at {pruned_at_ms}ms)"
+    )]
+    ProcessAuthorityPruned {
+        terminal_label: String,
+        pruned_at_ms: u64,
+    },
+
     #[error("prepared registration for process {process_id} is stale")]
     PreparedProcessRegistrationStale { process_id: crate::ProcessId },
 
@@ -935,6 +944,7 @@ impl StoreError {
     /// retryable.
     pub fn is_transient(&self) -> bool {
         match self {
+            Self::ProcessAuthorityPruned { .. } => false,
             Self::PreparedProcessRegistrationStale { .. }
             | Self::Contended
             | Self::MigrationOpenElsewhere { .. }
@@ -1046,6 +1056,7 @@ impl StoreError {
     pub fn runtime_code(&self) -> crate::RuntimeErrorCode {
         use crate::RuntimeErrorCode as Code;
         match self {
+            Self::ProcessAuthorityPruned { .. } => Code::ProcessNoLongerRetained,
             Self::PreparedProcessRegistrationStale { .. } | Self::Contended => {
                 Code::StoreCommitContended
             }
@@ -1163,6 +1174,7 @@ impl StoreError {
     /// classified.
     pub fn refuses_request_content(&self) -> bool {
         match self {
+            Self::ProcessAuthorityPruned { .. } => true,
             Self::TurnOutcomeMaterializationRefused { .. }
             | Self::CommitNodeBudgetExceeded { .. }
             | Self::CommitByteBudgetExceeded { .. }
@@ -1340,6 +1352,7 @@ impl StoreError {
     /// diagnostics that must use a wildcard for this non-exhaustive enum.
     pub fn variant_name(&self) -> &'static str {
         match self {
+            Self::ProcessAuthorityPruned { .. } => "ProcessAuthorityPruned",
             Self::ExecutionStateCaptureFailed { .. } => "ExecutionStateCaptureFailed",
             Self::TurnOutcomeMaterializationRefused { .. } => "TurnOutcomeMaterializationRefused",
             Self::PreparedProcessRegistrationStale { .. } => "PreparedProcessRegistrationStale",

@@ -62,6 +62,10 @@ impl StoreSet for IntegratorStores {
         self.substrate.process_registry()
     }
 
+    fn process_authority_reads(&self) -> Arc<dyn lash::persistence::ProcessAuthorityReads> {
+        self.substrate.process_authority_reads()
+    }
+
     fn process_env_store(&self) -> Arc<dyn ProcessEnvStore> {
         self.substrate.process_env_store()
     }

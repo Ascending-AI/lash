@@ -18,7 +18,7 @@ use lash_core::store::ArtifactCleanupLedger;
 use lash_core::{
     ArtifactCleanup, ArtifactReferrer, ArtifactReferrerPorts, Clock, DefinitionAcquisition,
     ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionId, ProcessEngineRegistry,
-    ProcessEnv, ProcessEnvRef, ProcessEnvStore, ReferrerClaim,
+    ProcessEnv, ProcessEnvRef, ProcessEnvStore, ReferrerClaim, ToolCatalog,
 };
 
 use crate::Result;
@@ -79,7 +79,6 @@ pub struct HostArtifacts {
     engines: ProcessEngineRegistry,
     /// The core these stores belong to: what resolves the tool catalogue a
     /// workflow is admitted against.
-    #[cfg(feature = "codemode")]
     core: crate::LashCore,
 }
 
@@ -103,9 +102,20 @@ impl HostArtifacts {
             clock,
             definition_ports,
             engines: core.host_process_engines.clone(),
-            #[cfg(feature = "codemode")]
             core: core.clone(),
         }
+    }
+
+    /// Observe the serving build's component tools intersected with `env.tools`.
+    /// Admits the environment and builds only its named components with
+    /// `process: None`. This is an observation of the serving build, not the
+    /// catalog at the time the process started.
+    pub fn process_catalog(&self, env: &ProcessEnv) -> Result<Arc<ToolCatalog>> {
+        self.engines
+            .components()
+            .admit(env)
+            .map_err(|refusal| lash_core::PluginError::ProcessEnvRefused { refusal })?;
+        self.core.process_tool_catalog(env)
     }
 
     /// Admit `env` against this core's process components, publish it and

@@ -853,3 +853,52 @@ impl lash_core_execution::ProcessClockRebind for PostgresProcessRegistry {
 }
 #[cfg(any(test, feature = "testing"))]
 impl lash_core_execution::ProcessRegistryTestSupport for PostgresProcessRegistry {}
+
+#[async_trait::async_trait]
+impl lash_core_execution::ProcessAuthorityReads for PostgresProcessRegistry {
+    async fn environment_bytes(
+        &self,
+        env: &lash_core_execution::ProcessEnvRef,
+    ) -> Result<Option<Vec<u8>>, StoreError> {
+        let row = crate::observed_sql::query(
+            process_sql()
+                .process_postgres
+                .select_environment_bytes
+                .sql(),
+        )
+        .bind(crate::artifact_store::PROCESS_ENV_NAMESPACE)
+        .bind(env.as_str())
+        .fetch_optional(crate::observed_sql::executor(&self.pool))
+        .await
+        .map_err(store_sqlx_error)?;
+        row.map(|row| row.try_get(0).map_err(store_sqlx_error))
+            .transpose()
+    }
+
+    async fn process_authority(
+        &self,
+        process: &ProcessId,
+    ) -> Result<Option<(ProcessRecord, Option<Vec<u8>>)>, StoreError> {
+        let row = crate::observed_sql::query(process_sql().process_postgres.select_authority.sql())
+            .bind(process.as_str())
+            .bind(crate::artifact_store::PROCESS_ENV_NAMESPACE)
+            .fetch_optional(crate::observed_sql::executor(&self.pool))
+            .await
+            .map_err(store_sqlx_error)?;
+        row.map(|row| {
+            let record: Option<String> = row.get(0);
+            if let Some(record) = record {
+                let record = serde_json::from_str(&record)
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                Ok((record, row.get(1)))
+            } else {
+                Err(StoreError::ProcessAuthorityPruned {
+                    terminal_label: row.get(2),
+                    pruned_at_ms: u64::try_from(row.get::<i64, _>(3))
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                })
+            }
+        })
+        .transpose()
+    }
+}

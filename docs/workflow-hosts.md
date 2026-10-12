@@ -365,3 +365,81 @@ can change a workflow.
 | `lash::workflow::graph` | The derived graph, execution sites and manifest requirements. |
 | `lash::workflow::edit` | Drafts, edits, transactions and correspondence. |
 | `lash::typescript` | The optional TypeScript dialect: its printer. |
+
+
+## Who supplies a process's environment
+
+Whatever starts an engine process supplies its complete `ProcessEnv` and
+engine settings. Lash builds only its ordered named process components from
+the separate component registry. It fills no session or deployment defaults.
+
+| Start site | Who supplies the environment and settings |
+| --- | --- |
+| Host engine or definition start | The host publishes `ProcessEnv` under a host pin, then states `EngineLaunch { env, settings }` in the request. It may explicitly call `processes().engine_defaults(kind, payload)`. |
+| Model start in a session | The host's required async `ProcessEnvPolicy` sees the recorded run and authoritative resolved target. Declaration holds and seals its complete choice with the tool outcome. |
+| Nested model start in a process | The same host policy sees the enclosing process. `cx.inherit()` explicitly chooses its exact environment and settings; a new environment is also an explicit choice. |
+| Other tool-outcome or runtime child start | Its producer states the complete choice and declares/holds it under the attempt's execution claim. Session-turn declarations carry no environment. |
+| Isolated tool call | The tool provider's `isolated_start` states payload, environment choice and settings. Binding holds that choice without overwriting it. |
+| Workflow publication | The host names `ProcessEnv` for admission against the component catalog; the eventual start states its launch. |
+| Trigger delivery | The host publishes the trigger's stated environment under its pin and starts the definition with its explicit launch. |
+| Host or tool session-turn start | No process environment. The create request supplies the child session's configuration; its stated session id or the process-derived child id names it. |
+| Restart, crash resume, redrive or takeover | The recorded environment ref and engine settings are loaded. No policy or default runs again. |
+| Adoption by another build | The build must serve the recorded components, config formats and unsettled executable revisions. It builds only the named components; nothing is re-selected. |
+
+A committed model-start decision never re-runs its policy. An attempt abandoned
+before commit may choose again. A policy refusal becomes a tool error; a policy
+or publication fault retries the uncommitted attempt.
+[ADR 0141](adr/0141-a-model-started-process-environment-is-the-host-start-policys-sealed-choice.md)
+states these decisions.
+
+## Reading and comparing process authority
+
+Authority is the recorded environment. `core.processes().environment(id)` reads
+it together with the process's provenance and engine settings in one store
+statement, without building components or loading a session. A session-turn
+answer instead names the child session, because it has no process environment.
+Unknown process ids answer `None`; pruned processes refuse with
+`ProcessNoLongerRetained`. Missing or corrupt environment bytes are typed errors.
+
+Narrowing a session does not change processes it already started. Lash enforces
+no process authority policy. A host that wants revocation gates
+`processes.await/status/cancel` with its own tool check using `environment(id)`
+and `tools_excess`, filters `processes.list` results the same way, or cancels the
+process. The host also decides how to authorize a session-turn's child session.
+
+Compare against the session's resolved offered catalog, never its tool policy
+alone. Ambient admits all offered names except hidden names; Restricted admits
+the matching offered identities, also excluding hidden names. A process tool
+absent from the offered catalog is excess, including a same-name tool with a
+different id. Capability refs are within only when
+equal; opaque refs have no ordering of authority. Components and named-session
+grants have separate helpers in `lash::process::authority`.
+
+This short host check is compiled in
+[processes_evidence.rs](../crates/lash/tests/processes_evidence.rs). It admits
+engine processes whose tool names fit and leaves child-session authorization
+for the host's separate policy:
+
+```rust
+async fn may_address_process(
+    processes: &lash::process::Processes,
+    id: &lash::ProcessId,
+    current: &lash::plugins::SessionToolAccess,
+    offered: &lash::plugins::ToolCatalog,
+) -> lash::Result<bool> {
+    Ok(match processes.environment(id).await? {
+        Some(lash::process::ProcessEnvView {
+            authority: lash::process::ProcessAuthority::Engine { env, .. }, ..
+        }) => lash::process::authority::tools_excess(&env, current, offered).is_empty(),
+        _ => false,
+    })
+}
+```
+
+A host holding only an `env_ref`, such as a promoted workflow definition, uses
+`core.processes().env(&env_ref)` to recover the recorded environment in one store
+statement, including capability binding ids, contracts and arguments. The ref
+is content identity and confers no retention; keep the environment pinned.
+`host_artifacts().process_catalog(&env)` admits the environment and builds its
+components with no process to return their tools intersected with `env.tools`.
+That catalog observes the serving build, rather than the tools at start time.

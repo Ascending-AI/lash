@@ -4,8 +4,7 @@ use super::super::validation::prepare_process_registration;
 use super::{
     Ancestry, EngineLaunch, EngineSettings, LifetimeDecision, ProcessEnvRef, ProcessExternalRef,
     ProcessId, ProcessIdentity, ProcessInput, ProcessLineage, ProcessOutcome, ProcessProvenance,
-    ProcessRegistration, ProcessStarted, ProcessStatus, SessionId, StartKey,
-    process_child_session_id,
+    ProcessRegistration, ProcessStarted, ProcessStatus, SessionId, StartKey, process_session_id,
 };
 use lash_sansio::CancelRequest;
 use serde::{Deserialize, Serialize};
@@ -294,12 +293,9 @@ pub(super) fn recorded_lineage(
     run: Option<&crate::TurnAddress>,
 ) -> ProcessLineage {
     let own_session = match input {
-        ProcessInput::SessionTurn { create_request, .. } => Some(
-            create_request
-                .session_id
-                .clone()
-                .unwrap_or_else(|| process_child_session_id(process_id)),
-        ),
+        ProcessInput::SessionTurn { create_request, .. } => {
+            Some(process_session_id(process_id, create_request))
+        }
         ProcessInput::Engine { .. } => None,
     };
     ProcessLineage::of_process(

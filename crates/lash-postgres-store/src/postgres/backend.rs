@@ -160,6 +160,10 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         PostgresStoreSet::process_env_store(self)
     }
 
+    fn process_authority_reads(&self) -> Arc<dyn lash_core_execution::ProcessAuthorityReads> {
+        self.inner.process_registry.clone()
+    }
+
     fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessEnvStore> {
         PostgresStoreSet::process_env_store(self)
     }

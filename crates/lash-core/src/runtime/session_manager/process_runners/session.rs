@@ -190,14 +190,12 @@ impl RuntimeSessionServices {
         process_id: &crate::ProcessId,
         create_request: crate::SessionCreateRequest,
     ) -> crate::SessionCreateRequest {
-        let mut create_request = create_request.with_caused_by(crate::CausalRef::Process {
-            process_id: process_id.clone(),
-        });
-        if create_request.session_id.is_none() {
-            create_request = create_request
-                .with_session_id(crate::runtime::process_child_session_id(process_id));
-        }
+        let session = crate::runtime::process_session_id(process_id, &create_request);
         create_request
+            .with_caused_by(crate::CausalRef::Process {
+                process_id: process_id.clone(),
+            })
+            .with_session_id(session)
     }
 
     /// The child session's store.

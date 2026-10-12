@@ -1,8 +1,12 @@
-# Self-contained processes capture their environment at creation
+# Self-contained processes run under the environment their starter states
 
 ## Decision
 
-A Runtime Process is a standalone durable record with a minted id, input, captured environment reference, identity, provenance, lifetime, ancestry, events and status. It holds no live reference to its creator's session. Execution reconstructs plugins and policy from the captured immutable environment, rather than reopening the originating session.
+A Runtime Process is a standalone durable record with a minted id, input, identity, provenance, lifetime, ancestry, events and status. An engine process records the complete immutable environment and engine settings its starter states in `EngineLaunch`. It builds only the ordered process components that environment names, from the separate process component registry. It holds no live reference to its creator's session.
+
+A session-turn process has no `ProcessEnv` (D5). It starts and runs its child session under the child's own configuration. The child's id is the create request's stated id, or the stable id derived from the process id.
+
+Engine settings are stated with the start (D4). Restart, redrive and adoption load the recorded environment ref and settings; they never run the start policy, select components anew or consult deployment defaults. A build that cannot serve the named components, config formats or unsettled executable revisions does not claim the process to run it. Engine-free cancellation remains available.
 
 Definition starts refer to immutable definitions under ADR 0095. Realization resolves that definition and registers its engine input; the retained record's identity names the definition id. Registry names do not re-resolve an admitted definition. Captured cell locals must be immutable and durably representable.
 
@@ -16,6 +20,6 @@ Every registration records a Lifetime over its admitted Ancestry under ADR 0108.
 
 Live session binding is rejected because session changes would change recovery inputs and prevent session-independent work. An owner enum bundling execution, cleanup and host routing is rejected because those relationships have independent meanings. An ambient sessionless execution configuration is unnecessary because the process carries its environment.
 
-Processes can exist without sessions and outlive their creators when their recorded lifetime permits it. Arguments and captured specifications provide state handover; mutable creator state does not. The implementation is in [process records and lineage](../../crates/lash-core-execution/src/runtime/process/model.rs), [environment specifications](../../crates/lash-core-store/src/process_identity.rs) and [process execution](../../crates/lash-vm-runtime/src/process.rs).
+Processes can exist without sessions and outlive their creators when their recorded lifetime permits it. Arguments and recorded specifications provide state handover; mutable creator state does not. The implementation is in [process records and lineage](../../crates/lash-core-execution/src/runtime/process/model.rs), [process environments](../../crates/lash-core-store/src/process_env.rs) and [process execution](../../crates/lash-vm-runtime/src/process.rs).
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

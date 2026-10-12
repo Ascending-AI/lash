@@ -47,13 +47,13 @@ The generated region below is checked against the live filenames and headings.
 | 0001 | [Context management uses views or frames](0001-context-management-uses-views-or-frames.md) |
 | 0002 | [Session observation uses cursors and bounded live replay](0002-session-observation-uses-cursors-and-bounded-live-replay.md) |
 | 0003 | [Durable waits are scoped wait rows with a first winner](0003-keyed-promise-is-scope-agnostic.md) |
-| 0004 | [Process environments carry plugin options, not product metadata](0004-process-environments-carry-plugin-options-not-product-metadata.md) |
+| 0004 | [Process environments carry ordered process component configs](0004-process-environments-carry-plugin-options-not-product-metadata.md) |
 | 0005 | [Tool Catalog membership defines availability](0005-tool-catalog-membership-replaces-availability-tiers.md) |
 | 0006 | [RLM history renders in the emission format](0006-rlm-history-renders-in-emission-format.md) |
 | 0007 | [Four layer scenario harnesses](0007-four-layer-scenario-harnesses.md) |
 | 0008 | [Confidence gate](0008-confidence-gate.md) |
 | 0009 | [Randomized simulation harness](0009-deterministic-simulation-harness.md) |
-| 0011 | [Self-contained processes capture their environment at creation](0011-self-contained-processes.md) |
+| 0011 | [Self-contained processes run under the environment their starter states](0011-self-contained-processes.md) |
 | 0013 | [Protocol capabilities enter through the plugin contract](0013-protocol-capabilities-enter-through-the-plugin-contract.md) |
 | 0014 | [Operational policy stays with the host and Lash exposes levers](0014-operational-policy-stays-with-the-host.md) |
 | 0015 | [Admission control lives in provider decorators](0015-admission-control-lives-in-provider-decorators.md) |
@@ -172,6 +172,7 @@ The generated region below is checked against the live filenames and headings.
 | 0138 | [Code mode cells are kernel programs](0138-codemode-cells-are-kernel-programs.md) |
 | 0139 | [The Lash VM is a dialect-free kernel](0139-the-lash-vm-is-a-dialect-free-kernel.md) |
 | 0140 | [Hosts name their dialects](0140-hosts-name-their-dialects.md) |
+| 0141 | [A model-started process's environment is the host start policy's sealed choice](0141-a-model-started-process-environment-is-the-host-start-policys-sealed-choice.md) |
 <!-- adr-index:end -->
 
 ## Replaced and retired decisions

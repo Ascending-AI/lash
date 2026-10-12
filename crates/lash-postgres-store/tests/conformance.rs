@@ -1081,3 +1081,13 @@ lash_conformance::process_prune_start_staging_tests!({
     let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessEnvStore>;
     (database_fixture, registry, env_store)
 });
+
+/// PostgreSQL twin of ENV-AUTHORITY-READ; requires a live hermetic service.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn env_authority_read_postgres() {
+    let _ = lash_postgres_store::testing::required_database_url();
+    let (_database, storage) = storage().await.expect("required PostgreSQL");
+    reset(storage.pool()).await;
+    let (_attachments, stores) = pg_law_stores(&storage);
+    lash_conformance::env_authority_read(stores).await;
+}

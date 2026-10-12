@@ -596,6 +596,11 @@ impl Backend {
         self.inner.stores.process_registry()
     }
 
+    /// A process's recorded authority, read atomically with its environment bytes.
+    pub fn process_authority_reads(&self) -> Arc<dyn ProcessAuthorityReads> {
+        self.inner.stores.process_authority_reads()
+    }
+
     /// The store of process execution environments.
     pub fn process_env_store(&self) -> Arc<dyn ProcessEnvStore> {
         self.inner.stores.process_env_store()
@@ -694,6 +699,9 @@ pub trait StoreSet: Send + Sync {
     /// The durable registry of background processes.
     fn process_registry(&self) -> Arc<dyn ProcessRegistry>;
 
+    /// Atomic process/environment observation, without executable reconstruction.
+    fn process_authority_reads(&self) -> Arc<dyn ProcessAuthorityReads>;
+
     /// The store of process execution environments.
     fn process_env_store(&self) -> Arc<dyn ProcessEnvStore>;
 
@@ -737,4 +745,24 @@ fn corrupt_key(error: lash_durable::ActorKeyError) -> DurableError {
         kind: lash_durable::StoreFailureKind::Corrupt,
         message: error.to_string(),
     })
+}
+
+/// Atomic observation of a retained process and its recorded environment.
+/// Implementations issue one SQL statement, including tombstone detection.
+/// Unknown ids return `None`; pruned ids return `StoreError::ProcessAuthorityPruned`.
+/// A retained engine row with absent environment bytes still returns its record;
+/// the caller verifies and decodes the bytes and reports their absence.
+#[async_trait::async_trait]
+pub trait ProcessAuthorityReads: Send + Sync {
+    /// Recorded environment bytes by content reference, in one store statement.
+    /// Missing bytes return `None`; the caller verifies the content address.
+    async fn environment_bytes(
+        &self,
+        env: &crate::ProcessEnvRef,
+    ) -> Result<Option<Vec<u8>>, crate::StoreError>;
+
+    async fn process_authority(
+        &self,
+        process: &crate::ProcessId,
+    ) -> Result<Option<(crate::ProcessRecord, Option<Vec<u8>>)>, crate::StoreError>;
 }

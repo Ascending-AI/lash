@@ -34,6 +34,44 @@ pub struct Processes {
     pub(crate) core: LashCore,
 }
 
+/// A process's immutable recorded authority and provenance.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProcessEnvView {
+    pub process: ProcessId,
+    pub authority: ProcessAuthority,
+    pub provenance: lash_core::ProcessProvenance,
+}
+
+/// Engine processes carry an explicit environment; session-turn processes
+/// carry no environment and run their child session's own configuration.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProcessAuthority {
+    Engine {
+        env_ref: lash_core::ProcessEnvRef,
+        env: Box<lash_core::ProcessEnv>,
+        engine_settings: Option<lash_core::EngineSettings>,
+    },
+    SessionTurn {
+        session: SessionId,
+    },
+}
+
+fn decode_environment(
+    env_ref: &lash_core::ProcessEnvRef,
+    bytes: &[u8],
+) -> Result<lash_core::ProcessEnv> {
+    if !env_ref.matches_store_bytes(bytes) {
+        return Err(crate::plugins::ProcessEnvLoadError::Mismatched(env_ref.clone()).into());
+    }
+    lash_core::ProcessEnv::from_store_bytes(bytes).map_err(|error| {
+        crate::plugins::ProcessEnvLoadError::Undecodable {
+            env_ref: env_ref.clone(),
+            message: error.to_string(),
+        }
+        .into()
+    })
+}
+
 impl Processes {
     /// Read a retained tool call by the typed id on its process effect
     /// occurrence. Reads committed round outcomes, including after reopening
@@ -500,6 +538,84 @@ impl Processes {
             .process(process_id)
             .await
             .map_err(Into::into)
+    }
+
+    /// Read recorded authority in one backend call and one SQL statement.
+    /// Builds no component and opens no session. Narrowing the creator's
+    /// session leaves this answer unchanged. An unknown id returns `None`;
+    /// a pruned id returns `PluginError::ProcessNoLongerRetained`. Missing or
+    /// corrupt recorded environment bytes return a typed `ProcessEnvLoad` error.
+    pub async fn environment(&self, id: &ProcessId) -> Result<Option<ProcessEnvView>> {
+        let row = self
+            .core
+            .backend
+            .process_authority_reads()
+            .process_authority(id)
+            .await
+            .map_err(|error| match error {
+                lash_core::StoreError::ProcessAuthorityPruned {
+                    terminal_label,
+                    pruned_at_ms,
+                } => {
+                    match lash_core::runtime::registry_transitions::ProcessTombstoneStamp::from_row(
+                        id,
+                        &terminal_label,
+                        pruned_at_ms,
+                    ) {
+                        Ok(stamp) => EmbedError::Plugin(
+                            lash_core::runtime::registry_transitions::process_no_longer_retained(
+                                stamp,
+                            ),
+                        ),
+                        Err(error) => error.into(),
+                    }
+                }
+                error => error.into(),
+            })?;
+        let Some((record, bytes)) = row else {
+            return Ok(None);
+        };
+        let authority = match record.input.as_ref() {
+            lash_core::ProcessInput::Engine { launch, .. } => {
+                let bytes = bytes.ok_or_else(|| {
+                    crate::plugins::ProcessEnvLoadError::Missing(launch.env.clone())
+                })?;
+                ProcessAuthority::Engine {
+                    env_ref: launch.env.clone(),
+                    env: Box::new(decode_environment(&launch.env, &bytes)?),
+                    engine_settings: launch.settings.clone(),
+                }
+            }
+            lash_core::ProcessInput::SessionTurn { create_request, .. } => {
+                ProcessAuthority::SessionTurn {
+                    session: lash_core::runtime::process_session_id(id, create_request),
+                }
+            }
+        };
+        Ok(Some(ProcessEnvView {
+            process: record.id,
+            authority,
+            provenance: record.provenance,
+        }))
+    }
+
+    /// Recover a published environment from its content reference, including
+    /// capability binding ids, contracts and arguments. One store read, without
+    /// component builds or session reads. Absent bytes return `None`; corrupt
+    /// bytes return a typed `ProcessEnvLoad` error.
+    pub async fn env(
+        &self,
+        env_ref: &lash_core::ProcessEnvRef,
+    ) -> Result<Option<lash_core::ProcessEnv>> {
+        let bytes = self
+            .core
+            .backend
+            .process_authority_reads()
+            .environment_bytes(env_ref)
+            .await?;
+        bytes
+            .map(|bytes| decode_environment(env_ref, &bytes))
+            .transpose()
     }
 
     /// Read the process as its workflow: the identity and signature of the

@@ -455,7 +455,6 @@ impl LashCore {
     /// only the components `env` names provide that its tools admit, built
     /// with no process, as its runtime builds them (FIG-6034 §3.7). Nothing
     /// of a session builds.
-    #[cfg(feature = "codemode")]
     pub(crate) fn process_tool_catalog(
         &self,
         env: &lash_core::ProcessEnv,

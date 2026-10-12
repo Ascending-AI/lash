@@ -132,7 +132,7 @@ pub use process::{
     current_epoch_ms, fold_process_record, hold_process_env, lifetime, load_process_env,
     mint_process_id, prepare_process_event_append, prepare_process_registration,
     prepare_process_start, prepare_process_transition, process_child_session_id,
-    process_session_turn_id, reconcile_session_process_observer_intents,
+    process_session_id, process_session_turn_id, reconcile_session_process_observer_intents,
     release_process_event_payload, restore_released_process_event, terminal_append_request,
     watch_process_registry,
 };

@@ -97,6 +97,7 @@ mod postgres_live_replay;
 mod postgres_process_replay;
 pub mod preflight;
 pub(crate) mod process_admin;
+mod process_authority;
 mod process_feed;
 mod process_history;
 mod process_lifecycle;
@@ -545,6 +546,7 @@ pub mod persistence {
     //! authorities here govern writes. Hosts and plugins read
     //! [`crate::process::ObservedProcess`] through `processes()` or their
     //! runtime-provided services instead.
+    pub use lash_core::ProcessAuthorityReads;
     pub use lash_core_store::checkpoint_graph::{
         DecodeLimits as GraphDecodeLimits, GraphReadPolicy, KernelDataLimits,
     };
@@ -1197,7 +1199,13 @@ pub mod process {
     pub use crate::artifacts::{
         HostArtifactPin, HostArtifactRefusal, HostArtifacts, ProcessDefinitions,
     };
-    pub use crate::process_admin::Processes;
+    pub use crate::process_admin::{ProcessAuthority, ProcessEnvView, Processes};
+    /// Compare recorded process authority with a host's current grants.
+    pub mod authority {
+        pub use crate::process_authority::{
+            capabilities_excess, components_excess, session_grants, tools_excess, tools_within,
+        };
+    }
     pub use crate::process_feed::{
         ObservableProcess, ProcessObservationEventId, ProcessObservationStream,
         ProcessObservationStreamItem,

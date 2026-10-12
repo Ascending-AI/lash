@@ -890,3 +890,177 @@ pub async fn two_starts_share_one_captured_environment(
         );
     }
 }
+
+/// ENV-AUTHORITY-READ: atomic record/environment reads preserve absence,
+/// prune evidence, session-turn distinction, and capability slots by reference.
+#[expect(
+    clippy::expect_used,
+    reason = "the law's setup and reads are its assertions"
+)]
+pub async fn env_authority_read(stores: Arc<dyn crate::StoreSet>) -> Vec<crate::ProcessRecord> {
+    let env = crate::ProcessEnv::builder(
+        crate::SessionToolAccess::restricted([]).expect("empty restricted tools"),
+        crate::MaxToolCalls::new(2),
+    )
+    .capability(
+        crate::SlotId::new("integration"),
+        crate::CapabilityRef {
+            binding: crate::BindingId::new("binding:recorded"),
+            contract: crate::ContractRef::new("integration", 7),
+            args: serde_json::json!({"account": "recorded", "scope": ["read"]}),
+        },
+    )
+    .build()
+    .expect("environment");
+    let env_ref = env.stable_ref().expect("ref");
+    let bytes = env.to_store_bytes().expect("bytes");
+    let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
+        crate::HostArtifactPin::mint(),
+    ))
+    .expect("pin");
+    stores
+        .process_env_store()
+        .publish_process_env(&claim, &env_ref, &bytes)
+        .await
+        .expect("publish");
+    let reads = stores.process_authority_reads();
+    assert_eq!(
+        reads.environment_bytes(&env_ref).await.expect("by ref"),
+        Some(bytes.clone())
+    );
+    let recovered = crate::ProcessEnv::from_store_bytes(
+        &reads
+            .environment_bytes(&env_ref)
+            .await
+            .expect("read")
+            .expect("published"),
+    )
+    .expect("decode");
+    assert_eq!(
+        recovered.capabilities(),
+        env.capabilities(),
+        "binding, contract and args survive by ref"
+    );
+    let absent = lash_core::testing::process_env_with_limit(99)
+        .stable_ref()
+        .expect("absent ref");
+    assert_eq!(
+        reads.environment_bytes(&absent).await.expect("unknown env"),
+        None
+    );
+    let registry = stores.process_registry();
+    let engine = registry
+        .register_process(crate::ProcessRegistration::new(
+            crate::ProcessInput::Engine {
+                kind: "testing-fixture".into(),
+                payload: serde_json::Value::Null,
+                launch: crate::EngineLaunch::new(
+                    env_ref.clone(),
+                    Some(crate::EngineSettings::new(serde_json::json!({"bound": 7}))),
+                ),
+            },
+            crate::ProcessProvenance::host(),
+            crate::Lifetime::Detached,
+        ))
+        .await
+        .expect("engine row");
+    let (record, stored) = reads
+        .process_authority(&engine.id)
+        .await
+        .expect("authority")
+        .expect("retained");
+    assert_eq!(record, engine);
+    assert_eq!(stored, Some(bytes));
+    assert_eq!(
+        reads
+            .process_authority(&crate::ProcessId::fixture("authority-never-minted"))
+            .await
+            .expect("unknown process"),
+        None
+    );
+    let mut children = Vec::new();
+    for named in [false, true] {
+        let mut request = crate::SessionCreateRequest::root(
+            crate::SessionToolAccess::restricted([]).expect("tools"),
+            crate::SessionStartPoint::Empty,
+            crate::PluginOptions::empty(),
+        );
+        request.session_id = named.then(|| crate::SessionId::from("authority-named-child"));
+        let child = registry
+            .register_process(crate::ProcessRegistration::new(
+                crate::ProcessInput::SessionTurn {
+                    definition_key: format!("authority-child-{named}"),
+                    create_request: Box::new(request),
+                    turn_input: Box::new(crate::TurnInput::text("child")),
+                    result: crate::SessionTurnOutcome::Turn,
+                },
+                crate::ProcessProvenance::host(),
+                crate::Lifetime::Detached,
+            ))
+            .await
+            .expect("session-turn row");
+        let (read, env) = reads
+            .process_authority(&child.id)
+            .await
+            .expect("child read")
+            .expect("child");
+        assert_eq!(read, child);
+        assert_eq!(env, None, "session turns have no environment");
+        children.push(child);
+    }
+    // A retained row with missing bytes remains a row, never unknown.
+    stores
+        .process_env_store()
+        .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+            referrer: claim.referrer().clone(),
+            carries: Vec::new(),
+        })
+        .await
+        .expect("end pin");
+    stores
+        .process_env_store()
+        .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+            referrer: crate::ArtifactReferrer::ProcessRecord(engine.id.clone()),
+            carries: Vec::new(),
+        })
+        .await
+        .expect("end record edge");
+    let (record, bytes) = reads
+        .process_authority(&engine.id)
+        .await
+        .expect("retained missing env")
+        .expect("record remains");
+    assert_eq!(record, engine);
+    assert_eq!(bytes, None);
+    let terminal = registry
+        .complete_process(
+            &engine.id,
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            crate::ProcessCompletionAuthority::workflow_key(engine.id.to_string()),
+        )
+        .await
+        .expect("terminal");
+    registry
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            Some(crate::ProcessListFilter {
+                identity_kind: Some("testing-fixture".into()),
+                status: crate::ProcessStatusFilter::Any,
+                ..Default::default()
+            }),
+            crate::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune");
+    assert!(
+        matches!(
+            reads.process_authority(&engine.id).await,
+            Err(crate::StoreError::ProcessAuthorityPruned { .. })
+        ),
+        "pruned differs from unknown"
+    );
+    children.push(engine);
+    children
+}

@@ -5,6 +5,11 @@ use lash_sansio::SessionId;
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
 pub enum EmbedError {
+    /// Missing, mismatched or undecodable recorded process environment; the
+    /// structured cause and reference stay available to the host.
+    #[error(transparent)]
+    ProcessEnvLoad(#[from] crate::plugins::ProcessEnvLoadError),
+
     /// A model call's admission record (its prompt snapshot, texts or exact body) could not be read.
     #[error(transparent)]
     PromptSnapshotLoad(#[from] lash_core::plugin::prompt::AdmittedCallLoadError),
@@ -406,6 +411,10 @@ impl EmbedError {
             Self::ProcessRender(_) => false,
             Self::Runtime(err) => err.is_retryable(),
             Self::Control(err) => err.is_retryable(),
+            Self::ProcessEnvLoad(crate::plugins::ProcessEnvLoadError::Store(error)) => {
+                error.is_retryable()
+            }
+            Self::ProcessEnvLoad(_) => false,
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_retryable(),
             Self::Reconfigure(_) => false,
             // A store error is retried here exactly when the engine retries
@@ -521,6 +530,10 @@ impl EmbedError {
             },
             Self::Runtime(err) => err.is_terminal(),
             Self::Control(err) => err.is_terminal(),
+            Self::ProcessEnvLoad(crate::plugins::ProcessEnvLoadError::Store(error)) => {
+                error.is_terminal()
+            }
+            Self::ProcessEnvLoad(_) => true,
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_terminal(),
             Self::Reconfigure(
                 lash_core::facade_support::ReconfigureError::Validation(_)

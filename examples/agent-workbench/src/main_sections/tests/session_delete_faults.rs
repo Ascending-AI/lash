@@ -380,6 +380,10 @@ impl lash::StoreSet for DeleteStores {
     fn process_registry(&self) -> Arc<dyn lash::persistence::ProcessRegistry> {
         self.inner.process_registry()
     }
+    fn process_authority_reads(&self) -> Arc<dyn lash::persistence::ProcessAuthorityReads> {
+        self.inner.process_authority_reads()
+    }
+
     fn process_env_store(&self) -> Arc<dyn lash::persistence::ProcessEnvStore> {
         self.inner.process_env_store()
     }

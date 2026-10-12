@@ -487,6 +487,27 @@ impl SessionToolAccess {
         self.insert_hidden_tool(name.into(), self.hidden_tools.len())
     }
 
+    /// Names admitted from the resolved catalog the session is offered.
+    /// Ambient admits every offered name; Restricted admits offered members
+    /// with a matching id and exact name. Exact hidden names are removed in either mode. A restricted
+    /// name absent from the catalog is never admitted.
+    pub fn admitted_names(&self, offered: &lash_sansio::ToolCatalog) -> BTreeSet<String> {
+        offered
+            .tools
+            .iter()
+            .filter(|entry| {
+                !self.hides(&entry.manifest.name)
+                    && self.restricted_tools().is_none_or(|tools| {
+                        tools.iter().any(|tool| {
+                            tool.manifest.id == entry.manifest.id
+                                && tool.manifest.name == entry.manifest.name
+                        })
+                    })
+            })
+            .map(|entry| entry.manifest.name.clone())
+            .collect()
+    }
+
     pub fn restricted_tools(&self) -> Option<&[ToolDefinition]> {
         match &self.resident {
             SessionResidentToolAccess::Ambient => None,

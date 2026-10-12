@@ -42,6 +42,19 @@ const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
 lash_store_sql::statements! {
     /// `processes` statements only PostgreSQL issues.
     pub(crate) struct ProcessPostgresStatements @ "process" {
+        /// Environment bytes by reference without executable reconstruction.
+        select_environment_bytes = "SELECT artifact_bytes FROM lash_vm_artifacts WHERE namespace = ?1 AND artifact_ref = ?2";
+
+        /// A retained process and its environment bytes, or its prune tombstone, atomically.
+        select_authority = "SELECT p.record_json, a.artifact_bytes, NULL::text, NULL::bigint
+             FROM processes p
+             LEFT JOIN lash_vm_artifacts a ON a.namespace = ?2
+               AND a.artifact_ref = p.record_json::jsonb #>> '{input,launch,env}'
+             WHERE p.process_id = ?1
+             UNION ALL
+             SELECT NULL, NULL, terminal_label, pruned_at_ms
+             FROM process_tombstones WHERE process_id = ?1";
+
         /// The preflight's started-process walk (FIG-3571): every live
         /// process strictly after key `?1` (`NULL` from the start), at most
         /// `?2`, in key order.

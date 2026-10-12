@@ -817,3 +817,79 @@ fn validate_process_execution_authority(
 
 #[cfg(any(test, feature = "testing"))]
 impl lash_core_execution::ProcessRegistryTestSupport for SqliteProcessRegistry {}
+
+#[async_trait::async_trait]
+impl lash_core_execution::ProcessAuthorityReads for SqliteProcessRegistry {
+    async fn environment_bytes(
+        &self,
+        env: &lash_core_execution::ProcessEnvRef,
+    ) -> Result<Option<Vec<u8>>, StoreError> {
+        let env = env.clone();
+        let bytes: Option<Option<Vec<u8>>> = self
+            .conn
+            .call(move |conn| {
+                conn.query_row(
+                    process_sql().process_sqlite.select_environment_bytes.sql(),
+                    params![crate::artifact_store::PROCESS_ENV_NAMESPACE, env.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        match bytes {
+            None => Ok(None),
+            Some(None) => Err(stored_data_corrupt(
+                "process environment",
+                "artifact points at a missing blob",
+            )),
+            Some(Some(bytes)) => crate::codec::decode_artifact_blob(&bytes).map(Some),
+        }
+    }
+
+    async fn process_authority(
+        &self,
+        process: &ProcessId,
+    ) -> Result<Option<(ProcessRecord, Option<Vec<u8>>)>, StoreError> {
+        let process = process.clone();
+        self.conn
+            .call(move |conn| {
+                let row: Option<(Option<String>, Option<Vec<u8>>, Option<String>, Option<i64>)> =
+                    conn.query_row(
+                        process_sql().process_sqlite.select_authority.sql(),
+                        params![
+                            process.as_str(),
+                            crate::artifact_store::PROCESS_ENV_NAMESPACE
+                        ],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                    )
+                    .optional()?;
+                Ok(row)
+            })
+            .await
+            .map_err(sqlite_error)?
+            .map(|(record, bytes, label, pruned)| {
+                if let Some(record) = record {
+                    let record = serde_json::from_str(&record)
+                        .map_err(|error| StoreError::Backend(error.to_string()))?;
+                    Ok((
+                        record,
+                        bytes
+                            .map(|bytes| crate::codec::decode_artifact_blob(&bytes))
+                            .transpose()?,
+                    ))
+                } else {
+                    Err(StoreError::ProcessAuthorityPruned {
+                        terminal_label: label
+                            .ok_or_else(|| StoreError::Backend("missing tombstone label".into()))?,
+                        pruned_at_ms: u64::try_from(
+                            pruned
+                                .ok_or_else(|| StoreError::Backend("missing prune time".into()))?,
+                        )
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    })
+                }
+            })
+            .transpose()
+    }
+}

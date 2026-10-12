@@ -42,6 +42,20 @@ const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
 lash_store_sql::statements! {
     /// `processes` statements only SQLite issues.
     pub(crate) struct ProcessSqliteStatements @ "process" {
+        /// Environment bytes by reference without executable reconstruction.
+        select_environment_bytes = "SELECT b.content FROM artifact_refs a LEFT JOIN blobs b ON b.hash = a.blob_ref WHERE a.namespace = ?1 AND a.artifact_ref = ?2";
+
+        /// A retained process and its environment bytes, or its prune tombstone, atomically.
+        select_authority = "SELECT p.record_json, b.content, NULL, NULL
+             FROM processes p
+             LEFT JOIN artifact_refs a ON a.namespace = ?2
+               AND a.artifact_ref = json_extract(p.record_json, '$.input.launch.env')
+             LEFT JOIN blobs b ON b.hash = a.blob_ref
+             WHERE p.process_id = ?1
+             UNION ALL
+             SELECT NULL, NULL, terminal_label, pruned_at_ms
+             FROM process_tombstones WHERE process_id = ?1";
+
         /// The preflight's started-process walk (FIG-3571): every live
         /// process strictly after key `?1` (`NULL` from the start), at most
         /// `?2`, in key order.

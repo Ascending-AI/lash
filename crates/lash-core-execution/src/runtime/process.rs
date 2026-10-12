@@ -105,7 +105,7 @@ pub use model::{
     SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StoreRealization,
     TerminalProcessStatus, WaitKind, WaitState, artifact_referrer_ended,
     artifact_store_plugin_error, lifetime, load_process_env, mint_process_id,
-    process_child_session_id, process_session_turn_id,
+    process_child_session_id, process_session_id, process_session_turn_id,
 };
 pub use model::{ConsumerHold, SessionTurnOutcome};
 pub use observation::{

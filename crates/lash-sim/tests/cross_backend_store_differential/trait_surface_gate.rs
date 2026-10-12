@@ -65,6 +65,10 @@ fn harness_sources() -> Vec<String> {
 /// Every fallible segment of `RuntimeStore`; fleet format is infallible and
 /// attachment referrers are checked separately below.
 const GATED_SESSION_TRAITS: &[(&str, &str)] = &[
+    (
+        include_str!("../../../lash-core-execution/src/backend.rs"),
+        "ProcessAuthorityReads",
+    ),
     (SESSION_CATALOG_SOURCE, "SessionCatalogStore"),
     (SESSION_STORE_SOURCE, "SessionCommitStore"),
     (SESSION_HISTORY_SOURCE, "SessionHistoryStore"),

@@ -15,3 +15,11 @@ pub fn process_child_session_id(process_id: &ProcessId) -> SessionId {
 pub fn process_session_turn_id(process_id: &ProcessId) -> crate::TurnId {
     crate::TurnId::from(process_id)
 }
+
+/// The session a session-turn process starts: the stated id, or its stable child id.
+pub fn process_session_id(process: &ProcessId, request: &crate::SessionCreateRequest) -> SessionId {
+    request
+        .session_id
+        .clone()
+        .unwrap_or_else(|| process_child_session_id(process))
+}

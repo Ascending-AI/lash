@@ -500,6 +500,10 @@ impl StoreSet for RecordedStores {
         self.inner.process_registry()
     }
 
+    fn process_authority_reads(&self) -> Arc<dyn lash_core::ProcessAuthorityReads> {
+        self.inner.process_authority_reads()
+    }
+
     fn process_env_store(&self) -> Arc<dyn ProcessEnvStore> {
         self.inner.process_env_store()
     }

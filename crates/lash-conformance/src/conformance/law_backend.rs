@@ -172,6 +172,10 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("tool material store")
     }
 
+    fn process_authority_reads(&self) -> Arc<dyn lash_core::ProcessAuthorityReads> {
+        Self::no_second_substrate("process authority reads")
+    }
+
     fn process_env_store(&self) -> Arc<dyn crate::ProcessEnvStore> {
         Arc::new(crate::testing::UnavailableProcessEnvStore)
     }

@@ -807,3 +807,5 @@ pub use lash_core_execution::{EffectAttempt, RecordedEffectExecution};
 mod attachments_tests;
 
 pub use lash_core_store::transcript;
+
+pub use lash_core_execution::ProcessAuthorityReads;

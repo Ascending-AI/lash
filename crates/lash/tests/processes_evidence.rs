@@ -844,6 +844,7 @@ mod named_component_laws {
     enum Stated {
         Named(Vec<ProcessConfigKey<()>>),
         Ambient,
+        Authority,
     }
 
     struct Policy(Arc<Mutex<Stated>>);
@@ -858,6 +859,37 @@ mod named_component_laws {
             let stated = self.0.lock_recover().clone();
             let env = match stated {
                 Stated::Ambient => ambient_env(),
+                Stated::Authority => {
+                    let policy = lash::process::env::policy::from_run(|_| {
+                        Ok(vec![ProcessComponentEntry::new(A, &(), [])?])
+                    });
+                    let choice = policy.choose(cx).await?;
+                    let lash::process::ProcessEnvChoice::New(recorded) = choice.env else {
+                        panic!("from_run chooses new")
+                    };
+                    // The host explicitly narrows its from_run choice to a and b.
+                    let mut builder = ProcessEnv::builder(
+                        lash::plugins::SessionToolAccess::restricted([
+                            a_definition(A_TOOL),
+                            a_definition("b"),
+                        ])
+                        .expect("the law states valid tool grants"),
+                        recorded.max_tool_calls(),
+                    )
+                    .attachments(Arc::clone(recorded.attachments()));
+                    if let Some(model) = recorded.model() {
+                        builder = builder.model(model.clone());
+                    }
+                    for entry in recorded.components() {
+                        builder = builder.entry(entry.clone());
+                    }
+                    for (slot, capability) in recorded.capabilities() {
+                        builder = builder.capability(slot.clone(), capability.clone());
+                    }
+                    builder
+                        .build()
+                        .map_err(lash::process::ProcessEnvPolicyError::Refused)?
+                }
                 Stated::Named(keys) => {
                     let (Some(run), Some(offered)) = (cx.run, cx.offered) else {
                         return Err(lash::process::ProcessEnvPolicyError::Fault(
@@ -937,11 +969,22 @@ mod named_component_laws {
     }
 
     async fn world() -> World {
+        world_with_reads(None).await
+    }
+
+    async fn world_with_reads(reads: Option<Arc<AuthorityProbe>>) -> World {
         let stores: Arc<dyn lash::StoreSet> = Arc::new(
             lash_sqlite_store::SqliteStoreSet::memory()
                 .await
                 .expect("SQLite stores"),
         );
+        let authority = reads.is_some();
+        let stores = match reads {
+            Some(reads) => lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                .map_process_authority_reads(|inner| Arc::new(CountingAuthority { inner, reads }))
+                .into_store_set(),
+            None => stores,
+        };
         let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(&stores))
             .process_engine(Arc::new(lash_core::testing::HeldProcessEngine))
             .build()
@@ -1002,6 +1045,12 @@ mod named_component_laws {
                     Arc::new(Policy(Arc::clone(&stated))),
                 ),
             ));
+        if authority {
+            builder = builder.tools(Arc::new(lash::tools::StaticToolProvider::new(
+                vec![a_definition("b"), a_definition("c")],
+                AnswerA,
+            )));
+        }
         for (key, shape) in [
             (CHECK, Shape::Check),
             (A, Shape::Tool),
@@ -1262,5 +1311,465 @@ mod named_component_laws {
             .expect("restricted access passes");
         assert!(world.stored(&restricted).await);
         world.core.shutdown().await.expect("the core shuts down");
+    }
+
+    #[derive(Default)]
+    struct AuthorityProbe {
+        calls: AtomicUsize,
+        override_bytes: Mutex<Option<Option<Vec<u8>>>>,
+    }
+
+    struct CountingAuthority {
+        inner: Arc<dyn lash::persistence::ProcessAuthorityReads>,
+        reads: Arc<AuthorityProbe>,
+    }
+
+    #[async_trait::async_trait]
+    impl lash::persistence::ProcessAuthorityReads for CountingAuthority {
+        async fn process_authority(
+            &self,
+            id: &lash::ProcessId,
+        ) -> Result<
+            Option<(lash::persistence::ProcessRecord, Option<Vec<u8>>)>,
+            lash::persistence::StoreError,
+        > {
+            self.reads.calls.fetch_add(1, Ordering::SeqCst);
+            let result = self.inner.process_authority(id).await?;
+            Ok(result.map(|(record, bytes)| {
+                let bytes = if record.env_ref().is_some() {
+                    self.reads
+                        .override_bytes
+                        .lock_recover()
+                        .clone()
+                        .unwrap_or(bytes)
+                } else {
+                    bytes
+                };
+                (record, bytes)
+            }))
+        }
+        async fn environment_bytes(
+            &self,
+            env: &lash::process::ProcessEnvRef,
+        ) -> Result<Option<Vec<u8>>, lash::persistence::StoreError> {
+            self.reads.calls.fetch_add(1, Ordering::SeqCst);
+            let bytes = self.inner.environment_bytes(env).await?;
+            Ok(self
+                .reads
+                .override_bytes
+                .lock_recover()
+                .clone()
+                .unwrap_or(bytes))
+        }
+    }
+
+    // The host guide's check, compiled with this owning test target.
+    async fn may_address_process(
+        processes: &lash::process::Processes,
+        id: &lash::ProcessId,
+        current: &lash::plugins::SessionToolAccess,
+        offered: &lash::plugins::ToolCatalog,
+    ) -> lash::Result<bool> {
+        Ok(match processes.environment(id).await? {
+            Some(lash::process::ProcessEnvView {
+                authority: lash::process::ProcessAuthority::Engine { env, .. },
+                ..
+            }) => lash::process::authority::tools_excess(&env, current, offered).is_empty(),
+            _ => false,
+        })
+    }
+
+    /// ENV-AUTHORITY-READ (M8, D5, D7): observation never composes executable code.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn env_authority_read() {
+        let reads = Arc::new(AuthorityProbe::default());
+        let world = world_with_reads(Some(Arc::clone(&reads))).await;
+        *world.stated.lock_recover() = Stated::Authority;
+        world
+            .run(
+                "authority-session",
+                &format!(
+                    "const body = async () => await tools.{A_TOOL}({{}});
+             const handle = await processes.start({{definition: body, label: 'authority-child'}});
+             await control.finish(await handle);"
+                ),
+            )
+            .await;
+        let record = world
+            .stores
+            .process_registry()
+            .list_processes_page(
+                &lash::persistence::ProcessListFilter {
+                    status: lash::process::ProcessStatusFilter::Any,
+                    identity_label: Some("authority-child".into()),
+                    ..Default::default()
+                },
+                std::num::NonZeroUsize::new(16).unwrap(),
+                None,
+            )
+            .await
+            .unwrap()
+            .records
+            .into_iter()
+            .next()
+            .unwrap();
+        let builds = world.witness.builds(A);
+        let before = reads.calls.load(Ordering::SeqCst);
+        let view = world
+            .core
+            .processes()
+            .environment(&record.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            reads.calls.load(Ordering::SeqCst) - before,
+            1,
+            "one backend read"
+        );
+        assert_eq!(
+            world.witness.builds(A),
+            builds,
+            "no component builds during observation"
+        );
+        assert_eq!(view.provenance, record.provenance);
+        assert!(
+            view.provenance.run.is_some(),
+            "the originating run is recorded"
+        );
+        let lash::process::ProcessAuthority::Engine {
+            env_ref,
+            env,
+            engine_settings,
+        } = &view.authority
+        else {
+            panic!("engine authority")
+        };
+        assert_eq!(Some(env_ref), record.env_ref());
+        assert_eq!(engine_settings.as_ref(), record.engine_settings());
+        assert_eq!(
+            env.tools()
+                .restricted_tools()
+                .unwrap()
+                .iter()
+                .map(|tool| tool.manifest.name.as_str())
+                .collect::<std::collections::BTreeSet<_>>(),
+            [A_TOOL, "b"].into_iter().collect()
+        );
+        let before = reads.calls.load(Ordering::SeqCst);
+        assert_eq!(
+            world.core.processes().env(env_ref).await.unwrap().as_ref(),
+            Some(env.as_ref())
+        );
+        assert_eq!(
+            reads.calls.load(Ordering::SeqCst) - before,
+            1,
+            "one read by reference"
+        );
+        let session = world
+            .core
+            .session(lash::SessionId::try_from("authority-session").unwrap())
+            .open()
+            .await
+            .unwrap();
+        let current = lash::plugins::SessionToolAccess::restricted([a_definition(A_TOOL)]).unwrap();
+        let config = session.admin().config();
+        let revision = config.revision().await.unwrap();
+        let changed = config
+            .apply(
+                lash::config::ConfigWrite::new("authority:narrow", revision),
+                lash::config::ConfigTransaction::of(lash::config::SetToolAccess {
+                    access: current.clone(),
+                }),
+            )
+            .await
+            .unwrap();
+        let changed = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            changed.await_outcome(&config),
+        )
+        .await
+        .expect("the engine settles the narrowing")
+        .unwrap();
+        assert!(
+            matches!(
+                changed,
+                lash::config::ConfigTransactionOutcome::Applied { .. }
+            ),
+            "{changed:?}"
+        );
+        let current = session.durable().tool_access().await.unwrap().unwrap();
+        let offered = lash::plugins::ToolCatalog::from_tool_definitions(vec![
+            a_definition(A_TOOL),
+            a_definition("b"),
+            a_definition("c"),
+        ]);
+        assert_eq!(
+            current.admitted_names(&offered),
+            [A_TOOL.to_owned()].into_iter().collect()
+        );
+        assert_eq!(
+            world
+                .core
+                .processes()
+                .environment(&record.id)
+                .await
+                .unwrap(),
+            Some(view.clone())
+        );
+        assert_eq!(
+            lash::process::authority::tools_excess(env, &current, &offered),
+            ["b".to_owned()].into_iter().collect()
+        );
+        assert!(
+            !may_address_process(&world.core.processes(), &record.id, &current, &offered)
+                .await
+                .unwrap()
+        );
+        assert_eq!(world.witness.builds(A), builds);
+        // The port's shared body also pins session-turn ids, unknown/pruned ids,
+        // missing bytes, and capability binding/contract/args round-trip by ref.
+        world.core.shutdown().await.unwrap();
+        let children = lash_conformance::env_authority_read(world.stores.clone()).await;
+        for child in children {
+            let lash_core::ProcessInput::SessionTurn { create_request, .. } = child.input.as_ref()
+            else {
+                assert!(matches!(
+                    world.core.processes().environment(&child.id).await,
+                    Err(lash::EmbedError::Plugin(
+                        PluginError::ProcessNoLongerRetained { .. }
+                    ))
+                ));
+                continue;
+            };
+            let expected = create_request
+                .session_id
+                .clone()
+                .unwrap_or_else(|| lash_core::facade_support::process_child_session_id(&child.id));
+            let before = reads.calls.load(Ordering::SeqCst);
+            let view = world
+                .core
+                .processes()
+                .environment(&child.id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(reads.calls.load(Ordering::SeqCst) - before, 1);
+            assert_eq!(
+                view.authority,
+                lash::process::ProcessAuthority::SessionTurn { session: expected }
+            );
+        }
+        assert_eq!(world.witness.builds(A), builds);
+        let before = reads.calls.load(Ordering::SeqCst);
+        assert_eq!(
+            world
+                .core
+                .processes()
+                .environment(&lash::ProcessId::fixture("authority-unknown"))
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(reads.calls.load(Ordering::SeqCst) - before, 1);
+        let catalog = world.core.host_artifacts().process_catalog(env).unwrap();
+        assert_eq!(
+            catalog
+                .tools
+                .iter()
+                .map(|entry| entry.manifest.name.as_str())
+                .collect::<Vec<_>>(),
+            [A_TOOL]
+        );
+        assert!(
+            world.witness.builds(A) > builds,
+            "catalog preview deliberately builds components"
+        );
+        assert!(matches!(
+            world.core.host_artifacts().process_catalog(&ambient_env()),
+            Err(lash::EmbedError::Plugin(PluginError::ProcessEnvRefused {
+                refusal: ProcessEnvRefusal::AmbientTools
+            }))
+        ));
+        let capability = lash::CapabilityRef {
+            binding: lash::BindingId::new("binding:promoted"),
+            contract: lash::ContractRef::new("integration", 3),
+            args: serde_json::json!({"account": "promoted"}),
+        };
+        let recorded = ProcessEnv::builder(
+            lash::plugins::SessionToolAccess::restricted([]).unwrap(),
+            lash::MaxToolCalls::new(2),
+        )
+        .capability(lash::SlotId::new("integration"), capability.clone())
+        .build()
+        .unwrap();
+        let reference = world
+            .core
+            .host_artifacts()
+            .publish_process_env(&lash::process::HostArtifactPin::mint(), &recorded)
+            .await
+            .unwrap();
+        let before = reads.calls.load(Ordering::SeqCst);
+        let restored = world
+            .core
+            .processes()
+            .env(&reference)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reads.calls.load(Ordering::SeqCst) - before, 1);
+        assert_eq!(
+            restored
+                .capabilities()
+                .get(&lash::SlotId::new("integration")),
+            Some(&capability)
+        );
+        let builds = world.witness.builds(A);
+        *reads.override_bytes.lock_recover() = Some(None);
+        assert!(
+            matches!(world.core.processes().environment(&record.id).await, Err(lash::EmbedError::ProcessEnvLoad(lash::plugins::ProcessEnvLoadError::Missing(missing))) if missing == *env_ref)
+        );
+        assert_eq!(world.core.processes().env(env_ref).await.unwrap(), None);
+        *reads.override_bytes.lock_recover() = Some(Some(b"{}".to_vec()));
+        assert!(
+            matches!(world.core.processes().environment(&record.id).await, Err(lash::EmbedError::ProcessEnvLoad(lash::plugins::ProcessEnvLoadError::Mismatched(mismatched))) if mismatched == *env_ref)
+        );
+        assert!(matches!(
+            world.core.processes().env(env_ref).await,
+            Err(lash::EmbedError::ProcessEnvLoad(
+                lash::plugins::ProcessEnvLoadError::Mismatched(_)
+            ))
+        ));
+        assert_eq!(world.witness.builds(A), builds);
+    }
+
+    /// D7: resolved catalog membership and exact hiding, including a mismatched id.
+    #[test]
+    fn admitted_names_obey_the_offered_catalog_and_hidden_names() {
+        use lash::plugins::{SessionToolAccess, ToolCatalog};
+        let offered = ToolCatalog::from_tool_definitions(vec![
+            a_definition("a"),
+            a_definition("b"),
+            a_definition("c"),
+        ]);
+        for (access, expected) in [
+            (SessionToolAccess::ambient(), vec!["a", "b", "c"]),
+            (
+                SessionToolAccess::ambient()
+                    .with_hidden_tools(["b"])
+                    .unwrap(),
+                vec!["a", "c"],
+            ),
+            (
+                SessionToolAccess::restricted([
+                    a_definition("a"),
+                    a_definition("b"),
+                    a_definition("missing"),
+                ])
+                .unwrap(),
+                vec!["a", "b"],
+            ),
+            (
+                SessionToolAccess::restricted([a_definition("a"), a_definition("b")])
+                    .unwrap()
+                    .with_hidden_tools(["b"])
+                    .unwrap(),
+                vec!["a"],
+            ),
+        ] {
+            assert_eq!(
+                access.admitted_names(&offered),
+                expected.into_iter().map(str::to_owned).collect()
+            );
+        }
+        let mut other_id = a_definition("a");
+        other_id.manifest.id = "other:a".into();
+        assert!(
+            SessionToolAccess::restricted([other_id])
+                .unwrap()
+                .admitted_names(&offered)
+                .is_empty()
+        );
+        let mut changed_identity = a_definition("a");
+        changed_identity.manifest.id = "other:a".into();
+        let absent_identity = ProcessEnv::builder(
+            SessionToolAccess::restricted([changed_identity]).unwrap(),
+            lash::MaxToolCalls::new(2),
+        )
+        .build()
+        .unwrap();
+        assert_eq!(
+            lash::process::authority::tools_excess(
+                &absent_identity,
+                &SessionToolAccess::ambient(),
+                &offered
+            ),
+            ["a".to_owned()].into_iter().collect(),
+            "a same-name tool with another id is absent from offered"
+        );
+        let env = ProcessEnv::builder(
+            SessionToolAccess::restricted([a_definition("a"), a_definition("missing")]).unwrap(),
+            lash::MaxToolCalls::new(2),
+        )
+        .build()
+        .unwrap();
+        assert_eq!(
+            lash::process::authority::tools_excess(&env, &SessionToolAccess::ambient(), &offered),
+            ["missing".to_owned()].into_iter().collect()
+        );
+        assert!(!lash::process::authority::tools_within(
+            &env,
+            &SessionToolAccess::ambient(),
+            &offered
+        ));
+        let session = lash::SessionId::try_from("granted-session").unwrap();
+        let capability = lash::CapabilityRef {
+            binding: lash::BindingId::new("binding:one"),
+            contract: lash::ContractRef::new("integration", 1),
+            args: serde_json::json!({"scope": "read"}),
+        };
+        let slot = lash::SlotId::new("integration");
+        let env = ProcessEnv::builder(
+            SessionToolAccess::restricted([]).unwrap(),
+            lash::MaxToolCalls::new(2),
+        )
+        .component_with_sessions(A, &(), [session.clone()])
+        .capability(slot.clone(), capability.clone())
+        .build()
+        .unwrap();
+        let id = env.components()[0].id().clone();
+        assert_eq!(
+            lash::process::authority::components_excess(&env, &Default::default()),
+            vec![id.clone()]
+        );
+        assert!(
+            lash::process::authority::components_excess(&env, &[id.clone()].into_iter().collect())
+                .is_empty()
+        );
+        assert_eq!(
+            lash::process::authority::session_grants(&env),
+            [(id, [session].into_iter().collect())]
+                .into_iter()
+                .collect()
+        );
+        let equal = [(slot.clone(), capability.clone())].into_iter().collect();
+        assert!(lash::process::authority::capabilities_excess(&env, &equal).is_empty());
+        assert_eq!(
+            lash::process::authority::capabilities_excess(&env, &Default::default()),
+            equal
+        );
+        let different = [(
+            slot,
+            lash::CapabilityRef {
+                args: serde_json::json!({"scope": "none"}),
+                ..capability
+            },
+        )]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            lash::process::authority::capabilities_excess(&env, &different),
+            equal
+        );
     }
 }

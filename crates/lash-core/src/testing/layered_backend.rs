@@ -34,6 +34,7 @@ pub struct LayeredBackend {
     session_store_factory: Arc<dyn DeploymentStore>,
     process_registry: Arc<dyn ProcessRegistry>,
     process_env_store: Arc<dyn ProcessEnvStore>,
+    process_authority_reads: Arc<dyn crate::ProcessAuthorityReads>,
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
@@ -48,6 +49,7 @@ impl LayeredBackend {
             session_store_factory: inner.session_store_factory(),
             process_registry: inner.process_registry(),
             process_env_store: inner.process_env_store(),
+            process_authority_reads: inner.process_authority_reads(),
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
             obligation_ledgers: None,
@@ -77,6 +79,17 @@ impl LayeredBackend {
         layer: impl FnOnce(Arc<dyn ProcessRegistry>) -> Arc<dyn ProcessRegistry>,
     ) -> Self {
         self.process_registry = layer(self.process_registry);
+        self
+    }
+
+    /// Decorate atomic recorded-authority reads independently of execution.
+    pub fn map_process_authority_reads(
+        mut self,
+        layer: impl FnOnce(
+            Arc<dyn crate::ProcessAuthorityReads>,
+        ) -> Arc<dyn crate::ProcessAuthorityReads>,
+    ) -> Self {
+        self.process_authority_reads = layer(self.process_authority_reads);
         self
     }
 
@@ -148,6 +161,7 @@ impl LayeredBackend {
             session_store_factory: self.session_store_factory,
             process_registry: self.process_registry,
             process_env_store: self.process_env_store,
+            process_authority_reads: self.process_authority_reads,
             attachment_store: self.attachment_store,
             module_artifacts: self.module_artifacts,
             obligation_ledgers: self.obligation_ledgers,
@@ -174,6 +188,7 @@ impl LayeredStores {
             session_store_factory: inner.session_store_factory(),
             process_registry: inner.process_registry(),
             process_env_store: inner.process_env_store(),
+            process_authority_reads: inner.process_authority_reads(),
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
             obligation_ledgers: None,
@@ -223,6 +238,17 @@ impl LayeredStores {
         layer: impl FnOnce(Arc<dyn ProcessRegistry>) -> Arc<dyn ProcessRegistry>,
     ) -> Self {
         self.0.process_registry = layer(self.0.process_registry);
+        self
+    }
+
+    /// Decorate atomic authority reads independently of registration and execution.
+    pub fn map_process_authority_reads(
+        mut self,
+        layer: impl FnOnce(
+            Arc<dyn crate::ProcessAuthorityReads>,
+        ) -> Arc<dyn crate::ProcessAuthorityReads>,
+    ) -> Self {
+        self.0.process_authority_reads = layer(self.0.process_authority_reads);
         self
     }
 
@@ -297,6 +323,7 @@ struct LayeredStoreSet {
     session_store_factory: Arc<dyn DeploymentStore>,
     process_registry: Arc<dyn ProcessRegistry>,
     process_env_store: Arc<dyn ProcessEnvStore>,
+    process_authority_reads: Arc<dyn crate::ProcessAuthorityReads>,
     attachment_store: Arc<dyn AttachmentStore>,
     attachment_referrers: Arc<dyn crate::AttachmentReferrers>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
@@ -344,6 +371,10 @@ impl StoreSet for LayeredStoreSet {
 
     fn tool_material_store(&self) -> Arc<dyn crate::store::ToolMaterialStore> {
         self.inner.tool_material_store()
+    }
+
+    fn process_authority_reads(&self) -> Arc<dyn crate::ProcessAuthorityReads> {
+        Arc::clone(&self.process_authority_reads)
     }
 
     fn process_env_store(&self) -> Arc<dyn ProcessEnvStore> {

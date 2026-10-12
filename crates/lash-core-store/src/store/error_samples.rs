@@ -46,6 +46,9 @@ fn attachment() -> crate::AttachmentId {
 }
 
 store_error_samples! {
+    ProcessAuthorityPruned { .. } => StoreError::ProcessAuthorityPruned {
+        terminal_label: "completed".into(), pruned_at_ms: 1,
+    },
     UnfinishedRunConflict { .. } => StoreError::UnfinishedRunConflict {
         session_id: session(),
         run: turn(),

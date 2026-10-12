@@ -35,6 +35,8 @@ pub(super) struct SurfaceScratch {
 /// One fallible store-trait method, executed as a compared differential step.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SurfaceMethod {
+    ProcessAuthority,
+    EnvironmentBytes,
     LoadSession,
     RunFactsOf,
     ListPendingTurnInputs,
@@ -170,6 +172,8 @@ pub(super) enum SurfaceMethod {
 impl SurfaceMethod {
     pub(super) fn label(self) -> &'static str {
         match self {
+            Self::ProcessAuthority => "surface:process_authority",
+            Self::EnvironmentBytes => "surface:environment_bytes",
             Self::LoadSession => "surface:load_session",
             Self::RunFactsOf => "surface:run_facts_of",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
@@ -351,6 +355,8 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             },
             StoreOperation::EnqueueNextTurnInput,
             StoreOperation::EnqueueAdmittableQueuedWork,
+            surface(SurfaceMethod::ProcessAuthority),
+            surface(SurfaceMethod::EnvironmentBytes),
             surface(SurfaceMethod::RunFactsOf),
             surface(SurfaceMethod::ReadSessionStateVersion),
             surface(SurfaceMethod::AdmitSessionState),
@@ -555,6 +561,25 @@ impl BackendRunner {
         let store = self.store();
         let session_id = self.session_id.clone();
         let answer = match method {
+            SurfaceMethod::ProcessAuthority => {
+                let record = self
+                    .lifecycle_backend
+                    .process_authority_reads()
+                    .process_authority(&lash_core::ProcessId::fixture("surface:unknown-process"))
+                    .await?;
+                format!("present={}", record.is_some())
+            }
+            SurfaceMethod::EnvironmentBytes => {
+                let env_ref = lash_core::testing::process_env_with_limit(999)
+                    .stable_ref()
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let bytes = self
+                    .lifecycle_backend
+                    .process_authority_reads()
+                    .environment_bytes(&env_ref)
+                    .await?;
+                format!("present={}", bytes.is_some())
+            }
             SurfaceMethod::RunFactsOf => {
                 let owner = lash_core::durable_port::domain::OwnerKey::Turn(
                     session_id.clone(),
