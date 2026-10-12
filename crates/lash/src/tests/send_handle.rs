@@ -16,6 +16,48 @@ mod arrival;
 mod pins;
 mod replay_lag;
 
+/// FIG-6047: attaching to an absent or deleted session decides without waiting.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn absent_sessions_answer_not_accepted_promptly() -> Result<()> {
+    let fixture = fixture(1).await?;
+    let id = SessionId::fixture("absent-input-outcome");
+    let missing = fixture.core.session(id.clone()).durable().await?;
+    let key = crate::TurnId::fixture("never-sent");
+    let answer = |session: crate::DurableSession| {
+        let key = key.clone();
+        async move {
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                session.attach_id(key).outcome(),
+            )
+            .await
+            .expect("absence decides promptly")
+            .expect("absence is an outcome, not a read failure");
+            assert!(matches!(outcome, crate::SendOutcome::NotAccepted { .. }));
+        }
+    };
+    answer(missing.clone()).await;
+    let created = fixture
+        .core
+        .session(id.clone())
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
+        .await?;
+    assert!(created.pending_turn_inputs().await?.is_empty());
+    let administration = fixture.core.session_administration().await;
+    LashCore::delete_session(administration.delete_context(id.as_str())?).await?;
+    assert_eq!(
+        fixture.core.await_session_deletion(&id).await?,
+        crate::core::SessionDeleteCompletion::Deleted
+    );
+    answer(created).await;
+    answer(missing).await;
+    fixture.core.shutdown().await?;
+    Ok(())
+}
+
 /// FIG-6017: settled answers read only run evidence. Session windows are
 /// loaded only when the host explicitly asks for a committed-head view.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

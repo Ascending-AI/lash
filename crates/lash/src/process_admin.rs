@@ -502,6 +502,8 @@ impl Processes {
         })
     }
 
+    /// Read the process with its park state from this core's actor store.
+    /// A retained terminal reports `NotParked`; this read never reports `NotRead`.
     pub async fn get(
         &self,
         process_id: &ProcessId,

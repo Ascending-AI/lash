@@ -279,6 +279,7 @@ macro_rules! process_registry_tests {
                 (watched_process_registry_start_key_after_prune_starts_a_new_process, "watched-start-key-after-prune"),
                 (lifecycle_transition_refusals_are_backend_invariant, "transition-refusals"),
                 (lifecycle_event_timestamps_follow_the_registry_clock, "lifecycle-clock"),
+                (terminal_retention_ignores_later_observer_facts, "terminal-retention-clock"),
                 (a_resume_event_cannot_return_an_ended_process_to_running, "resume-after-terminal"),
                 (external_ref_is_written_compare_and_set_by_segment_ordinal, "external-ref-compare-and-set"),
                 (a_start_key_reports_created_then_existing_and_is_trusted, "start-key-disposition"),

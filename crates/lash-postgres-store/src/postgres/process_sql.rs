@@ -124,7 +124,7 @@ lash_store_sql::statements! {
         /// nothing.
         list_prunable_terminal = "SELECT record_json FROM processes
          WHERE {{retired_process_status(status)}}
-           AND updated_at_ms < ?1
+           AND (record_json::jsonb #>> '{lifecycle,occurred_at_ms}')::NUMERIC < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
            AND consumer_hold_key IS NULL
                AND cascade_cursor IS NULL
@@ -138,7 +138,7 @@ lash_store_sql::statements! {
         /// through the delete.
         list_prunable_terminal_for_update = "SELECT record_json FROM processes
          WHERE {{retired_process_status(status)}}
-           AND updated_at_ms < ?1
+           AND (record_json::jsonb #>> '{lifecycle,occurred_at_ms}')::NUMERIC < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
            AND consumer_hold_key IS NULL
                AND cascade_cursor IS NULL

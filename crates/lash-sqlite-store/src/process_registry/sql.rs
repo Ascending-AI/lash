@@ -103,7 +103,7 @@ lash_store_sql::statements! {
         /// sequence `?2`, with no consumer hold.
         list_prunable_terminal = "SELECT process_id, record_json FROM processes
              WHERE {{retired_process_status(status)}}
-               AND updated_at_ms < ?1
+               AND json_extract(record_json, '$.lifecycle.occurred_at_ms') < ?1
                AND (?2 IS NULL OR change_seq <= ?2)
                AND consumer_hold_key IS NULL
                AND cascade_cursor IS NULL

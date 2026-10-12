@@ -644,7 +644,7 @@ pub trait ProcessRetention: Send + Sync {
         through: u64,
     ) -> Result<super::events::ProcessEventRelease, PluginError>;
 
-    /// Physically delete terminal process rows whose `updated_at_ms` is older
+    /// Physically delete terminal process rows whose terminal `occurred_at_ms` is older
     /// than `cutoff_epoch_ms`, match `filter` when one is supplied, and have a
     /// process change sequence allowed by the caller's explicit projection
     /// `watermark`, together with their events, observer edges, and lease rows.
@@ -694,7 +694,7 @@ pub trait ProcessRetention: Send + Sync {
     /// The process ids [`prune_terminal_processes`](Self::prune_terminal_processes)
     /// would delete right now for the same arguments, in ascending id order,
     /// without deleting anything. The survey applies the prune's complete
-    /// eligibility predicate — retired status, `updated_at_ms` before the
+    /// eligibility predicate — retired status, terminal `occurred_at_ms` before the
     /// cutoff, the projection `watermark`, no parent-end plan, no consumer hold, and `filter` — so a
     /// caller that must reclaim rows the registry does not own (the process's
     /// durable effect journal and its await-event promises) fences exactly the

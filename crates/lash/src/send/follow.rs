@@ -495,8 +495,15 @@ pub(super) async fn follow(
         if resolve_now {
             observation.take_ready(ctx, &mut adoption, tap).await;
             let resolution = match subject {
-                Subject::Input(receipt) => resolve::resolve_input(&ctx.parts, receipt).await?,
-                Subject::Run(run) => resolve::resolve_run(&ctx.parts, run).await?,
+                Subject::Input(receipt) => resolve::resolve_input(&ctx.parts, receipt).await,
+                Subject::Run(run) => resolve::resolve_run(&ctx.parts, run).await,
+            };
+            let resolution = match resolution {
+                Ok(resolution) => resolution,
+                Err(error) if super::absent_input_session(subject, &error) => {
+                    Resolution::NotAccepted
+                }
+                Err(error) => return Err(error),
             };
             match resolution {
                 Resolution::OperationSettled { run, outcome } => {

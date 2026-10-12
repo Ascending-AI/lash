@@ -5,7 +5,7 @@
 //! §12), drained at the actor's next pass, and the close's first step
 //! cancels the turn it finds open. So a run in flight when its session is
 //! deleted ends once, by its own commit or by the close, and its send
-//! answers that end, or the typed `SessionDeleted` once the close deleted
+//! answers that end, or `NotAccepted` once the close deleted
 //! the session's storage before the handle read it; nothing runs its turn
 //! again; the close ends at the
 //! tombstone; and a send after it is refused as the deleted session's. A
@@ -84,6 +84,13 @@ async fn a_run_in_flight_when_its_session_is_deleted_ends_typed(
         .await
         .expect("the deleted session's run ends");
     match &ended {
+        Ok(crate::SendOutcome::NotAccepted { .. }) => assert!(
+            matches!(
+                core.store_factory.lookup_session(&session_id).await?,
+                lash_core::store::SessionLookup::Deleted
+            ),
+            "an input without retained acceptance belongs to the deleted session"
+        ),
         Ok(outcome) => assert!(
             matches!(
                 outcome.status(),
@@ -91,10 +98,7 @@ async fn a_run_in_flight_when_its_session_is_deleted_ends_typed(
             ),
             "the run in flight ends once, by its commit or by the close's cancel: {outcome:?}"
         ),
-        Err(EmbedError::Store(StoreError::SessionDeleted {
-            session_id: deleted,
-        })) if *deleted == session_id => {}
-        Err(error) => panic!("the run's handle answers its end or the typed deletion: {error:?}"),
+        Err(error) => panic!("the input's handle answers its end or absence: {error:?}"),
     }
     assert_eq!(
         core.await_session_deletion(&session_id).await?,

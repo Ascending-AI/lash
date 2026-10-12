@@ -587,11 +587,12 @@ pub enum SendOutcome {
     Withdrawn {
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
-    /// Lash holds no record of the input: it was never accepted, or it was
-    /// withdrawn and [`vacuum`](lash_core::store::StoreMaintenance::vacuum)
+    /// Lash holds no record of the input: its session is absent or deleted,
+    /// it was never accepted, or it was withdrawn and
+    /// [`vacuum`](lash_core::store::StoreMaintenance::vacuum)
     /// has since reclaimed the withdrawal. A send under the same id is
-    /// accepted as new. A host that lost a send's response re-sends the same
-    /// id with the same content rather than reading this answer
+    /// accepted as new when the session is live. A host that lost a send's
+    /// response re-sends the same id with the same content rather than reading this answer
     /// ([`SendBuilder::id`]).
     NotAccepted {
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
@@ -813,13 +814,44 @@ async fn settle(
         }
         return Ok(outcome);
     }
+    let outcome = match follow_subject(target, subject, cursor, &mut tap).await {
+        Ok(outcome) => outcome,
+        // An input has no retained acceptance once its session is gone.
+        // Store failures and standing faults remain failed reads.
+        Err(error) if absent_input_session(subject, &error) => {
+            SendOutcome::NotAccepted { gaps: Vec::new() }
+        }
+        Err(error) => return Err(error),
+    };
+    shared.remember(&outcome);
+    Ok(outcome)
+}
+
+fn absent_input_session(subject: &Subject, error: &EmbedError) -> bool {
+    matches!(subject, Subject::Input(_))
+        && matches!(
+            error,
+            EmbedError::UnknownSession { .. }
+                | EmbedError::Store(
+                    lash_core::StoreError::SessionDeleted { .. }
+                        | lash_core::StoreError::SessionNotFound { .. }
+                )
+        )
+}
+
+async fn follow_subject(
+    target: &SendTarget,
+    subject: &Subject,
+    cursor: &lash_core::SessionCursor,
+    tap: &mut Tap<'_>,
+) -> Result<SendOutcome> {
     let context = target.context().await?;
     let mut from = follow::Position::at(cursor.clone());
     let mut gaps = Vec::new();
     // A follow without a window answers; a pending one would go on from its
     // position.
     let outcome = loop {
-        match Box::pin(follow::follow(&context, subject, from, &mut tap, None)).await? {
+        match Box::pin(follow::follow(&context, subject, from, tap, None)).await? {
             follow::Followed::Answered(mut outcome) => {
                 gaps.append(outcome.gaps_mut());
                 *outcome.gaps_mut() = gaps;
@@ -834,7 +866,6 @@ async fn settle(
             }
         }
     };
-    shared.remember(&outcome);
     Ok(outcome)
 }
 

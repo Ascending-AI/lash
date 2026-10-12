@@ -488,6 +488,24 @@ impl DurableSession {
         Ok(self.ops.cancel_queued_work_batch(store, batch_id).await?)
     }
 
+    /// Read the session's recorded tool authority with one head-metadata read
+    /// and no session hydration, including before its first run.
+    ///
+    /// Restricted access carries its complete definitions in
+    /// [`SessionToolAccess::restricted_tools`](crate::plugins::SessionToolAccess::restricted_tools);
+    /// its hidden names remain a separate offering policy. Ambient means
+    /// whatever the session's providers offer at run time; this read does not
+    /// resolve that catalog. A past run's offered catalog is its recorded tool
+    /// surface (FIG-6021), rather than the session's current authority.
+    /// `None` means no committed head is retained for this id.
+    pub async fn tool_access(&self) -> Result<Option<crate::plugins::SessionToolAccess>> {
+        Ok(self
+            .catalog
+            .load_session_head_meta(&self.session_id)
+            .await?
+            .map(|head| head.config.tool_access))
+    }
+
     /// Read the canonical settled view of this durable session's current
     /// frame without opening a live runtime or exposing mutations.
     ///

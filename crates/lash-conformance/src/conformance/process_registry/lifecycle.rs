@@ -2,6 +2,87 @@ use super::*;
 use lash_core::{LifetimeDecision, ScopeGrant, ScopeId};
 use pretty_assertions::assert_eq;
 
+/// FIG-6047: facts recorded after a terminal do not extend its retention.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture with checked setup"
+)]
+pub async fn terminal_retention_ignores_later_observer_facts(registry: Arc<dyn ProcessRegistry>) {
+    let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
+    let registry = registry
+        .with_runtime_clock(clock.clone())
+        .expect("registry clock");
+    let id = registry
+        .register_process(executed_registration("terminal-retention"))
+        .await
+        .expect("register")
+        .id;
+    registry
+        .complete_process(
+            &id,
+            settled_success(serde_json::Value::Null),
+            crate::ProcessCompletionAuthority::workflow_key("terminal-retention"),
+        )
+        .await
+        .expect("terminal");
+    let watermark = registry
+        .process_change_bounds()
+        .await
+        .expect("terminal watermark")
+        .current;
+    clock.advance(10_000);
+    registry
+        .add_observer(
+            &SessionId::from("later-observer"),
+            &id,
+            crate::ProcessObserverBy::host("retention-law"),
+        )
+        .await
+        .expect("later observer");
+    let record = registry
+        .get_process(&id)
+        .await
+        .expect("read")
+        .expect("retained");
+    assert_eq!(record.updated_at_ms, 20_000);
+    assert!(
+        registry
+            .prunable_terminal_processes(10_000, None, ProjectionWatermark::NoProjector)
+            .await
+            .expect("at terminal time")
+            .is_empty(),
+        "the cutoff is exclusive"
+    );
+    assert!(
+        registry
+            .prunable_terminal_processes(10_001, None, ProjectionWatermark::UpTo(watermark))
+            .await
+            .expect("behind projection")
+            .is_empty(),
+        "later facts still need projection"
+    );
+    assert_eq!(
+        registry
+            .prunable_terminal_processes(10_001, None, ProjectionWatermark::NoProjector)
+            .await
+            .expect("survey"),
+        vec![id.clone()],
+        "retention starts at the terminal, not the later fact"
+    );
+    assert_eq!(
+        registry
+            .prune_terminal_processes(10_001, None, ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune")
+            .pruned_processes,
+        1
+    );
+    assert!(matches!(
+        registry.get_process(&id).await,
+        Err(PluginError::ProcessNoLongerRetained { .. })
+    ));
+}
+
 /// Lifecycle event timestamps belong to the injected registry clock, including
 /// wait entry and exit. Advancing it between writes pins each write's source.
 #[expect(
