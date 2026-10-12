@@ -1,6 +1,247 @@
 use super::*;
 use crate::plugin::PluginSessionRequest;
 
+/// PLUGIN-VIEW-CANNOT-CAPTURE-FOREIGN-NAMESPACE: every public capture keeps
+/// the restriction of the host handed to a plugin, including trait forwards.
+#[test]
+fn plugin_view_cannot_capture_foreign_namespace() {
+    use crate::plugin::{ExecutionState, PluginError, SessionAuthorityContext};
+    use lash_core_store::session_state::SessionPluginStateSource;
+    use lash_sansio::sync::MutexExt;
+
+    #[derive(Clone)]
+    struct Probe {
+        id: &'static str,
+        handles: Arc<std::sync::Mutex<BTreeMap<String, Arc<crate::PluginSession>>>>,
+    }
+    impl crate::plugin::PluginMetadata for Probe {
+        fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(self.id)
+        }
+    }
+    impl crate::PluginFactory for Probe {
+        fn id(&self) -> &'static str {
+            self.id
+        }
+        fn initialize_state(
+            &self,
+            _: &crate::RuntimeOwner,
+            _: &crate::PluginConfig,
+        ) -> Result<BTreeMap<String, Value>, PluginError> {
+            Ok(BTreeMap::from([("secret".into(), Value::from(self.id))]))
+        }
+        fn build(
+            &self,
+            _: &crate::PluginSessionContext,
+        ) -> Result<Arc<dyn crate::SessionPlugin>, PluginError> {
+            Ok(Arc::new(self.clone()))
+        }
+    }
+    impl crate::SessionPlugin for Probe {
+        fn id(&self) -> &'static str {
+            self.id
+        }
+        fn register(&self, _: &mut crate::PluginRegistrar) -> Result<(), PluginError> {
+            Ok(())
+        }
+        fn session_ready(
+            &self,
+            ctx: crate::plugin::SessionReadyContext,
+        ) -> Result<(), PluginError> {
+            assert_eq!(ctx.state.get("secret"), Some(Value::from(self.id)));
+            let session = ctx.host.session(ctx.owner.session_id().unwrap()).unwrap();
+            self.handles.lock_recover().insert(self.id.into(), session);
+            Ok(())
+        }
+    }
+    let handles = Arc::new(std::sync::Mutex::new(BTreeMap::new()));
+    let host = crate::PluginHost::new(
+        ["plugin-a", "plugin-b"]
+            .into_iter()
+            .map(|id| {
+                Arc::new(Probe {
+                    id,
+                    handles: handles.clone(),
+                }) as Arc<dyn crate::PluginFactory>
+            })
+            .collect(),
+        crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
+    );
+    let record = host.transition_plugins(
+        transition_request("capture-owner", &host),
+        &Default::default(),
+        &Default::default(),
+    );
+    let (state, config) = record.candidate().unwrap();
+    let fleet = crate::FleetFormat::current();
+    let bytes = crate::plugin::PluginNativeView {
+        request: record.request,
+        source: record.source,
+        generation: None,
+        state: state.clone(),
+        config: config.clone(),
+    }
+    .encode(fleet)
+    .unwrap();
+    let session = host
+        .defer_session(PluginSessionRequest::creation(
+            "capture-owner",
+            SessionAuthorityContext::ambient_fixture(),
+        ))
+        .unwrap();
+    session.adopt_native_view(&bytes, fleet).unwrap();
+    session.materialize().unwrap();
+    let view = handles.lock_recover()["plugin-a"].clone();
+    let address = crate::EffectAddress::new(
+        crate::ExecutionScope::turn("capture-owner", "capture"),
+        "state",
+    )
+    .unwrap();
+    let staged =
+        crate::plugin::EffectPublication::begin(session.clone(), address).stage(Vec::new());
+
+    let mut leaks = Vec::new();
+    for (route, result) in [
+        ("export", Ok(view.export_state())),
+        ("committed", view.committed_state()),
+        ("staged", view.committed_state_with(&staged)),
+    ] {
+        match result {
+            Ok(state) if state.plugins.contains_key("plugin-b") => leaks.push(route),
+            Err(error) => assert!(matches!(error, PluginError::Session(_)), "{route}: {error}"),
+            _ => {}
+        }
+    }
+    for (route, namespaces) in [
+        ("prompt", view.committed_namespaces()),
+        (
+            "execution-state",
+            ExecutionState::committed_namespaces(view.as_ref()),
+        ),
+    ] {
+        if namespaces.contains_key("plugin-b") {
+            leaks.push(route);
+        }
+    }
+    assert!(
+        ExecutionState::owner_state(view.as_ref(), "plugin-b")
+            .values
+            .is_empty()
+    );
+    for (route, result) in [
+        (
+            "source-export",
+            SessionPluginStateSource::export_plugin_state(view.as_ref()),
+        ),
+        (
+            "source-capture",
+            SessionPluginStateSource::capture_plugin_state(view.as_ref()),
+        ),
+        (
+            "arc-source-export",
+            SessionPluginStateSource::export_plugin_state(&view),
+        ),
+        (
+            "arc-source-capture",
+            SessionPluginStateSource::capture_plugin_state(&view),
+        ),
+    ] {
+        if result.is_ok_and(|state| state.plugins.contains_key("plugin-b")) {
+            leaks.push(route);
+        }
+    }
+    for (route, result) in [
+        (
+            "native",
+            view.native_view(fleet).map_err(|error| {
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            }),
+        ),
+        (
+            "source-native",
+            SessionPluginStateSource::capture_plugin_admission(view.as_ref(), &config, fleet),
+        ),
+        (
+            "arc-source-native",
+            SessionPluginStateSource::capture_plugin_admission(&view, &config, fleet),
+        ),
+    ] {
+        if let Ok(Some(bytes)) = result {
+            let state = crate::plugin::PluginNativeView::decode(&bytes, fleet)
+                .unwrap()
+                .state;
+            if state.plugins.contains_key("plugin-b") {
+                leaks.push(route);
+            }
+        }
+    }
+    assert!(matches!(
+        view.build_recorded_head(),
+        Err(PluginError::Session(_))
+    ));
+    assert!(matches!(
+        view.fork_for_session(
+            "foreign-capture",
+            SessionAuthorityContext::ambient_fixture()
+        ),
+        Err(PluginError::Session(_))
+    ));
+    let full = session.committed_state().unwrap();
+    assert_eq!(full, state);
+    assert_eq!(session.committed_state_with(&staged).unwrap(), state);
+    assert!(session.committed_namespaces().contains_key("plugin-b"));
+    assert_eq!(
+        SessionPluginStateSource::capture_plugin_state(session.as_ref()).unwrap(),
+        state
+    );
+    assert!(session.native_view(fleet).unwrap().is_some());
+    let native = SessionPluginStateSource::capture_plugin_admission(&session, &config, fleet)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        crate::plugin::PluginNativeView::decode(&native, fleet)
+            .unwrap()
+            .state,
+        state
+    );
+    staged.discard();
+
+    session.begin_run();
+    let mut changed = state.clone();
+    let foreign = changed.plugins.get_mut("plugin-b").unwrap();
+    foreign.generation += 1;
+    foreign.values = Arc::new(BTreeMap::from([(
+        "secret".into(),
+        Value::from("changed-b"),
+    )]));
+    session.hydrate_state(&changed).unwrap();
+    let full_changes = session.run_changes();
+    let foreign_change = full_changes
+        .iter()
+        .find(|change| change.plugin == "plugin-b")
+        .unwrap();
+    assert!(
+        foreign_change.values.body().is_some(),
+        "the runtime captures the changed values"
+    );
+    for (route, changes) in [
+        ("run-changes", view.run_changes()),
+        (
+            "execution-run-changes",
+            ExecutionState::run_changes(view.as_ref()),
+        ),
+    ] {
+        if changes.iter().any(|change| change.plugin == "plugin-b") {
+            leaks.push(route);
+        }
+    }
+    assert!(
+        leaks.is_empty(),
+        "plugin A captured plugin B through {leaks:?}"
+    );
+}
+
 #[derive(Clone)]
 struct FormatProbe(Arc<std::sync::atomic::AtomicUsize>);
 

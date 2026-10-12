@@ -881,9 +881,11 @@ impl PluginSession {
         }
     }
 
-    /// The state a commit records: every namespace, in the formats the
-    /// adopted admission recorded (FIG-4747).
+    /// The state a runtime-owned commit records: every namespace, in the
+    /// formats the adopted admission recorded (FIG-4747).
+    /// Plugin-facing handles refuse with [`PluginError::Session`].
     pub fn committed_state(&self) -> Result<PluginState, PluginError> {
+        self.require_runtime_owner()?;
         self.in_recorded_formats(self.capture_state())
     }
 
@@ -899,6 +901,7 @@ impl PluginSession {
         &self,
         staged: &StagedPluginState,
     ) -> Result<PluginState, PluginError> {
+        self.require_runtime_owner()?;
         self.in_recorded_formats(self.state_with(staged.resolutions())?)
     }
 
@@ -974,6 +977,7 @@ impl PluginSession {
         session_id: impl Into<SessionId>,
         config: super::SessionAuthorityContext,
     ) -> Result<Arc<PluginSession>, PluginError> {
+        self.require_runtime_owner()?;
         let snapshot = self.capture_state();
         self.host.build_session(PluginSessionRequest {
             tool_catalog_overlay: self.tool_catalog_overlay.clone(),

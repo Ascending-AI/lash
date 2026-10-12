@@ -34,8 +34,12 @@ impl PluginSession {
     }
 
     /// Every plugin namespace, each frozen at its published generation, read
-    /// under one lock: the namespaces of one prompt cut.
+    /// under one lock: the namespaces of one prompt cut. Plugin-facing
+    /// handles expose no namespaces, as with [`Self::export_state`].
     pub fn committed_namespaces(&self) -> BTreeMap<String, CommittedPluginNamespace> {
+        if !self.host.export_plugin_namespaces {
+            return BTreeMap::new();
+        }
         let registry = self.state.lock_recover();
         registry
             .data

@@ -330,6 +330,7 @@ impl PluginSession {
     /// [`Self::build_published_view`], it registers, installs and publishes
     /// nothing.
     pub fn build_recorded_head(&self) -> Result<Arc<Self>, PluginError> {
+        self.require_runtime_owner()?;
         let built = self.defer_private_build(&self.capture_state(), None)?;
         built.materialize()?;
         Ok(built)
@@ -373,6 +374,7 @@ impl PluginSession {
         config: Option<&PluginConfig>,
         fleet: crate::FleetFormat,
     ) -> Result<Option<Arc<[u8]>>, PluginError> {
+        self.require_runtime_owner()?;
         let Some(mut view) = self.native_view.lock_recover().clone() else {
             return Ok(None);
         };

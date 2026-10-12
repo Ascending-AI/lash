@@ -99,8 +99,12 @@ impl crate::PluginSession {
     /// The namespaces whose published state the run's durable rows do not
     /// record yet, each with its values body when no row or base holds those
     /// values: what the run's next commit writes. An unchanged namespace
-    /// costs nothing, however large. Empty outside a durable run.
+    /// costs nothing, however large. Empty outside a durable run and on
+    /// plugin-facing handles, as with [`Self::export_state`].
     pub fn run_changes(&self) -> Vec<TurnNamespaceWrite> {
+        if !self.host.export_plugin_namespaces {
+            return Vec::new();
+        }
         let mut guard = self.state.lock_recover();
         let registry = &mut *guard;
         let Some(run) = registry.run.as_mut() else {
