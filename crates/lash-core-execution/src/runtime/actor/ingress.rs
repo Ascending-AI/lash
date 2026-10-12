@@ -29,7 +29,7 @@ impl ActorContext {
             crate::RuntimeEffectCommand::AcceptTurnInput { .. }
             | crate::RuntimeEffectCommand::TransitionPlugins { .. }
             | crate::RuntimeEffectCommand::PluginCallbacks { .. } => {
-                let publication = local.plugin_state_session().map(|plugins| {
+                let publication = local.execution_state().map(|plugins| {
                     crate::plugin::EffectPublication::begin(
                         plugins,
                         envelope.invocation.address().clone(),

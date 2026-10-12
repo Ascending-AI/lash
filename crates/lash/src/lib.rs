@@ -807,6 +807,10 @@ pub mod prompt {
 pub mod plugins {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::ConfigRegistry;
+    /// The neutral composition and state sink shared by execution owners.
+    pub use lash_core::plugin::{
+        AdmissionGate, ContributionKind, ExecutionComposition, ExecutionState, Proposal,
+    };
     pub use lash_core::plugin::{
         AssistantProseProjectorPlugin, AssistantStreamFinishedHook, DecidedContextPressure,
         PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture, ResolvedToolSurface,
@@ -885,10 +889,11 @@ pub mod plugins {
     /// final result.
     pub use lash_core::plugin::{
         AfterToolContributions, AfterToolDecision, AttemptOrdinal, BeforeToolDecision,
-        CachedToolSuccess, CheckRank, PreparedCallReadView, RankedVerdict, ToolArgsCheckHook,
-        ToolArgsCheckInput, ToolArgsTransformHook, ToolArgsTransformInput, ToolHookContext,
-        ToolHookOccurrence, ToolHookPhase, ToolResultCandidate, ToolResultCheckHook,
-        ToolResultCheckInput, ToolResultTransformHook, ToolResultTransformInput,
+        CachedToolSuccess, CheckRank, OwnerConfigView, PreparedCallReadView, RankedVerdict,
+        ToolArgsCheckHook, ToolArgsCheckInput, ToolArgsTransformHook, ToolArgsTransformInput,
+        ToolHookContext, ToolHookOccurrence, ToolHookPhase, ToolResultCandidate,
+        ToolResultCheckHook, ToolResultCheckInput, ToolResultTransformHook,
+        ToolResultTransformInput,
     };
     /// Hook contracts and reports used by plugin authors. Every hook
     /// registers under a [`HookKey`] (see [`hook_key!`](crate::hook_key));

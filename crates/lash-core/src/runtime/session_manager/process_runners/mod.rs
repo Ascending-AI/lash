@@ -81,7 +81,12 @@ impl RuntimeSessionServices {
                 .core
                 .session_store_factory()
                 .fleet_format(),
-            plugins: Arc::clone(&self.current.plugins),
+            composition: (self.current.plugins).composition(),
+            config: crate::plugin::OwnerConfigView::session(
+                (self.current.plugins).admitted_plugin_config(),
+            ),
+            execution_budgets: (self.current.plugins).execution_budgets(),
+            state: self.current.plugins.clone(),
             tools: Arc::clone(&tool_surface.registry) as Arc<dyn crate::ToolProvider>,
             tool_registry: Some(Arc::clone(&tool_surface.registry)),
             tool_catalog: tool_surface.catalog,
@@ -94,7 +99,7 @@ impl RuntimeSessionServices {
             direct_completions,
             parent_invocation: None,
             observation_call_key: None,
-            execution_env_spec,
+            facts: crate::plugin::ExecutionFacts::of_env_spec(&execution_env_spec),
             owner,
             // A process's steps have no host lane: the dispatch observes
             // nowhere.

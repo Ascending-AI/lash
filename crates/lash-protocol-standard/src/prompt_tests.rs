@@ -29,7 +29,7 @@ async fn compose(
             call: 0,
             purpose: purpose.clone(),
         },
-        config: Default::default(),
+        config: lash_core::OwnerConfigView::session(Default::default()),
         session: None,
         offered: OfferedTools::new(Arc::new(catalog), false),
         model: Default::default(),

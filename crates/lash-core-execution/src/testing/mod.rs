@@ -867,7 +867,7 @@ pub fn tool_hook_context(
         call_id: crate::ToolCallId::fixture("hook"),
         tool_id: crate::ToolId::from(format!("tool:{tool_name}")),
         tool_name: tool_name.to_string(),
-        plugin_config: Default::default(),
+        config: crate::OwnerConfigView::session(Default::default()),
         argument_projection,
         turn_context: crate::TurnContext::default(),
         sessions: std::sync::Arc::new(MockSessionManager::default()),

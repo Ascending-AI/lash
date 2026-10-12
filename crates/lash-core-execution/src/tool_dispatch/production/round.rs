@@ -206,7 +206,7 @@ impl ProductionToolHandlers<'_> {
             let binding = self
                 .context
                 .dispatch()
-                .plugins
+                .composition
                 .tool_run_binding(&invocation.tool_id, source)
                 .map_err(crate::RuntimeEffectControllerError::from)?;
             let start = self
@@ -537,7 +537,7 @@ pub(super) async fn present_resolved(
         call_id: call.call_id.clone(),
         tool_id: tool.clone(),
         tool_name: call.tool_name.clone(),
-        render: dispatch.execution_env_spec.render.clone(),
+        render: dispatch.facts.render.clone(),
         args: call.args.clone(),
         output: projected,
         duration_ms: 0,
@@ -549,12 +549,12 @@ pub(super) async fn present_resolved(
         intent_outcomes: completed.intent_outcomes.clone(),
     });
     match dispatch
-        .plugins
+        .composition
         .present_tool_result(
             projection,
             facts,
-            &dispatch.plugins.tool_presentation_plan(),
-            &dispatch.execution_env_spec.policy.attachment_acceptance,
+            &dispatch.composition.tool_presentation_plan(),
+            &dispatch.facts.attachment_acceptance,
         )
         .await
     {
@@ -679,11 +679,7 @@ pub(super) fn member_pin(
         return MemberPin::admitted(tool, manifest.execution_policy, manifest.bounds(), now_ms)
             .with_declaration(manifest.declaration().clone());
     }
-    let control = context
-        .dispatch()
-        .plugins
-        .execution_budgets()
-        .control_phase();
+    let control = context.dispatch().execution_budgets.control_phase();
     MemberPin {
         tool,
         policy: ExecutionPolicy::Once,
@@ -811,11 +807,7 @@ impl RoundTools for ProductionRoundTools {
     }
 
     fn stop_grace(&self) -> std::time::Duration {
-        self.context
-            .dispatch()
-            .plugins
-            .execution_budgets()
-            .stop_grace()
+        self.context.dispatch().execution_budgets.stop_grace()
     }
 
     fn refusal(&self, calls: &[crate::sansio::PendingToolCall]) -> Option<Vec<CompletedCall>> {
@@ -921,10 +913,7 @@ impl RoundTools for ProductionRoundTools {
         &self,
         state: &[crate::plugin::StateResolution],
     ) -> Result<(), crate::RuntimeEffectControllerError> {
-        self.context
-            .dispatch()
-            .plugins
-            .publish_committed_state(state)
+        self.context.dispatch().state.publish_committed_state(state)
     }
 }
 

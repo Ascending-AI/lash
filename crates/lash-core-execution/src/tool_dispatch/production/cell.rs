@@ -478,12 +478,7 @@ impl MemberBodies for CellMembers {
     }
 
     fn stop_grace(&self) -> std::time::Duration {
-        self.tools
-            .context
-            .dispatch()
-            .plugins
-            .execution_budgets()
-            .stop_grace()
+        self.tools.context.dispatch().execution_budgets.stop_grace()
     }
 
     fn resolved(
@@ -546,19 +541,19 @@ impl MemberBodies for CellMembers {
         self.tools
             .context
             .dispatch()
-            .plugins
+            .state
             .publish_committed_state(state)
     }
 
     fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
-        self.tools.context.dispatch().plugins.run_changes()
+        self.tools.context.dispatch().state.run_changes()
     }
 
     fn run_changes_committed(&self, written: &[lash_durable::domain::TurnNamespaceWrite]) {
         self.tools
             .context
             .dispatch()
-            .plugins
+            .state
             .run_changes_committed(written);
     }
 }

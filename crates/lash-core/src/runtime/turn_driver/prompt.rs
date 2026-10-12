@@ -91,7 +91,7 @@ impl RuntimeTurnDriver<'static> {
                     call,
                     purpose: PromptPurpose::Turn,
                 },
-                config: plugins.admitted_plugin_config(),
+                config: crate::OwnerConfigView::session(plugins.admitted_plugin_config()),
                 session: Some(view),
                 offered: offered.clone(),
                 model: PromptModel {

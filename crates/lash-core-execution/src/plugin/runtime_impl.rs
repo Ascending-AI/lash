@@ -554,7 +554,7 @@ impl PluginHost {
             };
             let BuiltSessionContributions {
                 plugins,
-                contributions,
+                mut contributions,
             } = self.build_session_contributions(&ctx, Arc::clone(&session.state))?;
             let registry = build_tool_registry(&contributions, session.tool_snapshot.clone())?;
             let tools = Arc::clone(&registry) as Arc<dyn ToolProvider>;
@@ -567,9 +567,16 @@ impl PluginHost {
                 !contributions.state_retaining_plugins.is_empty(),
                 std::sync::atomic::Ordering::SeqCst,
             );
+            let composition = Arc::new(super::ExecutionComposition::new(
+                self.plugin_revisions(),
+                &mut contributions,
+                Arc::clone(&registry),
+                session.execution_admission(),
+            ));
             let _ = session
                 .capabilities
                 .set(super::session_obj::PluginSessionCapabilities {
+                    composition,
                     plugins,
                     contributions,
                     tool_registry: registry,

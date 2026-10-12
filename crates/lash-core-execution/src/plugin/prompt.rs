@@ -450,7 +450,7 @@ pub struct ProjectedHistoryStats {
 #[derive(Clone)]
 pub struct PromptCut {
     call: PromptCall,
-    config: crate::AdmittedPluginConfig,
+    config: super::OwnerConfigView,
     session: Option<crate::SessionReadView>,
     offered: OfferedTools,
     model: PromptModel,
@@ -475,7 +475,7 @@ impl std::fmt::Debug for PromptCut {
 #[derive(Clone, Debug)]
 pub struct PromptCutParts {
     pub call: PromptCall,
-    pub config: crate::AdmittedPluginConfig,
+    pub config: super::OwnerConfigView,
     /// A read view of the committed frame.
     pub session: Option<crate::SessionReadView>,
     pub offered: OfferedTools,
@@ -564,8 +564,8 @@ impl PromptInput<'_> {
     }
 
     /// The session config revision the call was admitted under.
-    pub fn config_revision(&self) -> u64 {
-        self.cut.config.revision
+    pub fn session_config_revision(&self) -> Option<u64> {
+        self.cut.config.session_revision()
     }
 
     /// This plugin's admitted config namespace, decoded.
@@ -604,6 +604,7 @@ impl PromptInput<'_> {
 
 #[derive(Clone)]
 struct RegisteredPromptSection {
+    identity: super::PluginCallbackIdentity,
     owner: PluginRevision,
     spec: PromptSectionSpec,
     renderer: Arc<dyn PromptSection>,
@@ -658,12 +659,21 @@ impl RegisteredPromptWrap {
 /// Every section, family and wrapper the installed plugins registered, in
 /// plugin registration order, then declaration order.
 #[derive(Clone, Default)]
-pub(crate) struct PromptRegistry {
+pub struct PromptRegistry {
     entries: Vec<RegisteredPromptEntry>,
     wraps: Vec<RegisteredPromptWrap>,
 }
 
 impl PromptRegistry {
+    pub fn owners(&self) -> impl Iterator<Item = (PluginRevision, PromptSectionId)> {
+        self.sections()
+            .map(|section| (section.owner.clone(), section.id()))
+    }
+
+    pub(crate) fn identities(&self) -> impl Iterator<Item = &super::PluginCallbackIdentity> {
+        self.sections().map(|section| &section.identity)
+    }
+
     fn sections(&self) -> impl Iterator<Item = &RegisteredPromptSection> {
         self.entries.iter().filter_map(|entry| match entry {
             RegisteredPromptEntry::Section(section) => Some(section),
@@ -715,6 +725,10 @@ impl PromptRegistrations<'_> {
         registry
             .entries
             .push(RegisteredPromptEntry::Section(RegisteredPromptSection {
+                identity: super::PluginCallbackIdentity {
+                    owner: owner.clone(),
+                    key: format!("prompt_section:{}", spec.key),
+                },
                 owner,
                 spec,
                 renderer,
@@ -1247,7 +1261,7 @@ impl super::PluginSession {
     /// The prompt sections, families and wrappers this session's plugins
     /// registered.
     pub fn prompt_catalog(&self) -> PromptCatalog {
-        PromptCatalog::new(self.capabilities().contributions.prompt.clone())
+        self.composition().prompt_catalog()
     }
 
     /// [`Self::prompt_catalog`], or `None` before the session's plugins are
@@ -1255,7 +1269,7 @@ impl super::PluginSession {
     pub fn built_prompt_catalog(&self) -> Option<PromptCatalog> {
         self.capabilities
             .get()
-            .map(|capabilities| PromptCatalog::new(capabilities.contributions.prompt.clone()))
+            .map(|capabilities| capabilities.composition.prompt_catalog())
     }
 }
 

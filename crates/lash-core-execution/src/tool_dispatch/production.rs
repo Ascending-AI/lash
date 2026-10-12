@@ -206,7 +206,7 @@ impl<'run> ProductionToolHandlers<'run> {
         let provider = self
             .context
             .dispatch()
-            .plugins
+            .composition
             .resolve_context_tool_bindings(std::slice::from_ref(executable))?
             .remove(0);
         let payload = provider.isolated_start_payload(crate::IsolatedProcessRequest {
@@ -295,10 +295,13 @@ impl<'run> ProductionToolHandlers<'run> {
             .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
             .then_some(crate::CancelOrigin::TurnStopped))
     }
-    async fn dispatch(&self, input: &CallInput) -> Result<ToolDispatchContext<'run>, String> {
+    async fn dispatch(
+        &self,
+        input: &CallInput,
+    ) -> Result<(ToolDispatchContext<'run>, crate::ProcessExecutionEnvSpec), String> {
         let mut dispatch = self.context.dispatch().as_ref().clone();
         dispatch.parent_invocation = input.parent.clone();
-        dispatch.execution_env_spec = self
+        let execution_env_spec = self
             .context
             .recorded_tool_run_env_spec(&input.environment)
             .await
@@ -307,7 +310,8 @@ impl<'run> ProductionToolHandlers<'run> {
                 self.context.record_nested_effect_error(error.into());
                 message
             })?;
-        Ok(dispatch)
+        dispatch.facts = crate::plugin::ExecutionFacts::of_env_spec(&execution_env_spec);
+        Ok((dispatch, execution_env_spec))
     }
     async fn capture_output(
         &self,
@@ -326,12 +330,12 @@ impl<'run> ProductionToolHandlers<'run> {
                 start_refusal: None,
             });
         }
-        let dispatch = self.dispatch(&prepared.input).await?;
+        let (dispatch, _) = self.dispatch(&prepared.input).await?;
         let view = crate::plugin::PreparedCallReadView::new(prepared.call.clone());
         let hook = hooks::context(&dispatch, &prepared);
         let (original, control) = crate::plugin::ToolResultCandidate::split(output.clone());
         let transformed = dispatch
-            .plugins
+            .composition
             .transform_tool_result(&hook, occurrence, &view, &Arc::new(original))
             .await;
         // The call settles as its admitted declaration says, after every
@@ -459,8 +463,11 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             }
         })
     }
-    fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
-        Some(self.context.dispatch().plugins.clone())
+    fn execution_state(&self) -> Option<Arc<dyn crate::plugin::ExecutionState>> {
+        Some(self.context.dispatch().state.clone())
+    }
+    fn trace_limits(&self) -> lash_trace::TraceLimits {
+        self.context.dispatch().state.trace_limits()
     }
     fn process_engines(&self) -> Option<&crate::ProcessEngineRegistry> {
         Some(&self.context.dispatch().process_engines)
@@ -475,9 +482,9 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .get(&call.call_id)
             .cloned()
             .ok_or("an admitted call has no preparation binding")?;
-        let mut dispatch = self.dispatch(&input).await?;
+        let (mut dispatch, _) = self.dispatch(&input).await?;
         dispatch.tools = dispatch
-            .plugins
+            .composition
             .resolve_context_tool_bindings(&[input.binding.preparation.clone()])
             .map_err(|error| {
                 self.context
@@ -508,7 +515,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         );
         let mut failure = None;
         match dispatch
-            .plugins
+            .composition
             .transform_tool_args(&hook, pending.args.clone())
             .await
         {
@@ -593,10 +600,10 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
     async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String> {
         let prepared: Prepared = serde_json::from_value(attempt.request.prepared.clone())
             .map_err(|error| error.to_string())?;
-        let mut dispatch = self.dispatch(&prepared.input).await?;
+        let (mut dispatch, execution_env_spec) = self.dispatch(&prepared.input).await?;
         dispatch.observer = attempt.stream.clone();
         dispatch.tools = dispatch
-            .plugins
+            .composition
             .resolve_context_tool_bindings(std::slice::from_ref(&prepared.input.binding.executable))
             .map_err(|error| {
                 self.context
@@ -632,7 +639,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .runtime_execution_context(
                 self.context
                     .clone()
-                    .with_execution_env_spec(dispatch.execution_env_spec.clone()),
+                    .with_execution_env_spec(execution_env_spec),
             )
             .enclosing_process(enclosing_process.clone())
             .build()
@@ -659,12 +666,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             let authority = &authority;
             let call = &prepared.call;
             let execution_policy = prepared.input.definition.manifest.execution_policy;
-            let stop_grace = self
-                .context
-                .dispatch()
-                .plugins
-                .execution_budgets()
-                .stop_grace();
+            let stop_grace = self.context.dispatch().execution_budgets.stop_grace();
             async move {
                 if let Some(stop) = &stop {
                     context = context.with_step_stop(stop.clone());
@@ -1070,10 +1072,11 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .cloned()
             .ok_or_else(|| shape("the final has no admitted preparation".into()))?;
         let mut dispatch = self.context.dispatch().as_ref().clone();
-        dispatch.execution_env_spec = self
+        let execution_env_spec = self
             .context
             .recorded_tool_run_env_spec(&prepared.input.environment)
             .await?;
+        dispatch.facts = crate::plugin::ExecutionFacts::of_env_spec(&execution_env_spec);
         let attempt = match captured.occurrence {
             crate::plugin::ToolHookOccurrence::Attempt { attempt }
             | crate::plugin::ToolHookOccurrence::DeferredCompletion { attempt } => attempt,

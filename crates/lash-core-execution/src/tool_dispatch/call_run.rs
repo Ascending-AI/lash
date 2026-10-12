@@ -247,16 +247,9 @@ impl<'a> AdmittedToolCall<'a> {
         } else {
             None
         };
-        let state_snapshot = handlers.plugin_session().map(|plugins| {
-            Arc::new(
-                plugins
-                    .export_state()
-                    .plugins
-                    .get(&call.binding.executable.owner.plugin)
-                    .cloned()
-                    .unwrap_or_default(),
-            )
-        });
+        let state_snapshot = handlers
+            .execution_state()
+            .map(|state| Arc::new(state.owner_state(&call.binding.executable.owner.plugin)));
         let prepared = handlers.prepare(&call).await.map_err(fault)?;
         let request = SingletonPreparedRequest {
             arguments: call.arguments.clone(),
@@ -399,12 +392,7 @@ impl<'a> AdmittedToolCall<'a> {
                 binding: Box::new(binding.clone()),
             }));
         }
-        let limits = self
-            .handlers
-            .plugin_session()
-            .map_or_else(lash_trace::TraceLimits::standard, |plugins| {
-                plugins.host().trace_runtime().limits()
-            });
+        let limits = self.handlers.trace_limits();
         let recorder = AttemptStreamRecorder::start(limits.attempt_stream_bytes);
         let outcome = self
             .handlers
@@ -502,7 +490,7 @@ impl<'a> AdmittedToolCall<'a> {
     ) -> Result<CallEnd, SingletonRunError> {
         let handlers = self.handlers.as_ref();
         let call_id = &self.call.call_id;
-        let plugins = handlers.plugin_session();
+        let plugins = handlers.execution_state();
         let decide = async {
             if cancel.is_cancelled() {
                 return Ok((CallDecision::Cancelled, None));
@@ -525,15 +513,13 @@ impl<'a> AdmittedToolCall<'a> {
                         attempt: AttemptOrdinal::FIRST,
                     },
                 };
-                crate::plugin::propose(
-                    plugins,
-                    crate::plugin::Proposal::for_tool(
+                plugins
+                    .propose(crate::plugin::Proposal::for_tool(
                         self.call.binding.executable.owner.clone(),
                         origin,
                         commands.clone().into(),
-                    ),
-                )
-                .map_err(|error| error.to_string())?;
+                    ))
+                    .map_err(|error| crate::plugin::proposal_failure_message(&error))?;
             }
             let after = CheckRecord::reduce(handlers.after_checks(call_id, &capture).await?);
             let decision = match after.winner().map(|reply| &reply.verdict) {
@@ -553,7 +539,8 @@ impl<'a> AdmittedToolCall<'a> {
                 let publication =
                     crate::plugin::EffectPublication::begin(Arc::clone(plugins), address.clone());
                 let segment = plugins.state_segment();
-                let (decided, proposals) = crate::plugin::collect_proposals(plugins, decide).await;
+                let (decided, proposals) =
+                    crate::plugin::collect_proposals(plugins.as_ref(), decide).await;
                 let decided = decided.map_err(fault)?;
                 if matches!(decided.0, CallDecision::Final { .. })
                     && !proposals.is_empty()

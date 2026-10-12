@@ -118,6 +118,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// (`RunSpec::capabilities`): empty outside a run, or for a run whose
     /// spec names none.
     run_capabilities: Arc<std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef>>,
+    facts: crate::plugin::ExecutionFacts,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     process_execution: Option<RuntimeProcessExecution>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
@@ -478,6 +479,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_context: self.turn_context.clone(),
             logical_run: self.logical_run.clone(),
             run_capabilities: Arc::clone(&self.run_capabilities),
+            facts: self.facts.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             process_execution: self.process_execution.clone(),
             parent_invocation: self.parent_invocation.clone(),
@@ -599,7 +601,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     pub(crate) fn attachment_acceptance(&self) -> &crate::provider::AttachmentCapabilitySnapshot {
-        &self.execution_env_spec.policy.attachment_acceptance
+        &self.facts.attachment_acceptance
     }
 
     /// The session's recorded tool-call limit, as this execution runs under
@@ -608,13 +610,14 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// The `max_tool_calls` the execution runs under.
     #[must_use]
     pub fn max_tool_calls(&self) -> crate::MaxToolCalls {
-        self.execution_env_spec.policy.max_tool_calls
+        self.facts.max_tool_calls
     }
 
     pub fn with_execution_env_spec(
         mut self,
         execution_env_spec: crate::ProcessExecutionEnvSpec,
     ) -> Self {
+        self.facts = crate::plugin::ExecutionFacts::of_env_spec(&execution_env_spec);
         self.execution_env_spec = execution_env_spec;
         self
     }
@@ -633,10 +636,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     pub fn recorded_render(&self) -> Option<&crate::RecordedRender> {
-        self.execution_env_spec.render.as_ref()
+        self.facts.render.as_ref()
     }
 
     pub fn with_recorded_render(mut self, recorded: crate::RecordedRender) -> Self {
+        self.facts.render = Some(recorded.clone());
         self.execution_env_spec.render = Some(recorded);
         self
     }

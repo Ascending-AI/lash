@@ -19,8 +19,8 @@ struct LocalTurnEffectRunner {
 
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
-    fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
-        Some(Arc::clone(self.driver.session.plugins()))
+    fn execution_state(&self) -> Option<Arc<dyn crate::plugin::ExecutionState>> {
+        Some(self.driver.session.plugins().clone())
     }
 
     fn uses_task_boundary(&self, command: &RuntimeEffectCommand) -> bool {

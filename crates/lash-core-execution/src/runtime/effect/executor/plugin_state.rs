@@ -1,14 +1,14 @@
 use super::*;
 
 impl RuntimeEffectLocalExecutor<'_> {
-    pub(crate) fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
+    pub(crate) fn execution_state(&self) -> Option<Arc<dyn crate::plugin::ExecutionState>> {
         match &self.state {
-            RuntimeEffectLocalExecutorState::Runner(runner) => runner.plugin_state_session(),
+            RuntimeEffectLocalExecutorState::Runner(runner) => runner.execution_state(),
             RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
-                runner.plugin_state_session()
+                runner.execution_state()
             }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Presentation(execution)) => {
-                Some(Arc::clone(&execution.plugins))
+                Some(Arc::clone(&execution.state))
             }
             _ => None,
         }
@@ -16,7 +16,7 @@ impl RuntimeEffectLocalExecutor<'_> {
 }
 
 pub(super) async fn record_plugin_state<F>(
-    plugins: Option<Arc<crate::PluginSession>>,
+    plugins: Option<Arc<dyn crate::plugin::ExecutionState>>,
     kind: crate::RuntimeEffectKind,
     address: crate::EffectAddress,
     body: F,

@@ -39,7 +39,7 @@ pub struct ToolHookContext {
     /// The plugin configuration this hook runs under (FIG-4379): the running
     /// run's admitted configuration and its revision, a process's captured
     /// one, or the head's outside a run — never today's head inside a run.
-    pub plugin_config: super::AdmittedPluginConfig,
+    pub config: super::OwnerConfigView,
     pub argument_projection: crate::ToolArgumentProjectionPolicy,
     pub turn_context: crate::TurnContext,
     pub(crate) sessions: Arc<dyn SessionStateService>,

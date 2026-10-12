@@ -553,7 +553,7 @@ pub use plugin::{
     AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigCommandCatalog,
     ConfigCommandDescriptor, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, ConfigRegistry,
     ConfigSubmitError, ConfigTransaction, ConfigWire, CoreConfigOwner, CoreConfigRefusal,
-    CreationConfigError, NoRunOptions, OwnerChange, PluginConfig,
+    CreationConfigError, NoRunOptions, OwnerChange, OwnerConfigView, PluginConfig,
 };
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,

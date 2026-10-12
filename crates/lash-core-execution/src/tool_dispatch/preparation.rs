@@ -197,7 +197,7 @@ async fn prepare_authorized_tool_call_with_context(
     );
     let original_args = Arc::new(std::mem::take(&mut pending.args));
     let args = match context
-        .plugins
+        .composition
         .transform_tool_args(&hook_context, (*original_args).clone())
         .await
     {

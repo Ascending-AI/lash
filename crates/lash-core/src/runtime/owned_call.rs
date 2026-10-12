@@ -44,9 +44,11 @@ use lash_core_execution::core_internal::{compose_prompt, prompt_cut};
 /// it.
 pub(in crate::runtime) struct OwnedPrompt {
     pub(in crate::runtime) facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
-    pub(in crate::runtime) plugins: Arc<crate::PluginSession>,
+    pub(in crate::runtime) composition: Arc<crate::plugin::ExecutionComposition>,
+    pub(in crate::runtime) state: Arc<dyn crate::plugin::ExecutionState>,
+    pub(in crate::runtime) render_pool: crate::plugin::prompt::PromptRenderPool,
     pub(in crate::runtime) plan: PromptPlan,
-    pub(in crate::runtime) config: crate::AdmittedPluginConfig,
+    pub(in crate::runtime) config: crate::OwnerConfigView,
     pub(in crate::runtime) frame: Option<crate::FrameNodeId>,
     pub(in crate::runtime) session: Option<crate::SessionReadView>,
 }
@@ -311,13 +313,15 @@ async fn compose(
 ) -> Result<Result<Option<crate::plugin::prompt::ComposedPrompt>, LlmCallError>, PluginError> {
     let OwnedPrompt {
         facts,
-        plugins,
+        composition,
+        state,
+        render_pool,
         plan,
         config,
         frame,
         session,
     } = prompt;
-    let catalog = plugins.prompt_catalog();
+    let catalog = composition.prompt_catalog();
     if catalog.sections().is_empty() {
         return Ok(Ok(None));
     }
@@ -345,19 +349,11 @@ async fn compose(
                 messages: u32::try_from(request.messages.len()).unwrap_or(u32::MAX),
                 estimated_tokens: u64::from(request.estimated_tokens()),
             },
-            namespaces: plugins.committed_namespaces(),
+            namespaces: state.committed_namespaces(),
         },
         facts,
     );
-    match compose_prompt(
-        &catalog,
-        &plan,
-        purpose,
-        Arc::new(cut),
-        plugins.prompt_render_pool(),
-    )
-    .await
-    {
+    match compose_prompt(&catalog, &plan, purpose, Arc::new(cut), &render_pool).await {
         Ok(composed) => Ok(Ok(Some(composed))),
         // A full shared queue is this process's load, not the call's
         // outcome: the owner's redrive composes again.

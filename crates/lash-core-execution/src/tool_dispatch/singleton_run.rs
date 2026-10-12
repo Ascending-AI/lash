@@ -290,8 +290,12 @@ pub enum SingletonPresentationError {
 #[async_trait::async_trait]
 pub trait SingletonToolHandlers: Send + Sync {
     /// The session whose read-only snapshots and declared commands this Run uses.
-    fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
+    fn execution_state(&self) -> Option<Arc<dyn crate::plugin::ExecutionState>> {
         None
+    }
+
+    fn trace_limits(&self) -> lash_trace::TraceLimits {
+        lash_trace::TraceLimits::standard()
     }
 
     /// The actual process implementations installed by this host.

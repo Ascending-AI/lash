@@ -4,8 +4,8 @@ use super::*;
 
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
-    fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
-        Some(Arc::clone(&self.dispatch.plugins))
+    fn execution_state(&self) -> Option<Arc<dyn crate::plugin::ExecutionState>> {
+        Some(Arc::clone(&self.dispatch.state))
     }
 
     fn uses_task_boundary(&self, command: &RuntimeEffectCommand) -> bool {

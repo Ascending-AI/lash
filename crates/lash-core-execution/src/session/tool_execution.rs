@@ -171,7 +171,7 @@ impl RuntimeExecutionContext<'_> {
         tool: &crate::ToolId,
         source: Option<&str>,
     ) -> Result<crate::plugin::PluginRevision, crate::PluginError> {
-        self.dispatch.plugins.tool_execution_owner(tool, source)
+        self.dispatch.composition.tool_execution_owner(tool, source)
     }
 
     /// `call_key` is the material the call's observation lanes key under —
@@ -326,13 +326,14 @@ impl RuntimeExecutionContext<'_> {
                                 call_id: call_id.clone(),
                                 tool_id,
                                 tool_name: outcome.record.tool.clone(),
-                                render: self.dispatch.execution_env_spec.render.clone(),
+                                render: self.dispatch.facts.render.clone(),
                                 args: outcome.record.args.clone(),
                                 output: Box::new(outcome.record.output.clone()),
                             },
                         ),
                         crate::RuntimeEffectLocalExecutor::presentation(
-                            std::sync::Arc::clone(&self.dispatch.plugins),
+                            std::sync::Arc::clone(&self.dispatch.composition),
+                            std::sync::Arc::clone(&self.dispatch.state),
                             std::sync::Arc::new(facts),
                             std::sync::Arc::clone(&self.dispatch.attachment_store),
                             self.attachment_acceptance().clone(),

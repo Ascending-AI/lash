@@ -218,7 +218,7 @@ fn body_state(
         AttemptAuthority::Granted(grant) => grant.source_id.as_deref(),
     };
     let proposal = context
-        .plugins
+        .composition
         .tool_execution_owner(tool_id, source)
         .map(|owner| {
             crate::plugin::Proposal::for_tool(
@@ -253,7 +253,10 @@ fn carry_body_state(
         return result;
     }
     match (*proposal).and_then(|proposal| {
-        crate::plugin::propose(&context.plugins, proposal).map_err(|error| error.to_string())
+        context
+            .state
+            .propose(proposal)
+            .map_err(|error| crate::plugin::proposal_failure_message(&error))
     }) {
         Ok(()) => result,
         Err(message) => {
@@ -387,7 +390,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
     hold_declared_execution_environments(
         context,
         attempt_done(outcome),
-        &completion_context.execution_env_spec,
+        completion_context.execution_env_spec.as_ref(),
     )
     .await
 }
@@ -395,7 +398,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
 async fn hold_declared_execution_environments(
     context: &ToolDispatchContext<'_>,
     launch: crate::ToolAttemptLaunch,
-    captured_spec: &crate::ProcessExecutionEnvSpec,
+    captured_spec: Option<&crate::ProcessExecutionEnvSpec>,
 ) -> Result<crate::ToolAttemptLaunch, crate::RuntimeEffectControllerError> {
     let mut env_refs: Vec<_> = match &launch {
         crate::ToolAttemptLaunch::Done { intents, .. }
@@ -414,6 +417,11 @@ async fn hold_declared_execution_environments(
     env_refs.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
     env_refs.dedup();
     if !env_refs.is_empty() {
+        let captured_spec = captured_spec.ok_or_else(|| {
+            crate::PluginError::Session(
+                "process execution environment requires a runtime context".into(),
+            )
+        })?;
         let ports = context.process_engines.artifact_ports().ok_or_else(|| {
             crate::PluginError::Session(
                 "an environment declaration requires the runtime's artifact stores".to_string(),

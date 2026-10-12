@@ -27,7 +27,7 @@ pub(super) fn hook_context(
         call_id: call_id.clone(),
         tool_id: tool_id.clone(),
         tool_name: tool_name.to_string(),
-        plugin_config: context.plugins.admitted_plugin_config(),
+        config: context.config.clone(),
         argument_projection,
         turn_context: context.turn_context.clone(),
         sessions: Arc::clone(&context.sessions),
@@ -44,7 +44,7 @@ pub(super) async fn check_prepared_call(
     prepared: &PreparedCallReadView,
 ) -> BeforeSelection {
     let record = match context
-        .plugins
+        .composition
         .check_tool_args(hook_context, original_args, prepared)
         .await
     {
@@ -73,7 +73,7 @@ pub async fn finalize_tool_result_with_execution_context(
     occurrence: ToolHookOccurrence,
     result: ToolOutcome,
 ) -> ToolOutcome {
-    if !context.plugins.has_tool_result_hooks() {
+    if !context.composition.has_tool_result_hooks() {
         return result;
     }
     let output = match result.into_done_output() {
@@ -97,7 +97,7 @@ pub async fn finalize_tool_result_with_execution_context(
     );
     let original = Arc::new(original);
     let candidate = match context
-        .plugins
+        .composition
         .transform_tool_result(&hook_context, occurrence, prepared, &original)
         .await
     {
@@ -106,7 +106,7 @@ pub async fn finalize_tool_result_with_execution_context(
     };
     let final_result = Arc::new(candidate);
     let checks = match context
-        .plugins
+        .composition
         .check_tool_result(
             &hook_context,
             occurrence,
@@ -156,11 +156,11 @@ fn carry_result_check_state(
         return Ok(());
     };
     let plugin = first.batch.plugin.plugin.clone();
-    crate::plugin::propose_all(&context.plugins, proposals).map_err(|error| {
+    context.state.propose_all(proposals).map_err(|error| {
         let mut failure = crate::ToolFailure::runtime(
             crate::ToolFailureClass::Internal,
             "tool_result_check_state_unrecorded",
-            error.to_string(),
+            crate::plugin::proposal_failure_message(&error),
         )
         .with_cause(crate::ToolFailureCause::PluginStateUnrecorded { plugin });
         failure.source = crate::ToolFailureSource::Plugin;

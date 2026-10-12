@@ -19,6 +19,13 @@ pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginCo
 pub use lash_sansio::{CheckpointKind, PluginMessage, PluginRuntimeEvent, ToolCatalogContribution};
 
 mod actions;
+mod composition;
+mod execution_state;
+mod execution_views;
+pub use composition::{AdmissionGate, ContributionKind, ExecutionComposition};
+pub use execution_state::ExecutionState;
+pub(crate) use execution_state::proposal_failure_message;
+pub use execution_views::{ExecutionFacts, OwnerConfigView};
 mod attachment_omission;
 pub mod config;
 mod error;
@@ -42,7 +49,8 @@ pub(crate) mod state;
 pub use recorded_callbacks::{PluginCallbackBody, RecordedCallbackPhase, record_plugin_callbacks};
 pub use state::EffectPublication;
 use state::PluginStateRegistry;
-pub(crate) use state::{Proposal, collect_proposals, propose, propose_all};
+pub use state::Proposal;
+pub(crate) use state::{collect_proposals, propose, propose_all};
 mod tool_catalog;
 mod tool_hooks;
 

@@ -35,7 +35,7 @@ async fn turn_prompt(
             call: 0,
             purpose: PromptPurpose::Turn,
         },
-        config: session.admitted_plugin_config(),
+        config: lash_core::OwnerConfigView::session(session.admitted_plugin_config()),
         session: None,
         offered: OfferedTools::new(Arc::new(catalog.clone()), false),
         model: Default::default(),

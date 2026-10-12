@@ -180,3 +180,14 @@ impl CurrentOwnerCapability {
             .observe(|| (context, event));
     }
 }
+
+impl super::CurrentOwnerCapability {
+    pub(super) fn execution_facts(&self) -> Option<crate::plugin::ExecutionFacts> {
+        match &self.owner {
+            super::CurrentOwner::Session(_) => None,
+            super::CurrentOwner::Process { environment, .. } => {
+                Some(crate::plugin::ExecutionFacts::of_env_spec(environment))
+            }
+        }
+    }
+}

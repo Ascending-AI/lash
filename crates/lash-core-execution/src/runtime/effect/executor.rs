@@ -164,7 +164,7 @@ pub trait RuntimeEffectLocalRunner: Send {
     /// The session whose accepted state edits this callback body owns.
     /// An engine records these edits with the body result and restores them
     /// before it serves a completed result on replay.
-    fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
+    fn execution_state(&self) -> Option<Arc<dyn crate::plugin::ExecutionState>> {
         None
     }
 
@@ -301,7 +301,8 @@ pub(crate) fn unresolved_execution_env(
 /// under, and how long the settled call took — an observation the steps may
 /// read, never part of the command's recorded identity.
 pub struct PresentationLocalExecution {
-    pub plugins: Arc<crate::plugin::PluginSession>,
+    pub composition: Arc<crate::plugin::ExecutionComposition>,
+    pub state: Arc<dyn crate::plugin::ExecutionState>,
     pub facts: Arc<crate::plugin::ToolPresentationFacts>,
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
@@ -335,7 +336,7 @@ impl PresentationLocalExecution {
             &self.attachment_store,
         )));
         let context = crate::plugin::ToolResultProjectionContext {
-            owner: self.plugins.owner().clone(),
+            owner: self.state.owner().clone(),
             call_id,
             tool_id,
             tool_name,
@@ -345,7 +346,7 @@ impl PresentationLocalExecution {
             duration_ms: self.duration_ms,
             artifacts,
         };
-        let presentation = Box::pin(self.plugins.present_tool_result(
+        let presentation = Box::pin(self.composition.present_tool_result(
             context,
             self.facts,
             &plan,
@@ -612,18 +613,20 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// presentation steps run exactly once on the first execution and replay
     /// serves the recorded `ToolPresentation`.
     pub(crate) fn presentation(
-        plugins: Arc<crate::plugin::PluginSession>,
+        composition: Arc<crate::plugin::ExecutionComposition>,
+        state: Arc<dyn crate::plugin::ExecutionState>,
         facts: Arc<crate::plugin::ToolPresentationFacts>,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
         duration_ms: u64,
         plan: &super::PresentationBinding,
     ) -> Self {
-        let refusal = plugins.validate_tool_presentation_plan(plan).err();
+        let refusal = composition.validate_tool_presentation_plan(plan).err();
         let executor = Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Presentation(
                 PresentationLocalExecution {
-                    plugins,
+                    composition,
+                    state,
                     facts,
                     attachment_store,
                     attachment_acceptance,
@@ -832,7 +835,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         let plugins = if envelope.command.replays_by_reexecution() {
             None
         } else {
-            self.plugin_state_session()
+            self.execution_state()
         };
         let kind = envelope.command.kind();
         let address = envelope.invocation.address().clone();

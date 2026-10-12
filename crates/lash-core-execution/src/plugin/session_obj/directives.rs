@@ -126,8 +126,11 @@ impl PluginSession {
         address: crate::EffectAddress,
     ) -> Result<AfterTurnDecisions, PluginError> {
         let segment = self.state_segment();
-        let (contributions, proposals) =
-            super::state::collect_proposals(self, self.dispatch(phase_probe).after_turn(ctx)).await;
+        let (contributions, proposals) = super::state::collect_proposals(
+            self.as_ref(),
+            self.dispatch(phase_probe).after_turn(ctx),
+        )
+        .await;
         let decisions = recorded_contributions(
             contributions?,
             |AfterTurnContributions {
@@ -140,7 +143,7 @@ impl PluginSession {
         let resolutions = Box::pin(self.reduce_proposals(&address, segment, proposals)).await?;
         Ok(AfterTurnDecisions {
             decisions,
-            state: super::EffectPublication::begin(Arc::clone(self), address).stage(resolutions),
+            state: super::EffectPublication::begin(self.clone(), address).stage(resolutions),
         })
     }
 }

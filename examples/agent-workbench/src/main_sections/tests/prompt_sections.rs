@@ -24,7 +24,7 @@ fn cut(prompt: &WorkbenchPrompt, history_messages: u32) -> PromptCut {
             call: 0,
             purpose: PromptPurpose::Turn,
         },
-        config: lash::plugins::AdmittedPluginConfig::new(
+        config: lash::plugins::OwnerConfigView::session(lash::plugins::AdmittedPluginConfig::new(
             serde_json::from_value(json!({
                 "namespaces": {
                     "agent_workbench": { "format_version": 1, "value": prompt }
@@ -32,7 +32,7 @@ fn cut(prompt: &WorkbenchPrompt, history_messages: u32) -> PromptCut {
             }))
             .expect("the workbench namespace records"),
             1,
-        ),
+        )),
         session: None,
         offered: OfferedTools::default(),
         model: lash::plugins::PromptModel::default(),

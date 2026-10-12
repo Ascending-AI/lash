@@ -745,7 +745,12 @@ impl Session {
                 .map_or_else(crate::FleetFormat::current, |store| {
                     store.store().fleet_format()
                 }),
-            plugins: Arc::clone(self.plugins()),
+            composition: (self.plugins()).composition(),
+            config: crate::plugin::OwnerConfigView::session(
+                (self.plugins()).admitted_plugin_config(),
+            ),
+            execution_budgets: (self.plugins()).execution_budgets(),
+            state: (self.plugins()).clone(),
             tools: tool_surface.tools(),
             tool_registry: Some(tool_surface.tool_registry()),
             tool_catalog: tool_surface.tool_catalog(),
@@ -758,7 +763,7 @@ impl Session {
             direct_completions: direct_completions.clone(),
             parent_invocation: None,
             observation_call_key: None,
-            execution_env_spec: execution_env_spec.clone(),
+            facts: crate::plugin::ExecutionFacts::of_env_spec(&execution_env_spec),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: session_id.clone(),
                 agent_frame_id,

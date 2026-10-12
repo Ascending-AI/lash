@@ -129,7 +129,10 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
     let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
         fleet_format: lash_core_execution::FleetFormat::current(),
-        plugins,
+        composition: (plugins).composition(),
+        config: crate::plugin::OwnerConfigView::session((plugins).admitted_plugin_config()),
+        execution_budgets: (plugins).execution_budgets(),
+        state: plugins,
         tools,
         tool_registry: None,
         tool_catalog,
@@ -144,7 +147,7 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
         ),
         parent_invocation: None,
         observation_call_key: None,
-        execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+        facts: crate::plugin::ExecutionFacts::of_env_spec(&crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
@@ -152,7 +155,7 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
                 lash_core_execution::NoProgressBudget::bounded(12),
             ),
             crate::SessionToolAccess::ambient(),
-        ),
+        )),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: crate::SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),

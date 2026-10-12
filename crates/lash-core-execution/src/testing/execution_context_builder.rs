@@ -537,7 +537,10 @@ impl<'run> TestExecutionContextBuilder<'run> {
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
             fleet_format: crate::FleetFormat::current(),
             process_engines: self.process_engines,
-            plugins,
+            composition: (plugins).composition(),
+            config: crate::plugin::OwnerConfigView::session((plugins).admitted_plugin_config()),
+            execution_budgets: (plugins).execution_budgets(),
+            state: plugins,
             tools: self.provider,
             tool_registry: self.tool_registry,
             tool_catalog: Arc::new(self.tool_catalog),
@@ -553,7 +556,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             }),
             parent_invocation: self.dispatch_parent_invocation,
             observation_call_key: None,
-            execution_env_spec: self.execution_env_spec.clone(),
+            facts: crate::plugin::ExecutionFacts::of_env_spec(&self.execution_env_spec),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: self.session_id,
                 agent_frame_id: crate::FrameNodeId::new("test-frame")

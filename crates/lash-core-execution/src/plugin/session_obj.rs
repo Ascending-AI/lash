@@ -5,8 +5,6 @@ use std::sync::Arc;
 
 use lash_sansio::sync::{MutexExt, RwLockExt};
 
-use lash_core_store::tool_run::{AttributedVerdict, CheckRecord};
-
 use super::*;
 
 mod directives;
@@ -74,16 +72,6 @@ where
         });
     }
     Ok(out)
-}
-
-/// The call failure an unusable recorded admission becomes at a tool hook
-/// seam: no hook runs under an admission the session cannot honor.
-fn failed_admission(error: &PluginError) -> crate::ToolFailure {
-    crate::ToolFailure::runtime(
-        crate::ToolFailureClass::Unavailable,
-        "plugin_admission_refused",
-        error.to_string(),
-    )
 }
 
 fn plugin_hook_phase_name(hook_kind: &str, plugin_id: &str) -> String {
@@ -258,6 +246,7 @@ pub struct PluginSession {
         Arc<std::sync::Mutex<Option<crate::store::plugin_writers::PluginAdmission>>>,
 }
 pub(super) struct PluginSessionCapabilities {
+    pub(super) composition: Arc<ExecutionComposition>,
     pub(super) plugins: Vec<Arc<dyn SessionPlugin>>,
     pub(super) tools: Arc<dyn ToolProvider>,
     pub(super) tool_registry: Arc<crate::ToolRegistry>,
@@ -266,6 +255,10 @@ pub(super) struct PluginSessionCapabilities {
 }
 
 impl PluginSession {
+    pub fn composition(&self) -> Arc<ExecutionComposition> {
+        Arc::clone(&self.capabilities().composition)
+    }
+
     /// The runtime's execution budgets this session's tools run under.
     pub fn execution_budgets(&self) -> crate::ExecutionBudgets {
         self.host.execution_budgets()
@@ -402,38 +395,6 @@ impl PluginSession {
             self.host.validate_plugin_admission(&admission)?;
         }
         Ok(())
-    }
-
-    /// Check a tool's recorded owner without invoking a provider or hook.
-    pub fn validate_tool_owner(&self, owner: &PluginRevision) -> Result<(), crate::RuntimeError> {
-        let available = self.host.plugin_revisions();
-        if !available.contains(owner) {
-            return Err(PluginExecutionRefusal {
-                recorded: vec![owner.clone()],
-                available,
-                callback: None,
-            }
-            .into_runtime_error());
-        }
-        Ok(())
-    }
-
-    /// Resolve ownership from the registered tool source, before admission.
-    pub fn tool_execution_owner(
-        &self,
-        tool: &crate::ToolId,
-        source: Option<&str>,
-    ) -> Result<PluginRevision, PluginError> {
-        let source = source
-            .map(str::to_owned)
-            .or_else(|| self.capabilities().tool_registry.execution_source_id(tool));
-        self.host
-            .plugin_revisions()
-            .into_iter()
-            .find(|owner| source.as_deref() == Some(owner.plugin.as_str()))
-            .ok_or_else(|| {
-                PluginError::Registration(format!("tool `{tool}` has no registered plugin owner"))
-            })
     }
 
     /// The plugin admission this session writes under, if it adopted one.
@@ -737,173 +698,6 @@ impl PluginSession {
             }
         }
         Ok(None)
-    }
-
-    /// Chain every argument transform once, in recorded registration order.
-    /// A transform's failure ends the chain: there is no valid value to
-    /// continue from.
-    pub(crate) async fn transform_tool_args(
-        &self,
-        context: &ToolHookContext,
-        args: serde_json::Value,
-    ) -> Result<serde_json::Value, Box<crate::ToolFailure>> {
-        self.validate_recorded_admission()
-            .map_err(|error| Box::new(failed_admission(&error)))?;
-        let original = Arc::new(args);
-        let mut current = (*original).clone();
-        for registered in &self.capabilities().contributions.tool_args_transforms {
-            current = (registered.hook)(ToolArgsTransformInput {
-                context: context.clone(),
-                original: Arc::clone(&original),
-                current,
-            })
-            .await
-            .map_err(|error| {
-                Box::new(failed_transform(
-                    ToolHookPhase::ArgsTransform,
-                    &registered.identity,
-                    &error,
-                ))
-            })?;
-        }
-        Ok(current)
-    }
-
-    /// Ask every before-check, sequentially, about the one prepared call and
-    /// reduce their replies. A check that fails denies; it never allows.
-    pub(crate) async fn check_tool_args(
-        &self,
-        context: &ToolHookContext,
-        original_args: &Arc<serde_json::Value>,
-        prepared: &PreparedCallReadView,
-    ) -> Result<CheckRecord<BeforeToolDecision>, Box<crate::ToolFailure>> {
-        self.validate_recorded_admission()
-            .map_err(|error| Box::new(failed_admission(&error)))?;
-        let mut replies =
-            Vec::with_capacity(self.capabilities().contributions.tool_args_checks.len());
-        for registered in &self.capabilities().contributions.tool_args_checks {
-            let verdict = (registered.hook)(ToolArgsCheckInput {
-                context: context.clone(),
-                original_args: Arc::clone(original_args),
-                prepared: prepared.clone(),
-            })
-            .await
-            .unwrap_or_else(|error| {
-                BeforeToolDecision::Deny(failed_check(
-                    ToolHookPhase::ArgsCheck,
-                    &registered.identity,
-                    &error,
-                ))
-            });
-            replies.push(AttributedVerdict {
-                callback: registered.identity.clone(),
-                verdict,
-            });
-        }
-        Ok(CheckRecord::reduce(replies))
-    }
-
-    /// Chain every result transform once, in recorded registration order,
-    /// over the immutable original and the preceding candidate.
-    pub(crate) async fn transform_tool_result(
-        &self,
-        context: &ToolHookContext,
-        occurrence: ToolHookOccurrence,
-        prepared: &PreparedCallReadView,
-        original: &Arc<ToolResultCandidate>,
-    ) -> Result<ToolResultCandidate, Box<crate::ToolFailure>> {
-        self.validate_recorded_admission()
-            .map_err(|error| Box::new(failed_admission(&error)))?;
-        let mut current = (**original).clone();
-        for registered in &self.capabilities().contributions.tool_result_transforms {
-            current = (registered.hook)(ToolResultTransformInput {
-                context: context.clone(),
-                occurrence,
-                prepared: prepared.clone(),
-                original: Arc::clone(original),
-                current,
-            })
-            .await
-            .map_err(|error| {
-                Box::new(failed_transform(
-                    ToolHookPhase::ResultTransform,
-                    &registered.identity,
-                    &error,
-                ))
-            })?;
-        }
-        Ok(current)
-    }
-
-    /// Ask every after-check, sequentially, about the one final candidate
-    /// and reduce their verdicts. A check that fails denies.
-    pub(crate) async fn check_tool_result(
-        &self,
-        context: &ToolHookContext,
-        occurrence: ToolHookOccurrence,
-        prepared: &PreparedCallReadView,
-        original: &Arc<ToolResultCandidate>,
-        final_result: &Arc<ToolResultCandidate>,
-    ) -> Result<ResultChecks, Box<crate::ToolFailure>> {
-        self.validate_recorded_admission()
-            .map_err(|error| Box::new(failed_admission(&error)))?;
-        let mut replies =
-            Vec::with_capacity(self.capabilities().contributions.tool_result_checks.len());
-        let mut contributions = Vec::new();
-        let mut proposals = Vec::new();
-        for registered in &self.capabilities().contributions.tool_result_checks {
-            let reply = (registered.hook)(ToolResultCheckInput {
-                context: context.clone(),
-                occurrence,
-                prepared: prepared.clone(),
-                original: Arc::clone(original),
-                final_result: Arc::clone(final_result),
-            })
-            .await;
-            let verdict = match reply {
-                Ok(AfterToolContributions {
-                    verdict,
-                    events,
-                    state,
-                }) => {
-                    if !state.is_empty() {
-                        proposals.push(super::Proposal::for_callback(
-                            &registered.identity,
-                            StateCommandOrigin::ToolHook {
-                                occurrence: Box::new(lash_core_store::tool_run::HookOccurrence {
-                                    call_id: context.call_id.clone(),
-                                    callback: registered.identity.clone(),
-                                    phase: ToolHookPhase::ResultCheck,
-                                    occurrence,
-                                }),
-                            },
-                            state,
-                        ));
-                    }
-                    if !events.is_empty() {
-                        contributions.push(AttributedContributions {
-                            plugin_id: registered.identity.owner.plugin.clone(),
-                            events,
-                        });
-                    }
-                    verdict
-                }
-                Err(error) => AfterToolDecision::Deny(failed_check(
-                    ToolHookPhase::ResultCheck,
-                    &registered.identity,
-                    &error,
-                )),
-            };
-            replies.push(AttributedVerdict {
-                callback: registered.identity.clone(),
-                verdict,
-            });
-        }
-        Ok(ResultChecks {
-            record: CheckRecord::reduce(replies),
-            contributions,
-            proposals,
-        })
     }
 
     pub async fn at_checkpoint(
@@ -1435,6 +1229,7 @@ mod attachment_notice_order_tests {
             intent_outcomes: Vec::new(),
         });
         let presented = session
+            .composition()
             .present_tool_result(
                 super::super::ToolResultProjectionContext {
                     owner: crate::RuntimeOwner::Session("notice-order-session".into()),
@@ -1448,7 +1243,7 @@ mod attachment_notice_order_tests {
                     artifacts: Arc::new(super::super::NoPresentationArtifacts),
                 },
                 facts,
-                &session.tool_presentation_plan(),
+                &session.composition().tool_presentation_plan(),
                 &crate::provider::AttachmentCapabilitySnapshot::default(),
             )
             .await
@@ -1532,6 +1327,7 @@ mod presentation_plan_tests {
             intent_outcomes: Vec::new(),
         });
         session
+            .composition()
             .present_tool_result(
                 ToolResultProjectionContext {
                     owner: crate::RuntimeOwner::Session("presentation-plan".into()),
@@ -1554,7 +1350,9 @@ mod presentation_plan_tests {
     #[tokio::test]
     async fn a_recorded_presenter_never_runs_a_missing_or_revised_substitute() {
         let calls = Arc::new(AtomicUsize::new(0));
-        let plan = session(Some(1), &calls).tool_presentation_plan();
+        let plan = session(Some(1), &calls)
+            .composition()
+            .tool_presentation_plan();
         let plan: crate::runtime::PresentationBinding =
             serde_json::from_value(serde_json::to_value(plan).unwrap()).unwrap();
         for revision in [None, Some(2)] {
@@ -1584,5 +1382,36 @@ mod presentation_plan_tests {
         .await
         .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}
+
+// Shares the recorded admission without retaining the session's capabilities:
+// the composition may outlive the session and must not form an ownership cycle.
+struct SessionExecutionAdmission {
+    host: PluginHost,
+    admission: Arc<std::sync::Mutex<Option<crate::store::plugin_writers::PluginAdmission>>>,
+}
+
+impl AdmissionGate for SessionExecutionAdmission {
+    fn validate(&self) -> Result<(), PluginError> {
+        if let Some(admission) = self.admission.lock_recover().clone() {
+            self.host.validate_plugin_admission(&admission)?;
+        }
+        Ok(())
+    }
+}
+
+impl AdmissionGate for PluginSession {
+    fn validate(&self) -> Result<(), PluginError> {
+        self.validate_recorded_admission()
+    }
+}
+
+impl PluginSession {
+    pub(super) fn execution_admission(&self) -> Arc<dyn AdmissionGate> {
+        Arc::new(SessionExecutionAdmission {
+            host: self.host.clone(),
+            admission: Arc::clone(&self.admission),
+        })
     }
 }

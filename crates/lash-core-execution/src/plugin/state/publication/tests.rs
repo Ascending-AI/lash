@@ -113,11 +113,11 @@ async fn record(
 ) -> RuntimeEffectOutcome {
     let body_session = Arc::clone(session);
     record_effect(
-        Arc::clone(session),
+        session.clone(),
         RuntimeEffectKind::LanguageRuntimeValue,
         address(step),
         async move {
-            propose_all(&body_session, proposals).map_err(crate::PluginError::from)?;
+            propose_all(body_session.as_ref(), proposals).map_err(crate::PluginError::from)?;
             Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
         },
     )
@@ -131,7 +131,7 @@ fn publish(
     step: &str,
     outcome: RuntimeEffectOutcome,
 ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-    EffectPublication::begin(Arc::clone(session), address(step)).publish(outcome)
+    EffectPublication::begin(session.clone(), address(step)).publish(outcome)
 }
 
 /// The outcome's journal bytes and back: what a cold replay is served.
@@ -194,13 +194,13 @@ async fn an_unrecorded_command_never_reaches_a_durable_sibling() {
         let a_session = Arc::clone(&live);
         let a_bodies = Arc::clone(&bodies);
         let mut a = Box::pin(record_effect(
-            Arc::clone(&live),
+            live.clone(),
             RuntimeEffectKind::LanguageRuntimeValue,
             address("a"),
             async move {
                 a_bodies.fetch_add(1, Ordering::SeqCst);
                 propose(
-                    &a_session,
+                    a_session.as_ref(),
                     tool_commands(
                         a_plugin,
                         "a",
@@ -221,14 +221,14 @@ async fn an_unrecorded_command_never_reaches_a_durable_sibling() {
         let b_session = Arc::clone(&live);
         let b_bodies = Arc::clone(&bodies);
         let b = record_effect(
-            Arc::clone(&live),
+            live.clone(),
             RuntimeEffectKind::LanguageRuntimeValue,
             address("b"),
             async move {
                 b_bodies.fetch_add(1, Ordering::SeqCst);
                 let seen = view.get(a_key);
                 propose(
-                    &b_session,
+                    b_session.as_ref(),
                     tool_commands(
                         b_plugin,
                         "b",
@@ -751,12 +751,12 @@ async fn a_failed_body_publishes_nothing() {
     let base = live.export_state();
     let body_session = Arc::clone(&live);
     let failed = record_effect(
-        Arc::clone(&live),
+        live.clone(),
         RuntimeEffectKind::LanguageRuntimeValue,
         address("failed"),
         async move {
             propose(
-                &body_session,
+                body_session.as_ref(),
                 tool_commands(
                     LEDGER,
                     "failed",
@@ -799,7 +799,7 @@ async fn an_abandoned_publication_fences_its_namespace_until_rebuilt() {
     let host = host(&Arc::default());
     let live = session(&host, None);
     let base = live.export_state();
-    let publication = EffectPublication::begin(Arc::clone(&live), address("abandoned"));
+    let publication = EffectPublication::begin(live.clone(), address("abandoned"));
     let _unreturned = record(
         &live,
         "abandoned",
@@ -813,12 +813,12 @@ async fn an_abandoned_publication_fences_its_namespace_until_rebuilt() {
     drop(publication);
     let body_session = Arc::clone(&live);
     let fenced = record_effect(
-        Arc::clone(&live),
+        live.clone(),
         RuntimeEffectKind::ToolAttempt,
         address("after"),
         async move {
             propose(
-                &body_session,
+                body_session.as_ref(),
                 tool_commands(
                     LEDGER,
                     "after",
@@ -1018,14 +1018,14 @@ async fn a_callback_keeps_its_publisher_segment_across_handover() {
     let (began, reached) = tokio::sync::oneshot::channel();
     let (finish, finished) = tokio::sync::oneshot::channel();
     let body = record_effect(
-        Arc::clone(&live),
+        live.clone(),
         RuntimeEffectKind::LanguageRuntimeValue,
         address("held"),
         async move {
             began.send(()).unwrap();
             finished.await.unwrap();
             propose(
-                &body_session,
+                body_session.as_ref(),
                 tool_commands(
                     LEDGER,
                     "held",

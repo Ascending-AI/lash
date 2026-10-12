@@ -41,7 +41,10 @@ fn test_execution_context_with_env_store(
     .expect("plugin session");
     let dispatch = Arc::new(ToolDispatchContext {
         fleet_format: crate::FleetFormat::current(),
-        plugins,
+        composition: (plugins).composition(),
+        config: crate::plugin::OwnerConfigView::session((plugins).admitted_plugin_config()),
+        execution_budgets: (plugins).execution_budgets(),
+        state: plugins,
         tools: Arc::new(NoopTools),
         tool_registry: None,
         tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
@@ -60,7 +63,7 @@ fn test_execution_context_with_env_store(
         ),
         parent_invocation: None,
         observation_call_key: None,
-        execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+        facts: crate::plugin::ExecutionFacts::of_env_spec(&crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
@@ -68,7 +71,7 @@ fn test_execution_context_with_env_store(
                 crate::NoProgressBudget::bounded(12),
             ),
             crate::SessionToolAccess::ambient(),
-        ),
+        )),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),

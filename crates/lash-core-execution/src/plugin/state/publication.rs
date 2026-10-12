@@ -67,7 +67,7 @@ pub type StateReducer =
     Arc<dyn Fn(StateReduction<'_>) -> Result<Option<Value>, HookCause> + Send + Sync>;
 
 /// One command batch proposed inside a recorded body.
-pub(crate) struct Proposal {
+pub struct Proposal {
     pub(crate) batch: StateCommandBatch,
     /// The callback that proposed it, whose slot must hold state authority;
     /// `None` for a tool body's own result.
@@ -109,7 +109,7 @@ impl Proposal {
 }
 
 struct Sink {
-    state: Arc<Mutex<PluginStateRegistry>>,
+    key: usize,
     proposals: Vec<Proposal>,
 }
 
@@ -124,14 +124,14 @@ tokio::task_local! {
 /// [`PluginStateError::Unrecorded`] when no recorded body of this session
 /// runs here: nothing could carry the resolution.
 pub(crate) fn propose(
-    plugins: &crate::PluginSession,
+    plugins: &dyn super::super::ExecutionState,
     proposal: Proposal,
 ) -> Result<(), PluginStateError> {
     let plugin = proposal.batch.plugin.plugin.clone();
     let mut pending = Some(proposal);
     let _ = SINK.try_with(|sink| {
         let mut sink = sink.lock_recover();
-        if Arc::ptr_eq(&sink.state, &plugins.state)
+        if sink.key == plugins.proposal_key()
             && let Some(proposal) = pending.take()
         {
             sink.proposals.push(proposal);
@@ -145,7 +145,7 @@ pub(crate) fn propose(
 
 /// [`propose`] every proposal, in order.
 pub(crate) fn propose_all(
-    plugins: &crate::PluginSession,
+    plugins: &dyn super::super::ExecutionState,
     proposals: Vec<Proposal>,
 ) -> Result<(), PluginStateError> {
     proposals
@@ -157,11 +157,11 @@ pub(crate) fn propose_all(
 /// it to an enclosing recorded body: for a callback whose decision is
 /// recorded by a step of its own.
 pub(crate) async fn collect_proposals<F: Future>(
-    plugins: &crate::PluginSession,
+    plugins: &dyn super::super::ExecutionState,
     body: F,
 ) -> (F::Output, Vec<Proposal>) {
     let sink = Arc::new(Mutex::new(Sink {
-        state: Arc::clone(&plugins.state),
+        key: plugins.proposal_key(),
         proposals: Vec::new(),
     }));
     let output = SINK.scope(Arc::clone(&sink), body).await;
@@ -174,7 +174,7 @@ pub(crate) async fn collect_proposals<F: Future>(
 /// An attempt fault or a recorded failure publishes nothing: eligibility is
 /// the body's final result (Q5 §8).
 pub(crate) async fn record_effect<F>(
-    plugins: Arc<crate::PluginSession>,
+    plugins: Arc<dyn super::super::ExecutionState>,
     kind: RuntimeEffectKind,
     address: crate::EffectAddress,
     body: F,
@@ -183,7 +183,7 @@ where
     F: Future<Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>,
 {
     let segment = plugins.state_segment();
-    let (result, proposals) = collect_proposals(&plugins, body).await;
+    let (result, proposals) = collect_proposals(plugins.as_ref(), body).await;
     if proposals.is_empty() || result.is_err() {
         return result;
     }
@@ -225,14 +225,17 @@ fn fenced_fault(error: PluginStateError) -> RuntimeEffectControllerError {
 /// The engine's seam for a frame that executes an effect through a
 /// controller directly; `core_internal` re-exports it.
 pub struct EffectPublication {
-    plugins: Arc<crate::PluginSession>,
+    plugins: Arc<dyn super::super::ExecutionState>,
     address: crate::EffectAddress,
     settled: bool,
 }
 
 impl EffectPublication {
     /// Begin the publication of the effect at `address` for `plugins`.
-    pub fn begin(plugins: Arc<crate::PluginSession>, address: crate::EffectAddress) -> Self {
+    pub fn begin(
+        plugins: Arc<dyn super::super::ExecutionState>,
+        address: crate::EffectAddress,
+    ) -> Self {
         Self {
             plugins,
             address,
@@ -328,7 +331,7 @@ impl Eq for StagedPluginState {}
 /// The namespaces one call's staged resolutions reserved. Dropped while
 /// they are still reserved, it fences them.
 struct StateReservation {
-    plugins: Arc<crate::PluginSession>,
+    plugins: Arc<dyn super::super::ExecutionState>,
     address: crate::EffectAddress,
 }
 
@@ -552,7 +555,7 @@ impl crate::PluginSession {
         self.publish_recorded(&address, outcome)
     }
 
-    fn publish_recorded(
+    pub(crate) fn publish_recorded(
         &self,
         address: &crate::EffectAddress,
         outcome: RuntimeEffectOutcome,
@@ -694,7 +697,7 @@ impl crate::PluginSession {
 
     /// The engine never returned `address`'s outcome: fence what it
     /// reduced, since it may be durable.
-    fn abandon_publication(&self, address: &crate::EffectAddress) {
+    pub(crate) fn abandon_publication(&self, address: &crate::EffectAddress) {
         let mut registry = self.state.lock_recover();
         let abandoned: Vec<String> = registry
             .reserved

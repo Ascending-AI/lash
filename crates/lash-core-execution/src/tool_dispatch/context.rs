@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::plugin::{
-    PluginSession, SessionGraphService, SessionLifecycleService, SessionStateService,
+    ExecutionComposition, ExecutionFacts, ExecutionState, OwnerConfigView, SessionGraphService,
+    SessionLifecycleService, SessionStateService,
 };
 use crate::{
     PreparedToolCall, ToolCallRecord, ToolCatalog, ToolFailure, ToolFailureClass, ToolOutcome,
@@ -10,7 +11,11 @@ use crate::{
 
 #[derive(Clone)]
 pub struct ToolDispatchContext<'run> {
-    pub plugins: Arc<PluginSession>,
+    pub composition: Arc<ExecutionComposition>,
+    pub state: Arc<dyn ExecutionState>,
+    pub config: OwnerConfigView,
+    pub facts: ExecutionFacts,
+    pub execution_budgets: crate::ExecutionBudgets,
     pub tools: Arc<dyn ToolProvider>,
     pub tool_registry: Option<Arc<crate::ToolRegistry>>,
     pub tool_catalog: Arc<ToolCatalog>,
@@ -38,7 +43,6 @@ pub struct ToolDispatchContext<'run> {
     /// `None` everywhere else: a dispatch that serves one call — an attempt's,
     /// a command's — already keys uniquely through `parent_invocation`.
     pub observation_call_key: Option<String>,
-    pub execution_env_spec: crate::ProcessExecutionEnvSpec,
     /// Who this dispatch runs for: a session on its admitted agent frame, or
     /// a process, which has neither a session nor a frame of its own.
     pub owner: crate::ExecutionOwner,
@@ -149,7 +153,11 @@ impl<'run> ToolDispatchContext<'run> {
     pub(crate) fn to_static(&self) -> Option<ToolDispatchContext<'static>> {
         Some(ToolDispatchContext {
             fleet_format: self.fleet_format,
-            plugins: Arc::clone(&self.plugins),
+            composition: Arc::clone(&self.composition),
+            state: self.state.clone(),
+            config: self.config.clone(),
+            facts: self.facts.clone(),
+            execution_budgets: self.execution_budgets.clone(),
             tools: Arc::clone(&self.tools),
             tool_registry: self.tool_registry.clone(),
             tool_catalog: Arc::clone(&self.tool_catalog),
@@ -162,7 +170,6 @@ impl<'run> ToolDispatchContext<'run> {
             direct_completions: self.direct_completions.to_static()?,
             parent_invocation: self.parent_invocation.clone(),
             observation_call_key: self.observation_call_key.clone(),
-            execution_env_spec: self.execution_env_spec.clone(),
             owner: self.owner.clone(),
             observer: Arc::clone(&self.observer),
             attachment_store: Arc::clone(&self.attachment_store),

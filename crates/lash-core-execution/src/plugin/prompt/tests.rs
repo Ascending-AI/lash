@@ -44,7 +44,7 @@ fn cut(namespaces: BTreeMap<String, CommittedPluginNamespace>) -> PromptCut {
             call: 0,
             purpose: PromptPurpose::Turn,
         },
-        config: crate::AdmittedPluginConfig::default(),
+        config: crate::OwnerConfigView::session(crate::AdmittedPluginConfig::default()),
         session: None,
         offered: OfferedTools::default(),
         model: PromptModel::default(),

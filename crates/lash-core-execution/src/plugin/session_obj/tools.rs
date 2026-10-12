@@ -3,11 +3,6 @@ use std::sync::Arc;
 
 use super::*;
 
-struct ResolvedPresentationPlan<'a> {
-    presenter: Option<&'a RegisteredHook<ToolPresentationPresenter>>,
-    steps: Vec<&'a RegisteredHook<ToolPresentationStep>>,
-}
-
 #[derive(Clone)]
 pub struct ResolvedToolSurface {
     pub registry: Arc<crate::ToolRegistry>,
@@ -15,62 +10,6 @@ pub struct ResolvedToolSurface {
 }
 
 impl PluginSession {
-    pub(crate) fn tool_run_revisions(&self) -> Vec<crate::plugin::PluginRevision> {
-        self.host.plugin_revisions()
-    }
-
-    pub(crate) fn tool_run_binding(
-        &self,
-        tool: &crate::ToolId,
-        source: Option<&str>,
-    ) -> Result<crate::tool_run::AdmittedBinding, PluginError> {
-        let owner = self.tool_execution_owner(tool, source)?;
-        let executable = self
-            .capabilities()
-            .contributions
-            .tool_providers
-            .iter()
-            .find(|registered| {
-                registered.identity.owner == owner
-                    && registered.hook.resolve_manifest_by_id(tool).is_some()
-            })
-            .map(|registered| registered.identity.clone())
-            .ok_or_else(|| {
-                PluginError::Registration(format!(
-                    "tool `{tool}` has no registered executable callback"
-                ))
-            })?;
-        Ok(crate::tool_run::AdmittedBinding {
-            preparation: executable.clone(),
-            executable,
-            presentation: self.tool_presentation_plan(),
-        })
-    }
-
-    /// Bind recorded provider identities to this worker's capabilities.
-    pub fn resolve_context_tool_bindings(
-        &self,
-        bindings: &[crate::plugin::PluginCallbackIdentity],
-    ) -> Result<Vec<Arc<dyn crate::ToolProvider>>, PluginError> {
-        bindings
-            .iter()
-            .map(|binding| {
-                self.capabilities()
-                    .contributions
-                    .tool_providers
-                    .iter()
-                    .find(|registered| &registered.identity == binding)
-                    .map(|registered| Arc::clone(&registered.hook))
-                    .ok_or_else(|| {
-                        PluginError::Session(format!(
-                            "recorded context tool binding {}:{} is unavailable",
-                            binding.owner.plugin, binding.key,
-                        ))
-                    })
-            })
-            .collect()
-    }
-
     /// Pin this plugin session's resolved tool surface: its registry and the
     /// catalog its owner's calls resolve against.
     pub fn pin_resolved_tool_surface(&self) -> Result<ResolvedToolSurface, PluginError> {
@@ -145,7 +84,7 @@ impl PluginSession {
     ) -> Result<crate::ToolCatalog, PluginError> {
         self.validate_recorded_admission()?;
         let mut contributions = collect_owned_sync(
-            &self.capabilities().contributions.tool_catalog_contributors,
+            self.composition().tool_catalog_contributors(),
             ToolCatalogContext {
                 owner: ctx.owner.clone(),
                 tools: ctx.tools.clone(),
@@ -213,151 +152,6 @@ impl PluginSession {
                     source: Box::new(refusal),
                 }
             }
-        })
-    }
-}
-
-impl PluginSession {
-    /// Select the singleton renderer and ordered steps without invoking them.
-    /// The owning admission or presentation boundary records this selection.
-    pub fn tool_presentation_plan(&self) -> crate::runtime::PresentationBinding {
-        let contributions = &self.capabilities().contributions;
-        crate::runtime::PresentationBinding {
-            presenter: contributions
-                .presentation_presenter
-                .as_ref()
-                .map(|registered| registered.identity.clone()),
-            steps: contributions
-                .presentation_steps
-                .iter()
-                .map(|registered| registered.identity.clone())
-                .collect(),
-        }
-    }
-
-    /// Resolve every owed callback before presentation can invoke any of them.
-    pub fn validate_tool_presentation_plan(
-        &self,
-        plan: &crate::runtime::PresentationBinding,
-    ) -> Result<(), PluginError> {
-        self.validate_recorded_admission()?;
-        self.resolve_tool_presentation_plan(plan).map(drop)
-    }
-
-    fn resolve_tool_presentation_plan(
-        &self,
-        plan: &crate::runtime::PresentationBinding,
-    ) -> Result<ResolvedPresentationPlan<'_>, PluginError> {
-        let contributions = &self.capabilities().contributions;
-        let presenter = plan
-            .presenter
-            .as_ref()
-            .map(|callback| {
-                contributions
-                    .presentation_presenter
-                    .as_ref()
-                    .filter(|registered| &registered.identity == callback)
-                    .ok_or_else(|| self.unavailable_callback(callback))
-            })
-            .transpose()?;
-        let steps = plan
-            .steps
-            .iter()
-            .map(|callback| {
-                contributions
-                    .presentation_steps
-                    .iter()
-                    .find(|registered| &registered.identity == callback)
-                    .ok_or_else(|| self.unavailable_callback(callback))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(ResolvedPresentationPlan { presenter, steps })
-    }
-
-    /// The presentation boundary (ADR 0099 §6, FIG-3420): folds every
-    /// [`ToolPresentationStep`] in the recorded plan's order, starting
-    /// from `ModelToolReturn::from_output`.
-    ///
-    /// A retryable step error aborts the uncommitted derivation. Other optional
-    /// step errors continue the fold from the
-    /// recorded fallback text return (`ModelToolReturn::text(call_id, tool,
-    /// err)`), so one broken step settles a refusal the model can read instead
-    /// of losing the whole presentation. Attachment-materialization notices
-    /// are then computed under `attachment_acceptance`, the caller's recorded
-    /// environment. Last, the folded return is measured against the
-    /// retention policy and its text retained if it is too long for history
-    /// (FIG-1643). The refs retained through `ctx.artifacts` and the policy
-    /// ride the returned [`crate::runtime::effect::ToolPresentation`] into
-    /// the journal.
-    ///
-    /// A retention that failed anywhere in the chain — the presenter's, a
-    /// step's, or the boundary's own — fails the presentation with a typed
-    /// attachment-store cause: a step that turned the refusal into
-    /// text does not make it the call's return.
-    pub(crate) async fn present_tool_result(
-        &self,
-        ctx: ToolResultProjectionContext,
-        facts: Arc<crate::plugin::ToolPresentationFacts>,
-        plan: &crate::runtime::PresentationBinding,
-        attachment_acceptance: &crate::provider::AttachmentCapabilitySnapshot,
-    ) -> Result<
-        crate::runtime::effect::ToolPresentation,
-        crate::runtime::effect::RuntimeEffectControllerError,
-    > {
-        use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
-
-        self.validate_recorded_admission()
-            .map_err(crate::RuntimeEffectControllerError::from)?;
-        let callbacks = self
-            .resolve_tool_presentation_plan(plan)
-            .map_err(crate::RuntimeEffectControllerError::from)?;
-        let mut model_return =
-            crate::ModelToolReturn::from_output(ctx.tool_name.clone(), &ctx.output);
-        if let Some(presenter) = callbacks.presenter {
-            model_return = (presenter.hook)(ToolPresentationInput {
-                previous: model_return,
-                facts: Arc::clone(&facts),
-                context: ctx.clone(),
-            })
-            .await?;
-        }
-        for registered in callbacks.steps {
-            let input = ToolPresentationInput {
-                previous: model_return,
-                facts: Arc::clone(&facts),
-                context: ctx.clone(),
-            };
-            model_return = match (registered.hook)(input).await {
-                Ok(next) => next,
-                Err(err) if err.is_retryable() => {
-                    return Err(crate::RuntimeEffectControllerError::from(
-                        err.into_turn_failure(crate::RuntimeErrorCode::Plugin),
-                    )
-                    .retryable_uncommitted_derivation());
-                }
-                Err(err) => crate::ModelToolReturn::text(ctx.tool_name.clone(), err.to_string()),
-            };
-        }
-        crate::session::tool_execution::surface_attachment_materialization_notices(
-            attachment_acceptance,
-            &ctx.output,
-            &mut model_return,
-        );
-        let retention = ctx.artifacts.retention_policy();
-        crate::runtime::effect::retain_oversized_return(
-            &mut model_return,
-            &ctx.call_id,
-            ctx.artifacts.as_ref(),
-            retention,
-        )
-        .await?;
-        if let Some(failure) = ctx.artifacts.retention_failure() {
-            return Err(failure);
-        }
-        Ok(crate::runtime::effect::ToolPresentation {
-            model_return,
-            artifacts: ctx.artifacts.retained(),
-            retention,
         })
     }
 }

@@ -203,7 +203,9 @@ impl ProcessSteps for WorkerSteps {
             step: String::new(),
             reason: error.to_string(),
         })?;
-        Ok(Some(environment.policy.max_tool_calls))
+        Ok(Some(
+            lash_core_execution::plugin::ExecutionFacts::of_env_spec(&environment).max_tool_calls,
+        ))
     }
 
     async fn admit(

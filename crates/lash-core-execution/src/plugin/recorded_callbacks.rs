@@ -35,8 +35,8 @@ struct PluginCallbackRunner {
 
 #[async_trait::async_trait]
 impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for PluginCallbackRunner {
-    fn plugin_state_session(&self) -> Option<Arc<PluginSession>> {
-        Some(Arc::clone(&self.plugins))
+    fn execution_state(&self) -> Option<Arc<dyn super::ExecutionState>> {
+        Some(self.plugins.clone())
     }
 
     async fn execute(
@@ -54,9 +54,9 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for PluginCallba
             ));
         }
         let Self { plugins, body } = *self;
-        let (result, proposals) = super::collect_proposals(&plugins, body).await;
+        let (result, proposals) = super::collect_proposals(plugins.as_ref(), body).await;
         if result.is_ok() {
-            super::propose_all(&plugins, proposals).map_err(PluginError::from)?;
+            super::propose_all(plugins.as_ref(), proposals).map_err(PluginError::from)?;
         }
         Ok(RuntimeEffectOutcome::PluginCallbacks { result })
     }

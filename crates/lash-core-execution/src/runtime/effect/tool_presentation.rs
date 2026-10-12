@@ -31,7 +31,7 @@ pub(crate) async fn record_tool_presentation_plan(
 ) -> Result<PresentationBinding, RuntimeEffectControllerError> {
     let key = format!("{call_id}:presentation_plan");
     let controller = &context.effect_controller;
-    let plugins = Arc::clone(&context.plugins);
+    let plugins = Arc::clone(&context.composition);
     let envelope = super::RuntimeEffectEnvelope::new(
         super::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(controller.execution_scope().clone(), key.clone())?,
@@ -47,7 +47,7 @@ pub(crate) async fn record_tool_presentation_plan(
             envelope,
             super::RuntimeEffectLocalExecutor::language_runtime_value_with(move |_| async move {
                 plugins
-                    .validate_recorded_admission()
+                    .validate_admission()
                     .map_err(RuntimeEffectControllerError::from)?;
                 let value =
                     serde_json::to_value(plugins.tool_presentation_plan()).map_err(|error| {

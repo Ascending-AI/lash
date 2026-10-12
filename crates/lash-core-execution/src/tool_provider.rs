@@ -34,7 +34,7 @@ pub struct AttemptSessionReads {
     sessions: Arc<dyn SessionStateService>,
     /// The policy of the environment the attempt runs under: a process
     /// owner's model reads answer from it.
-    policy: crate::SessionPolicy,
+    facts: crate::plugin::ExecutionFacts,
     /// The catalog the attempt was dispatched against: a process owner's
     /// catalog reads answer from it. `None` outside a runtime dispatch.
     tool_catalog: Option<Arc<crate::ToolCatalog>>,
@@ -43,21 +43,30 @@ pub struct AttemptSessionReads {
 impl AttemptSessionReads {
     /// Integrator class 3 read of the attempt owner's effective model policy.
     pub async fn model(&self) -> Result<session::ToolSessionLlmProfile, PluginError> {
-        let policy = match &self.owner {
+        let (model, attachment_acceptance, generation) = match &self.owner {
             crate::RuntimeOwner::Session(session_id) => {
-                self.sessions.snapshot_session(session_id).await?.policy
+                let policy = self.sessions.snapshot_session(session_id).await?.policy;
+                (
+                    policy.model,
+                    policy.attachment_acceptance,
+                    policy.generation,
+                )
             }
-            crate::RuntimeOwner::Process(_) => self.policy.clone(),
+            crate::RuntimeOwner::Process(_) => (
+                self.facts.model.clone(),
+                Arc::clone(&self.facts.attachment_acceptance),
+                self.facts.generation.clone(),
+            ),
         };
-        let Some(config) = policy.model else {
+        let Some(config) = model else {
             return Err(PluginError::Session(
                 "the attempt owner has selected no model".to_string(),
             ));
         };
         Ok(session::ToolSessionLlmProfile {
             model: config,
-            attachment_acceptance: policy.attachment_acceptance,
-            generation: policy.generation,
+            attachment_acceptance,
+            generation,
         })
     }
 
@@ -197,7 +206,7 @@ pub struct AttemptContext<'run> {
     /// owner, so a declaration carrying it publishes nothing at realization.
     /// `None` outside a process execution, where the spec must be published.
     inherited_process_execution_env_ref: Option<crate::ProcessExecutionEnvRef>,
-    execution_env_spec: crate::ProcessExecutionEnvSpec,
+    execution_env_spec: Option<crate::ProcessExecutionEnvSpec>,
     completion: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     tool_execution_route: ToolExecutionRoute,
@@ -262,7 +271,7 @@ impl<'run> AttemptContext<'run> {
             sessions: AttemptSessionReads {
                 owner: context.owner.runtime_owner(),
                 sessions: Arc::clone(&context.sessions),
-                policy: context.execution_env_spec.policy.clone(),
+                facts: context.facts.clone(),
                 tool_catalog: context
                     .runtime_dispatch
                     .as_ref()
@@ -419,11 +428,19 @@ impl<'run> AttemptContext<'run> {
         if let Some(env_ref) = self.inherited_process_execution_env_ref.as_ref() {
             return Ok(env_ref.clone());
         }
-        self.execution_env_spec.stable_ref().map_err(|error| {
-            PluginError::Session(format!(
-                "failed to encode process execution environment: {error}"
-            ))
-        })
+        self.execution_env_spec
+            .as_ref()
+            .ok_or_else(|| {
+                PluginError::Session(
+                    "process execution environment requires a runtime context".into(),
+                )
+            })?
+            .stable_ref()
+            .map_err(|error| {
+                PluginError::Session(format!(
+                    "failed to encode process execution environment: {error}"
+                ))
+            })
     }
     /// Integrator class 3 decode of the sealed payload into a provider-owned type.
     pub fn decode_prepared_payload<T>(&self) -> Result<T, serde_json::Error>
@@ -511,7 +528,8 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) max_attempts: u32,
     pub(crate) completion: ToolCompletionState,
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
-    pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
+    pub(crate) facts: crate::plugin::ExecutionFacts,
+    pub(crate) execution_env_spec: Option<crate::ProcessExecutionEnvSpec>,
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
 }
 
@@ -565,7 +583,8 @@ pub(crate) struct ToolContextBuilder<'run> {
     call_id: lash_sansio::ToolCallId,
     completion: ToolCompletionState,
     parent_invocation: Option<crate::RuntimeInvocation>,
-    execution_env_spec: crate::ProcessExecutionEnvSpec,
+    facts: crate::plugin::ExecutionFacts,
+    execution_env_spec: Option<crate::ProcessExecutionEnvSpec>,
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
 }
 
@@ -593,7 +612,8 @@ impl<'run> ToolContextBuilder<'run> {
             call_id: call.call_id.clone(),
             completion: ToolCompletionState::default(),
             parent_invocation: dispatch.parent_invocation.clone(),
-            execution_env_spec: dispatch.execution_env_spec.clone(),
+            facts: dispatch.facts.clone(),
+            execution_env_spec: None,
             child_execution_trace_hook: None,
         }
     }
@@ -610,6 +630,7 @@ impl<'run> ToolContextBuilder<'run> {
         mut self,
         context: crate::RuntimeExecutionContext<'run>,
     ) -> Self {
+        self.execution_env_spec = Some(context.tool_run_env_spec());
         self.runtime_execution_context = Some(context);
         self
     }
@@ -655,6 +676,7 @@ impl<'run> ToolContextBuilder<'run> {
             max_attempts: 1,
             completion: self.completion,
             parent_invocation: self.parent_invocation,
+            facts: self.facts,
             execution_env_spec: self.execution_env_spec,
             child_execution_trace_hook: self.child_execution_trace_hook,
         }
@@ -714,6 +736,7 @@ impl<'run> ToolContext<'run> {
             max_attempts: self.max_attempts,
             completion: self.completion.clone(),
             parent_invocation: self.parent_invocation.clone(),
+            facts: self.facts.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
         })
@@ -733,6 +756,15 @@ impl<'run> ToolContext<'run> {
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         direct_completions: crate::DirectCompletionClient<'run>,
     ) -> ToolContextBuilder<'run> {
+        let execution_env_spec = crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::default(),
+            crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
+            ),
+            crate::SessionToolAccess::ambient(),
+        );
         ToolContextBuilder {
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id,
@@ -755,15 +787,8 @@ impl<'run> ToolContext<'run> {
             call_id: lash_sansio::ToolCallId::fixture("tool-context"),
             completion: ToolCompletionState::default(),
             parent_invocation: None,
-            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                    crate::NoProgressBudget::bounded(12),
-                ),
-                crate::SessionToolAccess::ambient(),
-            ),
+            facts: crate::plugin::ExecutionFacts::of_env_spec(&execution_env_spec),
+            execution_env_spec: Some(execution_env_spec),
             child_execution_trace_hook: None,
         }
     }

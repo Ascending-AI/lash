@@ -120,7 +120,10 @@ mod tests {
         );
         let dispatch = Arc::new(ToolDispatchContext {
             fleet_format: lash_core_execution::FleetFormat::current(),
-            plugins,
+            composition: (plugins).composition(),
+            config: crate::plugin::OwnerConfigView::session((plugins).admitted_plugin_config()),
+            execution_budgets: (plugins).execution_budgets(),
+            state: plugins,
             tools: provider,
             tool_registry: None,
             tool_catalog,
@@ -139,14 +142,16 @@ mod tests {
             ),
             parent_invocation: None,
             observation_call_key: None,
-            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                    lash_core_execution::NoProgressBudget::bounded(12),
+            facts: crate::plugin::ExecutionFacts::of_env_spec(
+                &crate::ProcessExecutionEnvSpec::new(
+                    crate::AdmittedPluginConfig::default(),
+                    crate::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                        lash_core_execution::NoProgressBudget::bounded(12),
+                    ),
+                    crate::SessionToolAccess::ambient(),
                 ),
-                crate::SessionToolAccess::ambient(),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -276,7 +281,10 @@ mod tests {
             .expect("register hidden process");
         let dispatch = Arc::new(ToolDispatchContext {
             fleet_format: lash_core_execution::FleetFormat::current(),
-            plugins,
+            composition: (plugins).composition(),
+            config: crate::plugin::OwnerConfigView::session((plugins).admitted_plugin_config()),
+            execution_budgets: (plugins).execution_budgets(),
+            state: plugins,
             tools: provider,
             tool_registry: None,
             tool_catalog,
@@ -295,14 +303,16 @@ mod tests {
             ),
             parent_invocation: None,
             observation_call_key: None,
-            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                    lash_core_execution::NoProgressBudget::bounded(12),
+            facts: crate::plugin::ExecutionFacts::of_env_spec(
+                &crate::ProcessExecutionEnvSpec::new(
+                    crate::AdmittedPluginConfig::default(),
+                    crate::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                        lash_core_execution::NoProgressBudget::bounded(12),
+                    ),
+                    crate::SessionToolAccess::ambient(),
                 ),
-                crate::SessionToolAccess::ambient(),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -565,7 +575,10 @@ mod tests {
             .expect("complete the started child");
         let dispatch = Arc::new(ToolDispatchContext {
             fleet_format: lash_core_execution::FleetFormat::current(),
-            plugins,
+            composition: (plugins).composition(),
+            config: crate::plugin::OwnerConfigView::session((plugins).admitted_plugin_config()),
+            execution_budgets: (plugins).execution_budgets(),
+            state: plugins,
             tools: provider,
             tool_registry: None,
             tool_catalog,
@@ -586,14 +599,16 @@ mod tests {
             ),
             parent_invocation: None,
             observation_call_key: None,
-            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                    lash_core_execution::NoProgressBudget::bounded(12),
+            facts: crate::plugin::ExecutionFacts::of_env_spec(
+                &crate::ProcessExecutionEnvSpec::new(
+                    crate::AdmittedPluginConfig::default(),
+                    crate::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                        lash_core_execution::NoProgressBudget::bounded(12),
+                    ),
+                    crate::SessionToolAccess::ambient(),
                 ),
-                crate::SessionToolAccess::ambient(),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),

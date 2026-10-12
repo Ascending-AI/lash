@@ -39,14 +39,14 @@ impl PluginSession {
     /// No after-turn, runtime-event or context-pressure callback, and no
     /// tool catalog or prompt contribution but the protocol's own.
     fn only_the_protocol_prepares(&self) -> bool {
-        let hooks = &self.capabilities().contributions;
+        let composition = self.composition();
         let protocol = self.protocol_plugin_id();
         let catalog = self.prompt_catalog();
         !self.has_after_turn_hooks()
             && !self.has_runtime_event_hooks()
             && !self.has_context_pressure_hooks()
-            && hooks
-                .tool_catalog_contributors
+            && composition
+                .tool_catalog_contributors()
                 .iter()
                 .all(|hook| hook.identity.owner.plugin == protocol)
             && catalog
@@ -90,17 +90,5 @@ impl PluginSession {
             .contributions
             .context_pressure_hooks
             .is_empty()
-    }
-    pub(crate) fn has_tool_result_hooks(&self) -> bool {
-        !self
-            .capabilities()
-            .contributions
-            .tool_result_transforms
-            .is_empty()
-            || !self
-                .capabilities()
-                .contributions
-                .tool_result_checks
-                .is_empty()
     }
 }

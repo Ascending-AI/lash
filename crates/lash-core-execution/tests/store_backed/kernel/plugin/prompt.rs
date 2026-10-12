@@ -37,7 +37,7 @@ fn cut(call: u32, note: &str) -> PromptCut {
             call,
             purpose: PromptPurpose::Turn,
         },
-        config: crate::AdmittedPluginConfig::default(),
+        config: crate::OwnerConfigView::session(crate::AdmittedPluginConfig::default()),
         session: None,
         offered: OfferedTools::default(),
         model: PromptModel::default(),

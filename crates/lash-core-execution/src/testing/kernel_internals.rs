@@ -78,19 +78,19 @@ pub async fn publish_plugin_state(
     );
     let body_plugins = std::sync::Arc::clone(plugins);
     let recorded = crate::plugin::state::record_effect(
-        std::sync::Arc::clone(plugins),
+        plugins.clone(),
         crate::RuntimeEffectKind::LanguageRuntimeValue,
         address.clone(),
         async move {
-            crate::plugin::propose(&body_plugins, proposal).map_err(crate::PluginError::from)?;
+            crate::plugin::propose(body_plugins.as_ref(), proposal)
+                .map_err(crate::PluginError::from)?;
             Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue {
                 value: serde_json::Value::Null,
             })
         },
     )
     .await?;
-    crate::plugin::EffectPublication::begin(std::sync::Arc::clone(plugins), address)
-        .publish(recorded.clone())?;
+    crate::plugin::EffectPublication::begin(plugins.clone(), address).publish(recorded.clone())?;
     Ok(recorded)
 }
 

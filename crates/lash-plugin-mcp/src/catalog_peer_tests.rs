@@ -265,7 +265,7 @@ fn guidance_sections(tools: Vec<lash_core::ToolDefinition>) -> Vec<(String, Stri
             call: 0,
             purpose: PromptPurpose::Turn,
         },
-        config: lash_core::AdmittedPluginConfig::default(),
+        config: lash_core::OwnerConfigView::session(lash_core::AdmittedPluginConfig::default()),
         session: None,
         offered: offered.clone(),
         model: Default::default(),

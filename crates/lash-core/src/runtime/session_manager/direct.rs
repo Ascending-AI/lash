@@ -164,13 +164,15 @@ impl CurrentOwnerCapability {
         &self,
         facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
     ) -> crate::runtime::owned_call::OwnedPrompt {
-        let config = self.plugins.admitted_plugin_config();
+        let config = crate::OwnerConfigView::session(self.plugins.admitted_plugin_config());
         match self.session() {
             Some(session) => {
                 let state = session.snapshot.to_runtime_state();
                 crate::runtime::owned_call::OwnedPrompt {
                     facts,
-                    plugins: Arc::clone(&self.plugins),
+                    composition: self.plugins.composition(),
+                    state: self.plugins.clone(),
+                    render_pool: self.plugins.prompt_render_pool().clone(),
                     plan: state.authority.prompt_plan.clone(),
                     config,
                     frame: state.current_frame_node_id.clone(),
@@ -183,7 +185,9 @@ impl CurrentOwnerCapability {
             }
             None => crate::runtime::owned_call::OwnedPrompt {
                 facts,
-                plugins: Arc::clone(&self.plugins),
+                composition: self.plugins.composition(),
+                state: self.plugins.clone(),
+                render_pool: self.plugins.prompt_render_pool().clone(),
                 plan: Default::default(),
                 config,
                 frame: None,
@@ -303,7 +307,10 @@ impl DirectCompletionCapability {
         );
         let local_executor = crate::RuntimeEffectLocalExecutor::direct(
             binding,
-            current.policy.charge_safety.clone(),
+            current.execution_facts().map_or_else(
+                || current.policy.charge_safety.clone(),
+                |facts| facts.charge_safety,
+            ),
             current.host.core.control.execution_budgets.clone(),
             admitted,
             current.runtime_owner(),
@@ -361,8 +368,10 @@ impl DirectCompletionCapability {
             .map_err(|error| crate::PluginError::Session(error.to_string()))?;
         // A durable direct completion renders attachments under its session's
         // recorded acceptance rules, never a caller's.
-        normalized.attachment_acceptance =
-            std::sync::Arc::clone(&context.current.policy.attachment_acceptance);
+        normalized.attachment_acceptance = context.current.execution_facts().map_or_else(
+            || Arc::clone(&context.current.policy.attachment_acceptance),
+            |facts| facts.attachment_acceptance,
+        );
         let (response, usage, llm_call) = self
             .run_direct_call(
                 &context,
@@ -406,7 +415,10 @@ impl DirectCompletionCapability {
             ));
         }
         request.model = policy.llm_profile_config().clone();
-        request.attachment_acceptance = Arc::clone(&context.current.policy.attachment_acceptance);
+        request.attachment_acceptance = context.current.execution_facts().map_or_else(
+            || Arc::clone(&context.current.policy.attachment_acceptance),
+            |facts| facts.attachment_acceptance,
+        );
         let replay = crate::RuntimeReplay {
             key: request.scope.request_id.clone(),
             attribution: None,

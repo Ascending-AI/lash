@@ -103,6 +103,7 @@ impl Drop for RenderInFlight {
 /// A renderer is trusted native code: the composer stops waiting at the
 /// render budget and drops the result, but cannot stop a renderer that never
 /// returns. Such a renderer holds its worker until it does.
+#[derive(Clone)]
 pub struct PromptRenderPool {
     queue: SyncSender<RenderJob>,
     capacity: usize,

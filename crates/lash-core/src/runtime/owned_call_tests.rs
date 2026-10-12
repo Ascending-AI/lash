@@ -145,9 +145,11 @@ async fn admit(world: &World) -> OwnedAdmission {
         purpose: PromptPurpose::Compaction,
         prompt: OwnedPrompt {
             facts: None,
-            plugins,
+            composition: plugins.composition(),
+            state: plugins.clone(),
+            render_pool: plugins.prompt_render_pool().clone(),
             plan: PromptPlan::default(),
-            config: crate::AdmittedPluginConfig::default(),
+            config: crate::OwnerConfigView::session(crate::AdmittedPluginConfig::default()),
             frame: None,
             session: None,
         },

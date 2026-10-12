@@ -106,6 +106,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             // recorded `F` with `with_fleet_format`, as every context over a
             // durable store must (the session's and the process runner's).
             fleet_format: crate::FleetFormat::current(),
+            facts: crate::plugin::ExecutionFacts::of_env_spec(&execution_env_spec),
             execution_env_spec,
             process_execution: None,
             started_process_ids: Arc::default(),

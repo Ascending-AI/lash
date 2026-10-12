@@ -37,9 +37,9 @@ impl ProductionToolHandlers<'_> {
                 },
             }]);
         }
-        let dispatch = self.dispatch(&prepared.input).await?;
+        let (dispatch, _) = self.dispatch(&prepared.input).await?;
         let record = match dispatch
-            .plugins
+            .composition
             .check_tool_args(
                 &context(&dispatch, &prepared),
                 &Arc::new(
@@ -152,12 +152,12 @@ impl ProductionToolHandlers<'_> {
                 },
             }]);
         }
-        let dispatch = self.dispatch(&prepared.input).await?;
+        let (dispatch, _) = self.dispatch(&prepared.input).await?;
         let original = captured.original.unwrap_or_else(|| captured.output.clone());
         let (original, _) = ToolResultCandidate::split(original);
         let (candidate, _) = ToolResultCandidate::split(captured.output);
         let checked = dispatch
-            .plugins
+            .composition
             .check_tool_result(
                 &context(&dispatch, &prepared),
                 captured.occurrence,
@@ -188,7 +188,7 @@ impl ProductionToolHandlers<'_> {
                 })
                 .collect(),
         );
-        if let Err(error) = crate::plugin::propose_all(&dispatch.plugins, checks.proposals) {
+        if let Err(error) = dispatch.state.propose_all(checks.proposals) {
             return Ok(vec![AttributedVerdict {
                 callback: prepared.input.binding.executable,
                 verdict: AfterCheckVerdict::Deny {
@@ -197,7 +197,7 @@ impl ProductionToolHandlers<'_> {
                         &crate::ToolFailure::runtime(
                             crate::ToolFailureClass::Internal,
                             "tool_state_unrecorded",
-                            error.to_string(),
+                            crate::plugin::proposal_failure_message(&error),
                         ),
                     ),
                 },
@@ -273,7 +273,7 @@ impl ProductionToolHandlers<'_> {
             .get(call_id)
             .cloned()
             .ok_or_else(|| fault("the final has no hydrated admission".to_owned()))?;
-        let dispatch = self.dispatch(&prepared.input).await.map_err(fault)?;
+        let (dispatch, _) = self.dispatch(&prepared.input).await.map_err(fault)?;
         let mut outcomes = self
             .declarations
             .lock_recover()
@@ -299,12 +299,12 @@ impl ProductionToolHandlers<'_> {
             )),
         };
         let presentation = dispatch
-            .plugins
+            .composition
             .present_tool_result(
                 projection,
                 facts,
                 &prepared.input.binding.presentation,
-                &dispatch.execution_env_spec.policy.attachment_acceptance,
+                &dispatch.facts.attachment_acceptance,
             )
             .await
             .map_err(|error| {

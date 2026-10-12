@@ -109,7 +109,9 @@ pub(crate) fn compose(plugins: &[Arc<dyn SessionPlugin>], call: Call) -> Compose
                 call: call.iteration,
                 purpose: call.purpose.clone(),
             },
-            config: lash_core::AdmittedPluginConfig::new(config, 0),
+            config: lash_core::OwnerConfigView::session(lash_core::AdmittedPluginConfig::new(
+                config, 0,
+            )),
             session: None,
             offered: OfferedTools::new(Arc::new(call.catalog), false),
             model: PromptModel {
