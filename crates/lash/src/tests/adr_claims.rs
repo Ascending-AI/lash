@@ -75,12 +75,21 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
             "lashvm"
         );
     }
+    // Distinct plugin ids reach engine installation rather than the
+    // duplicate-plugin-id preflight. Both plugins contribute `lashvm`.
+    let workers = untimed_fixture_workers();
+    let bounds = workers.config().run_bounds;
     let duplicate = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .plugin(Arc::new(rlm_factory()))
+        .plugin(Arc::new(crate::vm::KernelProcessPluginFactory::new(
+            workers,
+            crate::vm::TYPESCRIPT_DIALECT,
+            bounds,
+        )))
         .build(crate::testing::runtime_lease_owner());
     assert!(
-        matches!(duplicate, Err(EmbedError::Plugin(_))),
+        matches!(duplicate, Err(EmbedError::Plugin(lash_core::PluginError::Registration(message)))
+            if message == "duplicate process engine kind `lashvm`; each engine kind may be registered once"),
         "two plugin-owned engines of one kind must be refused"
     );
     let bad = cold

@@ -199,13 +199,18 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         .1
         .session(&SessionId::from("private-parent"))
         .unwrap();
-    let child = restricted
+    // Fork and checkpoint capture belong to the runtime owner; the plugin
+    // observes the resulting child only through its restricted host.
+    let owned_child = parent
         .fork_for_session(
             "private-child",
             crate::plugin::SessionAuthorityContext::ambient_fixture(),
         )
         .unwrap();
-    let owned_child = host.session(&SessionId::from("private-child")).unwrap();
+    let child = restricted
+        .host()
+        .session(&SessionId::from("private-child"))
+        .unwrap();
     owned_child
         .adopt_plugin_transition(&transition("private-child", &owned_child.export_state()))
         .unwrap();
@@ -238,7 +243,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         crate::NoProgressBudget::bounded(12),
     ));
     runtime_state
-        .capture_plugin_states(&child, lash_core_store::store::FleetFormat::current())
+        .capture_plugin_states(&owned_child, lash_core_store::store::FleetFormat::current())
         .expect("the live plugin state is captured");
     assert!(
         runtime_state.plugin_state().unwrap().plugins["neighbor-secret-key"]
