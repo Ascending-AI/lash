@@ -23,6 +23,7 @@ use lash_core_execution::runtime::actor::round::lifecycle::{Act, Lifecycle, Memb
 use lash_core_execution::runtime::actor::round::{
     self, AdmittedExecution, PinnedWaits, PolicyView, RoundError, RunFold, fold,
 };
+use lash_core_execution::runtime::turn_control;
 use lash_durable::domain::{OwnerKey, RunFacts, RunSeq};
 use lash_durable::{CommitLabel, DueSource, DurableError, DurableInstant};
 use tokio_util::sync::CancellationToken;
@@ -119,6 +120,10 @@ impl Members {
                 .bodies
                 .clone()
                 .ok_or_else(|| refused("the execution's host runs no member bodies"))?;
+            // A turn's cell answers its calls under the turn's accepted
+            // stop, as its round does: an answer that lands after an
+            // `Immediate` cancel was accepted, before the owner saw it, is
+            // the stop's, never a call the cell completed (FIG-6082).
             self.lifecycle = Some(
                 Lifecycle::new(
                     &self.cx,
@@ -126,7 +131,8 @@ impl Members {
                     bodies,
                     CommitLabel::ROUND_OUTCOME,
                 )
-                .with_settlement_label(CommitLabel::CELL_INJECT),
+                .with_settlement_label(CommitLabel::CELL_INJECT)
+                .fenced_by(Arc::new(turn_control::immediate_in)),
             );
         }
         self.lifecycle

@@ -12,10 +12,10 @@
 use std::sync::Arc;
 
 use lash_durable::domain::{
-    MailAnswer, MailDomainWrite, OperationCancelAnswer, OperationCancelRequest, TurnCancelAnswer,
-    TurnCancelRequest as DurableCancelRequest, TurnEnd,
+    MailAnswer, MailDomainWrite, OperationCancelAnswer, OperationCancelRequest, SESSION_CLOSE_MAIL,
+    TurnCancelAnswer, TurnCancelRequest as DurableCancelRequest, TurnEnd,
 };
-use lash_durable::{CommitLabel, DurableError, MailTx};
+use lash_durable::{ActorTx, CommitLabel, DurableError, MailTx};
 use serde::{Deserialize, Serialize};
 
 pub use lash_core_store::turn_control_vocabulary::*;
@@ -427,6 +427,28 @@ pub async fn request_turn_cancel(
             message: format!("a turn cancel request was answered with {other:?}"),
         })),
     }
+}
+
+/// Whether `tx`'s open read says the session's unfinished turn stops at
+/// once: its accepted cancel request is `Immediate`, or the session holds an
+/// undrained close request. The boundary check a phase commit's own open
+/// answers, with no read of its own, and the fence of the commits that
+/// answer the turn's members, a round's or a cell's (FIG-5381, FIG-6082).
+/// Never true on another actor's read.
+#[must_use]
+pub fn immediate_in(tx: &ActorTx) -> bool {
+    tx.turn_cancel()
+        .is_some_and(|request| request.mode == TurnCancelMode::Immediate)
+        || close_requested_in(tx)
+}
+
+/// Whether the session holds a close request its actor has not drained, as
+/// of `tx`'s open read.
+#[must_use]
+pub fn close_requested_in(tx: &ActorTx) -> bool {
+    tx.mail()
+        .iter()
+        .any(|mail| mail.kind.as_str() == SESSION_CLOSE_MAIL)
 }
 
 fn store_error(error: DurableError) -> RuntimeError {

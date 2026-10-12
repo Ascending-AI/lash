@@ -51,7 +51,8 @@
 
 use std::future::Future;
 
-use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, SESSION_CLOSE_MAIL, TurnWrite};
+pub(super) use lash_core_execution::runtime::turn_control::{close_requested_in, immediate_in};
+use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, TurnWrite};
 use lash_durable::runner::{Exit, Owned};
 use lash_durable::{CommitLabel, DurableError, Release};
 
@@ -78,28 +79,10 @@ pub(super) async fn immediate(cx: &ActorContext) -> Result<bool, TurnError> {
     Ok(immediate_in(&cx.begin().await?))
 }
 
-/// Whether `tx`'s open read says the turn stops at once: its cancel request
-/// is `Immediate`, or the session holds an undrained close request. The
-/// boundary check a phase commit's own open answers, with no read of its
-/// own.
-pub(super) fn immediate_in(tx: &lash_durable::ActorTx) -> bool {
-    tx.turn_cancel()
-        .is_some_and(|request| request.mode == TurnCancelMode::Immediate)
-        || close_requested_in(tx)
-}
-
 /// Whether `request`, a cancel a commit read under its fence, stops the turn
 /// at once.
 pub(super) fn stops_at_once(request: &lash_durable::domain::TurnCancelRequest) -> bool {
     request.mode == TurnCancelMode::Immediate
-}
-
-/// Whether the session holds a close request its actor has not drained, as
-/// of `tx`'s open read.
-pub(super) fn close_requested_in(tx: &lash_durable::ActorTx) -> bool {
-    tx.mail()
-        .iter()
-        .any(|mail| mail.kind.as_str() == SESSION_CLOSE_MAIL)
 }
 
 /// Run `work` until it finishes, or the turn accepts an `Immediate` cancel

@@ -1842,13 +1842,18 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
     Ok(())
 }
 
-/// `app_lookup` answering its first call and holding its second until the
-/// law releases it.
+/// `app_lookup` answering its first call at once. Its second holds until
+/// the law releases it, then tells `answering` and answers only once
+/// `accepted` says the law's cancel was accepted, blocking its runtime's one
+/// worker meanwhile: the turn's owner looks for the cancel only after the
+/// call answered.
 #[cfg(feature = "rlm")]
 struct SecondLookupHeld {
     calls: std::sync::atomic::AtomicUsize,
     entered: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
+    answering: std::sync::mpsc::SyncSender<()>,
+    accepted: Arc<StdMutex<std::sync::mpsc::Receiver<()>>>,
 }
 
 #[cfg(feature = "rlm")]
@@ -1866,6 +1871,14 @@ impl ToolProvider for SecondLookupHeld {
         if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
             self.entered.notify_one();
             self.release.notified().await;
+            self.answering
+                .send(())
+                .expect("the law waits for the answer");
+            self.accepted
+                .lock()
+                .expect("the law's lock")
+                .recv_timeout(std::time::Duration::from_secs(60))
+                .expect("the law's cancel is accepted");
         }
         lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })).into()
     }
@@ -1874,12 +1887,16 @@ impl ToolProvider for SecondLookupHeld {
 /// A turn that stops on a code cell loses none of the calls the cell
 /// completed (FIG-5330): its cancel records them from the cell's snapshot
 /// and the outcomes it committed since, and the cancelled turn's report
-/// lists them after a reopen. An `Immediate` cancel stops the cell during
-/// its second call: the first is reported and the unfinished second is not.
-/// An `AfterStep` cancel lets the cell answer and ends the turn before the
-/// model call whose commit would have recorded it: both calls are reported.
+/// lists them after a reopen. The cancel is accepted while the cell's
+/// second call runs, and the call answers before the turn's owner looks for
+/// the cancel. An `Immediate` cancel stops the cell during that call: the
+/// accepted request, not the owner's watch, decides that its late answer is
+/// not a completion (FIG-6082), so the first call is reported and the
+/// second is not. An `AfterStep` cancel lets the cell answer and ends the
+/// turn before the model call whose commit would have recorded it: both
+/// calls are reported.
 #[cfg(feature = "rlm")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reopen() -> Result<()> {
     for (mode, completed) in [
         (crate::TurnCancelMode::Immediate, 1),
@@ -1887,6 +1904,9 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
     ] {
         let entered = Arc::new(tokio::sync::Notify::new());
         let release = Arc::new(tokio::sync::Notify::new());
+        let (answering, answered) = std::sync::mpsc::sync_channel(1);
+        let (accept, accepted) = std::sync::mpsc::channel();
+        let accepted = Arc::new(StdMutex::new(accepted));
         let core = |backend: lash_core::Backend| {
             explicit_ephemeral_facets(rlm_core_builder_over(backend))
                 .serve_test_llm_profile(
@@ -1905,6 +1925,8 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
                         calls: std::sync::atomic::AtomicUsize::new(0),
                         entered: Arc::clone(&entered),
                         release: Arc::clone(&release),
+                        answering: answering.clone(),
+                        accepted: Arc::clone(&accepted),
                     }),
                 )
                 .build(crate::testing::runtime_lease_owner())
@@ -1924,12 +1946,26 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
             .id(run.clone())
             .await?;
         entered.notified().await;
-        handle.cancel().request_id("stop").mode(mode).await?;
+        // The cancel is requested off the runtime, once the released call
+        // holds its one worker: it is accepted before the call answers, and
+        // the turn's owner runs only after the call answered.
+        let cancel = handle.cancel().request_id("stop").mode(mode);
+        let canceller = std::thread::spawn(move || {
+            answered.recv().expect("the held call answers");
+            let receipt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("the canceller's runtime")
+                .block_on(async move { cancel.await });
+            accept.send(()).expect("the held call waits for the cancel");
+            receipt
+        });
         release.notify_one();
         let ended = tokio::time::timeout(std::time::Duration::from_secs(60), handle.output())
             .await
             .expect("the cancelled turn ends")?
             .result;
+        canceller.join().expect("the canceller runs")?;
         assert!(
             ended.cancellation().is_some(),
             "{mode:?}: {:?}",
