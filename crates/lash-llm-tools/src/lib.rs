@@ -63,22 +63,80 @@ impl lash_core::facade_support::SessionPlugin for LlmToolsPlugin {
 
     fn register(&self, reg: &mut lash_core::plugin::PluginRegistrar) -> Result<(), PluginError> {
         reg.tools().provider(Arc::clone(&self.provider))?;
-        let key = lash_core::prompt_sections::PromptSectionKey::new(LLM_QUERY_PURPOSE)
-            .map_err(|error| PluginError::Registration(error.to_string()))?;
-        reg.prompt().section(
-            lash_core::plugin::prompt::PromptSectionSpec::new(
-                key,
-                lash_core::prompt_sections::PromptPlacement::InitialInstructions,
-            )
-            .purposes([lash_core::prompt_sections::PromptPurpose::Direct {
-                name: LLM_QUERY_PURPOSE.to_owned(),
-            }]),
-            Arc::new(|_: &lash_core::plugin::prompt::PromptInput<'_>| {
-                Ok(lash_core::plugin::prompt::SectionText::text(
-                    LLM_QUERY_INSTRUCTIONS,
-                ))
-            }),
+        let (section, renderer) = llm_query_section()?;
+        reg.prompt().section(section, renderer)
+    }
+}
+
+/// The `llm_tools/llm_query` section: the instructions of the
+/// [`LLM_QUERY_PURPOSE`] direct purpose only.
+fn llm_query_section() -> Result<
+    (
+        lash_core::plugin::prompt::PromptSectionSpec,
+        Arc<dyn lash_core::plugin::prompt::PromptSection>,
+    ),
+    PluginError,
+> {
+    let key = lash_core::prompt_sections::PromptSectionKey::new(LLM_QUERY_PURPOSE)
+        .map_err(|error| PluginError::Registration(error.to_string()))?;
+    Ok((
+        lash_core::plugin::prompt::PromptSectionSpec::new(
+            key,
+            lash_core::prompt_sections::PromptPlacement::InitialInstructions,
         )
+        .purposes([lash_core::prompt_sections::PromptPurpose::Direct {
+            name: LLM_QUERY_PURPOSE.to_owned(),
+        }]),
+        Arc::new(|_: &lash_core::plugin::prompt::PromptInput<'_>| {
+            Ok(lash_core::plugin::prompt::SectionText::text(
+                LLM_QUERY_INSTRUCTIONS,
+            ))
+        }),
+    ))
+}
+
+/// The config key a process environment names for `llm_query`
+/// (FIG-6034 §3.2).
+pub const LLM_TOOLS_CONFIG: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new(LLM_TOOLS_PLUGIN_ID, lash_core::FormatVersion::ONE);
+
+/// `llm_query` as a process component: a process whose environment names
+/// [`LLM_TOOLS_CONFIG`] asks its sub-questions of the model its environment
+/// records, under the same direct-call instructions (D16).
+#[derive(Clone, Debug, Default)]
+pub struct LlmToolsComponent {}
+
+impl lash_core::plugin::ProcessComponentFactory for LlmToolsComponent {
+    #[expect(clippy::expect_used, reason = "the plugin id is a valid component id")]
+    fn declaration(&self) -> lash_core::plugin::ProcessComponentDeclaration {
+        lash_core::plugin::ProcessComponentDeclaration::initial(
+            LLM_TOOLS_PLUGIN_ID,
+            LLM_TOOLS_CONFIG.format(),
+        )
+        .expect("the plugin id is a valid component id")
+    }
+
+    fn config_type(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<()>()
+    }
+
+    fn validate(
+        &self,
+        _entry: &lash_core::ProcessComponentEntry,
+        _env: &lash_core::ProcessEnv,
+    ) -> Result<(), lash_core::ProcessEnvRefusal> {
+        Ok(())
+    }
+
+    fn build(
+        &self,
+        _cx: &lash_core::plugin::ProcessComponentContext<'_>,
+    ) -> Result<lash_core::plugin::ProcessComponentSpec, PluginError> {
+        Ok(lash_core::plugin::ProcessComponentSpec {
+            tool_providers: vec![Arc::new(llm_query_provider())],
+            direct_prompt_sections: vec![llm_query_section()?],
+            ..lash_core::plugin::ProcessComponentSpec::default()
+        })
     }
 }
 

@@ -318,10 +318,24 @@ impl ProcessEngine for LawEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Result<Option<Value>, crate::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&crate::EngineSettings>,
+    ) -> std::result::Result<(), crate::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(crate::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
         Ok(None)
     }
 
@@ -671,11 +685,14 @@ fn registration(payload: Value, lifetime: LifetimeDecision) -> ProcessRegistrati
         ProcessInput::Engine {
             kind: LAW_ENGINE_KIND.to_owned(),
             payload,
+            launch: crate::EngineLaunch::new(
+                crate::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
         },
         ProcessProvenance::host(),
         lifetime,
     )
-    .with_execution_env_ref(Some(crate::testing::process_execution_env_fixture_ref()))
 }
 
 async fn register(
@@ -839,6 +856,7 @@ async fn crash_claims(backend: &Backend, process: &ProcessId, count: u32) -> Law
             .register_node(&NodeSpec {
                 node: NodeId::new(NODE),
                 decodes: backend.formats().decodes(),
+                serves: Vec::new(),
                 ttl_millis: TTL_MILLIS,
             })
             .await?;
@@ -1252,6 +1270,7 @@ pub async fn engine_free_end_runs_no_engine_code(backend: &Backend) -> LawOutcom
     unknown.input = Arc::new(ProcessInput::Engine {
         kind: "law-missing".to_owned(),
         payload: json!({}),
+        launch: crate::testing::fixture_engine_launch(),
     });
     let unknown = register(&backend, unknown).await?;
     let undecodable_tag = tag("free-undecodable");

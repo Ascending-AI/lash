@@ -269,6 +269,7 @@ async fn an_accepted_close_stays_pending_when_its_mail_is_acknowledged_between_r
         .register_node(&NodeSpec {
             node: NodeId::new("close-observer-law"),
             decodes: vec![formats],
+            serves: Vec::new(),
             ttl_millis: 60_000,
         })
         .await

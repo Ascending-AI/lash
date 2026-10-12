@@ -224,6 +224,7 @@ impl Takeover {
             SimNodesConfig {
                 lease: Matrix::test_lease(),
                 decodes: backend.formats().decodes(),
+                serves: Vec::new(),
                 max_active: 4,
             },
             Arc::new(SessionActivation::new(

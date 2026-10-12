@@ -78,6 +78,9 @@ plugin_error_samples! {
     StartKeyConflict { .. } => PluginError::StartKeyConflict {
         start_key: crate::StartKey::for_host("sampled"),
     },
+    ProcessEnvRefused { .. } => PluginError::ProcessEnvRefused {
+        refusal: crate::ProcessEnvRefusal::AmbientTools,
+    },
     InvalidToolDiscovery { .. } => PluginError::InvalidToolDiscovery {
         operation: "sampled".to_string(),
     },

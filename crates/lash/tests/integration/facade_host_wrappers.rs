@@ -124,7 +124,7 @@ impl lash::StoreSet for HostStores {
         self.inner.process_registry()
     }
 
-    fn process_env_store(&self) -> Arc<dyn lash::persistence::ProcessExecutionEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn lash::persistence::ProcessEnvStore> {
         self.inner.process_env_store()
     }
 

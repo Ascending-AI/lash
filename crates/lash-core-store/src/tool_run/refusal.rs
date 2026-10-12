@@ -33,8 +33,6 @@ pub enum IsolatedStartRefusal {
 pub enum DeclaredStartObligationRefusal {
     #[error("a declared start needs a stable start key")]
     Keyless,
-    #[error("a declared start lash executes needs its captured execution environment")]
-    NoEnvironment,
     #[error("a declared start needs the consuming call's hold")]
     NoConsumerHold,
 }

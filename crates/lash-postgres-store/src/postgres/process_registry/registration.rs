@@ -110,6 +110,7 @@ pub(crate) async fn apply_registration_tx(
     if let Some(hold) = consumer_hold.as_ref() {
         parent_end::mark_holds_tx(tx, &hold.owner).await?;
     }
+    let requires = registration.requires.clone();
     let mut record = ProcessRecord::from_prepared_registration(registration, process_id, now);
     let record_json = serde_json::to_string(&record).map_err(process_decode_error)?;
     let result =
@@ -168,7 +169,7 @@ pub(crate) async fn apply_registration_tx(
         };
         return Ok(AppliedRegistration::LostRace { winner });
     }
-    if let Some(env) = record.env_ref.as_ref() {
+    if let Some(env) = record.env_ref() {
         crate::artifact_store::acquire_process_env_tx(tx, env, &record.id).await?;
     }
     // The process's actor commits with its row, ready: the start is a wake
@@ -177,6 +178,7 @@ pub(crate) async fn apply_registration_tx(
         tx,
         &record.id,
         record.input.unstarted_formats().as_str(),
+        &requires,
         lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
     )
     .await

@@ -35,6 +35,7 @@ async fn node(
         .register_node(&NodeSpec {
             node: NodeId::new(name),
             decodes,
+            serves: Vec::new(),
             ttl_millis: TTL_MILLIS,
         })
         .await?)

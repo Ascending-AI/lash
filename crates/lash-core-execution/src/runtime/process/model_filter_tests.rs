@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::model::{
-    ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessProvenance, ProcessRecord,
+    ProcessEnvRef, ProcessIdentity, ProcessInput, ProcessProvenance, ProcessRecord,
     ProcessRegistration,
 };
 
@@ -59,12 +59,12 @@ fn retained_host_start_requires_the_same_persisted_engine_definition() {
         ProcessInput::Engine {
             kind: "test-engine".to_string(),
             payload: json!({"program": "retained"}),
+            launch: crate::EngineLaunch::new(ProcessEnvRef::new("retained-engine-env"), None),
         },
         ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )
     .with_start_key(Some(crate::StartKey::for_host("retained-engine-identity")))
-    .with_execution_env_ref(Some(ProcessExecutionEnvRef::new("retained-engine-env")))
     .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
         ProcessIdentity::for_definition(reference, Some("retained")),
     ));

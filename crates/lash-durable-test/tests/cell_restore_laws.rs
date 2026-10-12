@@ -654,10 +654,27 @@ impl ProcessEngine for SleepEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &lash_core_execution::ProcessExecutionEnvSpec,
-    ) -> Result<Option<Value>, lash_core_execution::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash_core_execution::EngineSettings>,
+    ) -> std::result::Result<(), lash_core_execution::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(lash_core_execution::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<
+        Option<lash_core_execution::EngineSettings>,
+        lash_core_execution::PluginError,
+    > {
         Ok(None)
     }
 
@@ -893,6 +910,7 @@ impl CellTurn {
                     .plugin(Arc::new(
                         lash::process_controls::SessionProcessAdminPluginFactory::new(
                             lash_core::lifetime::session_or_starter,
+                            lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
                         ),
                     ))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -1306,6 +1324,7 @@ impl Scenario for CellTurn {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
+            serves: Vec::new(),
             max_active: 4,
         }
     }
@@ -1763,19 +1782,18 @@ async fn parked_on_a_process(
     let process = turn
         .backend()
         .process_registry()
-        .register_process(
-            ProcessRegistration::new(
-                ProcessInput::Engine {
-                    kind: ENGINE.to_owned(),
-                    payload: json!({ "until_ms": until }),
-                },
-                ProcessProvenance::host(),
-                LifetimeDecision::Detached,
-            )
-            .with_execution_env_ref(Some(
-                lash_core_execution::testing::process_execution_env_fixture_ref(),
-            )),
-        )
+        .register_process(ProcessRegistration::new(
+            ProcessInput::Engine {
+                kind: ENGINE.to_owned(),
+                payload: json!({ "until_ms": until }),
+                launch: lash_core::EngineLaunch::new(
+                    lash_core_execution::testing::process_execution_env_fixture_ref(),
+                    None,
+                ),
+            },
+            ProcessProvenance::host(),
+            LifetimeDecision::Detached,
+        ))
         .await
         .expect("register the awaited process")
         .id;

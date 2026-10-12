@@ -20,19 +20,22 @@ async fn a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start(t
         .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment())
         .await
         .expect("the environment is published");
+    let settings = deployment
+        .core
+        .processes()
+        .engine_defaults(lash_vm_runtime::LASH_VM_ENGINE_KIND, &payload)
+        .expect("the kernel's default settings");
     let refused = deployment
         .core
         .processes()
         .start(
-            lash_core::ProcessStartRequest::new(
-                lash_core::ProcessInput::Engine {
-                    kind: lash_vm_runtime::LASH_VM_ENGINE_KIND.to_owned(),
-                    payload,
-                },
+            lash_core::ProcessStartRequest::engine(
+                lash_vm_runtime::LASH_VM_ENGINE_KIND.to_owned(),
+                payload,
+                lash_core::EngineLaunch::new(env_ref, settings),
                 lash_core::ProcessOriginator::host(),
                 lash_core::LifetimeDecision::Detached,
-            )
-            .with_env_ref(env_ref),
+            ),
             deployment.core.effect_host(),
         )
         .await

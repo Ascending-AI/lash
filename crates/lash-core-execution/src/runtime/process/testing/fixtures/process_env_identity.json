@@ -1,0 +1,10 @@
+[
+  [
+    "{\"limits\":{\"max_tool_calls\":1024},\"tools\":{\"mode\":\"restricted\",\"tools\":[]}}",
+    "process-env:v6:blake3:5f24df484fc986af9195951ad1870fdb172e6546163b3bd5cbe54c9a3640579c"
+  ],
+  [
+    "{\"model\":{\"profile\":{\"model\":{\"key\":\"rich-key\",\"metadata\":{\"wire_model\":\"model:rich\",\"limits\":{\"context_window_tokens\":8192,\"output_tokens\":{\"capacity\":2048,\"default_cap\":null}},\"capability\":{\"instruction_role\":\"developer\",\"native_mid_conversation_system\":true,\"cache_control\":\"anthropic\",\"stream_termination\":\"eof_tolerated\",\"sampling\":\"pinned\",\"reasoning\":{\"efforts\":[\"low\",\"high\"],\"encoding\":{\"budget\":{\"high\":1024,\"low\":256}},\"disable\":true,\"mandatory\":true}},\"request_defaults\":{\"cache_retention\":\"short\"}}},\"reasoning\":{\"effort\":\"high\"}},\"generation\":{\"output_token_cap\":1024,\"temperature\":0.25,\"seed\":-7},\"charge_safety\":{\"mode\":\"require_guarantee\"}},\"limits\":{\"max_tool_calls\":1024},\"tools\":{\"mode\":\"restricted\",\"tools\":[],\"hidden_tools\":[\"hidden\"]},\"components\":[{\"id\":\"configured\",\"config\":{\"format_version\":1,\"value\":{\"enabled\":true}}},{\"id\":\"reader\",\"config\":{\"format_version\":1,\"value\":null},\"sessions\":[\"granted-session\"]}]}",
+    "process-env:v6:blake3:cdc61c53432a0dc5faf069f046946eba435263dee606c9d6a9d391199826cb5f"
+  ]
+]

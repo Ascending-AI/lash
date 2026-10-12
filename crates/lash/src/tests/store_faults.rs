@@ -854,22 +854,18 @@ mod sweep {
         let started = core
             .processes()
             .start(
-                lash_core::ProcessStartRequest::new(
-                    lash_core::ProcessInput::SessionTurn {
-                        definition_key: "sweep-child".into(),
-                        create_request: Box::new(
-                            lash_core::SessionCreateRequest::root(
-                                crate::plugins::SessionToolAccess::ambient(),
-                                lash_core::SessionStartPoint::Empty,
-                                lash_core::PluginOptions::default(),
-                            )
-                            .with_spec(&mock_session_spec())
-                            .expect("a root spec")
-                            .with_session_id(ID),
-                        ),
-                        turn_input: Box::new(TurnInput::text("first")),
-                        result: lash_core::SessionTurnOutcome::FinalValue { schema: None },
-                    },
+                lash_core::ProcessStartRequest::session_turn(
+                    "sweep-child",
+                    lash_core::SessionCreateRequest::root(
+                        crate::plugins::SessionToolAccess::ambient(),
+                        lash_core::SessionStartPoint::Empty,
+                        lash_core::PluginOptions::default(),
+                    )
+                    .with_spec(&mock_session_spec())
+                    .expect("a root spec")
+                    .with_session_id(ID),
+                    TurnInput::text("first"),
+                    lash_core::SessionTurnOutcome::FinalValue { schema: None },
                     lash_core::ProcessOriginator::host(),
                     lash_core::Lifetime::Detached,
                 )
@@ -1487,22 +1483,18 @@ mod sweep {
         let started = core
             .processes()
             .start(
-                lash_core::ProcessStartRequest::new(
-                    lash_core::ProcessInput::SessionTurn {
-                        definition_key: "fig4628-session-turn".into(),
-                        create_request: Box::new(
-                            lash_core::SessionCreateRequest::root(
-                                crate::plugins::SessionToolAccess::ambient(),
-                                lash_core::SessionStartPoint::Empty,
-                                lash_core::PluginOptions::default(),
-                            )
-                            .with_spec(&mock_session_spec())
-                            .expect("a root spec")
-                            .with_session_id(CHILD),
-                        ),
-                        turn_input: Box::new(TurnInput::text("run the committed child")),
-                        result: lash_core::SessionTurnOutcome::Turn,
-                    },
+                lash_core::ProcessStartRequest::session_turn(
+                    "fig4628-session-turn",
+                    lash_core::SessionCreateRequest::root(
+                        crate::plugins::SessionToolAccess::ambient(),
+                        lash_core::SessionStartPoint::Empty,
+                        lash_core::PluginOptions::default(),
+                    )
+                    .with_spec(&mock_session_spec())
+                    .expect("a root spec")
+                    .with_session_id(CHILD),
+                    TurnInput::text("run the committed child"),
+                    lash_core::SessionTurnOutcome::Turn,
                     lash_core::ProcessOriginator::host(),
                     lash_core::Lifetime::Detached,
                 )

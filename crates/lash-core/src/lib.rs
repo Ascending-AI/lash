@@ -2,7 +2,7 @@
 //!
 //! The process kernel understands `SessionTurn` to coordinate child-session
 //! turns. Executable process bodies, including work a host runs outside lash,
-//! use `ProcessInput::Engine { kind, payload }` and call ordinary recorded tool
+//! use `ProcessInput::Engine { kind, payload, launch }` and call ordinary recorded tool
 //! attempts under their process journal.
 //!
 //! Protocols follow the same boundary: core owns the `HostTurnProtocol` state
@@ -605,9 +605,6 @@ pub use runtime::{ObservationSource, work_with_observations};
 // process engines and their integration tests —
 // they are deliberately public; the rest of the runtime module stays
 // crate-internal.
-/// A host publishes the execution environment a start names, under the
-/// referrer that holds it (FIG-3116, ADR 0113 §3.4).
-pub use lash_core_execution::runtime::publish_process_execution_env;
 /// The artifact ports a process-engine registry acquires start and revision
 /// artifacts through (ADR 0113 §3.3), for hosts that assemble a registry
 /// outside `RuntimeHostConfig`.
@@ -617,26 +614,28 @@ pub use runtime::{
     AdmittedTurnInputs, Ancestry, ArgsMismatch, ArgsMode, AssistantResponseHookEvents,
     AssistantResponsePlan, AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity,
     BindingId, CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
-    ClockWallTime, CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredProcessIdentity,
-    DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
+    ClockWallTime, CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredLaunch,
+    DeclaredProcessIdentity, DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
     DeploymentStoreDecorator, DrainMode, DrainModePolicy, DurableProcessWork, EffectAddress,
-    EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate, EngineAction,
-    EngineEvent, EngineState, EngineStateFormat, EngineStateMigration, EngineStateRefusal,
-    EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, ExecutableGeneration,
-    ExecutableGenerationRefusal, ExecutionScope, ForkSessionReceipt, ForkSessionRequest, HandleId,
-    InputItem, InspectedProcessDefinition, InvalidProcessDefinitionId, InvalidStartKey,
-    JournalReplay, KeyName, Lifetime, LifetimeDecision, LifetimePolicy, LiveReplayEventDraft,
-    LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
-    LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LlmStreamRecord,
-    MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork,
-    NoRunOptionsOwner, NonTerminalProcessPage, OwnerRunOptions, PROCESS_EFFECT_OCCURRENCE_CAP,
-    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-    PROCESS_EVENT_VOCABULARY_VERSION, ParentEndPlan, PendingTurnInput, PendingTurnInputBatch,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
-    PendingTurnInputSuffixCancelOutcome, PreparedProcessRegistration, ProcessAwaitOutput,
-    ProcessCancelReceipt, ProcessChange, ProcessChangeBounds, ProcessChangeCursor,
-    ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate,
+    EnclosingProcess, EngineAction, EngineEvent, EngineLaunch, EngineSettings, EngineState,
+    EngineStateFormat, EngineStateMigration, EngineStateRefusal, EngineStepKind, EngineStepRefusal,
+    EngineStepRun, EngineSteps, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
+    ForkSessionReceipt, ForkSessionRequest, HandleId, HoldEnvError, InputItem,
+    InspectedProcessDefinition, InvalidProcessDefinitionId, InvalidStartKey, JournalReplay,
+    KeyName, Lifetime, LifetimeDecision, LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason,
+    LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
+    LiveReplaySubscription, LlmRequestSpec, LlmStreamRecord, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
+    MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork, NoRunOptionsOwner, NonTerminalProcessPage,
+    OwnerRunOptions, PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ParentEndPlan,
+    PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
+    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
+    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
+    PreparedProcessRegistration, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeBounds, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessComponentConfig,
+    ProcessComponentEntry, ProcessComponentId, ProcessComponentIdError, ProcessConfigKey,
     ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError, ProcessDefinitionError,
     ProcessDefinitionId, ProcessDefinitionRef, ProcessDefinitionRefusal,
     ProcessDefinitionResolution, ProcessDefinitionStore, ProcessDefinitionStoredError,
@@ -645,31 +644,33 @@ pub use runtime::{
     ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
     ProcessEffectOutcome, ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError,
     ProcessEngine, ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration,
-    ProcessEngineRegistry, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite, ProcessEventLog,
-    ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
-    ProcessEventReadOutcome, ProcessEventRelease, ProcessExecutionContext,
-    ProcessExecutionDocumentRead, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessEngineRegistry, ProcessEnv, ProcessEnvBuilder, ProcessEnvChoice, ProcessEnvCx,
+    ProcessEnvPolicy, ProcessEnvPolicyError, ProcessEnvPorts, ProcessEnvRef, ProcessEnvRefusal,
+    ProcessEnvSelection, ProcessEnvStore, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite,
+    ProcessEventLog, ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore,
+    ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease, ProcessExecutionContext,
+    ProcessExecutionDocumentRead, ProcessExecutionWriteAuthority, ProcessExternalRef,
     ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInfraError, ProcessInput,
-    ProcessLifecycle, ProcessLifecycleFact, ProcessLineage, ProcessListFilter, ProcessListMode,
-    ProcessListSelection, ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry,
-    ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
-    ProcessOutcomeObserver, ProcessParkReason, ProcessParkState, ProcessProvenance,
-    ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
-    ProcessRegistrationOutcome, ProcessRegistrationReceipt, ProcessRegistry,
-    ProcessRegistryAwaiter, ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention,
-    ProcessRosterCursor, ProcessRosterPage, ProcessRosterRecords, ProcessRosterTokenError,
-    ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport, ProcessSignature,
-    ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
-    ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-    ProcessTerminalWait, ProcessTombstone, ProcessToolIntents, ProcessWaits, ProcessWorkSubstrate,
-    ProcessWorkWiring, ProjectionWatermark, ProtocolSessionExtension, QueuedDrainCandidate,
-    QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
-    QueuedWorkAuthority, QueuedWorkBatchingConfig, RecordedKeyFence, RecordedKeyRange,
-    RecordedKeys, RecordedRefusal, RecordedRender, RefusedWriteRange, RenderFault, RenderRefusal,
-    Resolution, ResolveOutcome, ResolvedProcessDefinition, ResolvedRun, RetainedRevision,
-    Retention, RunAggregateWakePolicy, RunDefinition, RunDefinitionRefusal, RunDefinitions,
+    ProcessLifecycle, ProcessLifecycleFact, ProcessLimits, ProcessLineage, ProcessListFilter,
+    ProcessListMode, ProcessListSelection, ProcessLiveReferenceView, ProcessModel,
+    ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator,
+    ProcessOriginatorFilter, ProcessOutcome, ProcessOutcomeObserver, ProcessParkReason,
+    ProcessParkState, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
+    ProcessRegistrar, ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
+    ProcessRegistry, ProcessRegistryAwaiter, ProcessRegistryCursor, ProcessResumeRefusal,
+    ProcessRetention, ProcessRosterCursor, ProcessRosterPage, ProcessRosterRecords,
+    ProcessRosterTokenError, ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport,
+    ProcessSignature, ProcessSpawnProvenance, ProcessStartChoice, ProcessStartDeclaration,
+    ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt, ProcessStartRequest,
+    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessTombstone,
+    ProcessToolIntents, ProcessWaits, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
+    ProtocolSessionExtension, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy,
+    QueuedDrainRequest, QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig,
+    RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRefusal, RecordedRender,
+    RefusedWriteRange, RenderFault, RenderRefusal, Resolution, ResolveOutcome,
+    ResolvedProcessDefinition, ResolvedRun, ResolvedStartTarget, RetainedRevision, Retention,
+    RunAggregateWakePolicy, RunDefinition, RunDefinitionRefusal, RunDefinitions,
     RunOptionsEncodeError, RunOptionsKey, RunOptionsOwner, RunOverrides, RunResolveError,
     RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution, RuntimeCheckpointComponents,
     RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
@@ -692,15 +693,14 @@ pub use runtime::{
     TurnInputState, TurnInputStateKind, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef,
     TurnPreludeStore, WaitKind, WaitState, WatchedRegistry, WeakProcessEngineRegistry,
     WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
-    artifact_store_plugin_error, lifetime, mint_process_id, tool_failure_code,
+    artifact_store_plugin_error, hold_process_env, lifetime, mint_process_id, tool_failure_code,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
     AdmissionBoundary, AdmittedQueuedWork, QueuedCheckpointTurnInput, QueuedWorkBatch,
     QueuedWorkBatchDraft, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkPayload,
-    RuntimeSubject, load_process_execution_env, prepare_process_event_append,
-    prepare_process_registration, prepare_process_start, prepare_process_transition,
-    process_event_invocation,
+    RuntimeSubject, load_process_env, prepare_process_event_append, prepare_process_registration,
+    prepare_process_start, prepare_process_transition, process_event_invocation,
 };
 pub use runtime::{ConsumerHold, SessionTurnOutcome};
 /// Process observation: the snapshot, cursor, stream events and bounded
@@ -778,14 +778,15 @@ pub use tool_intent::{
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, IsolatedProcessRequest,
-    PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ToolCall,
-    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
-    ToolPrepareContext, ToolProvider,
+    IsolatedStart, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ResolveTargetError,
+    ToolCall, ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant,
+    ToolPrepareCall, ToolPrepareContext, ToolProvider,
 };
 #[doc(hidden)]
 pub mod core_internal {
     pub use crate::runtime::{
-        ProcessRuntimeContext, ProcessRuntimePorts, ProcessStepTools, RuntimeSessionServices,
+        EngineProcessRuntime, ProcessRuntimePorts, ProcessStepTools, RuntimeSessionServices,
+        SessionTurnRuntime,
     };
     pub use lash_core_execution::core_internal::{
         RuntimeEffectLocalRunner, RuntimeExecutionContextRuntimeOps, StartKeyDerivation,

@@ -752,12 +752,42 @@ fn benchmark_rlm_builder(
 
 // The benchmark plugin list, in push order. Every conditional reads the
 // scenario's `ScenarioWiring` column; the builders only append the result.
+/// The benchmark tools' process component.
+const RUNTIME_PERF_TOOLS: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("runtime_perf_tools", lash_core::FormatVersion::ONE);
+
+/// A process component and the key it registers under.
+type BenchmarkComponent = (
+    Arc<dyn lash::process::ProcessComponentFactory>,
+    lash_core::ProcessConfigKey<()>,
+);
+
+/// What a benchmark core installs beside its plugin stack: the plugins, and
+/// the components a benchmark process names (FIG-6034).
+struct BenchmarkPlugins {
+    factories: Vec<Arc<dyn PluginFactory>>,
+    components: Vec<BenchmarkComponent>,
+}
+
+impl BenchmarkPlugins {
+    fn keys(&self) -> Vec<lash_core::ProcessConfigKey<()>> {
+        self.components.iter().map(|(_, key)| *key).collect()
+    }
+
+    fn install(&self, mut builder: lash::LashCoreBuilder) -> lash::LashCoreBuilder {
+        for (component, key) in &self.components {
+            builder = builder.process_component(Arc::clone(component), *key);
+        }
+        builder
+    }
+}
+
 fn benchmark_plugin_factories(
     scenario: RuntimePerfScenario,
     effect_host: &lash::runtime::ActorContext,
     settlement_control: Option<&Arc<BenchmarkSettlementControl>>,
     tool_catalog_observer: Option<&Arc<BenchmarkToolCatalogObserver>>,
-) -> Vec<Arc<dyn PluginFactory>> {
+) -> BenchmarkPlugins {
     let wiring = scenario.wiring();
     let benchmark_tool = settlement_control.map_or_else(
         || BenchmarkEchoTool::new(effect_host.clone()),
@@ -765,12 +795,21 @@ fn benchmark_plugin_factories(
             BenchmarkEchoTool::with_settlement_control(effect_host.clone(), Arc::clone(control))
         },
     );
+    let benchmark_tool: Arc<dyn lash_core::ToolProvider> = Arc::new(benchmark_tool);
+    let mut components: Vec<BenchmarkComponent> = vec![(
+        lash_core::testing::tool_component(RUNTIME_PERF_TOOLS, Arc::clone(&benchmark_tool)),
+        RUNTIME_PERF_TOOLS,
+    )];
     let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("runtime_perf_tools"),
-        PluginSpec::new().with_tool_provider(Arc::new(benchmark_tool)),
+        PluginSpec::new().with_tool_provider(benchmark_tool),
     ))];
     if wiring.llm_query_plugin {
         factories.push(Arc::new(LlmToolsPluginFactory::default()));
+        components.push((
+            Arc::new(lash_llm_tools::LlmToolsComponent::default()),
+            lash_llm_tools::LLM_TOOLS_CONFIG,
+        ));
     }
     if wiring.delegation_plugin {
         // The host's delegation tool (`examples/delegation`): each child runs
@@ -790,11 +829,13 @@ fn benchmark_plugin_factories(
             .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
             lash_core::lifetime::starter,
         );
-        factories.push(Arc::new(if scenario.execution_mode().is_rlm() {
+        let delegation = if scenario.execution_mode().is_rlm() {
             delegation.with_rlm_children()
         } else {
             delegation
-        }));
+        };
+        components.push((delegation.component(), delegation::DELEGATION_CONFIG));
+        factories.push(Arc::new(delegation));
     }
     if wiring.oblique_tools_plugin {
         factories.push(Arc::new(StaticPluginFactory::new(
@@ -824,7 +865,10 @@ fn benchmark_plugin_factories(
         )));
     }
 
-    factories
+    BenchmarkPlugins {
+        factories,
+        components,
+    }
 }
 
 /// The in-process lane: lash's durable engine over a fresh SQLite memory
@@ -944,23 +988,27 @@ pub(crate) async fn build_runtime(
     let tool_catalog_observer = wiring
         .tool_catalog_observer
         .then(|| Arc::new(BenchmarkToolCatalogObserver::default()));
-    let mut plugin_stack = runtime_perf_plugin_stack(
-        scenario.uses_standard_compaction(),
-        execution_mode.is_standard(),
-    );
-    for factory in benchmark_plugin_factories(
+    let plugins = benchmark_plugin_factories(
         scenario,
         &effect_host,
         settlement_control.as_ref(),
         tool_catalog_observer.as_ref(),
-    ) {
-        plugin_stack.push(factory);
+    );
+    let mut plugin_stack = runtime_perf_plugin_stack(
+        scenario.uses_standard_compaction(),
+        execution_mode.is_standard(),
+        &plugins.keys(),
+    );
+    for factory in &plugins.factories {
+        plugin_stack.push(Arc::clone(factory));
     }
     let core = match execution_mode {
         ExecutionMode::Standard => {
-            let mut builder = benchmark_standard_builder(backend, provider)
-                .with_explicit_ephemeral_facets()
-                .plugins(plugin_stack);
+            let mut builder = plugins.install(
+                benchmark_standard_builder(backend, provider)
+                    .with_explicit_ephemeral_facets()
+                    .plugins(plugin_stack),
+            );
             if let Some(config) = trace_config {
                 if let Some(path) = config.trace_jsonl_path {
                     builder = builder.trace_jsonl_path(path);
@@ -979,10 +1027,12 @@ pub(crate) async fn build_runtime(
                 tracing = tracing
                     .with_product_observer(Arc::new(lash::tracing::JsonlTraceSink::new(path)));
             }
-            let mut builder = benchmark_rlm_builder(backend, provider, factory)
-                .trace_runtime(tracing)
-                .with_explicit_ephemeral_facets()
-                .plugins(plugin_stack);
+            let mut builder = plugins.install(
+                benchmark_rlm_builder(backend, provider, factory)
+                    .trace_runtime(tracing)
+                    .with_explicit_ephemeral_facets()
+                    .plugins(plugin_stack),
+            );
             if let Some(config) = trace_config {
                 if let Some(path) = config.trace_jsonl_path {
                     builder = builder.trace_jsonl_path(path);
@@ -1063,8 +1113,6 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let wiring = scenario.wiring();
     let mode_id = scenario.execution_mode();
     let provider = benchmark_provider(scenario).into_handle();
-    let mut plugin_stack =
-        runtime_perf_plugin_stack(scenario.uses_standard_compaction(), mode_id.is_standard());
     let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open(
             root.join("lash.db"),
@@ -1094,10 +1142,16 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     );
     let backend = durable_backend(layered)?;
     let effect_host = lash::runtime::ActorContext::detached(backend.clone());
-    for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
-        plugin_stack.push(factory);
+    let plugins = benchmark_plugin_factories(scenario, &effect_host, None, None);
+    let mut plugin_stack = runtime_perf_plugin_stack(
+        scenario.uses_standard_compaction(),
+        mode_id.is_standard(),
+        &plugins.keys(),
+    );
+    for factory in &plugins.factories {
+        plugin_stack.push(Arc::clone(factory));
     }
-    let core = durable_benchmark_core(backend, mode_id, provider, plugin_stack)?;
+    let core = durable_benchmark_core(backend, mode_id, provider, plugin_stack, &plugins)?;
     let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
     let mut creation = lash::SessionCreation::root(
         lash::plugins::SessionToolAccess::ambient(),
@@ -1133,7 +1187,7 @@ pub(crate) fn checkpoint_benchmark_core(
     backend: lash::Backend,
     factory: Arc<dyn PluginFactory>,
 ) -> anyhow::Result<LashCore> {
-    let mut plugins = runtime_perf_plugin_stack(false, true);
+    let mut plugins = runtime_perf_plugin_stack(false, true, &[]);
     plugins.push(factory);
     Ok(benchmark_standard_builder(
         backend,
@@ -1152,6 +1206,7 @@ fn durable_benchmark_core(
     mode_id: ExecutionMode,
     provider: ProviderHandle,
     plugin_stack: lash::PluginStack,
+    plugins: &BenchmarkPlugins,
 ) -> anyhow::Result<BenchmarkCore> {
     let builder = match mode_id {
         ExecutionMode::Standard => benchmark_standard_builder(backend, provider),
@@ -1168,7 +1223,7 @@ fn durable_benchmark_core(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugins(plugin_stack);
-    let core = builder.build(runtime_perf_owner())?;
+    let core = plugins.install(builder).build(runtime_perf_owner())?;
     Ok(match mode_id {
         ExecutionMode::Standard => BenchmarkCore::Standard(core),
         ExecutionMode::Rlm => BenchmarkCore::Rlm(core),

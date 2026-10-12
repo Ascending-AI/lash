@@ -240,15 +240,34 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
             .build(),
         lash_protocol_rlm::CellDialect::typescript(),
     );
+    // A generated cell's process runs under the turn's run with the
+    // workload's tools and the process controls, and a process it starts
+    // inherits that environment (FIG-6034).
+    const TOOLS: lash_core::ProcessConfigKey<()> =
+        lash_core::ProcessConfigKey::new("seeded-plan-tools", lash_core::FormatVersion::ONE);
+    let components = [TOOLS, lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG];
+    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(Tools::new(workload.clone(), &meter)?);
     let mut plugins = lash::PluginStack::new();
     plugins.push(Arc::new(
         lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
             lash_core::lifetime::session_or_starter,
+            lash_core::testing::run_policy_naming(&components),
         ),
     ));
     let core = lash::LashCore::rlm_builder(backend, factory)
         .serve_test_llm_profile(provider, facade::metadata()?)
-        .tools(Arc::new(Tools::new(workload.clone(), &meter)?))
+        .process_component(
+            lash_core::testing::tool_component(TOOLS, Arc::clone(&tools)),
+            TOOLS,
+        )
+        .process_component(
+            Arc::new(lash_plugin_process_controls::ProcessControlsComponent::new(
+                lash_core::lifetime::session_or_starter,
+                lash_core::testing::run_policy_naming(&components),
+            )),
+            lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG,
+        )
+        .tools(tools)
         .plugins(plugins)
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())

@@ -525,6 +525,7 @@ async fn admit_composed_inputs(
         .register_node(&lash_durable::NodeSpec {
             node: lash_durable::NodeId::new("composed-input-admission"),
             decodes: vec![snapshot.formats],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

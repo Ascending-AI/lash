@@ -18,7 +18,7 @@ use lash_core::store::ArtifactCleanupLedger;
 use lash_core::{
     ArtifactCleanup, ArtifactReferrer, ArtifactReferrerPorts, Clock, DefinitionAcquisition,
     ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionId, ProcessEngineRegistry,
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ReferrerClaim,
+    ProcessEnv, ProcessEnvRef, ProcessEnvStore, ReferrerClaim,
 };
 
 use crate::Result;
@@ -70,7 +70,7 @@ impl HostArtifactRefusal {
 /// The artifact stores of one core, as a host publishes into them.
 #[derive(Clone)]
 pub struct HostArtifacts {
-    process_env: Arc<dyn ProcessExecutionEnvStore>,
+    process_env: Arc<dyn ProcessEnvStore>,
     cleanup: Arc<dyn ArtifactCleanupLedger>,
     clock: Arc<dyn Clock>,
     /// The ports a definition's closure is held through, and the engines
@@ -108,19 +108,31 @@ impl HostArtifacts {
         }
     }
 
-    /// Publish `spec` and hold it under `pin`, answering its reference. A
-    /// released pin is refused.
+    /// Admit `env` against this core's process components, publish it and
+    /// hold it under `pin`, answering its reference (FIG-6034 §3.3). A
+    /// component the env names that is not installed, a config it refuses,
+    /// or a released pin is refused; nothing is published for a refusal.
     pub async fn publish_process_env(
         &self,
         pin: &HostArtifactPin,
-        spec: &ProcessExecutionEnvSpec,
-    ) -> Result<ProcessExecutionEnvRef> {
-        Ok(lash_core::runtime::publish_process_execution_env(
+        env: &ProcessEnv,
+    ) -> Result<ProcessEnvRef> {
+        let ports = lash_core::ProcessEnvPorts::admitting(
             self.process_env.as_ref(),
+            self.engines.components(),
+        );
+        lash_core::hold_process_env(
+            &ports,
             &claim(pin)?,
-            spec,
+            &lash_core::ProcessEnvSelection::New(env.clone()),
         )
-        .await?)
+        .await
+        .map_err(|error| match error {
+            lash_core::HoldEnvError::Refused(refusal) => {
+                lash_core::PluginError::ProcessEnvRefused { refusal }.into()
+            }
+            lash_core::HoldEnvError::Fault(error) => error.into(),
+        })
     }
 
     /// Publish `draft` and hold it under `pin`: its descriptor and every
@@ -189,7 +201,7 @@ impl HostArtifacts {
     #[cfg(feature = "codemode")]
     pub async fn workflow_environment(
         &self,
-        environment: &ProcessExecutionEnvSpec,
+        environment: &ProcessEnv,
     ) -> Result<Option<crate::workflow::WorkflowEnvironment>> {
         if self
             .engines
@@ -232,7 +244,7 @@ impl HostArtifacts {
     pub async fn import_typescript_workflow(
         &self,
         source: &str,
-        environment: &ProcessExecutionEnvSpec,
+        environment: &ProcessEnv,
     ) -> Result<crate::workflow::WorkflowImport> {
         self.import_typescript_workflow_with_limits(
             source,
@@ -247,7 +259,7 @@ impl HostArtifacts {
     pub async fn import_typescript_workflow_with_limits(
         &self,
         source: &str,
-        environment: &ProcessExecutionEnvSpec,
+        environment: &ProcessEnv,
         limits: crate::typescript::SourceLimits,
     ) -> Result<crate::workflow::WorkflowImport> {
         use crate::workflow::{
@@ -343,7 +355,7 @@ impl HostArtifacts {
         pin: &HostArtifactPin,
         draft: &crate::workflow::edit::Draft,
         entry: &crate::workflow::document::Name,
-        environment: &ProcessExecutionEnvSpec,
+        environment: &ProcessEnv,
     ) -> Result<crate::workflow::WorkflowPublish> {
         use crate::workflow::{WorkflowPublication, WorkflowPublish};
         let unsupported = || WorkflowPublish::Unsupported {

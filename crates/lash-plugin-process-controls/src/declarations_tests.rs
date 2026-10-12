@@ -9,6 +9,9 @@ fn tools() -> SessionProcessAdminTools {
     SessionProcessAdminTools {
         include_cancel_process: true,
         lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
+        environment: lash_core::runtime::env_policy::policy::refuse(
+            "these laws never reach the environment policy",
+        ),
     }
 }
 
@@ -84,18 +87,10 @@ fn definition() -> Value {
     .expect("definition")
 }
 
+/// The start and get contracts refuse every shape but their own before any
+/// definition is read or any policy runs.
 #[tokio::test]
 async fn start_and_get_accept_only_the_exact_definition_contracts() {
-    let (_, declared) = intents(attempt!(
-        "start_process",
-        serde_json::json!({"definition_id": id(1).to_tagged_json()})
-    ));
-    let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
-        panic!("one start")
-    };
-    assert!(
-        matches!(&intent.declaration.input, lash_core::ProcessStartTarget::Definition {definition_id, args, ..} if definition_id == &id(1) && args.is_empty())
-    );
     let (slot, get) = intents(attempt!(
         "get_process_definition",
         serde_json::json!({"definition_id": id(1).to_tagged_json()})
@@ -130,28 +125,10 @@ async fn start_and_get_accept_only_the_exact_definition_contracts() {
     }
 }
 
+/// A label that is present but unusable is refused before any definition is
+/// read or any policy runs.
 #[tokio::test]
-async fn two_starts_of_one_definition_differ_only_in_the_declared_label() {
-    let mut declarations = Vec::new();
-    for label in ["first", "second"] {
-        let (_, declared) = intents(attempt!(
-            "start_process",
-            serde_json::json!({"definition": definition(), "label": label})
-        ));
-        let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
-            panic!("start")
-        };
-        assert_eq!(
-            intent
-                .declaration
-                .identity
-                .as_ref()
-                .and_then(|i| i.label.as_deref()),
-            Some(label)
-        );
-        declarations.push(intent.declaration.input.clone());
-    }
-    assert_eq!(declarations[0], declarations[1]);
+async fn an_unusable_declared_label_is_refused() {
     for label in [
         serde_json::Value::Null,
         serde_json::json!(7),

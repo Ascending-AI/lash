@@ -254,20 +254,20 @@ fn taken(from: &Mutex<Vec<ResolvedArtifactCleanup>>) -> Vec<ResolvedArtifactClea
 struct EnvStore(Arc<Applied>);
 
 #[async_trait::async_trait]
-impl ProcessExecutionEnvStore for EnvStore {
-    async fn publish_process_execution_env(
+impl ProcessEnvStore for EnvStore {
+    async fn publish_process_env(
         &self,
         _claim: &ReferrerClaim,
-        _env_ref: &ProcessExecutionEnvRef,
+        _env_ref: &ProcessEnvRef,
         _bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
         Ok(())
     }
 
-    async fn acquire_process_execution_env(
+    async fn acquire_process_env(
         &self,
         claim: &ReferrerClaim,
-        env_ref: &ProcessExecutionEnvRef,
+        env_ref: &ProcessEnvRef,
     ) -> Result<(), ArtifactStoreError> {
         self.0.acquire(claim, env_ref.as_str())
     }
@@ -280,9 +280,9 @@ impl ProcessExecutionEnvStore for EnvStore {
         Ok(())
     }
 
-    async fn get_process_execution_env(
+    async fn get_process_env(
         &self,
-        _env_ref: &ProcessExecutionEnvRef,
+        _env_ref: &ProcessEnvRef,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         Ok(None)
     }
@@ -461,10 +461,24 @@ impl crate::ProcessEngine for Engine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&crate::EngineSettings>,
+    ) -> std::result::Result<(), crate::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(crate::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
         Ok(None)
     }
 
@@ -692,10 +706,11 @@ async fn a_registered_start_carries_the_retained_record_onto_it() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(RetainedStart {
         process_id: process_id.clone(),
-        env_ref: Some(ProcessExecutionEnvRef::new("env-retained")),
+        env_ref: Some(ProcessEnvRef::new("env-retained")),
         input: Arc::new(ProcessInput::Engine {
             kind: ENGINE_KIND.to_owned(),
             payload: serde_json::json!({}),
+            launch: crate::testing::fixture_engine_launch(),
         }),
         definition_id: None,
     });
@@ -766,10 +781,11 @@ async fn a_start_by_id_carries_its_descriptor_and_manifest_onto_its_record() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(RetainedStart {
         process_id: process_id.clone(),
-        env_ref: Some(ProcessExecutionEnvRef::new("env-retained")),
+        env_ref: Some(ProcessEnvRef::new("env-retained")),
         input: Arc::new(ProcessInput::Engine {
             kind: ENGINE_KIND.to_owned(),
             payload: serde_json::json!({}),
+            launch: crate::testing::fixture_engine_launch(),
         }),
         definition_id: Some(id.clone()),
     });
@@ -866,10 +882,11 @@ impl Harness {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(RetainedStart {
             process_id: process_id.clone(),
-            env_ref: Some(ProcessExecutionEnvRef::new("env-retained")),
+            env_ref: Some(ProcessEnvRef::new("env-retained")),
             input: Arc::new(ProcessInput::Engine {
                 kind: ENGINE_KIND.to_owned(),
                 payload: serde_json::json!({}),
+                launch: crate::testing::fixture_engine_launch(),
             }),
             definition_id: None,
         });

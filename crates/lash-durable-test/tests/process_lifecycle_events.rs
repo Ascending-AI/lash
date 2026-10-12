@@ -122,6 +122,10 @@ fn core(
         .expect("the backend assembles");
     let core = lash::LashCore::standard_builder(backend.clone())
         .tools(write_tool(world))
+        .process_component(
+            lash_core::testing::tool_component(WRITE_COMPONENT, write_tool(world)),
+            WRITE_COMPONENT,
+        )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
@@ -202,10 +206,24 @@ impl lash_core::ProcessEngine for ScriptEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &lash_core::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, lash_core::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash_core::EngineSettings>,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(lash_core::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<lash_core::EngineSettings>, lash_core::PluginError> {
         Ok(None)
     }
 
@@ -302,9 +320,13 @@ impl lash::tools::StaticToolExecute for Write {
     }
 }
 
-fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
+/// The component that serves the write tool to a process.
+const WRITE_COMPONENT: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("lifecycle-events-write", lash_core::FormatVersion::ONE);
+
+fn write_definition() -> lash_core::ToolDefinition {
     use lash_core::ToolDefinitionBindingExt as _;
-    let definition = lash_core::ToolDefinition::raw(
+    lash_core::ToolDefinition::raw(
         WRITE_TOOL,
         WRITE_TOOL,
         "Writes x to the outside world, once.",
@@ -324,9 +346,12 @@ fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
     )
     .expect("a deferring tool declares its park bound")
     .with_execution_policy(lash_core::ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], WRITE_TOOL));
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], WRITE_TOOL))
+}
+
+fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
     Arc::new(lash::tools::StaticToolProvider::new(
-        vec![definition],
+        vec![write_definition()],
         Write {
             world: Arc::clone(world),
         },
@@ -350,29 +375,16 @@ fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineActi
 
 // --- the host's side --------------------------------------------------------------
 
-/// The environment every start in these laws captures.
-fn environment() -> lash_core::ProcessExecutionEnvSpec {
-    let mut environment = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(16),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
-    environment.render = Some(lash_core::RecordedRender {
-        renderer_id: lash::render::ToolOutputRendererSlot::default()
-            .0
-            .id()
-            .to_owned(),
-        params: serde_json::to_value(lash::render::ResolvedStandardRenderConfig {
-            defaults: lash::render::ToolRenderParams::default(),
-            per_tool: std::collections::BTreeMap::new(),
-        })
-        .expect("the render config encodes"),
-    });
-    environment
+/// The environment a host start states in these laws: the write tool, from
+/// its component.
+fn environment() -> lash_core::ProcessEnv {
+    lash_core::ProcessEnv::builder(
+        lash_core::SessionToolAccess::restricted([write_definition()]).expect("the write tool"),
+        lash_core::MaxToolCalls::new(16),
+    )
+    .component(WRITE_COMPONENT, &())
+    .build()
+    .expect("the environment builds")
 }
 
 /// Start a detached process of the scripted engine.
@@ -382,15 +394,13 @@ async fn start(core: &lash::LashCore) -> lash_core::ProcessId {
         .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment())
         .await
         .expect("the environment is published");
-    let request = lash_core::ProcessStartRequest::new(
-        lash_core::ProcessInput::Engine {
-            kind: KIND.to_owned(),
-            payload: serde_json::Value::Null,
-        },
+    let request = lash_core::ProcessStartRequest::engine(
+        KIND.to_owned(),
+        serde_json::Value::Null,
+        lash_core::EngineLaunch::new(env_ref, None),
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,
-    )
-    .with_env_ref(env_ref);
+    );
     core.processes()
         .start(request, core.effect_host())
         .await
@@ -717,6 +727,7 @@ impl Fleet {
             lash_durable_test::SimNodesConfig {
                 lease: lash_durable::LeaseConfig::default(),
                 decodes: backend.formats().decodes(),
+                serves: Vec::new(),
                 max_active: 8,
             },
             Self::activation(&backend, None),
@@ -764,13 +775,14 @@ impl Fleet {
             lash_core::ProcessInput::Engine {
                 kind: KIND.to_owned(),
                 payload: serde_json::Value::Null,
+                launch: lash_core::EngineLaunch::new(
+                    lash_core_execution::testing::process_execution_env_fixture_ref(),
+                    None,
+                ),
             },
             lash_core::ProcessProvenance::host(),
             lash_core::LifetimeDecision::Detached,
-        )
-        .with_execution_env_ref(Some(
-            lash_core_execution::testing::process_execution_env_fixture_ref(),
-        ));
+        );
         self.backend
             .process_registry()
             .register_process(registration)

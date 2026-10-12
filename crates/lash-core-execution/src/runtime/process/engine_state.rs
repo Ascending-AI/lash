@@ -220,8 +220,9 @@ impl EngineStepKind {
 pub struct EngineStepRun {
     /// The process the step belongs to.
     pub process: ProcessId,
-    /// What the engine's `creation_config` recorded on the process's row.
-    pub engine_config: Option<serde_json::Value>,
+    /// The engine settings the process's start stated and its row records
+    /// (D4): never this build's defaults.
+    pub engine_settings: Option<super::EngineSettings>,
     /// The catalog the process's steps resolve against.
     pub tool_catalog: std::sync::Arc<crate::ToolCatalog>,
     /// The activation's clock reading when the body started.

@@ -47,8 +47,6 @@ kiln gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
   kiln test --test_output=all //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test \
     --test_arg=native_rlm_and_validation_share_one_pinned_definition_under_registry_drift \
     --test_arg=rlm_catalog_distinguishes_ambient_from_restricted_empty_access
-  kiln test --test_output=all //crates/lash-core:lash-core__unit_test \
-    --test_arg=process_run_context_captures_catalog_and_execution_route_together
   kiln test --test_output=all //crates/lash-protocol-standard:native_tools__test \
     --test_arg=standard_protocol_distinguishes_ambient_from_restricted_empty_access
 ' | tee "$LASH_RESIDENT_AUTHORITY_EVIDENCE_DIR/resident-tool-authority.log"

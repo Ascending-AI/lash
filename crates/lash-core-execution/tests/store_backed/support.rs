@@ -59,7 +59,7 @@ pub async fn after_millisecond_tick(epoch_ms: u64) {
 /// `_` names so a test module imports them with one glob.
 pub mod prelude {
     pub use crate::{
-        ProcessEventLogTestSupport as _, ProcessExecutionEnvStore as _, ProcessLifecycle as _,
+        ProcessEnvStore as _, ProcessEventLogTestSupport as _, ProcessLifecycle as _,
         ProcessObserverRegistry as _, ProcessQuery as _, ProcessRegistrar as _,
         ProcessRetention as _,
     };

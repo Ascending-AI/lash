@@ -21,11 +21,17 @@ pub use lash_sansio::{CheckpointKind, PluginMessage, PluginRuntimeEvent, ToolCat
 mod actions;
 mod composition;
 mod execution_state;
+mod process_components;
+pub use process_components::{
+    ProcessComponentContext, ProcessComponentDeclaration, ProcessComponentFactory,
+    ProcessComponentHost, ProcessComponentPorts, ProcessComponentRegistry, ProcessComponentSpec,
+    ProcessComposition, ProcessSessionReads, StaticProcessComponent,
+};
 mod execution_views;
 pub use composition::{AdmissionGate, ContributionKind, ExecutionComposition};
 pub use execution_state::ExecutionState;
 pub(crate) use execution_state::proposal_failure_message;
-pub use execution_views::{ExecutionFacts, OwnerConfigView};
+pub use execution_views::{ExecutionFacts, OwnerConfigView, RecordedCallFacts};
 mod attachment_omission;
 pub mod config;
 mod error;
@@ -47,9 +53,9 @@ pub use session_obj::{ResolvedToolSurface, plugin_lifecycle_hook_issue};
 pub(crate) mod session_types;
 pub(crate) mod state;
 pub use recorded_callbacks::{PluginCallbackBody, RecordedCallbackPhase, record_plugin_callbacks};
-pub use state::EffectPublication;
 use state::PluginStateRegistry;
 pub use state::Proposal;
+pub use state::{ComponentState, EffectPublication};
 pub(crate) use state::{collect_proposals, propose, propose_all};
 mod tool_catalog;
 mod tool_hooks;

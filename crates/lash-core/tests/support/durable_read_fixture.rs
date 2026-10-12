@@ -66,20 +66,18 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core::runtime::{
-    DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, SessionCommand,
-    load_process_execution_env, publish_process_execution_env,
+    DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, SessionCommand, load_process_env,
 };
 use lash_core::{
     ArtifactReferrer, AttachmentId, AttachmentReferrers, AttachmentWrite, Clock, DeploymentStore,
     ExecutionScope, LlmUsage, MessageOrigin, MessageRole, OperationId, PartKind,
     PendingTurnInputDraft, PluginNamespaceState, PluginState, ProcessAwaitOutput, ProcessChange,
-    ProcessChangeCursor, ProcessCompletionAuthority, ProcessEventLogTestSupport as _,
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
-    ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessProvenance,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus, ProjectionWatermark,
-    ReferrerClaim, RuntimeCommit, RuntimeSessionState, SessionAppendNode, SessionCreationHead,
-    SessionNodePayload, SessionPolicy, SessionRelation, SessionStoreCreateRequest, StoreError,
-    TurnInput, TurnInputIngress, WaitKind, WaitState,
+    ProcessChangeCursor, ProcessCompletionAuthority, ProcessEnv, ProcessEnvRef, ProcessEnvStore,
+    ProcessEventLogTestSupport as _, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
+    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
+    ProjectionWatermark, ReferrerClaim, RuntimeCommit, RuntimeSessionState, SessionAppendNode,
+    SessionCreationHead, SessionNodePayload, SessionRelation, SessionStoreCreateRequest,
+    StoreError, TurnInput, TurnInputIngress, WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -203,7 +201,7 @@ pub struct FixtureHandles {
     /// The deployment's catalog store; the fixture session is a view of it.
     pub store: Arc<dyn DeploymentStore>,
     pub processes: Arc<dyn lash_core::ConformanceProcessRegistry>,
-    pub process_envs: Arc<dyn ProcessExecutionEnvStore>,
+    pub process_envs: Arc<dyn ProcessEnvStore>,
 }
 
 impl FixtureHandles {
@@ -245,7 +243,7 @@ pub struct ExpectedFixture {
     pub record_config_retry: RuntimeCommit,
     pub queue_batch_id: String,
     pub pending_input_id: String,
-    pub process_env_ref: ProcessExecutionEnvRef,
+    pub process_env_ref: ProcessEnvRef,
     /// The projected registration payload of the waiting process (FIG-1485).
     /// A re-registration is answered by its start key and compares no content,
     /// so pinning the whole record is what makes the payload's shape visible.
@@ -395,10 +393,22 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         lash_core::HostArtifactPin::mint(),
     ))
     .expect("fixture host pin claim");
-    let process_env_ref =
-        publish_process_execution_env(handles.process_envs.as_ref(), &host_claim, &process_env)
-            .await
-            .expect("persist fixture process execution environment");
+    // Written to the store directly: no registry installs the fixture's
+    // component, and the store reads the bytes as they are.
+    let process_env_ref = process_env
+        .stable_ref()
+        .expect("fixture environment reference");
+    handles
+        .process_envs
+        .publish_process_env(
+            &host_claim,
+            &process_env_ref,
+            &process_env
+                .to_store_bytes()
+                .expect("fixture environment bytes"),
+        )
+        .await
+        .expect("persist fixture process execution environment");
     let registration = waiting_process_registration(process_env_ref.clone());
     let waiting = handles
         .processes
@@ -811,7 +821,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .expect("durable fixture drift: process disappeared");
     assert_eq!(process.status(), ProcessStatus::Waiting);
     assert_eq!(process.waits(), [fixture_wait_state()]);
-    assert_eq!(process.env_ref.as_ref(), Some(&expected.process_env_ref));
+    assert_eq!(process.env_ref(), Some(&expected.process_env_ref));
     assert_eq!(
         process, expected.waiting_process,
         "durable fixture drift: the projected registration payload recovered from the committed \
@@ -878,10 +888,9 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         vec![SESSION_ID.to_string()],
         "durable fixture semantic drift: process-observer edge changed"
     );
-    let loaded_env =
-        load_process_execution_env(handles.process_envs.as_ref(), &expected.process_env_ref)
-            .await
-            .expect("durable fixture identity drift: process env ref no longer resolves");
+    let loaded_env = load_process_env(handles.process_envs.as_ref(), &expected.process_env_ref)
+        .await
+        .expect("durable fixture identity drift: process env ref no longer resolves");
     assert_eq!(
         serde_json::to_value(loaded_env).expect("encode loaded fixture env"),
         serde_json::to_value(fixture_process_env()).expect("encode expected fixture env")
@@ -1139,28 +1148,25 @@ fn fixture_tool_output() -> lash_core::ToolCallOutput {
     )
 }
 
-fn fixture_process_env() -> ProcessExecutionEnvSpec {
-    let mut env = ProcessExecutionEnvSpec::new(
-        Default::default(),
-        SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
-    env.render = Some(lash_core::RecordedRender {
-        renderer_id: "standard".to_string(),
-        params: serde_json::json!({"max_chars": 120}),
-    });
-    env
+fn fixture_process_env() -> ProcessEnv {
+    const FIXTURE: lash_core::ProcessConfigKey<serde_json::Value> =
+        lash_core::ProcessConfigKey::new("durable-read", lash_core::FormatVersion::ONE);
+    ProcessEnv::builder(
+        lash_core::SessionToolAccess::restricted(std::iter::empty())
+            .expect("an empty tool restriction"),
+        lash_core::MaxToolCalls::new(1024),
+    )
+    .component(FIXTURE, &serde_json::json!({"max_chars": 120}))
+    .build()
+    .expect("the fixture environment builds")
 }
 
-fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegistration {
+fn waiting_process_registration(env_ref: ProcessEnvRef) -> ProcessRegistration {
     ProcessRegistration::new(
         ProcessInput::Engine {
             kind: "durable-read-engine".to_string(),
             payload: serde_json::json!({"fixture": "process"}),
+            launch: lash_core::EngineLaunch::new(env_ref, None),
         },
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
@@ -1168,7 +1174,6 @@ fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegis
     .with_start_key(Some(lash_core::StartKey::for_host(
         WAITING_PROCESS_START_KEY,
     )))
-    .with_execution_env_ref(Some(env_ref))
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         ProcessIdentity::for_definition(
             lash_core::ProcessDefinitionRef::unclaimed(

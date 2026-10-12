@@ -135,11 +135,6 @@ impl lash_core::plugin::PluginFactory for EnginePlugin {
         &self,
         _ctx: &lash_core::plugin::PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
-        if self.catalog_failure {
-            return Err(lash_core::PluginError::Registration(
-                "catalog law refusal".to_owned(),
-            ));
-        }
         Ok(Arc::new(NoSessionPlugin))
     }
 }
@@ -468,57 +463,87 @@ fn failed_step_advance(
     engine_step_advance(state, event)
 }
 
-/// FIG-5600: an unreadable catalog remains a known failure, with the
-/// original typed plugin cause retained in the facade's terminal output.
-async fn an_unreadable_engine_step_catalog_ends_failed_with_its_typed_reason(tier: Tier) {
+/// The component whose tool catalog contribution refuses.
+const FAILING_CATALOG: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("core-node-failing-catalog", lash_core::FormatVersion::ONE);
+
+fn failing_catalog_component() -> Arc<dyn lash::process::ProcessComponentFactory> {
+    let refuse: lash_core::plugin::ToolCatalogContributor = Arc::new(|_| {
+        Err(lash_core::PluginError::Registration(
+            "catalog law refusal".to_owned(),
+        ))
+    });
+    Arc::new(
+        lash_core::plugin::StaticPluginFactory::new(
+            lash_core::plugin::PluginDeclaration::initial(FAILING_CATALOG.component()),
+            lash_core::facade_support::PluginSpec::new().with_tool_catalog_contributor(
+                lash_core::plugin::HookKey::new("refuse").expect("a hook key"),
+                refuse,
+            ),
+        )
+        .as_component(FAILING_CATALOG.format())
+        .expect("the failing catalog is a process component"),
+    )
+}
+
+/// FIG-6034 §5.1: the catalog is the process's composition's, and a
+/// component its environment names refuses its contribution. The
+/// composition builds before any step is admitted, so the process parks
+/// with the typed reason and its plugin cause, and nothing runs or settles.
+async fn an_unreadable_engine_step_catalog_parks_the_process_with_its_typed_reason(tier: Tier) {
     let runs = Arc::new(AtomicUsize::new(0));
     let plugin = Arc::new(EnginePlugin {
         runs: Arc::clone(&runs),
         declarations: None,
         catalog_failure: true,
     });
-    let deployment = deploy(tier, Vec::new(), |builder| builder.plugin(plugin)).await;
-    let process = start(&deployment.core, PLUGIN_ENGINE, serde_json::json!(21)).await;
-    let output = ended(&deployment.core, &process).await;
-    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
-        panic!("the unreadable catalog fails the process: {output:?}");
-    };
-    assert_eq!(failure.code, "engine_step_catalog_unreadable");
-    assert_eq!(
-        failure.cause.as_deref(),
-        Some(&lash_core::ToolFailureCause::EngineStepCatalogUnreadable {
-            engine: PLUGIN_ENGINE.to_owned(),
-            step: "double".to_owned(),
-            step_kind: DOUBLE.to_owned(),
-        })
-    );
-    let source: lash_core::ToolIntentCommandFailure = serde_json::from_value(
-        failure
-            .raw
-            .as_ref()
-            .expect("the plugin cause is retained")
-            .to_json_value()["catalog_error"]
-            .clone(),
+    let deployment = deploy(tier, Vec::new(), |builder| {
+        builder
+            .plugin(plugin)
+            .process_component(failing_catalog_component(), FAILING_CATALOG)
+    })
+    .await;
+    let process = start_under(
+        &deployment.core,
+        &environment_of(Vec::new(), &[FAILING_CATALOG]),
+        PLUGIN_ENGINE,
+        serde_json::json!(21),
+        |request| request,
     )
-    .expect("the plugin cause remains typed");
-    assert!(
-        matches!(source, lash_core::ToolIntentCommandFailure::Registration(message) if message == "catalog law refusal")
-    );
-    let record = deployment
-        .backend
-        .process_registry()
-        .get_process(&process)
-        .await
-        .expect("the process is read")
-        .expect("the process exists");
-    let lash_core::ProcessLifecycleState::Terminal { outcome, .. } = &record.lifecycle else {
-        panic!("the process has its canonical terminal: {record:?}");
+    .await;
+    let park = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let observed = deployment
+                .core
+                .processes()
+                .get(&process)
+                .await
+                .expect("the process is read")
+                .expect("the process exists");
+            if let lash_core::ProcessParkState::Parked(reason) = observed.park.clone() {
+                break (reason, observed);
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the process parks within a minute");
+    let (reason, observed) = park;
+    let lash_core::ProcessParkReason::CompositionUnavailable { message, .. } = &reason else {
+        panic!("the process parked for another reason: {reason:?}");
     };
-    assert_eq!(
-        *outcome,
-        lash_core::ProcessTerminal::from_tool_output(output)
+    assert!(
+        message.contains("catalog law refusal"),
+        "the park keeps the plugin cause: {message}"
+    );
+    assert!(
+        !matches!(
+            observed.lifecycle,
+            lash_core::ProcessLifecycleState::Terminal { .. }
+        ),
+        "nothing settled: {observed:?}"
     );
     assert_eq!(runs.load(Ordering::SeqCst), 0, "no body ran");
 }
 
-on_every_tier!(an_unreadable_engine_step_catalog_ends_failed_with_its_typed_reason);
+on_every_tier!(an_unreadable_engine_step_catalog_parks_the_process_with_its_typed_reason);

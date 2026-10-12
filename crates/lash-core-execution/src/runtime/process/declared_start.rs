@@ -95,8 +95,8 @@ impl DeclaredStartObligation {
     ///
     /// # Errors
     ///
-    /// [`DeclaredStartObligationRefusal`] for a keyless start, a start
-    /// without its environment, or one without its consumer hold.
+    /// [`DeclaredStartObligationRefusal`] for a keyless start, or one without
+    /// its consumer hold.
     pub fn new(
         call_id: ToolCallId,
         registration: ProcessStartRegistration,
@@ -106,9 +106,6 @@ impl DeclaredStartObligation {
             .as_ref()
             .ok_or(DeclaredStartObligationRefusal::Keyless)?
             .clone();
-        if registration.env_ref.is_none() {
-            return Err(DeclaredStartObligationRefusal::NoEnvironment);
-        }
         let consumer_hold = registration
             .consumer_hold
             .as_ref()
@@ -149,7 +146,8 @@ impl DeclaredStartObligation {
 #[cfg(test)]
 mod tests {
     use super::super::{
-        ConsumerHold, Lifetime, ProcessExecutionEnvRef, ProcessInput, ProcessProvenance, ScopeId,
+        ConsumerHold, EngineLaunch, Lifetime, ProcessEnvRef, ProcessInput, ProcessProvenance,
+        ScopeId,
     };
     use super::*;
 
@@ -158,12 +156,12 @@ mod tests {
             ProcessInput::Engine {
                 kind: "index".into(),
                 payload: serde_json::json!({"job": "index"}),
+                launch: EngineLaunch::new(ProcessEnvRef::new("process-env:fixture"), None),
             },
             ProcessProvenance::host(),
             Lifetime::Detached,
         )
         .with_start_key(Some(StartKey::for_host("declared-start")));
-        registration.env_ref = Some(ProcessExecutionEnvRef::new("process-env:fixture"));
         registration.consumer_hold = Some(ConsumerHold {
             key: "completion-1".into(),
             owner: ScopeId::Session("session-1".into()),
@@ -209,29 +207,13 @@ mod tests {
     }
 
     #[test]
-    fn decoding_a_lash_executed_declared_start_without_its_environment_refuses() {
-        let error = serde_json::from_value::<DeclaredStartObligation>(material_without("env_ref"))
-            .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            DeclaredStartObligationRefusal::NoEnvironment.to_string()
-        );
-    }
-
-    #[test]
-    fn a_declared_start_needs_its_key_environment_and_hold() {
+    fn a_declared_start_needs_its_key_and_hold() {
         let call_id = ToolCallId::fixture("start");
         let mut keyless = registration(false);
         keyless.start_key = None;
         assert_eq!(
             DeclaredStartObligation::new(call_id.clone(), keyless).unwrap_err(),
             DeclaredStartObligationRefusal::Keyless
-        );
-        let mut no_env = registration(false);
-        no_env.env_ref = None;
-        assert_eq!(
-            DeclaredStartObligation::new(call_id.clone(), no_env).unwrap_err(),
-            DeclaredStartObligationRefusal::NoEnvironment
         );
         let mut unheld = registration(false);
         unheld.consumer_hold = None;

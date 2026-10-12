@@ -51,6 +51,7 @@ async fn world() -> World {
         .register_node(&NodeSpec {
             node: NodeId::new("owned-call-owner"),
             decodes: vec![formats],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

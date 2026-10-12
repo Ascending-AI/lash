@@ -81,6 +81,8 @@ pub struct RunnerConfig {
     pub node: NodeId,
     /// The format sets this build decodes.
     pub decodes: Vec<FormatSet>,
+    /// The claim requirements this build serves.
+    pub serves: Vec<String>,
     /// The node-lease timings.
     pub lease: LeaseConfig,
     /// How many actors the node runs at once; claims never take more.
@@ -90,6 +92,13 @@ pub struct RunnerConfig {
 }
 
 impl RunnerConfig {
+    /// This config, its node serving `serves`.
+    #[must_use]
+    pub fn with_serves(mut self, serves: Vec<String>) -> Self {
+        self.serves = serves;
+        self
+    }
+
     /// Run as `node`, decoding `decodes`, with `config`'s validated lease,
     /// capacity and claim batch.
     #[must_use]
@@ -98,6 +107,7 @@ impl RunnerConfig {
         Self {
             node,
             decodes,
+            serves: Vec::new(),
             lease: config.lease(),
             max_active: settings.max_active,
             claim_batch: settings.claim_batch,
@@ -938,6 +948,7 @@ impl Runner {
         let spec = NodeSpec {
             node: self.config.node.clone(),
             decodes: self.config.decodes.clone(),
+            serves: self.config.serves.clone(),
             ttl_millis: self.config.lease.ttl_millis(),
         };
         let mut register_delay = settings.claim_backoff;

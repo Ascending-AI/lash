@@ -449,13 +449,14 @@ impl Cluster {
             ProcessInput::Engine {
                 kind: lash_postgres_workers::process::KIND.to_owned(),
                 payload: lash_postgres_workers::process::payload(wait),
+                launch: lash_core::EngineLaunch::new(
+                    lash_core_execution::testing::process_execution_env_fixture_ref(),
+                    None,
+                ),
             },
             ProcessProvenance::host(),
             lash_core_execution::LifetimeDecision::Detached,
         )
-        .with_execution_env_ref(Some(
-            lash_core_execution::testing::process_execution_env_fixture_ref(),
-        ))
         .with_start_key(Some(lash_core_execution::StartKey::for_host(start_key)));
         self.backend
             .process_registry()

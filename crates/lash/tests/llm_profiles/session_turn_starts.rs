@@ -29,16 +29,11 @@ pub(super) fn session_turn_start_of(
     text: &str,
     create_request: lash_core::SessionCreateRequest,
 ) -> lash_core::ProcessStartRequest {
-    lash_core::ProcessStartRequest::new(
-        lash_core::ProcessInput::SessionTurn {
-            definition_key: "keys-session-turn-start".into(),
-            create_request: Box::new(
-                create_request
-                    .with_session_id(lash_core::SessionId::fixture(format!("{key}-child"))),
-            ),
-            turn_input: Box::new(TurnInput::text(text)),
-            result: lash_core::SessionTurnOutcome::Turn,
-        },
+    lash_core::ProcessStartRequest::session_turn(
+        "keys-session-turn-start",
+        create_request.with_session_id(lash_core::SessionId::fixture(format!("{key}-child"))),
+        TurnInput::text(text),
+        lash_core::SessionTurnOutcome::Turn,
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )

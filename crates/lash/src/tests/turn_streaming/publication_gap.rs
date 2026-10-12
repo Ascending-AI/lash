@@ -516,14 +516,11 @@ async fn process_feed_across_two_publication_windows() -> Result<(Vec<Shown>, us
     .build(crate::testing::runtime_lease_owner())?;
     let registry = core.process_registry.clone();
     let process_id = registry
-        .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::testing::held_engine_input(serde_json::Value::Null),
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
-        )
+        .register_process(lash_core::ProcessRegistration::new(
+            lash_core::testing::held_engine_input(serde_json::Value::Null),
+            lash_core::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
         .await?
         .id;
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(

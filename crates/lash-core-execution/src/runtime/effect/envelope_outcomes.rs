@@ -92,7 +92,7 @@ impl RuntimeEffectOutcome {
     /// The immutable environment a recorded load holds.
     pub fn into_execution_env_ref(
         self,
-    ) -> Result<crate::ProcessExecutionEnvRef, RuntimeEffectControllerError> {
+    ) -> Result<crate::ProcessEnvRef, RuntimeEffectControllerError> {
         match self {
             Self::LoadExecutionEnv { env } => Ok(env),
             other => Err(RuntimeEffectControllerError::wrong_outcome(

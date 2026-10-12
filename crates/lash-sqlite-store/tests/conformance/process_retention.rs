@@ -5,17 +5,18 @@ use lash_core_execution::ProcessRetention as _;
 /// are listed as non-terminal and are never prune candidates.
 async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegistry) {
     let process_id = registry
-        .register_process(
-            lash_core_execution::ProcessRegistration::new(
-                lash_core_execution::ProcessInput::Engine {
-                    kind: "retention-test".to_string(),
-                    payload: serde_json::Value::Null,
-                },
-                lash_core_execution::ProcessProvenance::host(),
-                lash_core_execution::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
-        )
+        .register_process(lash_core_execution::ProcessRegistration::new(
+            lash_core_execution::ProcessInput::Engine {
+                kind: "retention-test".to_string(),
+                payload: serde_json::Value::Null,
+                launch: lash_core::EngineLaunch::new(
+                    lash_core::testing::process_execution_env_fixture_ref(),
+                    None,
+                ),
+            },
+            lash_core_execution::ProcessProvenance::host(),
+            lash_core_execution::Lifetime::Detached,
+        ))
         .await
         .expect("register waiting retention process")
         .id;
@@ -111,17 +112,18 @@ async fn sqlite_prune_cleanup_obligation_survives_reopen() {
     lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let registry = backend.process_registry();
     let registered = registry
-        .register_process(
-            lash_core_execution::ProcessRegistration::new(
-                lash_core_execution::ProcessInput::Engine {
-                    kind: "test-engine".to_string(),
-                    payload: serde_json::json!({"module_ref": "module-sqlite"}),
-                },
-                lash_core_execution::ProcessProvenance::host(),
-                lash_core_execution::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
-        )
+        .register_process(lash_core_execution::ProcessRegistration::new(
+            lash_core_execution::ProcessInput::Engine {
+                kind: "test-engine".to_string(),
+                payload: serde_json::json!({"module_ref": "module-sqlite"}),
+                launch: lash_core::EngineLaunch::new(
+                    lash_core::testing::process_execution_env_fixture_ref(),
+                    None,
+                ),
+            },
+            lash_core_execution::ProcessProvenance::host(),
+            lash_core_execution::Lifetime::Detached,
+        ))
         .await
         .expect("register cleanup process");
     registry

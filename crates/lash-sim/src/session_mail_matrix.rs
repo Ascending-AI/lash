@@ -197,6 +197,7 @@ impl Scenario for SessionMail {
         SimNodesConfig {
             lease: lash_durable_test::Matrix::test_lease(),
             decodes: vec![FormatSet::new(SESSION_ACTOR_FORMATS)],
+            serves: Vec::new(),
             max_active: 8,
         }
     }

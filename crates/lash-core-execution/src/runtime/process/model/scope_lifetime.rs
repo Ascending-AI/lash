@@ -205,6 +205,10 @@ impl Ancestry {
 pub struct ProcessLineage {
     ancestry: Ancestry,
     session: Option<SessionId>,
+    /// The logical run the process's own provenance records, which every
+    /// start made inside it records as its own (FIG-6034).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run: Option<crate::TurnAddress>,
 }
 
 impl ProcessLineage {
@@ -222,6 +226,7 @@ impl ProcessLineage {
         ancestry: &Ancestry,
         session_capability: Option<&SessionId>,
         own_session: Option<&SessionId>,
+        run: Option<&crate::TurnAddress>,
     ) -> Self {
         let mut scopes = vec![ScopeId::process(process_id.clone())];
         if let Some(own) = own_session {
@@ -242,6 +247,7 @@ impl ProcessLineage {
         Self {
             ancestry: Ancestry(scopes),
             session,
+            run: run.cloned(),
         }
     }
 
@@ -256,6 +262,12 @@ impl ProcessLineage {
     pub fn session(&self) -> Option<&SessionId> {
         self.session.as_ref()
     }
+
+    /// The logical run a start made under this lineage records.
+    #[must_use]
+    pub fn run(&self) -> Option<&crate::TurnAddress> {
+        self.run.as_ref()
+    }
 }
 
 /// The context a runtime start draws its lifetime from, materialized once per
@@ -268,6 +280,10 @@ pub struct StartCx {
     starter: ScopeRef,
     ancestors: Vec<ScopeRef>,
     session: Option<ScopeRef>,
+    /// The logical run the start belongs to: the opening turn, or the run
+    /// the enclosing process records. Lash stamps it into the child's
+    /// provenance; no tool or model input reaches it.
+    run: Option<crate::TurnAddress>,
 }
 
 /// Why a start context could not be materialized.
@@ -314,11 +330,19 @@ impl StartCx {
                     ScopeId::process(process_id.clone()),
                     lineage.ancestry.scopes().get(1..).unwrap_or(&[]).to_vec(),
                     lineage.session.clone(),
+                    lineage.run.clone(),
                 ))
             }
             EffectOpener::Turn { session_id, .. }
             | EffectOpener::SessionOperation { session_id, .. } => {
                 let session_id = session_id.clone();
+                let run = match &opener {
+                    EffectOpener::Turn {
+                        session_id,
+                        turn_id,
+                    } => Some(crate::TurnAddress::new(session_id.clone(), turn_id.clone())),
+                    _ => None,
+                };
                 let starter = ScopeId::Opener(opener.clone());
                 let mut above = vec![ScopeId::Session(session_id.clone())];
                 if let Some(lineage) = lineage {
@@ -328,12 +352,17 @@ impl StartCx {
                         }
                     }
                 }
-                Ok(Self::from_scopes(starter, above, Some(session_id)))
+                Ok(Self::from_scopes(starter, above, Some(session_id), run))
             }
         }
     }
 
-    fn from_scopes(starter: ScopeId, above: Vec<ScopeId>, session: Option<SessionId>) -> Self {
+    fn from_scopes(
+        starter: ScopeId,
+        above: Vec<ScopeId>,
+        session: Option<SessionId>,
+        run: Option<crate::TurnAddress>,
+    ) -> Self {
         let starter = ScopeRef::ancestor(starter);
         let session = session.map(|session| ScopeRef::ancestor(ScopeId::Session(session)));
         let ancestors = std::iter::once(starter.clone())
@@ -343,6 +372,7 @@ impl StartCx {
             starter,
             ancestors,
             session,
+            run,
         }
     }
 
@@ -375,6 +405,13 @@ impl StartCx {
                 .map(|scope| scope.id.clone())
                 .collect(),
         )
+    }
+
+    /// The logical run a start made in this context records in its
+    /// provenance.
+    #[must_use]
+    pub fn run(&self) -> Option<&crate::TurnAddress> {
+        self.run.as_ref()
     }
 
     /// The session capability a start made in this context records.
@@ -524,7 +561,7 @@ mod tests {
     #[test]
     fn a_standalone_process_context_has_no_session() {
         let process = crate::process_id_for_test("standalone");
-        let lineage = ProcessLineage::of_process(&process, &Ancestry::root(), None, None);
+        let lineage = ProcessLineage::of_process(&process, &Ancestry::root(), None, None, None);
         let scope = crate::AdmittedScope::process(process.clone());
         let cx = StartCx::materialize(&scope, Some(&lineage)).expect("lineage names the process");
         assert_eq!(cx.session(), None);
@@ -545,6 +582,7 @@ mod tests {
             &process,
             &parent_cx.ancestry(),
             parent_cx.session_capability().as_ref(),
+            None,
             None,
         );
         let cx = StartCx::materialize(
@@ -574,6 +612,7 @@ mod tests {
             &parent_cx.ancestry(),
             parent_cx.session_capability().as_ref(),
             Some(&own),
+            None,
         );
         assert_eq!(lineage.session(), Some(&own));
         assert_eq!(

@@ -224,6 +224,16 @@ define_plugin_errors! {
         => Self::StartKeyConflict { .. }
         => "process_start_key_conflict"
         => crate::ToolFailureClass::InvalidRequest;
+/// A process environment was refused at admission, or a start named one
+    /// that is not published (FIG-6034). A retry meets it again.
+    #[error("{refusal}")]
+    ProcessEnvRefused { refusal: lash_core_store::process_env::ProcessEnvRefusal }
+        => PluginError::ProcessEnvRefused { refusal }
+        => { refusal: lash_core_store::process_env::ProcessEnvRefusal }
+        => Self::ProcessEnvRefused { refusal: refusal.clone() }
+        => Self::ProcessEnvRefused { .. }
+        => "process_env_refused"
+        => crate::ToolFailureClass::InvalidRequest;
 /// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]
     InvalidToolDiscovery { operation: String }
@@ -959,6 +969,7 @@ impl PluginError {
             | Self::ProcessCancelConflict { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
+            | Self::ProcessEnvRefused { .. }
             | Self::InvalidToolDiscovery { .. }
             | Self::InvalidBatchMaximum { .. }
             | Self::ResidentToolContractUnavailable { .. }

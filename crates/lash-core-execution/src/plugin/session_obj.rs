@@ -186,7 +186,7 @@ pub fn plugin_lifecycle_hook_issue(error: PluginError) -> crate::runtime::TurnIs
     }
 }
 
-fn collect_owned_sync<C, O, H, F>(
+pub(crate) fn collect_owned_sync<C, O, H, F>(
     hooks: &[RegisteredHook<H>],
     ctx: C,
     invoke: F,

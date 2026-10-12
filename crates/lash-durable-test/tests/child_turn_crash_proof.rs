@@ -36,8 +36,8 @@ use lash_core::LlmOutputPart;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core_execution::{
-    Backend, BackendParts, HostArtifactPin, LifetimeDecision, NoProjectionProviders, ProcessId,
-    ProcessInput, ProcessProvenance, ProcessRegistration, SessionCreateRequest, SessionStartPoint,
+    Backend, BackendParts, LifetimeDecision, NoProjectionProviders, ProcessId, ProcessInput,
+    ProcessProvenance, ProcessRegistration, SessionCreateRequest, SessionStartPoint,
     SessionTurnOutcome, StoreSet,
 };
 use lash_durable::runner::Activation;
@@ -170,23 +170,6 @@ impl ChildTurn {
         .with_session_id(child())
         .with_spec(&spec())
         .map_err(|error| format!("state the child's spec: {error}"))?;
-        let policy = request
-            .policy
-            .clone()
-            .expect("a stated spec states a policy");
-        let env_ref = self
-            .core()
-            .host_artifacts()
-            .publish_process_env(
-                &HostArtifactPin::mint(),
-                &lash_core_execution::ProcessExecutionEnvSpec::new(
-                    lash_core_execution::AdmittedPluginConfig::default(),
-                    policy,
-                    lash_core_execution::SessionToolAccess::ambient(),
-                ),
-            )
-            .await
-            .map_err(|error| format!("publish the process's environment: {error}"))?;
         let registration = ProcessRegistration::new(
             ProcessInput::SessionTurn {
                 definition_key: "child-turn".to_owned(),
@@ -196,8 +179,7 @@ impl ChildTurn {
             },
             ProcessProvenance::host(),
             LifetimeDecision::Detached,
-        )
-        .with_execution_env_ref(Some(env_ref));
+        );
         self.backend()
             .process_registry()
             .register_process(registration)
@@ -229,6 +211,7 @@ impl Scenario for ChildTurn {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
+            serves: Vec::new(),
             max_active: 4,
         }
     }

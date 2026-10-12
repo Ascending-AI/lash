@@ -29,9 +29,12 @@
 //! other's uncommitted state, and each committed record is one step of the
 //! namespace's frontier.
 use super::*;
+use crate::plugin::{BehaviorRevision, FormatVersion};
 use crate::{RuntimeEffectControllerError, RuntimeEffectKind, RuntimeEffectOutcome};
 use lash_core_store::store::plugin_writers::PluginCallbackIdentity;
-use lash_core_store::tool_run::{FrontierStep, ReducerRefusal, StateCommandBatch};
+use lash_core_store::tool_run::{
+    FrontierStep, ReducerRefusal, StateCommandBatch, StateCommandLimits,
+};
 use std::future::Future;
 
 /// The resolutions one recorded body published, retained with its result.
@@ -341,6 +344,26 @@ impl Drop for StateReservation {
 
 const REDUCER_PANIC: &str = "lash.state_reducer_panicked";
 
+/// What admits and reduces a state owner's batches: the plugins a session
+/// installed, or the components a process's environment names.
+pub(in crate::plugin) trait StateAuthority: Send + Sync {
+    /// The behaviour revision and state format `plugin` declares here.
+    fn declared(&self, plugin: &str) -> Option<(BehaviorRevision, FormatVersion)>;
+    /// `plugin`'s reducer `name`.
+    fn reducer(&self, plugin: &str, name: &str) -> Option<StateReducer>;
+}
+
+/// One owner's published state, as its publication coordinator reads and
+/// writes it: a session's plugin namespaces or a process's component
+/// namespaces.
+pub(in crate::plugin) struct StateDesk<'a> {
+    pub(in crate::plugin) state: &'a Arc<std::sync::Mutex<PluginStateRegistry>>,
+    pub(in crate::plugin) owner: &'a crate::RuntimeOwner,
+    pub(in crate::plugin) authority: &'a dyn StateAuthority,
+    /// The deployment's bounds on one batch of state commands.
+    pub(in crate::plugin) limits: StateCommandLimits,
+}
+
 impl crate::PluginSession {
     /// Hand a callback's commands to the recorded body running it.
     pub(crate) fn propose_callback_state(
@@ -355,6 +378,115 @@ impl crate::PluginSession {
         propose(self, Proposal::for_callback(callback, origin, commands))
     }
 
+    pub(in crate::plugin) fn state_desk(&self) -> StateDesk<'_> {
+        StateDesk {
+            state: &self.state,
+            owner: &self.owner,
+            authority: self,
+            limits: self.host.data_limits().plugin_state,
+        }
+    }
+
+    pub(crate) fn state_segment(&self) -> SegmentOrdinal {
+        self.state_desk().state_segment()
+    }
+
+    pub(crate) async fn reduce_proposals(
+        &self,
+        address: &crate::EffectAddress,
+        segment: SegmentOrdinal,
+        proposals: Vec<Proposal>,
+    ) -> Result<Vec<StateResolution>, PluginStateError> {
+        self.state_desk()
+            .reduce_proposals(address, segment, proposals)
+            .await
+    }
+
+    /// Publish the resolutions a recorded outcome carries and return the
+    /// body's result. Each resolution applies at most once, in its
+    /// namespace's order; the whole outcome validates before any namespace
+    /// changes.
+    pub fn publish_effect_state(
+        &self,
+        outcome: RuntimeEffectOutcome,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        self.state_desk().publish_effect_state(outcome)
+    }
+
+    pub(crate) fn publish_recorded(
+        &self,
+        address: &crate::EffectAddress,
+        outcome: RuntimeEffectOutcome,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        self.state_desk().publish_recorded(address, outcome)
+    }
+
+    /// Publish `resolutions`, what committed outcome records carry, each
+    /// under the effect that reduced it, and release what that effect
+    /// reserved.
+    ///
+    /// # Errors
+    ///
+    /// A resolution its namespace's frontier refuses.
+    pub fn publish_committed_state(
+        &self,
+        resolutions: &[StateResolution],
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.state_desk().publish_committed_state(resolutions)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn publish_run_resolutions(
+        &self,
+        address: &crate::EffectAddress,
+        resolutions: Vec<StateResolution>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.state_desk()
+            .publish_run_resolutions(address, resolutions)
+    }
+
+    pub(crate) fn state_with(
+        &self,
+        staged: &[StateResolution],
+    ) -> Result<PluginState, PluginStateError> {
+        self.state_desk().state_with(staged)
+    }
+
+    pub(crate) fn release_publication(&self, address: &crate::EffectAddress) {
+        self.state_desk().release_publication(address);
+    }
+
+    pub(crate) fn abandon_publication(&self, address: &crate::EffectAddress) {
+        self.state_desk().abandon_publication(address);
+    }
+
+    /// The segment that owns publication from now on: a recorded resolution
+    /// of an earlier segment no longer applies (K6, Q5 §6).
+    pub fn adopt_state_segment(&self, segment: SegmentOrdinal) {
+        self.state_desk().adopt_state_segment(segment);
+    }
+}
+
+impl StateAuthority for crate::PluginSession {
+    fn declared(&self, plugin: &str) -> Option<(BehaviorRevision, FormatVersion)> {
+        self.host
+            .factories()
+            .iter()
+            .map(|factory| factory.plugin_declaration())
+            .find(|declaration| declaration.id.as_str() == plugin)
+            .map(|declaration| (declaration.behavior_revision, declaration.format_version))
+    }
+
+    fn reducer(&self, plugin: &str, name: &str) -> Option<StateReducer> {
+        self.capabilities
+            .get()
+            .and_then(|capabilities| capabilities.contributions.state_reducers.get(plugin))
+            .and_then(|reducers| reducers.get(name))
+            .cloned()
+    }
+}
+
+impl StateDesk<'_> {
     /// The segment that owns publication now.
     pub(crate) fn state_segment(&self) -> SegmentOrdinal {
         self.state.lock_recover().segment
@@ -444,7 +576,7 @@ impl crate::PluginSession {
                                 },
                             )
                         },
-                        self.host.data_limits().plugin_state,
+                        self.limits,
                     ),
                 };
                 let reduced = match &outcome {
@@ -495,24 +627,21 @@ impl crate::PluginSession {
         namespace: &PluginNamespaceState,
     ) -> Result<(), StateCommandRefusal> {
         match proposer {
-            Some(proposer) => batch.check(proposer, self.host.data_limits().plugin_state)?,
-            None => batch.check_bounds(self.host.data_limits().plugin_state)?,
+            Some(proposer) => batch.check(proposer, self.limits)?,
+            None => batch.check_bounds(self.limits)?,
         }
-        let declaration = self
-            .host
-            .factories()
-            .iter()
-            .map(|factory| factory.plugin_declaration())
-            .find(|declaration| declaration.id.as_str() == batch.plugin.plugin)
-            .filter(|declaration| declaration.behavior_revision == batch.plugin.behavior_revision)
+        let (_, format_version) = self
+            .authority
+            .declared(&batch.plugin.plugin)
+            .filter(|(revision, _)| *revision == batch.plugin.behavior_revision)
             .ok_or(StateCommandRefusal::WrongOwner)?;
-        if namespace.format_version != declaration.format_version {
+        if namespace.format_version != format_version {
             return Err(StateCommandRefusal::IncompatibleWriter(
                 crate::FormatRefusal {
                     plugin: batch.plugin.plugin.clone(),
                     namespace: crate::FormatNamespace::State,
                     stored: namespace.format_version,
-                    readable: declaration.format_version,
+                    readable: format_version,
                 },
             ));
         }
@@ -526,10 +655,8 @@ impl crate::PluginSession {
         reduction: StateReduction<'_>,
     ) -> Result<Option<Value>, ReducerRefusal> {
         let reducer = self
-            .capabilities
-            .get()
-            .and_then(|capabilities| capabilities.contributions.state_reducers.get(plugin))
-            .and_then(|reducers| reducers.get(name))
+            .authority
+            .reducer(plugin, name)
             .ok_or(ReducerRefusal::Unknown)?;
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reducer(reduction))) {
             Ok(Ok(value)) => Ok(value),
@@ -566,7 +693,7 @@ impl crate::PluginSession {
             self.release_publication(address);
             return Ok(outcome);
         };
-        if state.owner != self.owner {
+        if state.owner != *self.owner {
             self.abandon_publication(address);
             return Err(crate::PluginError::State(PluginStateError::EffectOwnerMismatch).into());
         }

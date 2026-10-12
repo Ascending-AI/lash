@@ -3,6 +3,9 @@
 //!
 //! Dedicated plugins register these tools into the normal tool-provider
 //! surface, so protocol crates do not own or duplicate runtime control behavior.
+//! A session installs them through [`SessionProcessAdminPluginFactory`]; a
+//! process whose environment names [`PROCESS_CONTROLS_CONFIG`]'s component
+//! gets the same tools through [`ProcessControlsComponent`] (FIG-6034).
 
 use std::sync::Arc;
 
@@ -49,49 +52,141 @@ pub fn process_tool_definition(tool: ProcessControlTool) -> ToolDefinition {
 /// [`StaticPluginFactory`], so it does not hand-roll the `SessionPlugin` +
 /// `register` ceremony.
 ///
-/// The [`LifetimePolicy`](lash_core::LifetimePolicy) is required and has no
-/// default: it chooses the lifetime of every process the model's
-/// `start_process` declares, against the start's admitted
-/// [`StartCx`](lash_core::StartCx). The model never picks one (FIG-3607).
+/// The [`LifetimePolicy`](lash_core::LifetimePolicy) and the
+/// [`ProcessEnvPolicy`](lash_core::ProcessEnvPolicy) are required and have no
+/// default: they choose the lifetime, environment and engine settings of every
+/// process the model's `start_process` declares, against the start's admitted
+/// [`StartCx`](lash_core::StartCx) and the attempt's recorded run. The model
+/// never picks them (FIG-3607, FIG-6034).
 pub struct SessionProcessAdminPluginFactory {
     inner: StaticPluginFactory,
 }
 
 impl SessionProcessAdminPluginFactory {
     /// Process controls whose starts take `lifetime`, for example
-    /// [`lash_core::lifetime::session_or_starter`].
+    /// [`lash_core::lifetime::session_or_starter`], and the environment
+    /// `environment` states, for example
+    /// [`lash_core::env_policy::policy::from_run`].
     pub fn new(
         lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
+        environment: Arc<dyn lash_core::ProcessEnvPolicy>,
     ) -> Self {
-        Self::with_cancel_process(Arc::new(lifetime), true)
+        Self::with_cancel_process(Arc::new(lifetime), environment, true)
     }
 
     /// The same controls without `cancel_process`.
     pub fn without_cancel_process(
         lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
+        environment: Arc<dyn lash_core::ProcessEnvPolicy>,
     ) -> Self {
-        Self::with_cancel_process(Arc::new(lifetime), false)
+        Self::with_cancel_process(Arc::new(lifetime), environment, false)
     }
 
     fn with_cancel_process(
         lifetime: lash_core::LifetimePolicy,
+        environment: Arc<dyn lash_core::ProcessEnvPolicy>,
         include_cancel_process: bool,
     ) -> Self {
-        let provider = StaticToolProvider::new(
-            processes_tool_definitions(include_cancel_process),
-            SessionProcessAdminTools {
-                include_cancel_process,
-                lifetime,
-            },
-        );
-        let spec =
-            PluginSpec::new().with_tool_provider(Arc::new(provider) as Arc<dyn ToolProvider>);
         Self {
             inner: StaticPluginFactory::new(
                 <Self as lash_core::plugin::PluginDefinition>::declaration(),
-                spec,
+                controls_spec(lifetime, environment, include_cancel_process),
             ),
         }
+    }
+}
+
+/// The spec both twins install: one provider, so a process whose
+/// environment names the controls starts children exactly as a session does.
+fn controls_spec(
+    lifetime: lash_core::LifetimePolicy,
+    environment: Arc<dyn lash_core::ProcessEnvPolicy>,
+    include_cancel_process: bool,
+) -> PluginSpec {
+    let provider = StaticToolProvider::new(
+        processes_tool_definitions(include_cancel_process),
+        SessionProcessAdminTools {
+            include_cancel_process,
+            lifetime,
+            environment,
+        },
+    );
+    PluginSpec::new().with_tool_provider(Arc::new(provider) as Arc<dyn ToolProvider>)
+}
+
+/// The config key of the process-controls component: its config is `()`.
+pub const PROCESS_CONTROLS_CONFIG: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("processes", lash_core::FormatVersion::ONE);
+
+/// The process controls as a process component (FIG-6034 §3.2): a process
+/// whose environment names `processes` gets `start_process` and its siblings,
+/// with the same required lifetime and environment policies as the session
+/// twin.
+pub struct ProcessControlsComponent {
+    inner: lash_core::plugin::StaticProcessComponent,
+}
+
+impl ProcessControlsComponent {
+    /// Process controls whose starts take `lifetime` and `environment`.
+    pub fn new(
+        lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
+        environment: Arc<dyn lash_core::ProcessEnvPolicy>,
+    ) -> Self {
+        Self::with_cancel_process(Arc::new(lifetime), environment, true)
+    }
+
+    /// The same controls without `cancel_process`.
+    pub fn without_cancel_process(
+        lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
+        environment: Arc<dyn lash_core::ProcessEnvPolicy>,
+    ) -> Self {
+        Self::with_cancel_process(Arc::new(lifetime), environment, false)
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the controls spec fills only the provider, which a process component admits"
+    )]
+    fn with_cancel_process(
+        lifetime: lash_core::LifetimePolicy,
+        environment: Arc<dyn lash_core::ProcessEnvPolicy>,
+        include_cancel_process: bool,
+    ) -> Self {
+        let factory = StaticPluginFactory::new(
+            <SessionProcessAdminPluginFactory as lash_core::plugin::PluginDefinition>::declaration(
+            ),
+            controls_spec(lifetime, environment, include_cancel_process),
+        );
+        Self {
+            inner: factory
+                .as_component(PROCESS_CONTROLS_CONFIG.format())
+                .expect("the process controls are a process component"),
+        }
+    }
+}
+
+impl lash_core::plugin::ProcessComponentFactory for ProcessControlsComponent {
+    fn declaration(&self) -> lash_core::plugin::ProcessComponentDeclaration {
+        self.inner.declaration()
+    }
+
+    fn config_type(&self) -> std::any::TypeId {
+        self.inner.config_type()
+    }
+
+    fn validate(
+        &self,
+        entry: &lash_core::ProcessComponentEntry,
+        env: &lash_core::ProcessEnv,
+    ) -> Result<(), lash_core::ProcessEnvRefusal> {
+        self.inner.validate(entry, env)
+    }
+
+    fn build(
+        &self,
+        cx: &lash_core::plugin::ProcessComponentContext<'_>,
+    ) -> Result<lash_core::plugin::ProcessComponentSpec, PluginError> {
+        self.inner.build(cx)
     }
 }
 
@@ -114,6 +209,7 @@ impl lash_core::plugin::PluginDefinition for SessionProcessAdminPluginFactory {
 struct SessionProcessAdminTools {
     include_cancel_process: bool,
     lifetime: lash_core::LifetimePolicy,
+    environment: Arc<dyn lash_core::ProcessEnvPolicy>,
 }
 
 #[async_trait::async_trait]
@@ -123,7 +219,13 @@ impl StaticToolExecute for SessionProcessAdminTools {
             return execute_process_await_tool_call(call.context, call.args);
         }
         if call.name() == "start_process" {
-            return execute_process_start_tool_call(call.context, call.args, &self.lifetime).await;
+            return execute_process_start_tool_call(
+                call.context,
+                call.args,
+                &self.lifetime,
+                self.environment.as_ref(),
+            )
+            .await;
         }
         if call.name() == "get_process_definition" {
             return execute_process_get_tool_call(call.context, call.args);

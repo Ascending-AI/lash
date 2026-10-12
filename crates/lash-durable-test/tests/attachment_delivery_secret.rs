@@ -300,6 +300,7 @@ async fn delivered_values_stay_out_of_records_across_crash_and_resend() {
             SimNodesConfig {
                 lease: Matrix::test_lease(),
                 decodes: backend.formats().decodes(),
+                serves: Vec::new(),
                 max_active: 4,
             },
             lash::testing::node_activation(&core, Arc::new(Tripwire::default()))

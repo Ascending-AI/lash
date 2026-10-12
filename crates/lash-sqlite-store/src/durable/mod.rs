@@ -31,11 +31,11 @@ use lash_durable::domain::{
     SessionCloseRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
-    ActorCommit, ActorKey, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause, Claimed,
-    CommitLabel, DomainWrite, DurableError, DurableInstant, DurableReads, DurableStore, Epoch,
-    Fenced, HeartbeatOutcome, Mail, MailAnswer, MailCommit, MailDomainWrite, MailKind, MailRefusal,
-    MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor, Owner, Reaped, Release,
-    StateRevision, StoreFailure, StoreFailureKind, Woken,
+    ActorCommit, ActorKey, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause, ClaimPurpose,
+    Claimed, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableReads, DurableStore,
+    Epoch, Fenced, HeartbeatOutcome, Mail, MailAnswer, MailCommit, MailDomainWrite, MailKind,
+    MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor, Owner,
+    Reaped, Release, StateRevision, StoreFailure, StoreFailureKind, Woken,
 };
 use lash_store_sql::durable::processes::{ActorParkStatements, ProcessActorStatements};
 use lash_store_sql::durable::session_mail::SessionMailStatements;
@@ -196,6 +196,7 @@ CREATE TABLE IF NOT EXISTS actors (
     ready_at_ms INTEGER,
     next_due_ms INTEGER,
     formats TEXT NOT NULL,
+    requires TEXT,
     state_revision INTEGER NOT NULL,
     mail_seq INTEGER NOT NULL,
     acked_seq INTEGER NOT NULL,
@@ -240,13 +241,18 @@ lash_store_sql::statements! {
         boots = "SELECT node_id, boot_id FROM nodes ORDER BY node_id, boot_id";
 
         /// Up to `?3` actors claimable at `?1` in a format set of JSON array
-        /// `?2`, or process actors in another set with mail of kind `?4` (a
-        /// cancel) pending, oldest first, with the state that made each
-        /// claimable and its format set.
-        claimable = "SELECT a.actor_key, a.state, a.formats FROM actors a
+        /// `?2` whose claim requirements are all in JSON array `?5`, or
+        /// process actors in another set or with another requirement with
+        /// mail of kind `?4` (a cancel) pending, oldest first, with the
+        /// state that made each claimable, its format set and its
+        /// requirements.
+        claimable = "SELECT a.actor_key, a.state, a.formats, a.requires FROM actors a
              WHERE ((a.state = 'ready' AND a.ready_at_ms <= ?1)
                  OR (a.state = 'waiting' AND a.next_due_ms <= ?1))
-               AND (a.formats IN (SELECT value FROM json_each(?2))
+               AND ((a.formats IN (SELECT value FROM json_each(?2))
+                     AND (a.requires IS NULL OR NOT EXISTS (
+                         SELECT 1 FROM json_each(a.requires) r
+                         WHERE r.value NOT IN (SELECT value FROM json_each(?5)))))
                  OR (a.kind = 'process' AND EXISTS (
                      SELECT 1 FROM actor_mail m
                      WHERE m.actor_key = a.actor_key AND m.seq > a.acked_seq
@@ -720,6 +726,9 @@ fn apply_owner(
             rusqlite::params![actor, formats.as_str()],
         )?;
     }
+    if let Some(requires) = write.requires() {
+        processes::stamp_requires(tx, &actor, requires)?;
+    }
     if let Some(through) = write.ack() {
         cached_execute(tx, SQL.actor.ack.sql(), rusqlite::params![actor, through.0])?;
         cached_execute(
@@ -1082,6 +1091,7 @@ impl DurableStore for SqliteDurableStore {
                 commit(NodeLease {
                     owner: lease_owner,
                     decodes: spec.decodes,
+                    serves: spec.serves.clone(),
                     ttl_millis: spec.ttl_millis,
                     expires_at,
                 })
@@ -1178,9 +1188,8 @@ impl DurableStore for SqliteDurableStore {
 
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         let owner = node.owner.clone();
-        let formats = formats_json(&node.decodes);
         let limit = integer::<i64>(limit).map_err(store_failure)?;
-        let decodes = node.decodes.clone();
+        let lease = node.clone();
         self.write(CommitLabel::CLAIM, move |tx, now| {
             match node_draining(tx, &owner)? {
                 None => {
@@ -1191,48 +1200,17 @@ impl DurableStore for SqliteDurableStore {
                 Some(true) => return commit(Vec::new()),
                 Some(false) => {}
             }
-            let candidates = tx
-                .prepare_cached(SQL.sqlite.claimable.sql())?
-                .query_map(
-                    rusqlite::params![now.0, formats, limit, lash_durable::domain::CANCEL_MAIL],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    },
-                )?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            let mut claimed = Vec::with_capacity(candidates.len());
-            for (key, state, stored_formats) in candidates {
-                let epoch = tx.prepare_cached(SQL.sqlite.claim.sql())?.query_row(
-                    rusqlite::params![key, owner.node.as_str(), owner.boot.as_str()],
-                    |row| row.get::<_, i64>(0),
-                )?;
-                let actor = match actor_key(&key) {
-                    Ok(actor) => actor,
-                    Err(error) => return refuse(error),
-                };
-                claimed.push(Claimed {
-                    actor,
-                    epoch: Epoch(epoch),
-                    cause: if state == "waiting" {
-                        ClaimCause::Due
-                    } else {
-                        ClaimCause::Ready
-                    },
-                    purpose: lash_durable::ClaimPurpose::of(&decodes, &stored_formats),
-                });
+            match processes::claim_within(tx, &lease, now, limit)? {
+                Ok(claimed) => commit(claimed),
+                Err(error) => refuse(error),
             }
-            commit(claimed)
         })
         .await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         let owner = node.owner.clone();
-        let decodes = node.decodes.clone();
+        let lease = node.clone();
         self.read(move |tx| {
             let rows = tx
                 .prepare_cached(SQL.actor.owned_by.sql())?
@@ -1241,17 +1219,22 @@ impl DurableStore for SqliteDurableStore {
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows
                 .into_iter()
-                .map(|(key, epoch, stored_formats)| {
-                    actor_key(&key).map(|actor| Claimed {
-                        actor,
+                .map(|(key, epoch, stored_formats, requires)| {
+                    Ok(Claimed {
+                        actor: actor_key(&key)?,
                         epoch: Epoch(epoch),
                         cause: ClaimCause::Adopted,
-                        purpose: lash_durable::ClaimPurpose::of(&decodes, &stored_formats),
+                        purpose: ClaimPurpose::of_stored(
+                            &lease,
+                            &stored_formats,
+                            requires.as_deref(),
+                        )?,
                     })
                 })
                 .collect())

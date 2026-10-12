@@ -162,32 +162,24 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::DeploymentStore>) 
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
-    let spec = crate::ProcessExecutionEnvSpec::new(
-        crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        crate::SessionToolAccess::ambient(),
-    );
+pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessEnvStore>) {
+    let spec = lash_core::testing::process_env_with_limit(1024);
     let bytes = spec.to_store_bytes().expect("encode test environment");
     let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
         crate::HostArtifactPin::mint(),
     ))
     .expect("host pin claim");
     for raw in ["", "nul\0reference"] {
-        let reference = crate::ProcessExecutionEnvRef::new(raw);
+        let reference = crate::ProcessEnvRef::new(raw);
         assert!(
             store
-                .publish_process_execution_env(&claim, &reference, &bytes)
+                .publish_process_env(&claim, &reference, &bytes)
                 .await
                 .is_err(),
             "malformed environment reference must not reach blob mutation"
         );
         assert!(
-            store.get_process_execution_env(&reference).await.is_err(),
+            store.get_process_env(&reference).await.is_err(),
             "malformed environment reference must not reach blob lookup"
         );
     }
@@ -198,11 +190,7 @@ pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutio
     ] {
         assert!(
             store
-                .publish_process_execution_env(
-                    &claim,
-                    &crate::ProcessExecutionEnvRef::new(raw),
-                    &bytes,
-                )
+                .publish_process_env(&claim, &crate::ProcessEnvRef::new(raw), &bytes,)
                 .await
                 .is_err(),
             "non-content-addressed environment references must be refused"

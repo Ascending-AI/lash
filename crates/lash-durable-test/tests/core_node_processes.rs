@@ -1168,10 +1168,24 @@ impl lash_core::ProcessEngine for ScriptEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &lash_core::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, lash_core::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash_core::EngineSettings>,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(lash_core::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<lash_core::EngineSettings>, lash_core::PluginError> {
         Ok(None)
     }
 
@@ -1278,10 +1292,14 @@ impl lash::tools::StaticToolExecute for Write {
     }
 }
 
-/// The `Once` host tool that writes to `world`.
-fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
+/// The component a process names to call the write tool.
+const WRITE_COMPONENT: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("core-node-write", lash_core::FormatVersion::ONE);
+
+/// The `Once` write tool's definition.
+fn write_definition() -> lash_core::ToolDefinition {
     use lash_core::ToolDefinitionBindingExt as _;
-    let definition = lash_core::ToolDefinition::raw(
+    lash_core::ToolDefinition::raw(
         WRITE_TOOL,
         WRITE_TOOL,
         "Writes x to the outside world, once.",
@@ -1296,40 +1314,58 @@ fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
     .expect("the write tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(lash_core::ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], WRITE_TOOL));
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], WRITE_TOOL))
+}
+
+/// The `Once` host tool that writes to `world`.
+fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
     Arc::new(lash::tools::StaticToolProvider::new(
-        vec![definition],
+        vec![write_definition()],
         Write {
             world: Arc::clone(world),
         },
     ))
 }
 
-/// The environment every host start in these laws captures: the core's
-/// plugins at their defaults, and the standard protocol's builtin renderer
-/// at its defaults, which its tools' outputs are rendered by.
-fn environment() -> lash_core::ProcessExecutionEnvSpec {
-    let mut environment = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(16),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
-    environment.render = Some(lash_core::RecordedRender {
-        renderer_id: lash::render::ToolOutputRendererSlot::default()
-            .0
-            .id()
-            .to_owned(),
-        params: serde_json::to_value(lash::render::ResolvedStandardRenderConfig {
-            defaults: lash::render::ToolRenderParams::default(),
-            per_tool: std::collections::BTreeMap::new(),
-        })
-        .expect("the render config encodes"),
-    });
-    environment
+/// The process component that contributes the write tool over `world`.
+fn write_component(world: &Arc<World>) -> Arc<dyn lash::process::ProcessComponentFactory> {
+    Arc::new(
+        lash_core::plugin::StaticPluginFactory::new(
+            lash_core::plugin::PluginDeclaration::initial(WRITE_COMPONENT.component()),
+            lash_core::facade_support::PluginSpec::new().with_tool_provider(write_tool(world)),
+        )
+        .as_component(WRITE_COMPONENT.format())
+        .expect("the write tool is a process component"),
+    )
+}
+
+/// The environment a host start in these laws states: no tools and no
+/// components.
+fn environment() -> lash::process::ProcessEnv {
+    environment_of(Vec::new(), &[])
+}
+
+/// An environment admitting `tools`, from the `components` it names.
+fn environment_of(
+    tools: Vec<lash_core::ToolDefinition>,
+    components: &[lash_core::ProcessConfigKey<()>],
+) -> lash::process::ProcessEnv {
+    components
+        .iter()
+        .fold(
+            lash::process::ProcessEnv::builder(
+                lash_core::SessionToolAccess::restricted(tools).expect("the admitted tools"),
+                lash::MaxToolCalls::new(16),
+            ),
+            |builder, key| builder.component(*key, &()),
+        )
+        .build()
+        .expect("the environment builds")
+}
+
+/// The environment a write-tool process states.
+fn write_environment() -> lash::process::ProcessEnv {
+    environment_of(vec![write_definition()], &[WRITE_COMPONENT])
 }
 
 /// A dangling environment is a typed admission refusal, before a process
@@ -1347,15 +1383,19 @@ async fn a_start_with_a_missing_environment_is_refused_at_admission(tier: Tier) 
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_start_key(Some(key.clone()))
-    .with_execution_env_ref(Some(env_ref.clone()));
+    .with_start_key(Some(key.clone()));
+    let registration = with_launch(registration, &env_ref);
     let mut first = None;
     for source_ends_after_prepare in [false, true] {
         let pin = lash_core_execution::testing::host_pin_claim_for_testing();
         if source_ends_after_prepare {
-            lash_core::publish_process_execution_env(env_store.as_ref(), &pin, &spec)
-                .await
-                .expect("the reference exists during preparation");
+            lash_core_execution::testing::publish_process_env_for_testing(
+                env_store.as_ref(),
+                &pin,
+                &spec,
+            )
+            .await
+            .expect("the reference exists during preparation");
         }
         let prepared = registry
             .prepare_process_registration(registration.clone(), &[])
@@ -1420,9 +1460,13 @@ async fn an_admitted_process_keeps_its_environment_after_the_source_pin_ends(tie
     let env_store = stores.process_env_store();
     let pin = lash_core_execution::testing::host_pin_claim_for_testing();
     let spec = environment();
-    let env_ref = lash_core::publish_process_execution_env(env_store.as_ref(), &pin, &spec)
-        .await
-        .expect("publish the source environment");
+    let env_ref = lash_core_execution::testing::publish_process_env_for_testing(
+        env_store.as_ref(),
+        &pin,
+        &spec,
+    )
+    .await
+    .expect("publish the source environment");
     let registration = lash_core_execution::testing::held_engine_registration(
         serde_json::Value::Null,
         lash_core::ProcessProvenance::host(),
@@ -1430,8 +1474,8 @@ async fn an_admitted_process_keeps_its_environment_after_the_source_pin_ends(tie
     )
     .with_start_key(Some(lash_core::StartKey::for_host(
         "admitted-environment-law",
-    )))
-    .with_execution_env_ref(Some(env_ref.clone()));
+    )));
+    let registration = with_launch(registration, &env_ref);
     let admitted = registry
         .register_process(registration.clone())
         .await
@@ -1444,7 +1488,7 @@ async fn an_admitted_process_keeps_its_environment_after_the_source_pin_ends(tie
         .await
         .expect("end the source pin");
     assert_eq!(
-        lash_core::runtime::load_process_execution_env(env_store.as_ref(), &env_ref)
+        lash_core::runtime::load_process_env(env_store.as_ref(), &env_ref)
             .await
             .expect("the admitted process still resolves its environment"),
         spec
@@ -1461,8 +1505,21 @@ async fn an_admitted_process_keeps_its_environment_after_the_source_pin_ends(tie
 
 on_every_tier!(an_admitted_process_keeps_its_environment_after_the_source_pin_ends);
 
+/// `registration`, its engine launched under `env_ref`.
+fn with_launch(
+    mut registration: lash_core::ProcessRegistration,
+    env_ref: &lash_core::ProcessEnvRef,
+) -> lash_core::ProcessRegistration {
+    let lash_core::ProcessInput::Engine { launch, .. } = Arc::make_mut(&mut registration.input)
+    else {
+        unreachable!("a held registration is an engine start")
+    };
+    *launch = lash_core::EngineLaunch::new(env_ref.clone(), None);
+    registration
+}
+
 /// Start a detached process of engine `kind` on `payload` through the
-/// core's process API, under the captured [`environment`].
+/// core's process API, under the stated [`environment`].
 async fn start(
     core: &lash::LashCore,
     kind: &str,
@@ -1478,20 +1535,33 @@ async fn start_as(
     payload: serde_json::Value,
     shape: impl FnOnce(lash_core::ProcessStartRequest) -> lash_core::ProcessStartRequest,
 ) -> lash_core::ProcessId {
+    start_under(core, &environment(), kind, payload, shape).await
+}
+
+/// [`start_as`] under `env`.
+async fn start_under(
+    core: &lash::LashCore,
+    env: &lash::process::ProcessEnv,
+    kind: &str,
+    payload: serde_json::Value,
+    shape: impl FnOnce(lash_core::ProcessStartRequest) -> lash_core::ProcessStartRequest,
+) -> lash_core::ProcessId {
     let env_ref = core
         .host_artifacts()
-        .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment())
+        .publish_process_env(&lash_core::HostArtifactPin::mint(), env)
         .await
         .expect("the environment is published");
-    let request = lash_core::ProcessStartRequest::new(
-        lash_core::ProcessInput::Engine {
-            kind: kind.to_owned(),
-            payload,
-        },
+    let settings = core
+        .processes()
+        .engine_defaults(kind, &payload)
+        .expect("the engine's default settings");
+    let request = lash_core::ProcessStartRequest::engine(
+        kind.to_owned(),
+        payload,
+        lash_core::EngineLaunch::new(env_ref, settings),
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,
-    )
-    .with_env_ref(env_ref);
+    );
     core.processes()
         .start(shape(request), core.effect_host())
         .await
@@ -1555,9 +1625,9 @@ fn tool_engine_advance(
 }
 
 /// A host engine started through the core's process API runs its Steps
-/// action on the core's node: the catalog tool it names runs once, under
-/// its `Once` policy, and the engine reads the tool's output as the step's
-/// answer.
+/// action on the core's node: the tool its environment's component
+/// contributes runs once, under its `Once` policy, and the engine reads the
+/// tool's output as the step's answer.
 async fn host_engine_step_runs_its_catalog_tool_once(tier: Tier) {
     let world = Arc::new(World::default());
     let deployment = deploy(
@@ -1566,10 +1636,17 @@ async fn host_engine_step_runs_its_catalog_tool_once(tier: Tier) {
             kind: TOOL_ENGINE,
             advance: tool_engine_advance,
         })],
-        |builder| builder.tools(write_tool(&world)),
+        |builder| builder.process_component(write_component(&world), WRITE_COMPONENT),
     )
     .await;
-    let process = start(&deployment.core, TOOL_ENGINE, serde_json::json!({ "x": 7 })).await;
+    let process = start_under(
+        &deployment.core,
+        &write_environment(),
+        TOOL_ENGINE,
+        serde_json::json!({ "x": 7 }),
+        |request| request,
+    )
+    .await;
     let answer = success(&ended(&deployment.core, &process).await);
     let writes = world.writes.lock().unwrap().clone();
     assert_eq!(writes.len(), 1, "the tool ran once: {writes:?}");
@@ -1632,15 +1709,13 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
             .publish_process_env(&pin, &environment())
             .await
             .expect("the environment is published");
-        let request = lash_core::ProcessStartRequest::new(
-            lash_core::ProcessInput::Engine {
-                kind: HOLD_ENGINE.to_owned(),
-                payload: serde_json::json!({ "run": run }),
-            },
+        let request = lash_core::ProcessStartRequest::engine(
+            HOLD_ENGINE.to_owned(),
+            serde_json::json!({ "run": run }),
+            lash_core::EngineLaunch::new(env_ref.clone(), None),
             lash_core::ProcessOriginator::host(),
             lash_core::LifetimeDecision::Detached,
-        )
-        .with_env_ref(env_ref.clone());
+        );
         let receipt = deployment
             .core
             .processes()
@@ -1671,7 +1746,7 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
             .expect("the cleanup relay's due pass");
         }
         assert_eq!(
-            lash_core::runtime::load_process_execution_env(env_store.as_ref(), &env_ref)
+            lash_core::runtime::load_process_env(env_store.as_ref(), &env_ref)
                 .await
                 .expect("the started process still resolves its environment"),
             environment()
@@ -1820,6 +1895,19 @@ impl lash_core::ToolProvider for IsolatedTools {
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.executions.fetch_add(1, Ordering::SeqCst);
         lash_core::ToolOutcome::ok(serde_json::json!({ "ordinary": true })).into()
+    }
+
+    /// The call's process runs on its arguments under the stated
+    /// [`environment`] (D6).
+    fn isolated_start(
+        &self,
+        call: lash_core::IsolatedProcessRequest<'_>,
+    ) -> Result<lash_core::IsolatedStart, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core::IsolatedStart {
+            payload: call.args.clone(),
+            env: lash_core::ProcessEnvChoice::New(environment()),
+            engine_settings: None,
+        })
     }
 }
 
@@ -2063,3 +2151,6 @@ mod process_endstates;
 
 #[path = "core_node_processes/engine_steps.rs"]
 mod engine_steps;
+
+#[path = "core_node_processes/session_and_isolated_envs.rs"]
+mod session_and_isolated_envs;

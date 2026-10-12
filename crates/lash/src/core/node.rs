@@ -82,6 +82,7 @@ impl NodeSlot {
             backend,
             sessions,
             processes,
+            serves,
         } = core.node_activations(Arc::new(lash_core::durable_port::NoProbe));
         let processes = match processes {
             Ok(processes) => Some(processes),
@@ -103,6 +104,7 @@ impl NodeSlot {
                     drain,
                     sessions,
                     processes,
+                    serves,
                 },
                 stop.cancelled_owned(),
             )
@@ -205,6 +207,8 @@ pub(crate) struct NodeActivations {
     /// Runs the claimed processes on the core's process worker, or why the
     /// worker did not build.
     pub(crate) processes: crate::Result<Arc<dyn Activation>>,
+    /// The claim requirements the core's process components serve.
+    pub(crate) serves: Vec<String>,
 }
 
 impl LashCore {
@@ -246,6 +250,7 @@ impl LashCore {
             backend,
             sessions,
             processes,
+            serves: self.env.core.process_engines.components().serves(),
         }
     }
 

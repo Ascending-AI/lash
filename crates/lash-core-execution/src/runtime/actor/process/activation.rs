@@ -439,7 +439,7 @@ impl ProcessActivation {
             .cancel_request
             .as_deref()
             .map(|request| request.origin);
-        let ProcessInput::Engine { kind, payload } = record.input.as_ref() else {
+        let ProcessInput::Engine { kind, payload, .. } = record.input.as_ref() else {
             // A kernel process (a child session turn) has no engine to
             // advance: its turn is its child session's mail.
             return self
@@ -500,7 +500,30 @@ impl ProcessActivation {
                 return self.park(owned, tx, &reason).await;
             }
         };
+        // The composition builds before any step is admitted or resumed: one
+        // this node cannot build parks the process and settles nothing, so
+        // an admitted step is never answered `Interrupted` for it (D3).
+        match self.steps.prepare(&record).await {
+            Ok(()) => {}
+            Err(StepRefusal::CompositionUnavailable { component, reason }) => {
+                let reason = ProcessParkReason::CompositionUnavailable {
+                    component,
+                    message: reason,
+                };
+                return self.park(owned, tx, &reason).await;
+            }
+            Err(refusal) => {
+                return Err(DurableError::Store(StoreFailure {
+                    kind: StoreFailureKind::Unavailable,
+                    message: refusal.to_string(),
+                }));
+            }
+        }
         let written = state.format.clone();
+        let requires_before = self
+            .steps
+            .requirements(&record, &step_requests(&driver))
+            .await?;
         let mut tx = match self
             .carry_forward(
                 owned,
@@ -678,6 +701,18 @@ impl ProcessActivation {
             driver_json: driver.encode(),
         }));
         self.record_published(&mut tx, process, &row);
+        // The commit that changes the steps the process holds rewrites its
+        // claim requirements with them: a node that lacks a revision an
+        // unsettled step is bound to never claims the process (D3).
+        let requires = self
+            .steps
+            .requirements(&record, &step_requests(&driver))
+            .await?;
+        if requires != requires_before
+            && let Some(requires) = requires
+        {
+            tx.set_requires(requires);
+        }
         if (row.state_rev == 0 || next.format != written)
             && let Some(formats) = self.backend.formats().process_in(&next.format)
         {
@@ -1311,6 +1346,16 @@ fn refused(message: String) -> crate::ProcessOutcome {
 /// settled, with its payload as the fold checked it, for its `StepSettled`
 /// event. Its lifecycle recorded the outcome; the step leaves the driver
 /// with the transition that hands it over.
+/// The steps `driver` holds: those admitted and not yet answered to the
+/// engine.
+fn step_requests(driver: &Driver) -> Vec<StepRequest> {
+    driver
+        .steps
+        .values()
+        .map(|step| step.request.clone())
+        .collect()
+}
+
 fn settled_step(driver: &mut Driver, fold: &RunFold) -> Option<(InFlight, SettledOutput)> {
     let (name, outcome) = driver.steps.iter().find_map(|(name, step)| {
         let outcome = fold

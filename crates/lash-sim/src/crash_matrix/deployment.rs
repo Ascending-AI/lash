@@ -81,6 +81,7 @@ pub fn nodes_config(backend: &Backend) -> SimNodesConfig {
     SimNodesConfig {
         lease: LeaseConfig::default(),
         decodes: backend.formats().decodes(),
+        serves: Vec::new(),
         max_active: 8,
     }
 }

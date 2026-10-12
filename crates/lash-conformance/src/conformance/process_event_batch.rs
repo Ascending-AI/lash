@@ -20,11 +20,14 @@ fn batch_registration() -> ProcessRegistration {
         ProcessInput::Engine {
             kind: "test-engine".to_string(),
             payload: serde_json::Value::Null,
+            launch: crate::EngineLaunch::new(
+                lash_core::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
         },
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
 }
 
 /// Register a process and start its first engine invocation.

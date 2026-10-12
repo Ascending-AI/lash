@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use lash_core_execution::{
-    AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessExecutionEnvStore,
-    ProcessRegistry, StoreBindingId, StoreSet,
+    AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessEnvStore, ProcessRegistry,
+    StoreBindingId, StoreSet,
 };
 use lash_durable::domain::{
     ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
@@ -593,7 +593,7 @@ impl StoreSet for RecordingStores {
         self.inner.process_registry()
     }
 
-    fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn ProcessEnvStore> {
         self.inner.process_env_store()
     }
 

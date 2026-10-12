@@ -28,8 +28,8 @@ use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ProcessEngineRegistry, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ProcessInput, ProcessRecord, ProcessRegistration, ProcessRegistry,
+    HoldEnvError, ProcessEngineRegistry, ProcessEnvPorts, ProcessEnvRef, ProcessEnvSelection,
+    ProcessEnvStore, ProcessInput, ProcessRecord, ProcessRegistration, ProcessRegistry,
     ProcessStartRegistration, ProcessStartTarget, SessionId, StoreRealization,
     artifact_referrer_ended,
 };
@@ -47,7 +47,7 @@ use crate::{
 #[derive(Clone)]
 pub struct ArtifactReferrerPorts {
     modules: Arc<dyn ModuleArtifactStore>,
-    env: Arc<dyn ProcessExecutionEnvStore>,
+    env: Arc<dyn ProcessEnvStore>,
     definitions: Arc<dyn super::ProcessDefinitionStore>,
     attachments: Arc<dyn crate::AttachmentReferrers>,
     cleanup: Arc<dyn ArtifactCleanupLedger>,
@@ -67,7 +67,7 @@ pub enum ReferrerAcquisition {
 impl ArtifactReferrerPorts {
     pub fn new(
         modules: Arc<dyn ModuleArtifactStore>,
-        env: Arc<dyn ProcessExecutionEnvStore>,
+        env: Arc<dyn ProcessEnvStore>,
         definitions: Arc<dyn super::ProcessDefinitionStore>,
         attachments: Arc<dyn crate::AttachmentReferrers>,
         cleanup: Arc<dyn ArtifactCleanupLedger>,
@@ -99,7 +99,7 @@ impl ArtifactReferrerPorts {
         &self.modules
     }
 
-    pub fn env(&self) -> &Arc<dyn ProcessExecutionEnvStore> {
+    pub fn env(&self) -> &Arc<dyn ProcessEnvStore> {
         &self.env
     }
 
@@ -145,10 +145,7 @@ impl ArtifactReferrerPorts {
                 }
                 ArtifactStoreId::ProcessEnv => {
                     self.env
-                        .acquire_process_execution_env(
-                            claim,
-                            &ProcessExecutionEnvRef::new(name.artifact_ref.clone()),
-                        )
+                        .acquire_process_env(claim, &ProcessEnvRef::new(name.artifact_ref.clone()))
                         .await
                 }
                 // A descriptor name alone: its manifest is held through
@@ -289,7 +286,7 @@ pub struct HostStartAdmission {
 pub struct ProcessStartStores<'a> {
     pub tracing: Option<&'a crate::trace::TraceRuntime>,
     pub registry: &'a dyn ProcessRegistry,
-    pub env_store: Option<&'a Arc<dyn ProcessExecutionEnvStore>>,
+    pub env_store: Option<&'a Arc<dyn ProcessEnvStore>>,
     /// The engines a start names artifacts through, and the
     /// [`ArtifactReferrerPorts`] that hold them.
     pub engines: &'a ProcessEngineRegistry,
@@ -324,7 +321,7 @@ pub struct RegisteredProcessStart {
     /// Whether the registrar created the row for this start.
     pub disposition: crate::ProcessRegistrationOutcome,
     /// The execution environment the start's registration names once staged.
-    pub env_ref: Option<ProcessExecutionEnvRef>,
+    pub env_ref: Option<ProcessEnvRef>,
 }
 
 impl RegisteredProcessStart {
@@ -344,8 +341,7 @@ impl RegisteredProcessStart {
         &self,
         registration: impl Into<ProcessStartRegistration>,
     ) -> ProcessRegistration {
-        let mut registration = registration.into();
-        registration.engine_config = self.record.engine_config.clone();
+        let registration = registration.into();
         match registration.input.as_ref() {
             // The row holds the request with the default binding its
             // registration recorded; the process runs that (FIG-4531).
@@ -584,7 +580,7 @@ pub struct StartStaging<'a> {
     definition: Option<StagedDefinition<'a>>,
     env: Option<StagedEnv>,
     engine: Option<StagedEngine<'a>>,
-    submitted_env_ref: Option<ProcessExecutionEnvRef>,
+    submitted_env_ref: Option<ProcessEnvRef>,
     submitted_input: Arc<ProcessInput>,
     anchor: lash_trace::TraceAnchor,
     candidate: Option<Box<dyn lash_trace::TraceAdmissionCandidate>>,
@@ -761,31 +757,13 @@ async fn stage<'a>(
     registration: ProcessStartRegistration,
     observers: &[SessionId],
 ) -> Result<PreparedProcessStart<'a>, RuntimeEffectControllerError> {
-    let env = stage_env(stores, &claim, registration.env_ref.clone()).await?;
-    let env_spec = match env.as_ref() {
-        Some(env) => Some(
-            super::load_process_execution_env(
-                stores
-                    .env_store
-                    .ok_or_else(|| {
-                        crate::PluginError::Session(
-                            "process environment store is unavailable".to_string(),
-                        )
-                    })?
-                    .as_ref(),
-                &env.env_ref,
-            )
-            .await
-            .map_err(crate::PluginError::from)?,
-        ),
-        None => None,
-    };
-    let (definition, mut registration) =
-        resolve_start_target(stores, &claim, registration, env_spec.as_ref()).await?;
+    let submitted_env_ref = registration.input.launch().map(|launch| launch.env.clone());
+    let env = stage_env(stores, &claim, submitted_env_ref.clone()).await?;
+    let (definition, mut registration) = resolve_start_target(stores, &claim, registration).await?;
+    check_sealed_settings(stores, &registration)?;
+    registration.requires = stage_requirements(stores, env.as_ref()).await?;
     let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
-    registration.engine_config = creation_config(stores, &registration, env_spec.as_ref())?;
     Box::pin(stage_input(stores, start_key, registration.input.as_ref())).await?;
-    let submitted_env_ref = registration.env_ref.clone();
     let submitted_input = Arc::clone(&registration.input);
     let prepared = stores
         .registry
@@ -935,7 +913,7 @@ impl StartStaging<'_> {
         let process_claim =
             ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(record.id.clone()))
                 .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-        let adopts_env = created || record.env_ref == submitted_env_ref;
+        let adopts_env = created || record.env_ref() == submitted_env_ref.as_ref();
         let adopts_engine = created || record.input == submitted_input;
         // A key is global, so another start's terminal refusal can end
         // `Start(key)` after this start staged there and before its row
@@ -1108,21 +1086,34 @@ async fn start_ended_after_staging(
     Ok(false)
 }
 
+/// Hold the start's environment under `claim` through the one hold path
+/// (D10): `true` when the claim holds it, `false` when the claim met its
+/// fence. An environment that is not published refuses the start.
 async fn acquire_env(
-    env_store: &dyn ProcessExecutionEnvStore,
+    env_store: &dyn ProcessEnvStore,
     claim: &ReferrerClaim,
     env: &StagedEnv,
 ) -> Result<bool, RuntimeEffectControllerError> {
-    let acquired = env_store
-        .acquire_process_execution_env(claim, &env.env_ref)
-        .await;
-    Ok(held_or_ended(claim, acquired.map_err(crate::PluginError::from))?.is_none())
+    let held = super::hold_process_env(
+        &ProcessEnvPorts::published_only(env_store),
+        claim,
+        &ProcessEnvSelection::Published(env.env_ref.clone()),
+    )
+    .await;
+    let acquired = match held {
+        Ok(_) => Ok(()),
+        Err(HoldEnvError::Fault(error)) => Err(error),
+        Err(HoldEnvError::Refused(refusal)) => {
+            return Err(crate::PluginError::ProcessEnvRefused { refusal }.into());
+        }
+    };
+    Ok(held_or_ended(claim, acquired)?.is_none())
 }
 
 async fn stage_env(
     stores: &ProcessStartStores<'_>,
     claim: &ReferrerClaim,
-    env_ref: Option<ProcessExecutionEnvRef>,
+    env_ref: Option<ProcessEnvRef>,
 ) -> Result<Option<StagedEnv>, RuntimeEffectControllerError> {
     let Some(env_ref) = env_ref else {
         return Ok(None);
@@ -1140,23 +1131,46 @@ async fn stage_env(
     Ok(Some(env))
 }
 
-/// What the engine of an engine start records with the row this registration
-/// creates (FIG-4527). It is read here, inside the start's one recorded
-/// registration step and never ahead of the command: a replay of the start
-/// reads the recorded registration, and a start that finds a row retained
-/// under its key is returned that row with what its own creation recorded.
-/// The start's author states none; a value it carried is replaced.
-fn creation_config(
+/// The claim requirements a process under the staged environment carries:
+/// its components' config tokens (§6.2). The environment is held, so its
+/// bytes are read back verified.
+async fn stage_requirements(
+    stores: &ProcessStartStores<'_>,
+    env: Option<&StagedEnv>,
+) -> Result<Vec<String>, RuntimeEffectControllerError> {
+    let (Some(env), Some(env_store)) = (env, stores.env_store) else {
+        return Ok(Vec::new());
+    };
+    let loaded = crate::runtime::load_process_env(env_store.as_ref(), &env.env_ref)
+        .await
+        .map_err(|error| {
+            crate::runtime::effect::executor::unresolved_execution_env(
+                stores.executor,
+                &env.env_ref,
+                error,
+            )
+        })?;
+    Ok(crate::plugin::ProcessComponentDeclaration::env_requirements(&loaded))
+}
+
+/// The engine of an engine start checks the settings its starter sealed,
+/// defensively, before the row is registered (D4). Registration copies the
+/// settings; it never chooses them.
+fn check_sealed_settings(
     stores: &ProcessStartStores<'_>,
     registration: &ProcessRegistration,
-    env_spec: Option<&ProcessExecutionEnvSpec>,
-) -> Result<Option<serde_json::Value>, RuntimeEffectControllerError> {
-    let (ProcessInput::Engine { kind, .. }, Some(env_spec)) =
-        (registration.input.as_ref(), env_spec)
+) -> Result<(), RuntimeEffectControllerError> {
+    let ProcessInput::Engine {
+        kind,
+        payload,
+        launch,
+    } = registration.input.as_ref()
     else {
-        return Ok(None);
+        return Ok(());
     };
-    Ok(stores.engines.require(kind)?.creation_config(env_spec)?)
+    Ok(stores
+        .engines
+        .check_settings(kind, payload, launch.settings.as_ref())?)
 }
 
 async fn stage_engine<'a>(
@@ -1165,7 +1179,7 @@ async fn stage_engine<'a>(
     registration: &ProcessRegistration,
     env: Option<&StagedEnv>,
 ) -> Result<Option<StagedEngine<'a>>, RuntimeEffectControllerError> {
-    let ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
+    let ProcessInput::Engine { kind, payload, .. } = registration.input.as_ref() else {
         return Ok(None);
     };
     let engines = stores.engines;
@@ -1205,13 +1219,12 @@ async fn resolve_start_target<'a>(
     stores: &ProcessStartStores<'a>,
     claim: &ReferrerClaim,
     registration: ProcessStartRegistration,
-    env_spec: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<(Option<StagedDefinition<'a>>, ProcessRegistration), RuntimeEffectControllerError> {
     match registration.input.as_ref() {
         ProcessStartTarget::Input(input) => {
             let identity = match input {
-                ProcessInput::Engine { kind, payload } => {
-                    Some(stores.engines.admit(kind, payload, env_spec).await?)
+                ProcessInput::Engine { kind, payload, .. } => {
+                    Some(stores.engines.admit(kind, payload).await?)
                 }
                 _ => None,
             };
@@ -1229,6 +1242,7 @@ async fn resolve_start_target<'a>(
             definition_id,
             signature_claim,
             args,
+            launch,
         } => {
             let (staged, registration) = stage_definition(
                 stores,
@@ -1237,7 +1251,7 @@ async fn resolve_start_target<'a>(
                 definition_id,
                 signature_claim.as_ref(),
                 args,
-                env_spec,
+                launch,
             )
             .await?;
             Ok((Some(staged), registration))
@@ -1264,7 +1278,7 @@ async fn stage_definition<'a>(
     definition_id: &super::ProcessDefinitionId,
     signature_claim: Option<&super::ProcessSignature>,
     args: &serde_json::Map<String, serde_json::Value>,
-    env_spec: Option<&ProcessExecutionEnvSpec>,
+    launch: &super::EngineLaunch,
 ) -> Result<(StagedDefinition<'a>, ProcessRegistration), RuntimeEffectControllerError> {
     let engines = stores.engines;
     let Some(ports) = stores.ports() else {
@@ -1308,15 +1322,16 @@ async fn stage_definition<'a>(
     let kind = resolved.draft.engine_kind().as_str().to_owned();
     let payload = resolved.start_payload(args)?;
     let declared_label = registration.identity.label.clone();
-    let mut identity = engines
-        .admit(&kind, &payload, env_spec)
-        .await?
-        .into_identity();
+    let mut identity = engines.admit(&kind, &payload).await?.into_identity();
     identity.definition_id = Some(resolved.id().clone());
     let id = resolved.id().clone();
     let registration = registration
         .clone()
-        .with_input(Arc::new(ProcessInput::Engine { kind, payload }))
+        .with_input(Arc::new(ProcessInput::Engine {
+            kind,
+            payload,
+            launch: launch.clone(),
+        }))
         .with_admitted_identity(super::AdmittedProcessIdentity::admitted(identity))
         .with_host_facing_label(declared_label);
     Ok((
@@ -1340,7 +1355,7 @@ struct StagedDefinition<'a> {
 }
 
 struct StagedEnv {
-    env_ref: ProcessExecutionEnvRef,
+    env_ref: ProcessEnvRef,
     /// Whether the start's own referrer holds it: `false` when `Start(key)`
     /// was already fenced.
     staged: bool,

@@ -433,6 +433,7 @@ fn nodes(
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: backend.formats().decodes(),
+            serves: Vec::new(),
             max_active: 1,
         },
         Arc::new(SessionActivation::new(

@@ -1,6 +1,5 @@
 use super::*;
 use crate::PluginError;
-use crate::facade_support::RuntimeSessionStateFacadeOps;
 use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 
 impl<'run> RuntimeTurnDriver<'run> {
@@ -41,10 +40,10 @@ impl<'run> RuntimeTurnDriver<'run> {
         let effect_controller = self.scoped_effect_controller.clone();
         let direct_completions =
             manager.direct_completion_client(effect_controller.clone(), Some(self.turn_id.clone()));
-        let execution_env_spec = self
-            .turn_pipeline
-            .state()
-            .process_execution_env_spec(&self.policy.policy);
+        // The turn runs under its logical Run's recorded configuration and
+        // render (FIG-6021), never the session's live config.
+        let run = self.run_config.shared_run();
+        let facts = crate::plugin::ExecutionFacts::of_run(&run);
         self.session
             .code_execution_context(
                 &self.session_id,
@@ -68,7 +67,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                 observer,
                 chronological_projection,
                 self.turn_context.clone(),
-                execution_env_spec,
+                facts,
             )
             .map(|context| {
                 let context = context
@@ -80,7 +79,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                         self.session_id.clone(),
                         self.logical_run(),
                     ))
-                    .with_resolved_run(self.run_config.shared_run())
+                    .with_resolved_run(run)
                     .with_recorded_turn_cancel(self.children_stop.clone())
                     .with_opener_state(self.opener_state.clone())
                     .with_turn_cancel_scope(self.turn_cancel_scope())

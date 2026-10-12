@@ -27,7 +27,7 @@ use lash::durable::{
 use lash::persistence::ProcessRegistry;
 use lash::persistence::{
     ArtifactCleanupLedger, AttachmentReferrers, AttachmentStore, DeploymentStore,
-    ModuleArtifactStore, ObligationLedger, ProcessDefinitionStore, ProcessExecutionEnvStore,
+    ModuleArtifactStore, ObligationLedger, ProcessDefinitionStore, ProcessEnvStore,
     RecoveryLeaderStore, ToolMaterialStore, TurnPreludeStore,
 };
 use lash::runtime::Clock;
@@ -499,7 +499,7 @@ impl StoreSet for RecordedStores {
         self.inner.process_registry()
     }
 
-    fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn ProcessEnvStore> {
         self.inner.process_env_store()
     }
 

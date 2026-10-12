@@ -423,7 +423,7 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         SqliteStoreSet::process_env_store(self)
     }
 
-    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessExecutionEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessEnvStore> {
         SqliteStoreSet::process_env_store(self)
     }
 

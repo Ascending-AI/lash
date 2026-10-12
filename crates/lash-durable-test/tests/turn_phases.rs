@@ -994,6 +994,7 @@ impl Scenario for L3 {
                 .expect("the database is built first")
                 .formats()
                 .decodes(),
+            serves: Vec::new(),
             max_active: 4,
         }
     }
@@ -2281,6 +2282,7 @@ async fn claim_and_admit(
         .register_node(&lash_durable::NodeSpec {
             node: lash_durable::NodeId::new(format!("owner-of-{session}")),
             decodes: vec![snapshot.formats.clone()],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

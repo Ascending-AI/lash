@@ -72,8 +72,8 @@ use lash_conformance::{
 };
 use lash_core_execution::compat::CompatRefusal;
 use lash_core_execution::{
-    AttachmentReferrers as _, DeploymentStore, ProcessExecutionEnvStore, ProcessRegistry,
-    RuntimeStore, SessionCatalogStore as _, SessionCommitStore as _, StoreError,
+    AttachmentReferrers as _, DeploymentStore, ProcessEnvStore, ProcessRegistry, RuntimeStore,
+    SessionCatalogStore as _, SessionCommitStore as _, StoreError,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -387,8 +387,7 @@ lash_conformance::artifact_store_reopenable_tests!({
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                 artifacts: Arc::new(open_storage.lash_vm_artifact_store())
                     as Arc<dyn lash_core::ModuleArtifactStore>,
-                process_env: Arc::new(open_storage.process_env_store())
-                    as Arc<dyn ProcessExecutionEnvStore>,
+                process_env: Arc::new(open_storage.process_env_store()) as Arc<dyn ProcessEnvStore>,
                 turn_preludes: Arc::new(open_storage.process_env_store())
                     as Arc<dyn lash_core::TurnPreludeStore>,
             };
@@ -406,7 +405,7 @@ lash_conformance::artifact_store_reopenable_tests!({
                         artifacts: Arc::new(reopened.lash_vm_artifact_store())
                             as Arc<dyn lash_core::ModuleArtifactStore>,
                         process_env: Arc::new(reopened.process_env_store())
-                            as Arc<dyn ProcessExecutionEnvStore>,
+                            as Arc<dyn ProcessEnvStore>,
                         turn_preludes: Arc::new(reopened.process_env_store())
                             as Arc<dyn lash_core::TurnPreludeStore>,
                     }
@@ -1079,6 +1078,6 @@ lash_conformance::process_prune_start_staging_tests!({
     };
     reset(storage.pool()).await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessExecutionEnvStore>;
+    let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessEnvStore>;
     (database_fixture, registry, env_store)
 });

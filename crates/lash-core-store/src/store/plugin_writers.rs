@@ -220,12 +220,20 @@ impl PluginPublication {
         publication
     }
 
-    /// The namespaces a process execution environment publishes, read off
-    /// its store bytes.
-    pub fn of_process_execution_env(bytes: &[u8]) -> Result<Self, serde_json::Error> {
-        let spec = crate::ProcessExecutionEnvSpec::from_store_bytes(bytes)?;
+    /// The config formats a process environment publishes, read off its
+    /// store bytes: one stamp per named component, under the component's
+    /// own writer key (`component:<id>`), so a component and a session
+    /// plugin of the same id never share a format range.
+    pub fn of_process_env(bytes: &[u8]) -> Result<Self, serde_json::Error> {
+        let env = crate::process_env::ProcessEnv::from_store_bytes(bytes)?;
         let mut publication = Self::default();
-        publication.add_config(&spec.plugin_config.config);
+        for entry in env.components() {
+            publication.push(
+                &entry.id().writer_key(),
+                FormatNamespace::Config,
+                entry.config().format_version(),
+            );
+        }
         Ok(publication)
     }
 }

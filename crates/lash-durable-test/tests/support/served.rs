@@ -43,9 +43,19 @@ pub const MODEL: &str = "tool-semantics-model";
 /// directory, and its isolated PostgreSQL database.
 pub type Keep = Vec<Box<dyn std::any::Any + Send>>;
 
-/// A fresh store set of `tier`, or `None` for a PostgreSQL leg the run was
-/// handed no server for.
+/// A fresh store set of `tier`, holding the fixture process environment a
+/// fixture start declaration names, or `None` for a PostgreSQL leg the run
+/// was handed no server for.
 pub async fn stores(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
+    let (stores, keep) = unseeded(tier).await?;
+    lash_core_execution::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
+    Some((stores, keep))
+}
+
+async fn unseeded(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
     match tier {
         Tier::SqliteMemory => {
             let stores = lash_sqlite_store::SqliteStoreSet::memory()

@@ -43,19 +43,13 @@ impl ProductionToolHandlers<'_> {
 
     /// The call `invocation` runs as, its input registered with these
     /// handlers.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "a leaf's admission reads its owner's frame, parent, environment and attribution"
-    )]
-    pub(super) async fn admit_leaf(
+    pub(super) fn admit_leaf(
         &self,
         owner: &crate::EffectOpener,
         invocation: &crate::session::tool_execution::ToolInvocation,
         definition: crate::ToolDefinition,
         parent: Option<crate::RuntimeInvocation>,
-        environment_spec: &crate::ProcessExecutionEnvSpec,
         attribution: &crate::session::ToolObservationAttribution,
-        environment: &mut Option<crate::ProcessExecutionEnvRef>,
     ) -> Result<SingletonToolCall, SingletonRunError> {
         let source = invocation
             .execution_grant
@@ -74,25 +68,6 @@ impl ProductionToolHandlers<'_> {
                 .validate_tool_owner(&grant.owner)
                 .map_err(crate::RuntimeEffectControllerError::from)?;
         }
-        let environment = match environment {
-            Some(reference) => reference.clone(),
-            None => {
-                let context = self
-                    .context
-                    .clone()
-                    .with_execution_env_spec(environment_spec.clone());
-                let claim = crate::session::execution_claim_of(
-                    context.dispatch().effect_controller.execution_scope(),
-                )
-                .map_err(crate::RuntimeEffectControllerError::from)?;
-                let reference = context
-                    .capture_execution_env(&claim)
-                    .await
-                    .map_err(crate::RuntimeEffectControllerError::from)?;
-                *environment = Some(reference.clone());
-                reference
-            }
-        };
         let mut attribution = attribution.clone();
         if invocation.issuing_language_node_id.is_some() {
             attribution.issuing_node_id = invocation.issuing_language_node_id.clone();
@@ -106,8 +81,7 @@ impl ProductionToolHandlers<'_> {
                 grant: invocation.execution_grant.clone(),
                 parent,
                 binding: binding.clone(),
-                environment: environment.clone(),
-                render: environment_spec.render.clone(),
+                facts: self.context.execution_facts().recorded_call(),
             },
         );
         Ok(SingletonToolCall {
@@ -119,7 +93,6 @@ impl ProductionToolHandlers<'_> {
             binding,
             available: self.context.dispatch().composition.tool_run_revisions(),
             cancel: ExternalCancelPolicy::CancelExternalWork,
-            environment: Some(environment),
         })
     }
 

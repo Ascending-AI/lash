@@ -14,8 +14,8 @@
 //! spells is an arm neither validator is proved to refuse.
 
 use super::super::model::{
-    Ancestry, Lifetime, LifetimeDecision, ProcessExecutionEnvRef, ProcessInput, ProcessProvenance,
-    ProcessRegistration, ScopeGrant, ScopeId,
+    Ancestry, EngineLaunch, Lifetime, LifetimeDecision, ProcessEnvRef, ProcessInput,
+    ProcessProvenance, ProcessRegistration, ScopeGrant, ScopeId,
 };
 use super::super::validation::ProcessRegistrationRefusal;
 
@@ -38,12 +38,8 @@ pub fn accepted_process_registration() -> ProcessRegistration {
     host_registration(ProcessInput::Engine {
         kind: "fixture-engine".to_string(),
         payload: serde_json::Value::Null,
+        launch: EngineLaunch::new(ProcessEnvRef::new(FIXTURE_ENV_REF.to_string()), None),
     })
-    .with_execution_env_ref(env_ref())
-}
-
-fn env_ref() -> Option<ProcessExecutionEnvRef> {
-    Some(ProcessExecutionEnvRef::new(FIXTURE_ENV_REF.to_string()))
 }
 
 /// A session-turn input with an otherwise valid definition key.
@@ -94,16 +90,6 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
             registration.lifetime = LifetimeDecision::Detached;
             registration.session_capability = Some(crate::SessionId::from("a-different-session"));
             vec![registration]
-        }
-        // Engine and session-turn inputs must carry an env.
-        ProcessRegistrationRefusal::ExecutionEnvMissing => {
-            vec![
-                host_registration(ProcessInput::Engine {
-                    kind: "fixture-engine".to_string(),
-                    payload: serde_json::Value::Null,
-                }),
-                host_registration(session_turn_input("fixture-definition")),
-            ]
         }
         ProcessRegistrationRefusal::EmptySessionTurnDefinitionKey => {
             vec![host_registration(session_turn_input("  "))]

@@ -10,18 +10,24 @@ use lash::plugins::{
     ProcessEngine, ProcessEngineContributionContext, ProcessEngineRegistration, ProcessInfraError,
     SessionPlugin,
 };
-use lash::process::{ProcessAwaitOutput, ProcessInput, ProcessOriginator, ProcessStartRequest};
+use lash::process::{ProcessAwaitOutput, ProcessOriginator, ProcessStartRequest};
 
 /// The kind of [`ReceiverEngine`].
 pub const RECEIVER_ENGINE_KIND: &str = "h2-receiver";
 
-/// The receiver's input for `session`: what its start declares and what a
-/// binding check compares a retained row against.
-pub fn receiver_input(session: &lash::SessionId) -> ProcessInput {
-    ProcessInput::Engine {
-        kind: RECEIVER_ENGINE_KIND.to_owned(),
-        payload: serde_json::json!({"fixture":"h2-receiver","session":session}),
-    }
+/// The receiver's start payload for `session`.
+fn receiver_payload(session: &lash::SessionId) -> serde_json::Value {
+    serde_json::json!({"fixture":"h2-receiver","session":session})
+}
+
+/// The environment every h2 fixture process runs under: no tools and no
+/// components, since its engines call none.
+fn environment() -> Result<lash::process::ProcessEnv> {
+    Ok(lash::process::ProcessEnv::builder(
+        lash::plugins::SessionToolAccess::restricted(std::iter::empty())?,
+        lash::MaxToolCalls::new(1024),
+    )
+    .build()?)
 }
 
 /// The receiver's engine: its process runs until it is cancelled.
@@ -62,10 +68,24 @@ impl ProcessEngine for ReceiverEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env: &lash::process::ProcessExecutionEnvSpec,
-    ) -> std::result::Result<Option<serde_json::Value>, PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash::process::EngineSettings>,
+    ) -> std::result::Result<(), PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<lash::process::EngineSettings>, PluginError> {
         Ok(None)
     }
 
@@ -173,10 +193,24 @@ impl ProcessEngine for SourceEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env: &lash::process::ProcessExecutionEnvSpec,
-    ) -> std::result::Result<Option<serde_json::Value>, PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash::process::EngineSettings>,
+    ) -> std::result::Result<(), PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<lash::process::EngineSettings>, PluginError> {
         Ok(None)
     }
 
@@ -293,10 +327,24 @@ impl ProcessEngine for SleeperEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env: &lash::process::ProcessExecutionEnvSpec,
-    ) -> std::result::Result<Option<serde_json::Value>, PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash::process::EngineSettings>,
+    ) -> std::result::Result<(), PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<lash::process::EngineSettings>, PluginError> {
         Ok(None)
     }
 
@@ -420,25 +468,15 @@ pub async fn register_receiver(
     // host pin keeps it alive for the process (ADR 0113).
     let env_ref = core
         .host_artifacts()
-        .publish_process_env(
-            &lash::process::HostArtifactPin::mint(),
-            &lash::process::ProcessExecutionEnvSpec::new(
-                lash::plugins::AdmittedPluginConfig::default(),
-                lash::runtime::SessionPolicy::new(
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(1024),
-                    lash::NoProgressBudget::bounded(12),
-                ),
-                lash::plugins::SessionToolAccess::ambient(),
-            ),
-        )
+        .publish_process_env(&lash::process::HostArtifactPin::mint(), &environment()?)
         .await?;
-    let start = ProcessStartRequest::new(
-        receiver_input(session),
+    let start = ProcessStartRequest::engine(
+        RECEIVER_ENGINE_KIND,
+        receiver_payload(session),
+        lash::process::EngineLaunch::new(env_ref, None),
         ProcessOriginator::host_scoped(format!("h2:{session}")),
         lash::process::Lifetime::Detached,
     )
-    .with_env_ref(env_ref)
     .with_host_start_key(format!("h2-receiver:{session}"))
     .with_observers([session.clone()]);
     Ok(core.processes().start(start, scoped).await?)
@@ -453,28 +491,15 @@ pub async fn start_source(
 ) -> Result<ProcessStartReceipt> {
     let env_ref = core
         .host_artifacts()
-        .publish_process_env(
-            &lash::process::HostArtifactPin::mint(),
-            &lash::process::ProcessExecutionEnvSpec::new(
-                lash::plugins::AdmittedPluginConfig::default(),
-                lash::runtime::SessionPolicy::new(
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(1024),
-                    lash::NoProgressBudget::bounded(12),
-                ),
-                lash::plugins::SessionToolAccess::ambient(),
-            ),
-        )
+        .publish_process_env(&lash::process::HostArtifactPin::mint(), &environment()?)
         .await?;
-    let start = ProcessStartRequest::new(
-        ProcessInput::Engine {
-            kind: SOURCE_ENGINE_KIND.to_owned(),
-            payload: source_payload(session, key),
-        },
+    let start = ProcessStartRequest::engine(
+        SOURCE_ENGINE_KIND.to_owned(),
+        source_payload(session, key),
+        lash::process::EngineLaunch::new(env_ref, None),
         ProcessOriginator::host_scoped(format!("h2-source:{session}")),
         lash::process::Lifetime::Detached,
     )
-    .with_env_ref(env_ref)
     .with_host_start_key(format!("h2-source:{session}:{key}"))
     .with_observers([session.clone()]);
     Ok(core.processes().start(start, scoped).await?)
@@ -489,33 +514,20 @@ pub async fn start_sleeper(
 ) -> Result<ProcessStartReceipt> {
     let env_ref = core
         .host_artifacts()
-        .publish_process_env(
-            &lash::process::HostArtifactPin::mint(),
-            &lash::process::ProcessExecutionEnvSpec::new(
-                lash::plugins::AdmittedPluginConfig::default(),
-                lash::runtime::SessionPolicy::new(
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(1024),
-                    lash::NoProgressBudget::bounded(12),
-                ),
-                lash::plugins::SessionToolAccess::ambient(),
-            ),
-        )
+        .publish_process_env(&lash::process::HostArtifactPin::mint(), &environment()?)
         .await?;
     let now = i64::try_from(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_millis(),
     )?;
-    let start = ProcessStartRequest::new(
-        ProcessInput::Engine {
-            kind: SLEEPER_ENGINE_KIND.to_owned(),
-            payload: serde_json::json!({"fixture": "h2-sleeper", "until_ms": now + millis}),
-        },
+    let start = ProcessStartRequest::engine(
+        SLEEPER_ENGINE_KIND.to_owned(),
+        serde_json::json!({"fixture": "h2-sleeper", "until_ms": now + millis}),
+        lash::process::EngineLaunch::new(env_ref, None),
         ProcessOriginator::host_scoped(format!("h2-sleeper:{session}")),
         lash::process::Lifetime::Detached,
     )
-    .with_env_ref(env_ref)
     .with_host_start_key(format!("h2-sleeper:{session}"))
     .with_observers([session.clone()]);
     Ok(core.processes().start(start, scoped).await?)

@@ -105,6 +105,9 @@ pub enum ProcessInput {
         kind: String,
         #[serde(default)]
         payload: serde_json::Value,
+        /// The environment and engine settings the process runs under,
+        /// stated by its starter and sealed with the start (D4, D10).
+        launch: EngineLaunch,
     },
     SessionTurn {
         /// Caller-owned revision for the growable session request/input pair.
@@ -142,6 +145,9 @@ pub enum ProcessStartTarget {
         signature_claim: Option<super::ProcessSignature>,
         #[serde(default)]
         args: serde_json::Map<String, serde_json::Value>,
+        /// The environment and engine settings the resolved engine start
+        /// runs under, stated by the starter (D4, D10).
+        launch: EngineLaunch,
     },
     /// A start of an input as its author stated it.
     #[serde(untagged)]
@@ -161,6 +167,15 @@ impl ProcessStartTarget {
         match self {
             Self::Input(input) => Some(input),
             Self::Definition { .. } => None,
+        }
+    }
+
+    /// The launch this start states: every engine-bearing target carries
+    /// one, and a session turn none.
+    pub fn launch(&self) -> Option<&EngineLaunch> {
+        match self {
+            Self::Input(input) => input.launch(),
+            Self::Definition { launch, .. } => Some(launch),
         }
     }
 
@@ -213,9 +228,14 @@ pub enum SessionTurnOutcome {
 impl Clone for ProcessInput {
     fn clone(&self) -> Self {
         match self {
-            Self::Engine { kind, payload } => Self::Engine {
+            Self::Engine {
+                kind,
+                payload,
+                launch,
+            } => Self::Engine {
                 kind: kind.clone(),
                 payload: payload.clone(),
+                launch: launch.clone(),
             },
             Self::SessionTurn {
                 definition_key,
@@ -275,6 +295,74 @@ impl ProcessInput {
             _ => None,
         }
     }
+
+    /// The launch an engine input runs under; a session turn has none (D5).
+    pub fn launch(&self) -> Option<&EngineLaunch> {
+        match self {
+            Self::Engine { launch, .. } => Some(launch),
+            Self::SessionTurn { .. } => None,
+        }
+    }
+}
+
+/// Engine-owned settings a starter states for an engine start, checked by
+/// the engine before the start is durable
+/// ([`ProcessEngine::check_settings`](super::ProcessEngine::check_settings))
+/// and read back by every run of the process (D4). Lash never chooses them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct EngineSettings(serde_json::Value);
+
+impl EngineSettings {
+    pub fn new(value: serde_json::Value) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> &serde_json::Value {
+        &self.0
+    }
+
+    pub fn into_value(self) -> serde_json::Value {
+        self.0
+    }
+}
+
+/// What an engine process runs under, sealed with its start: the
+/// environment its starter holds and the engine settings it states.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineLaunch {
+    pub env: ProcessEnvRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<EngineSettings>,
+}
+
+impl EngineLaunch {
+    pub fn new(env: ProcessEnvRef, settings: Option<EngineSettings>) -> Self {
+        Self { env, settings }
+    }
+}
+
+/// A launch a declaring attempt holds: only
+/// [`AttemptContext::declare_launch`](crate::AttemptContext::declare_launch)
+/// mints one, after it held the environment under the attempt's execution
+/// claim and the engine checked the settings, so no tool declares an engine
+/// start whose environment it has not held (D10).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclaredLaunch(EngineLaunch);
+
+impl DeclaredLaunch {
+    pub(crate) fn held(launch: EngineLaunch) -> Self {
+        Self(launch)
+    }
+
+    pub fn launch(&self) -> &EngineLaunch {
+        &self.0
+    }
+
+    pub(crate) fn into_launch(self) -> EngineLaunch {
+        self.0
+    }
 }
 
 /// The store of process execution environments (ADR 0113 §2.1): immutable
@@ -282,24 +370,24 @@ impl ProcessInput {
 /// Only the cleanup executor severs edges, through
 /// [`Self::end_process_env_referrer`].
 #[async_trait::async_trait]
-pub trait ProcessExecutionEnvStore: Send + Sync {
+pub trait ProcessEnvStore: Send + Sync {
     /// Store `bytes` under `env_ref` if absent, verify they equal any stored
     /// bytes, and add the claim's edge, in one transaction that first takes
     /// the referrer's lock, checks its fence (`ReferrerEnded`) and arms the
     /// claim's guard if it has one and no row exists.
-    async fn publish_process_execution_env(
+    async fn publish_process_env(
         &self,
         claim: &crate::ReferrerClaim,
-        env_ref: &ProcessExecutionEnvRef,
+        env_ref: &ProcessEnvRef,
         bytes: &[u8],
     ) -> Result<(), crate::ArtifactStoreError>;
 
     /// Add the claim's edge to bytes already stored, with the same lock,
     /// fence check and guard arming. Absent bytes are `ArtifactMissing`.
-    async fn acquire_process_execution_env(
+    async fn acquire_process_env(
         &self,
         claim: &crate::ReferrerClaim,
-        env_ref: &ProcessExecutionEnvRef,
+        env_ref: &ProcessEnvRef,
     ) -> Result<(), crate::ArtifactStoreError>;
 
     /// Apply one resolved cleanup in one transaction (ADR 0113 §2.3).
@@ -308,9 +396,9 @@ pub trait ProcessExecutionEnvStore: Send + Sync {
         cleanup: &crate::ResolvedArtifactCleanup,
     ) -> Result<(), crate::ArtifactStoreError>;
 
-    async fn get_process_execution_env(
+    async fn get_process_env(
         &self,
-        env_ref: &ProcessExecutionEnvRef,
+        env_ref: &ProcessEnvRef,
     ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError>;
 }
 
@@ -332,21 +420,6 @@ pub fn artifact_referrer_ended(error: &crate::PluginError) -> Option<&crate::Art
     }
 }
 
-pub async fn publish_process_execution_env(
-    env_store: &dyn ProcessExecutionEnvStore,
-    claim: &crate::ReferrerClaim,
-    spec: &ProcessExecutionEnvSpec,
-) -> Result<ProcessExecutionEnvRef, crate::PluginError> {
-    let bytes = spec.to_store_bytes().map_err(|err| {
-        crate::PluginError::Session(format!("failed to encode process execution env: {err}"))
-    })?;
-    let env_ref = process_execution_env_ref_for_bytes(&bytes);
-    env_store
-        .publish_process_execution_env(claim, &env_ref, &bytes)
-        .await?;
-    Ok(env_ref)
-}
-
 /// Why a recorded process execution environment did not load.
 ///
 /// The halves are distinct because they classify differently (FIG-3575). The
@@ -355,53 +428,51 @@ pub async fn publish_process_execution_env(
 /// environment. Every other variant is a fact about what the store durably
 /// holds under the reference, which every retry by this build meets again.
 #[derive(Debug, thiserror::Error)]
-pub enum ProcessExecutionEnvLoadError {
+pub enum ProcessEnvLoadError {
     /// The store did not answer the read; its own error says why.
     #[error(transparent)]
     Store(crate::PluginError),
     /// Nothing is stored under the reference.
     #[error("missing process execution env `{0}`")]
-    Missing(ProcessExecutionEnvRef),
+    Missing(ProcessEnvRef),
     /// The stored bytes are not the ones the reference names under this
     /// build's reference family.
     #[error(
         "unsupported or mismatched process execution env reference `{0}`; recreate the environment"
     )]
-    Mismatched(ProcessExecutionEnvRef),
+    Mismatched(ProcessEnvRef),
     /// The stored bytes do not decode as this build's environment.
     #[error("failed to decode process execution env `{env_ref}`: {message}")]
     Undecodable {
-        env_ref: ProcessExecutionEnvRef,
+        env_ref: ProcessEnvRef,
         message: String,
     },
 }
 
-impl From<ProcessExecutionEnvLoadError> for crate::PluginError {
-    fn from(error: ProcessExecutionEnvLoadError) -> Self {
+impl From<ProcessEnvLoadError> for crate::PluginError {
+    fn from(error: ProcessEnvLoadError) -> Self {
         match error {
-            ProcessExecutionEnvLoadError::Store(error) => error,
+            ProcessEnvLoadError::Store(error) => error,
             unresolved => Self::Session(unresolved.to_string()),
         }
     }
 }
 
-pub async fn load_process_execution_env(
-    env_store: &dyn ProcessExecutionEnvStore,
-    env_ref: &ProcessExecutionEnvRef,
-) -> Result<ProcessExecutionEnvSpec, ProcessExecutionEnvLoadError> {
+pub async fn load_process_env(
+    env_store: &dyn ProcessEnvStore,
+    env_ref: &ProcessEnvRef,
+) -> Result<ProcessEnv, ProcessEnvLoadError> {
     let bytes = env_store
-        .get_process_execution_env(env_ref)
+        .get_process_env(env_ref)
         .await
-        .map_err(|error| ProcessExecutionEnvLoadError::Store(error.into()))?
-        .ok_or_else(|| ProcessExecutionEnvLoadError::Missing(env_ref.clone()))?;
-    if process_execution_env_ref_for_bytes(&bytes) != *env_ref {
-        return Err(ProcessExecutionEnvLoadError::Mismatched(env_ref.clone()));
+        .map_err(|error| ProcessEnvLoadError::Store(error.into()))?
+        .ok_or_else(|| ProcessEnvLoadError::Missing(env_ref.clone()))?;
+    if process_env_ref_for_bytes(&bytes) != *env_ref {
+        return Err(ProcessEnvLoadError::Mismatched(env_ref.clone()));
     }
-    ProcessExecutionEnvSpec::from_store_bytes(&bytes).map_err(|err| {
-        ProcessExecutionEnvLoadError::Undecodable {
-            env_ref: env_ref.clone(),
-            message: err.to_string(),
-        }
+    ProcessEnv::from_store_bytes(&bytes).map_err(|err| ProcessEnvLoadError::Undecodable {
+        env_ref: env_ref.clone(),
+        message: err.to_string(),
     })
 }
 
@@ -481,6 +552,12 @@ pub struct ProcessProvenance {
     pub originator: ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caused_by: Option<crate::CausalRef>,
+    /// The logical run that started the process: the declaring turn of a
+    /// model start, the enclosing process's run for a start inside a
+    /// process, and `None` for a host start. Lash stamps it; no model or
+    /// host input reaches it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<crate::TurnAddress>,
 }
 
 impl ProcessProvenance {
@@ -490,6 +567,7 @@ impl ProcessProvenance {
         Self {
             originator,
             caused_by: None,
+            run: None,
         }
     }
 
@@ -622,20 +700,11 @@ pub struct ProcessRegistration<I = ProcessInput> {
     pub session_capability: Option<SessionId>,
     pub identity: ProcessIdentity,
     pub provenance: ProcessProvenance,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_ref: Option<ProcessExecutionEnvRef>,
     /// The parked call that consumes this process's terminal, when a
     /// declared start registered it (ADR 0116 §3.6). The registrar writes the
     /// hold with the row, and prune leaves a held row alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub consumer_hold: Option<ConsumerHold>,
-    /// What the process's engine recorded when the row was created
-    /// ([`ProcessEngine::creation_config`](super::ProcessEngine::creation_config)):
-    /// the engine-owned configuration its runs read back. Captured settings
-    /// are mapped into this record at creation. The registration step writes it,
-    /// never the start's author, and a retained row keeps its own.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub engine_config: Option<serde_json::Value>,
     /// What the start offers the process's trace scope: its cause and the
     /// anchor its admission candidate proposed. The registration that
     /// inserts the row retains them as the record's
@@ -645,6 +714,13 @@ pub struct ProcessRegistration<I = ProcessInput> {
     /// start's effect identity never cover it.
     #[serde(default, skip_serializing_if = "lash_trace::TraceScopeOffer::is_empty")]
     pub trace: lash_trace::TraceScopeOffer,
+    /// The claim requirements the process's actor is created with: one
+    /// `component:<id>@cfg<format>` for every component its environment
+    /// names (FIG-6034 §6.2). Start staging derives them from the held
+    /// environment; a node runs the process only when it serves them all.
+    /// It is no part of the start, like [`Self::trace`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<String>,
 }
 
 /// A start as its command carries it, before realization: its target may
@@ -661,10 +737,9 @@ impl<I> Clone for ProcessRegistration<I> {
             session_capability: self.session_capability.clone(),
             identity: self.identity.clone(),
             provenance: self.provenance.clone(),
-            env_ref: self.env_ref.clone(),
             consumer_hold: self.consumer_hold.clone(),
-            engine_config: self.engine_config.clone(),
             trace: self.trace.clone(),
+            requires: self.requires.clone(),
         }
     }
 }
@@ -716,6 +791,7 @@ impl ProcessRegistration {
             &self.input,
             &self.ancestry,
             self.session_capability.as_ref(),
+            self.provenance.run.as_ref(),
         )
     }
 }
@@ -783,10 +859,9 @@ impl<I> ProcessRegistration<I> {
             session_capability,
             identity,
             provenance,
-            env_ref: None,
             consumer_hold: None,
-            engine_config: None,
             trace: lash_trace::TraceScopeOffer::default(),
+            requires: Vec::new(),
         }
     }
 
@@ -830,10 +905,9 @@ impl<I> ProcessRegistration<I> {
             session_capability: self.session_capability,
             identity: self.identity,
             provenance: self.provenance,
-            env_ref: self.env_ref,
             consumer_hold: self.consumer_hold,
-            engine_config: self.engine_config,
             trace: self.trace,
+            requires: self.requires,
         }
     }
 
@@ -852,6 +926,7 @@ impl<I> ProcessRegistration<I> {
     pub fn with_start_cx(mut self, cx: &StartCx) -> Self {
         self.ancestry = cx.ancestry();
         self.session_capability = cx.session_capability();
+        self.provenance.run = cx.run().cloned();
         self
     }
 
@@ -868,13 +943,6 @@ impl<I> ProcessRegistration<I> {
     /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn with_process_provenance(mut self, provenance: ProcessProvenance) -> Self {
         self.provenance = provenance;
-        self
-    }
-
-    /// Sets the execution env ref carried by a `ProcessRegistration` for store and
-    /// durable-substrate implementors while persisting and coordinating durable process execution.
-    pub fn with_execution_env_ref(mut self, env_ref: Option<ProcessExecutionEnvRef>) -> Self {
-        self.env_ref = env_ref;
         self
     }
 

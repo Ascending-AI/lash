@@ -14,7 +14,7 @@ pub struct SessionAdministration {
     store_factory: Arc<dyn DeploymentStore>,
     effect_host: ActorContext,
     process: Option<ProcessWorkWiring>,
-    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    process_env_store: Arc<dyn crate::ProcessEnvStore>,
     process_engines: crate::ProcessEngineRegistry,
 }
 
@@ -27,7 +27,7 @@ impl SessionAdministration {
         store_factory: Arc<dyn DeploymentStore>,
         effect_host: ActorContext,
         process: Option<ProcessWorkWiring>,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_env_store: Arc<dyn crate::ProcessEnvStore>,
         process_engines: crate::ProcessEngineRegistry,
     ) -> Self {
         Self {
@@ -59,7 +59,7 @@ impl SessionAdministration {
         self.process.as_ref()
     }
 
-    pub fn process_env_store(&self) -> &Arc<dyn crate::ProcessExecutionEnvStore> {
+    pub fn process_env_store(&self) -> &Arc<dyn crate::ProcessEnvStore> {
         &self.process_env_store
     }
 

@@ -156,7 +156,7 @@ pub(crate) async fn lock_referrer_tx(
 /// The artifact lock orders this acquisition against source cleanup.
 pub(crate) async fn acquire_process_env_tx(
     tx: &mut crate::guarded_tx::GuardedTx<'_>,
-    env: &lash_core_execution::ProcessExecutionEnvRef,
+    env: &lash_core_execution::ProcessEnvRef,
     process: &lash_core_execution::ProcessId,
 ) -> Result<(), lash_core_execution::PluginError> {
     let referrer = ArtifactReferrer::ProcessRecord(process.clone());
@@ -258,7 +258,7 @@ impl PostgresLashVmArtifactStore {
         // ranges before the artifact is written (FIG-4746).
         let plugin_publication = match bytes {
             Some(bytes) if namespace == PROCESS_ENV_NAMESPACE => {
-                lash_core_execution::store::plugin_writers::PluginPublication::of_process_execution_env(bytes)
+                lash_core_execution::store::plugin_writers::PluginPublication::of_process_env(bytes)
                     .map_err(|error| ArtifactStoreError::Encode(error.to_string()))?
             }
             _ => Default::default(),
@@ -739,11 +739,11 @@ impl lash_core_execution::ModuleArtifactStore for PostgresLashVmArtifactStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessExecutionEnvStore for PostgresLashVmArtifactStore {
-    async fn publish_process_execution_env(
+impl lash_core_execution::ProcessEnvStore for PostgresLashVmArtifactStore {
+    async fn publish_process_env(
         &self,
         claim: &ReferrerClaim,
-        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+        env_ref: &lash_core_execution::ProcessEnvRef,
         bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
@@ -760,10 +760,10 @@ impl lash_core_execution::ProcessExecutionEnvStore for PostgresLashVmArtifactSto
             .await
     }
 
-    async fn acquire_process_execution_env(
+    async fn acquire_process_env(
         &self,
         claim: &ReferrerClaim,
-        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+        env_ref: &lash_core_execution::ProcessEnvRef,
     ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
             return Err(ArtifactStoreError::Encode(
@@ -781,9 +781,9 @@ impl lash_core_execution::ProcessExecutionEnvStore for PostgresLashVmArtifactSto
         self.end_namespaced(PROCESS_ENV_NAMESPACE, cleanup).await
     }
 
-    async fn get_process_execution_env(
+    async fn get_process_env(
         &self,
-        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+        env_ref: &lash_core_execution::ProcessEnvRef,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
             return Err(ArtifactStoreError::Encode(

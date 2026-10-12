@@ -76,6 +76,7 @@ async fn world(tier: Tier, inspector: &Arc<Inspector>) -> Option<World> {
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_core::lifetime::detached,
+                lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
             ),
         ))
         .tools(inspector)

@@ -9,8 +9,10 @@
 //! with its result, and publishes it once the engine returns that result
 //! durably. Replay installs the recorded resolution without running the
 //! body, the callback or a reducer.
+mod component;
 mod publication;
 mod run;
+pub use component::ComponentState;
 pub use lash_core_store::plugin_state::{
     KeyRejection, NamespaceEntry, NamespaceValues, PluginNamespaceState, PluginState,
     PluginStateError, StateFork,

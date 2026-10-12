@@ -37,35 +37,16 @@ async fn registered_process_count(registry: &Arc<dyn ProcessRegistry>) -> Result
     .len())
 }
 
-/// A held process start under the session's captured environment.
+/// A held process start under the fixture environment.
 fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
         owner: crate::RuntimeOwner::Session(session_id.clone()),
-        declaration: lash_core::ProcessStartDeclaration::new(
-            lash_core::testing::held_engine_input(serde_json::Value::Null),
+        declaration: lash_core::testing::held_engine_declaration(
+            serde_json::Value::Null,
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
-        )
-        .with_env_ref(session_env_ref()),
+        ),
     }))
-}
-
-/// The environment an ingress test session captures.
-fn session_env_ref() -> lash_core::ProcessExecutionEnvRef {
-    (lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy {
-            model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-            ..lash_core::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                crate::NoProgressBudget::bounded(12),
-            )
-        },
-        lash_core::SessionToolAccess::ambient(),
-    ))
-    .stable_ref()
-    .expect("captured environment digest")
 }
 
 #[test]
@@ -155,10 +136,24 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &lash_core::ProcessExecutionEnvSpec,
-    ) -> std::result::Result<Option<serde_json::Value>, lash_core::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash_core::EngineSettings>,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(lash_core::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<lash_core::EngineSettings>, lash_core::PluginError> {
         Ok(None)
     }
 
@@ -202,24 +197,15 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
 fn admit_ingress_engine(
     _kind: &'static str,
     payload: &serde_json::Value,
-    env: Option<&lash_core::ProcessExecutionEnvSpec>,
 ) -> std::result::Result<lash_core::ProcessIdentity, lash_core::PluginError> {
     if payload.get("program").and_then(serde_json::Value::as_str) == Some("invalid") {
         return Err(lash_core::PluginError::Session(
             "invalid ingress engine program".to_owned(),
         ));
     }
-    let env = env.ok_or_else(|| {
-        lash_core::PluginError::Session(
-            "ingress admission requires the recorded execution environment".to_string(),
-        )
-    })?;
     let draft = lash_core::ProcessDefinitionDraft::new(
         INGRESS_ENGINE_KIND,
-        serde_json::json!({
-            "payload": payload,
-            "model": env.policy.profile_key().map(ToString::to_string),
-        }),
+        serde_json::json!({ "payload": payload }),
         [],
     )
     .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
@@ -300,18 +286,7 @@ pub(super) async fn ingress_engine_core_with(
     core.host_artifacts()
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
-            &lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::AdmittedPluginConfig::default(),
-                lash_core::SessionPolicy {
-                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-                    ..lash_core::SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                        crate::MaxToolCalls::new(1024),
-                        crate::NoProgressBudget::bounded(12),
-                    )
-                },
-                lash_core::SessionToolAccess::ambient(),
-            ),
+            &lash_core::testing::process_env_fixture(),
         )
         .await?;
     let _session = core
@@ -326,46 +301,16 @@ pub(super) async fn ingress_engine_core_with(
 pub(super) fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
         owner: crate::RuntimeOwner::Session(SessionId::fixture(SESSION.to_string())),
-        declaration: lash_core::ProcessStartDeclaration::new(
-            lash_core::ProcessInput::Engine {
-                kind: kind.to_string(),
-                payload,
-            },
+        declaration: lash_core::ProcessStartDeclaration::engine(
+            kind,
+            payload,
+            lash_core::testing::declared_launch_for_testing(
+                lash_core::testing::fixture_engine_launch(),
+            ),
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
-        )
-        .with_env_ref(
-            (lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::AdmittedPluginConfig::default(),
-                lash_core::SessionPolicy {
-                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-                    ..lash_core::SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                        crate::MaxToolCalls::new(1024),
-                        crate::NoProgressBudget::bounded(12),
-                    )
-                },
-                lash_core::SessionToolAccess::ambient(),
-            ))
-            .stable_ref()
-            .expect("captured environment digest"),
         ),
     }))
-}
-
-fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
-    lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy {
-            model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-            ..lash_core::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                crate::NoProgressBudget::bounded(12),
-            )
-        },
-        lash_core::SessionToolAccess::ambient(),
-    )
 }
 
 /// The host front door records engine admission too: an unconfigured engine
@@ -462,12 +407,7 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         .expect("admitted start registers its row");
     assert_eq!(
         started.identity,
-        admit_ingress_engine(
-            INGRESS_ENGINE_KIND,
-            &payload,
-            Some(&ingress_engine_env_spec())
-        )
-        .expect("known payload and recorded environment"),
+        admit_ingress_engine(INGRESS_ENGINE_KIND, &payload).expect("known payload"),
         "the admitted row must carry the engine identity stamp"
     );
     let replay = ingress
@@ -487,12 +427,11 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
     Ok(())
 }
 
-/// FIG-1838: host ingress and session-owned recorded-intent execution must feed
-/// the same immutable request environment into engine admission. Otherwise an
-/// environment-derived identity changes solely with the route used to start it.
+/// FIG-1838: host ingress and session-owned recorded-intent execution admit an
+/// equivalent start to one identity: it never changes with the route used to
+/// start it.
 #[tokio::test]
-async fn equivalent_recorded_start_has_same_environment_sensitive_identity_across_routes()
--> Result<()> {
+async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Result<()> {
     let (core, registry) = ingress_engine_core(sqlite_memory_store_backend().await).await?;
     let payload = serde_json::json!({"program": "environment-sensitive"});
 
@@ -580,15 +519,14 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
         INGRESS_ENGINE_KIND,
         serde_json::json!({
             "payload": {"program": "environment-sensitive"},
-            "model": "mock-model",
         }),
         [],
     )
-    .expect("the environment produces a canonical definition");
+    .expect("the payload produces a canonical definition");
     assert_eq!(
         ingress_identity.definition_id,
         Some(expected.id()),
-        "the shared identity must prove the recorded environment reached admission"
+        "the shared identity is the payload's admission"
     );
     Ok(())
 }

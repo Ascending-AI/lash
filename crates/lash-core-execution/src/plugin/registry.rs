@@ -1003,6 +1003,10 @@ impl StaticPluginFactory {
     pub fn new(declaration: PluginDeclaration, spec: PluginSpec) -> Self {
         Self { declaration, spec }
     }
+
+    pub(crate) fn spec(&self) -> &PluginSpec {
+        &self.spec
+    }
 }
 
 struct SpecPlugin {

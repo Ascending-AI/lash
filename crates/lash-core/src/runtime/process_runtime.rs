@@ -1,20 +1,30 @@
-//! The runtime a process execution runs under, keyed by its minted id.
+//! The runtimes a process execution runs under, keyed by its minted id.
 //!
 //! A process is not a session: it has no session state, no session store, no
-//! agent frame and no catalog row. Its runtime is built from the host's ports,
-//! the environment its start captured and the controller the worker admitted
-//! for it. Every session-only service refuses it with
+//! agent frame and no catalog row. Every session-only service refuses it with
 //! [`crate::PluginError::NotASessionRuntime`].
+//!
+//! - An engine process runs under [`EngineProcessRuntime`]: the environment
+//!   its start stated, built only from the process components that
+//!   environment names, in its order (FIG-6034). Nothing of a session, no
+//!   session plugin and no protocol factory builds.
+//! - A session-turn process runs under [`SessionTurnRuntime`]: the host's
+//!   session plugin host and the plugin admission its segment adopted, from
+//!   which its child session is created (D5). It has no environment and no
+//!   composition.
 
 use std::sync::Arc;
 
-use super::session_manager::{ProcessServicesPorts, RuntimeSessionServices};
+use super::session_manager::{EngineProcessParts, ProcessServicesPorts, RuntimeSessionServices};
 
 /// The host's ports a process runtime is built from.
 pub struct ProcessRuntimePorts {
-    /// Clock, stores, effect host and engines. Its attachment
-    /// store is rebound to the process as holder when the runtime is built.
+    /// Clock, stores, effect host, engines and the process components. Its
+    /// attachment store is rebound to the process as holder when the
+    /// runtime is built.
     pub host: crate::RuntimeHostConfig,
+    /// The deployment's session plugin host: what a session the process
+    /// creates resolves against.
     pub plugin_host: Arc<crate::PluginHost>,
     pub process_work: crate::ProcessWorkWiring,
     /// The host owner identity the process's session work runs under.
@@ -22,119 +32,83 @@ pub struct ProcessRuntimePorts {
     pub turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
 }
 
-/// A process execution's runtime, keyed by its minted id.
-pub struct ProcessRuntimeContext {
+/// An engine process's runtime: its recorded environment's composition.
+pub struct EngineProcessRuntime {
     process_id: crate::ProcessId,
     services: Arc<RuntimeSessionServices>,
 }
 
-impl ProcessRuntimeContext {
-    /// Build the runtime `process` runs under: the environment its start
-    /// captured — its starter's policy, plugin config and tool authority — and this
-    /// worker's ports. An engine process and a session-turn process alike run
-    /// under the facts their start recorded; the worker supplies no default
-    /// for either (FIG-4396).
+impl EngineProcessRuntime {
+    /// Build the runtime `process` runs under (§5.1): its recorded
+    /// environment, verified against its reference, and the composition only
+    /// that environment's components make, in its order. No policy, helper
+    /// or default runs, and no session is read (§6.1).
+    ///
+    /// # Errors
+    ///
+    /// `process` is not an engine process, its environment does not load,
+    /// or a component it names does not build here.
     pub async fn for_record(
         ports: ProcessRuntimePorts,
         process: &crate::ProcessRecord,
     ) -> Result<Self, crate::PluginError> {
         let process_id = process.id.clone();
-        let Some(env_ref) = process.env_ref.as_ref() else {
+        let Some(env_ref) = process.env_ref() else {
             return Err(crate::PluginError::Session(format!(
-                "process `{process_id}` is missing a captured execution env"
+                "process `{process_id}` runs a session turn, which has no environment"
             )));
         };
-        let environment = crate::runtime::load_process_execution_env(
-            ports.host.durability.process_env_store.as_ref(),
-            env_ref,
-        )
-        .await?;
-        Self::build(ProcessRuntimeBuild {
-            process_id,
-            environment,
-            host: ports.host,
-            work: super::host::RuntimeWork::processes(ports.process_work),
-            plugin_host: ports.plugin_host,
-            lease_owner: ports.lease_owner,
-            turn_phase_probe: ports.turn_phase_probe,
-        })
-    }
-
-    fn build(build: ProcessRuntimeBuild) -> Result<Self, crate::PluginError> {
-        let ProcessRuntimeBuild {
-            process_id,
-            environment,
-            host,
-            work,
-            plugin_host,
-            lease_owner,
-            turn_phase_probe,
-        } = build;
-        // The process runs under the budgets its host config records,
-        // whatever the supplied plugin host was constructed with.
-        let plugins = Arc::unwrap_or_clone(plugin_host)
-            .with_execution_budgets(host.control.execution_budgets.clone())
-            .isolated_registry()
-            .defer_session(crate::plugin::PluginSessionRequest::process_creation(
-                process_id.clone(),
-                // Every rebuild reads the authority the process captured at creation.
-                crate::plugin::SessionAuthorityContext {
-                    tool_access: environment.tool_access.clone(),
-                    plugin_config: environment.plugin_config.clone(),
-                },
-            ))?;
-        // The process's attachments are held by its own record: a put it
-        // makes names `ProcessRecord(id)` as its referrer, and the cleanup its
-        // terminal publication plans ends that edge (ADR 0124).
-        let mut core = host;
-        let host_attachments = Arc::clone(&core.durability.attachment_store);
-        core.durability.attachment_store = Arc::new(
-            crate::RuntimeAttachmentStore::new_with_clock(
-                Arc::clone(host_attachments.backend()),
-                core.backend().attachment_referrers(),
-                crate::RuntimeOwner::Process(process_id.clone()),
-                Arc::clone(&core.clock),
-                host_attachments.policy(),
+        let env = Arc::new(
+            crate::runtime::load_process_env(
+                ports.host.durability.process_env_store.as_ref(),
+                env_ref,
             )
-            .with_reclamation_retry(host_attachments.reclamation_retry()),
+            .await?,
         );
-        let host = super::host::RuntimeHost { core, work };
+        let components = ports.host.process_engines.components();
+        let composition = components
+            .compose(&env, Some(&process_id))
+            .map_err(|refusal| crate::PluginError::ProcessEnvRefused { refusal })?;
+        let state = Arc::new(crate::plugin::ComponentState::new(
+            process_id.clone(),
+            &composition,
+            ports.host.tracing.limits(),
+            ports.host.data_limits,
+        ));
+        let policy = direct_policy(&env);
+        let engine = Arc::new(EngineProcessParts {
+            env,
+            composition,
+            state,
+        });
         Ok(Self {
-            services: Arc::new(RuntimeSessionServices::for_process(ProcessServicesPorts {
-                process_id: process_id.clone(),
-                environment,
-                host,
-                plugins,
-                runtime_lease_owner: lease_owner,
-                turn_phase_probe,
-            })),
+            services: process_services(&process_id, ports, Some(engine), Some(policy)),
             process_id,
         })
     }
 
-    /// Adopt `admission`, the plugin admission the running segment's start
-    /// recorded (FIG-4747): what the process writes, and every session it
-    /// creates, records plugin namespaces in those formats.
-    pub fn adopt_plugin_admission(&self, admission: crate::store::plugin_writers::PluginAdmission) {
-        self.services.adopt_plugin_admission(admission);
-    }
-}
-
-impl ProcessRuntimeContext {
-    /// The plugin session this runtime's process runs under.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn plugin_session(&self) -> &Arc<crate::PluginSession> {
-        self.services.plugin_session()
-    }
-
-    /// The catalog this runtime's process's steps resolve against: its own
-    /// plugin session's tools.
+    /// The catalog this runtime's process's steps resolve against: the
+    /// tools its environment's components provide that its environment's
+    /// tools admit.
     ///
     /// # Errors
     ///
-    /// The surface does not resolve.
+    /// The catalog does not build.
     pub fn step_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
         self.services.process_step_catalog()
+    }
+
+    /// The claim requirements this runtime's process carries while it holds
+    /// tool steps on `tools` (§6.2).
+    ///
+    /// # Errors
+    ///
+    /// This runtime has no composition.
+    pub fn step_requirements(
+        &self,
+        tools: &[crate::ToolId],
+    ) -> Result<Vec<String>, crate::PluginError> {
+        self.services.process_step_requirements(tools)
     }
 
     /// The tools `process`'s steps run under `cx`, the process actor's
@@ -142,34 +116,56 @@ impl ProcessRuntimeContext {
     ///
     /// # Errors
     ///
-    /// `process` is not this runtime's, or its surface does not resolve.
+    /// `process` is not this runtime's, or its catalog does not build.
     pub async fn step_tools(
         &self,
         cx: crate::ActorContext,
         process: &crate::ProcessRecord,
     ) -> Result<lash_core_execution::runtime::process::ProcessStepTools, crate::PluginError> {
-        if process.id != self.process_id {
-            return Err(crate::PluginError::attempt_fault(format!(
-                "the runtime of process `{}` cannot run process `{}`",
-                self.process_id, process.id
-            )));
-        }
+        require_own(&self.process_id, process)?;
         self.services.process_step_tools(cx, process).await
     }
 }
 
-/// Everything one process runtime is built from.
-struct ProcessRuntimeBuild {
+/// A session-turn process's runtime: the host's session plugins, from which
+/// its child session is created (D5).
+pub struct SessionTurnRuntime {
     process_id: crate::ProcessId,
-    environment: crate::ProcessExecutionEnvSpec,
-    host: crate::RuntimeHostConfig,
-    work: super::host::RuntimeWork,
-    plugin_host: Arc<crate::PluginHost>,
-    lease_owner: crate::LeaseOwnerIdentity,
-    turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+    services: Arc<RuntimeSessionServices>,
 }
 
-impl ProcessRuntimeContext {
+impl SessionTurnRuntime {
+    /// Build the runtime the session-turn `process` runs under: the host's
+    /// ports and session plugin host, with no environment and no
+    /// composition.
+    ///
+    /// # Errors
+    ///
+    /// `process` is not a session-turn process.
+    pub fn for_record(
+        ports: ProcessRuntimePorts,
+        process: &crate::ProcessRecord,
+    ) -> Result<Self, crate::PluginError> {
+        let process_id = process.id.clone();
+        if let crate::ProcessInput::Engine { kind, .. } = process.input.as_ref() {
+            return Err(crate::PluginError::Invoke(format!(
+                "process `{process_id}` runs engine `{kind}`, which its process actor drives by \
+                 advance"
+            )));
+        }
+        Ok(Self {
+            services: process_services(&process_id, ports, None, None),
+            process_id,
+        })
+    }
+
+    /// Adopt `admission`, the plugin admission the running segment's start
+    /// recorded (FIG-4747): every session the process creates records plugin
+    /// namespaces in those formats.
+    pub fn adopt_plugin_admission(&self, admission: crate::store::plugin_writers::PluginAdmission) {
+        self.services.adopt_plugin_admission(admission);
+    }
+
     /// The `SessionTurn` input of this runtime's process, or why it is not one.
     fn session_turn<'a>(
         &self,
@@ -182,12 +178,7 @@ impl ProcessRuntimeContext {
         ),
         crate::PluginError,
     > {
-        if process.id != self.process_id {
-            return Err(crate::PluginError::attempt_fault(format!(
-                "the runtime of process `{}` cannot run process `{}`",
-                self.process_id, process.id
-            )));
-        }
+        require_own(&self.process_id, process)?;
         match process.input.as_ref() {
             crate::ProcessInput::SessionTurn {
                 create_request,
@@ -254,4 +245,85 @@ impl ProcessRuntimeContext {
             .process_session_turn_outcome(&process.id, create_request.clone(), result)
             .await
     }
+}
+
+fn require_own(
+    process_id: &crate::ProcessId,
+    process: &crate::ProcessRecord,
+) -> Result<(), crate::PluginError> {
+    if process.id == *process_id {
+        return Ok(());
+    }
+    Err(crate::PluginError::attempt_fault(format!(
+        "the runtime of process `{process_id}` cannot run process `{}`",
+        process.id
+    )))
+}
+
+/// The services a process runtime runs through, keyed by `process_id`.
+fn process_services(
+    process_id: &crate::ProcessId,
+    ports: ProcessRuntimePorts,
+    engine: Option<Arc<EngineProcessParts>>,
+    policy: Option<crate::SessionPolicy>,
+) -> Arc<RuntimeSessionServices> {
+    let ProcessRuntimePorts {
+        host: mut core,
+        plugin_host,
+        process_work,
+        lease_owner,
+        turn_phase_probe,
+    } = ports;
+    // The process's attachments are held by its own record: a put it makes
+    // names `ProcessRecord(id)` as its referrer, and the cleanup its terminal
+    // publication plans ends that edge (ADR 0124).
+    let host_attachments = Arc::clone(&core.durability.attachment_store);
+    core.durability.attachment_store = Arc::new(
+        crate::RuntimeAttachmentStore::new_with_clock(
+            Arc::clone(host_attachments.backend()),
+            core.backend().attachment_referrers(),
+            crate::RuntimeOwner::Process(process_id.clone()),
+            Arc::clone(&core.clock),
+            host_attachments.policy(),
+        )
+        .with_reclamation_retry(host_attachments.reclamation_retry()),
+    );
+    // A session the process creates runs under the budgets the host config
+    // records, whatever the supplied plugin host was constructed with.
+    let plugin_host = Arc::new(
+        Arc::unwrap_or_clone(plugin_host)
+            .with_execution_budgets(core.control.execution_budgets.clone()),
+    );
+    let host = super::host::RuntimeHost {
+        core,
+        work: super::host::RuntimeWork::processes(process_work),
+    };
+    Arc::new(RuntimeSessionServices::for_process(ProcessServicesPorts {
+        process_id: process_id.clone(),
+        engine,
+        policy,
+        host,
+        plugin_host,
+        runtime_lease_owner: lease_owner,
+        turn_phase_probe,
+    }))
+}
+
+/// The policy an engine process's direct calls run under: its environment's
+/// model, generation, charge safety, attachment rules and tool-call limit.
+/// A process has no turn, so the turn and progress bounds of the policy are
+/// never read; they are stated unbounded only to complete the value.
+fn direct_policy(env: &crate::ProcessEnv) -> crate::SessionPolicy {
+    let mut policy = crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        env.max_tool_calls(),
+        crate::NoProgressBudget::Unbounded,
+    );
+    policy.attachment_acceptance = Arc::clone(env.attachments());
+    if let Some(model) = env.model() {
+        policy.model = Some(model.profile().clone());
+        policy.generation = model.generation().clone();
+        policy.charge_safety = model.charge_safety().clone();
+    }
+    policy
 }

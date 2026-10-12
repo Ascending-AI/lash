@@ -4,7 +4,7 @@ use lash_trace::TraceSink;
 use std::sync::Arc;
 
 use super::process::{
-    ArtifactReferrerPorts, ProcessEngineRegistry, ProcessExecutionEnvStore, ProcessRegistry,
+    ArtifactReferrerPorts, ProcessEngineRegistry, ProcessEnvStore, ProcessRegistry,
 };
 use super::{DeploymentStore, ProcessWorkSubstrate, ProcessWorkWiring};
 
@@ -71,7 +71,7 @@ pub struct RuntimeDurabilityConfig {
     /// The revision retention every session this host creates is recorded
     /// with ([`DataRetentionConfig::session_revisions`]).
     pub session_retention: crate::Retention,
-    pub process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+    pub process_env_store: Arc<dyn ProcessEnvStore>,
     /// Where a turn's environment sync records its preparation, which the
     /// sync's outcome journals by digest (FIG-5133).
     pub turn_prelude_store: Arc<dyn crate::TurnPreludeStore>,
@@ -481,10 +481,7 @@ impl RuntimeHostConfig {
     }
 
     /// Replace the process execution-environment store.
-    pub fn with_process_env_store(
-        mut self,
-        process_env_store: Arc<dyn ProcessExecutionEnvStore>,
-    ) -> Self {
+    pub fn with_process_env_store(mut self, process_env_store: Arc<dyn ProcessEnvStore>) -> Self {
         self.durability.process_env_store = process_env_store;
         self
     }

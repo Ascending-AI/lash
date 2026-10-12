@@ -146,9 +146,6 @@ impl DeclaredStart {
                 },
             );
         }
-        if let Some(refusal) = self.start.admission_refusal() {
-            return Err(refusal);
-        }
         Ok(())
     }
 
@@ -641,8 +638,8 @@ mod tests {
     fn declared_start() -> crate::PendingResolver {
         let start = crate::StartProcessIntent {
             owner: crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
-            declaration: crate::ProcessStartDeclaration::new(
-                crate::testing::held_engine_input(serde_json::Value::Null),
+            declaration: crate::testing::held_engine_declaration(
+                serde_json::Value::Null,
                 crate::ProcessOriginator::host(),
                 crate::Lifetime::Detached,
             ),

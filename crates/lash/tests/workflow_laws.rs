@@ -104,23 +104,40 @@ impl lash::tools::StaticToolExecute for Echo {
     }
 }
 
-fn echo_tool() -> Arc<lash::tools::StaticToolProvider<Echo>> {
+/// The component that contributes `tools.echo` to a workflow process.
+const ECHO_TOOLS: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new("workflow-echo", lash::plugins::FormatVersion::ONE);
+
+fn echo_definitions() -> Vec<lash::tools::ToolDefinition> {
     use lash::tools::ToolDefinitionBindingExt as _;
+    vec![
+        lash::tools::ToolDefinition::raw(
+            "tool:echo",
+            "echo",
+            "Answers its value.",
+            serde_json::json!({"type": "object"}),
+            serde_json::json!({}),
+        )
+        .expect("tool schema")
+        .with_execution(std::time::Duration::from_secs(120))
+        .with_tool_binding(lash::tools::ToolBinding::new(["tools"], "echo")),
+    ]
+}
+
+fn echo_tool() -> Arc<lash::tools::StaticToolProvider<Echo>> {
     Arc::new(lash::tools::StaticToolProvider::new(
-        vec![
-            lash::tools::ToolDefinition::raw(
-                "tool:echo",
-                "echo",
-                "Answers its value.",
-                serde_json::json!({"type": "object"}),
-                serde_json::json!({}),
-            )
-            .expect("tool schema")
-            .with_execution(std::time::Duration::from_secs(120))
-            .with_tool_binding(lash::tools::ToolBinding::new(["tools"], "echo")),
-        ],
+        echo_definitions(),
         Echo,
     ))
+}
+
+fn echo_component() -> lash::process::StaticProcessComponent {
+    lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(ECHO_TOOLS.component()),
+        lash::plugins::PluginSpec::new().with_tool_provider(echo_tool()),
+    )
+    .as_component(ECHO_TOOLS.format())
+    .expect("the echo tools are a process component")
 }
 
 async fn core() -> lash::LashCore {
@@ -156,13 +173,26 @@ async fn core_with_process_tools(
             lash::vm::TYPESCRIPT_DIALECT,
             bounds,
         )))
-        .tools(echo_tool());
+        .tools(echo_tool())
+        .process_component(Arc::new(echo_component()), ECHO_TOOLS);
+    // A process a workflow starts runs under its starter's environment.
     let builder = if process_tools {
-        builder.plugin(Arc::new(
-            lash::process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::session_or_starter,
-            ),
-        ))
+        builder
+            .plugin(Arc::new(
+                lash::process_controls::SessionProcessAdminPluginFactory::new(
+                    lash_core::lifetime::session_or_starter,
+                    lash::process::env::policy::from_run(|_| Ok(Vec::new())),
+                ),
+            ))
+            .process_component(
+                Arc::new(lash::process_controls::ProcessControlsComponent::new(
+                    lash_core::lifetime::session_or_starter,
+                    lash::process::env::policy::inherit_or(lash::process::env::policy::refuse(
+                        "a workflow process starts only inside a process",
+                    )),
+                )),
+                lash::process_controls::PROCESS_CONTROLS_CONFIG,
+            )
     } else {
         builder
     };
@@ -180,16 +210,27 @@ async fn core_with_process_tools(
         .expect("the core builds")
 }
 
-fn environment() -> lash_core::ProcessExecutionEnvSpec {
-    lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash::TurnBudget::bounded(32),
-            lash::MaxToolCalls::new(1024),
-            lash::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
+/// The environment a workflow process runs under: `tools.echo`, and with
+/// `process_tools` the process controls, each from its component.
+fn environment(process_tools: bool) -> lash::process::ProcessEnv {
+    let mut tools = echo_definitions();
+    let mut builder = lash::process::ProcessEnv::builder(
+        lash_core::SessionToolAccess::restricted(std::iter::empty()).expect("no tools"),
+        lash::MaxToolCalls::new(1024),
     )
+    .component(ECHO_TOOLS, &());
+    if process_tools {
+        use lash::process_controls::ProcessControlTool;
+        tools.extend(
+            [ProcessControlTool::Start, ProcessControlTool::Await]
+                .map(lash::process_controls::process_tool_definition),
+        );
+        builder = builder.component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &());
+    }
+    builder
+        .tools(lash_core::SessionToolAccess::restricted(tools).expect("the workflow tools"))
+        .build()
+        .expect("the environment builds")
 }
 
 fn published(publish: WorkflowPublish) -> WorkflowPublication {
@@ -202,7 +243,7 @@ fn published(publish: WorkflowPublish) -> WorkflowPublication {
 /// Starts `definition` as `guarded(name)` and answers the process.
 async fn start(
     core: &lash::LashCore,
-    env_ref: &lash_core::ProcessExecutionEnvRef,
+    env_ref: &lash_core::ProcessEnvRef,
     definition: &lash_core::ProcessDefinition,
     key: &str,
     name: &str,
@@ -214,24 +255,30 @@ async fn start(
 
 async fn start_with(
     core: &lash::LashCore,
-    env_ref: &lash_core::ProcessExecutionEnvRef,
+    env_ref: &lash_core::ProcessEnvRef,
     definition: &lash_core::ProcessDefinition,
     key: &str,
     args: serde_json::Map<String, serde_json::Value>,
 ) -> lash_core::ProcessId {
     core.processes()
         .start(
-            lash_core::ProcessStartRequest::new(
-                lash_core::ProcessStartTarget::Definition {
-                    definition_id: definition.id.clone(),
-                    signature_claim: Some(definition.signature.clone()),
-                    args,
-                },
+            lash_core::ProcessStartRequest::definition(
+                definition.id.clone(),
+                Some(definition.signature.clone()),
+                args,
+                lash_core::EngineLaunch::new(
+                    env_ref.clone(),
+                    core.processes()
+                        .engine_defaults(
+                            lash::process::LASH_VM_ENGINE_KIND,
+                            &serde_json::Value::Null,
+                        )
+                        .expect("the kernel states its settings"),
+                ),
                 lash_core::ProcessOriginator::host(),
                 lash_core::LifetimeDecision::Detached,
             )
-            .with_host_start_key(key)
-            .with_env_ref(env_ref.clone()),
+            .with_host_start_key(key),
             core.effect_host(),
         )
         .await
@@ -265,7 +312,7 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     let core = core().await;
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
-    let environment = environment();
+    let environment = environment(true);
     let checked = artifacts
         .workflow_environment(&environment)
         .await
@@ -354,12 +401,7 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     // The first definition is immutable: a process of it runs the document
     // it was admitted with, beside a process of the edited one.
     let env_ref = artifacts
-        .publish_process_env(
-            &pin,
-            &core
-                .resolve_process_environment(environment.clone())
-                .expect("the process renderer resolves"),
-        )
+        .publish_process_env(&pin, &environment)
         .await
         .expect("publish the process environment");
     let kept = start(&core, &env_ref, &first.definition, "first", "operator").await;
@@ -392,7 +434,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     let core = core().await;
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
-    let environment = environment();
+    let environment = environment(true);
     let checked = artifacts
         .workflow_environment(&environment)
         .await
@@ -433,12 +475,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     };
 
     let env_ref = artifacts
-        .publish_process_env(
-            &pin,
-            &core
-                .resolve_process_environment(environment.clone())
-                .expect("the process renderer resolves"),
-        )
+        .publish_process_env(&pin, &environment)
         .await
         .expect("publish the process environment");
     let args = serde_json::json!({"a": "x", "b": "y", "c": "z"});
@@ -533,7 +570,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
     let core = core().await;
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
-    let environment = environment();
+    let environment = environment(true);
     let checked = artifacts
         .workflow_environment(&environment)
         .await
@@ -561,12 +598,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
             .expect("the publication answers"),
     );
     let env_ref = artifacts
-        .publish_process_env(
-            &pin,
-            &core
-                .resolve_process_environment(environment.clone())
-                .expect("the process renderer resolves"),
-        )
+        .publish_process_env(&pin, &environment)
         .await
         .expect("publish the process environment");
     let mut args = serde_json::Map::new();
@@ -655,7 +687,7 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
     let first = core_over(open().await, "first").await;
     let artifacts = first.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
-    let environment = environment();
+    let environment = environment(true);
     let document = lash::workflow::document::parse_document(GUARDED).expect("the document parses");
     let publication = published(
         artifacts
@@ -669,12 +701,7 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
             .expect("the publication answers"),
     );
     let env_ref = artifacts
-        .publish_process_env(
-            &pin,
-            &first
-                .resolve_process_environment(environment.clone())
-                .expect("the process renderer resolves"),
-        )
+        .publish_process_env(&pin, &environment)
         .await
         .expect("publish the process environment");
     let process = start(
@@ -724,7 +751,7 @@ async fn typescript_import_reports_front_end_errors_with_source_spans() {
     );
     let core = core_with_process_tools(stores, "import", false).await;
     let artifacts = core.host_artifacts();
-    let environment = environment();
+    let environment = environment(false);
     let checked = artifacts
         .workflow_environment(&environment)
         .await
@@ -790,7 +817,7 @@ async fn typescript_import_reports_missing_tools_as_admission_refusals() {
     let source = lash::typescript::print(&document).expect("the printer accepts the document");
     let WorkflowImport::Admission(WorkflowAdmissionRefusal::Document(refusal)) = core
         .host_artifacts()
-        .import_typescript_workflow(&source, &environment())
+        .import_typescript_workflow(&source, &environment(true))
         .await
         .expect("import answers")
     else {

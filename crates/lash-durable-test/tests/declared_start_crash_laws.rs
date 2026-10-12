@@ -333,6 +333,9 @@ impl Spawn {
                         .plugin(Arc::new(
                             lash::process_controls::SessionProcessAdminPluginFactory::new(
                                 lash_core::lifetime::starter,
+                                lash_core::runtime::env_policy::policy::from_run(
+                                    |_| Ok(Vec::new()),
+                                ),
                             ),
                         ))
                         .tools(Arc::new(Echo(Arc::clone(&self.echoes))))
@@ -381,26 +384,19 @@ impl Spawn {
             .host_artifacts()
             .publish_process_env(
                 &lash_core::HostArtifactPin::mint(),
-                &lash_core::ProcessExecutionEnvSpec::new(
-                    lash_core::AdmittedPluginConfig::default(),
-                    lash_core::SessionPolicy::new(
-                        lash::TurnBudget::Unbounded,
-                        lash::MaxToolCalls::new(16),
-                        lash_core::NoProgressBudget::bounded(12),
-                    ),
-                    lash_core::SessionToolAccess::ambient(),
-                ),
+                &lash_core_execution::testing::process_env_with_limit(16),
             )
             .await
             .map_err(|error| format!("publish the target's environment: {error}"))?;
-        let mut request = lash_core::ProcessStartRequest::new(
-            lash_core_execution::testing::held_engine_input(serde_json::json!({
+        let mut request = lash_core::ProcessStartRequest::engine(
+            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+            serde_json::json!({
                 "fixture": "migrated-tools",
-            })),
+            }),
+            lash_core::EngineLaunch::new(env_ref, None),
             lash_core::ProcessOriginator::host(),
             lash_core::LifetimeDecision::Detached,
-        )
-        .with_env_ref(env_ref);
+        );
         request.observers = vec![session()];
         core.processes()
             .start(request, core.effect_host())
@@ -575,6 +571,7 @@ impl Scenario for Spawn {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
+            serves: Vec::new(),
             max_active: 8,
         }
     }
@@ -949,3 +946,6 @@ tiered_laws!(
     declared_start_retention_hold_blocks_prune_until_consumed,
     declared_start_prune_after_hold_release_before_settlement_replays_terminal,
 );
+
+#[path = "declared_start_crash_laws/start_policy.rs"]
+mod start_policy;

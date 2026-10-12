@@ -709,15 +709,60 @@ impl lash::plugins::SessionPlugin for StatePlugin {
         let view = reg.state();
         reg.tools().provider(Arc::new(StateTools {
             world: Arc::clone(&self.world),
-            view,
+            view: Some(view),
         }))
+    }
+}
+
+/// The state tools as the process component of the same id: a process's
+/// step reads the namespace its committed step outcomes published.
+struct StateComponent {
+    world: Arc<World>,
+}
+
+const STATE_COMPONENT: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new(STATE_PLUGIN, lash_core::FormatVersion::ONE);
+
+impl lash_core::plugin::ProcessComponentFactory for StateComponent {
+    fn declaration(&self) -> lash_core::plugin::ProcessComponentDeclaration {
+        lash_core::plugin::ProcessComponentDeclaration::initial(
+            STATE_PLUGIN,
+            STATE_COMPONENT.format(),
+        )
+        .expect("the state component's id")
+    }
+
+    fn config_type(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<()>()
+    }
+
+    fn validate(
+        &self,
+        _entry: &lash_core::ProcessComponentEntry,
+        _env: &lash_core::ProcessEnv,
+    ) -> Result<(), lash_core::ProcessEnvRefusal> {
+        Ok(())
+    }
+
+    fn build(
+        &self,
+        cx: &lash_core::plugin::ProcessComponentContext<'_>,
+    ) -> Result<lash_core::plugin::ProcessComponentSpec, lash::plugins::PluginError> {
+        Ok(lash_core::plugin::ProcessComponentSpec {
+            tool_providers: vec![Arc::new(StateTools {
+                world: Arc::clone(&self.world),
+                view: cx.state.clone(),
+            })],
+            ..lash_core::plugin::ProcessComponentSpec::default()
+        })
     }
 }
 
 /// The plugin's tools, reading its namespace through its published view.
 struct StateTools {
     world: Arc<World>,
-    view: lash::plugins::PluginStateView,
+    /// `None` only while a process composition is admitted.
+    view: Option<lash::plugins::PluginStateView>,
 }
 
 #[async_trait::async_trait]
@@ -743,7 +788,7 @@ impl lash_core::ToolProvider for StateTools {
             // whether its outcome had committed by the time it showed.
             let mut seen = None;
             for _ in 0..OBSERVE_YIELDS {
-                seen = self.view.get(STATE_KEY);
+                seen = self.view.as_ref().and_then(|view| view.get(STATE_KEY));
                 if seen.is_some() {
                     break;
                 }
@@ -1315,6 +1360,7 @@ impl Scenario for Crash {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
+            serves: Vec::new(),
             max_active: 4,
         }
     }
@@ -1508,10 +1554,27 @@ impl lash_core_execution::ProcessEngine for StateEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &lash_core_execution::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, lash_core_execution::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash_core_execution::EngineSettings>,
+    ) -> std::result::Result<(), lash_core_execution::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(lash_core_execution::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<
+        Option<lash_core_execution::EngineSettings>,
+        lash_core_execution::PluginError,
+    > {
         Ok(None)
     }
 
@@ -1615,30 +1678,17 @@ impl lash_core_execution::ProcessEngine for StateEngine {
     }
 }
 
-/// The environment the process's start captures: the core's plugins at
-/// their defaults, and the standard protocol's builtin renderer.
-fn process_environment() -> lash_core_execution::ProcessExecutionEnvSpec {
-    let mut environment = lash_core_execution::ProcessExecutionEnvSpec::new(
-        lash_core_execution::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(16),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core_execution::SessionToolAccess::ambient(),
-    );
-    environment.render = Some(lash_core::RecordedRender {
-        renderer_id: lash::render::ToolOutputRendererSlot::default()
-            .0
-            .id()
-            .to_owned(),
-        params: serde_json::to_value(lash::render::ResolvedStandardRenderConfig {
-            defaults: lash::render::ToolRenderParams::default(),
-            per_tool: BTreeMap::new(),
-        })
-        .expect("the render config encodes"),
-    });
-    environment
+/// The environment a host start states in these laws: no tools and no
+/// components.
+fn process_environment() -> lash_core::ProcessEnv {
+    lash_core::ProcessEnv::builder(
+        lash_core::SessionToolAccess::restricted([STATE_SET, STATE_OBSERVE].map(state_definition))
+            .expect("the state tools"),
+        lash_core::MaxToolCalls::new(16),
+    )
+    .component(STATE_COMPONENT, &())
+    .build()
+    .expect("the process environment builds")
 }
 
 /// The process scenario on one dialect, fresh for every matrix cell: a
@@ -1693,9 +1743,12 @@ impl ProcessCrash {
                     .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
-                    .plugin(Arc::new(StatePlugin {
-                        world: Arc::clone(&self.world),
-                    }))
+                    .process_component(
+                        Arc::new(StateComponent {
+                            world: Arc::clone(&self.world),
+                        }),
+                        STATE_COMPONENT,
+                    )
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
                         lash::persistence::LeaseOwnerId::new("process-state-deployment"),
                         lash::persistence::LeaseIncarnationId::new("process-state-boot"),
@@ -1754,6 +1807,7 @@ impl Scenario for ProcessCrash {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
+            serves: lash::testing::node_serves(&self.core()),
             max_active: 4,
         }
     }
@@ -1775,15 +1829,13 @@ impl Scenario for ProcessCrash {
             .publish_process_env(&lash_core::HostArtifactPin::mint(), &process_environment())
             .await
             .map_err(|error| format!("publish the environment: {error}"))?;
-        let request = lash_core::ProcessStartRequest::new(
-            lash_core::ProcessInput::Engine {
-                kind: STATE_ENGINE.to_owned(),
-                payload: serde_json::Value::Null,
-            },
+        let request = lash_core::ProcessStartRequest::engine(
+            STATE_ENGINE.to_owned(),
+            serde_json::Value::Null,
+            lash_core::EngineLaunch::new(env_ref, None),
             lash_core::ProcessOriginator::host(),
             lash_core::LifetimeDecision::Detached,
-        )
-        .with_env_ref(env_ref);
+        );
         let process = core
             .processes()
             .start(request, core.effect_host())

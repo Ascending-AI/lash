@@ -705,26 +705,6 @@ fn plugin_formats_stamp_every_state_write() {
         let options: crate::PluginOptions =
             rmp_serde::from_slice(&rmp_serde::to_vec_named(&options).unwrap()).unwrap();
         assert_eq!(options.plugins["format-probe"].format_version, writer);
-        let environment = crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::new(encoded_config, 3),
-            crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                crate::NoProgressBudget::bounded(12),
-            ),
-            crate::SessionToolAccess::ambient(),
-        );
-        let environment: crate::ProcessExecutionEnvSpec =
-            rmp_serde::from_slice(&rmp_serde::to_vec_named(&environment).unwrap()).unwrap();
-        assert_eq!(
-            environment
-                .plugin_config
-                .config
-                .namespace("format-probe")
-                .unwrap()
-                .format_version,
-            writer
-        );
     }
     assert!(
         host.encode_state(

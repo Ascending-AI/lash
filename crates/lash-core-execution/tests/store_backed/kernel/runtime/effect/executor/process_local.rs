@@ -26,15 +26,7 @@ mod tests {
             env_store.as_ref(),
             "observed-effects",
             engine_registration("observed-effects", "valid"),
-            crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                    lash_core_execution::NoProgressBudget::bounded(12),
-                ),
-                crate::SessionToolAccess::ambient(),
-            ),
+            lash_core_execution::testing::process_env_with_limit(1024),
         )
         .await;
         let started: crate::facade_support::ObservedProcess =
@@ -138,18 +130,14 @@ mod tests {
         let backend = crate::support::sqlite_memory_store_backend().await;
         let store = backend.process_env_store();
         let pin = crate::testing::host_pin_claim_for_testing();
-        let spec = crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                lash_core_execution::NoProgressBudget::bounded(12),
-            ),
-            crate::SessionToolAccess::ambient(),
-        );
-        let env_ref = crate::publish_process_execution_env(store.as_ref(), &pin, &spec)
-            .await
-            .expect("source publication");
+        let spec = lash_core_execution::testing::process_env_with_limit(1024);
+        let env_ref = lash_core_execution::testing::publish_process_env_for_testing(
+            store.as_ref(),
+            &pin,
+            &spec,
+        )
+        .await
+        .expect("source publication");
         let scope = crate::ExecutionScope::runtime_operation("load-retention-law");
         let outcome = crate::RuntimeEffectLocalExecutor::execution_env_load(
             Arc::clone(&store),
@@ -176,7 +164,7 @@ mod tests {
             .await
             .expect("source pin ends");
         assert_eq!(
-            crate::load_process_execution_env(store.as_ref(), &env_ref)
+            crate::load_process_env(store.as_ref(), &env_ref)
                 .await
                 .expect("replay resolves bytes"),
             spec
@@ -189,7 +177,7 @@ mod tests {
             .expect("load journal ends");
         assert_eq!(
             store
-                .get_process_execution_env(&env_ref)
+                .get_process_env(&env_ref)
                 .await
                 .expect("read reclaimed bytes"),
             None
@@ -204,8 +192,7 @@ mod tests {
         let engines = crate::ProcessEngineRegistry::new().with_registration(
             crate::ProcessEngineRegistration::new(
                 Arc::new(crate::testing::FixtureProcessEngine),
-                crate::ProcessEngineAdmission::new("testing-fixture", |kind, payload, env| {
-                    assert!(env.is_some(), "admission receives the recorded environment");
+                crate::ProcessEngineAdmission::new("testing-fixture", |kind, payload| {
                     if payload["marker"] == "invalid" {
                         return Err(crate::PluginError::Session(
                             "invalid fixture payload".to_owned(),
@@ -228,15 +215,7 @@ mod tests {
                 env_store.as_ref(),
                 marker,
                 registration,
-                crate::ProcessExecutionEnvSpec::new(
-                    crate::AdmittedPluginConfig::default(),
-                    crate::SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                        crate::MaxToolCalls::new(1024),
-                        lash_core_execution::NoProgressBudget::bounded(12),
-                    ),
-                    crate::SessionToolAccess::ambient(),
-                ),
+                lash_core_execution::testing::process_env_with_limit(1024),
             )
             .await;
             let crate::RuntimeEffectCommand::Process { command } = envelope.command else {
@@ -314,15 +293,7 @@ mod tests {
             env_store.as_ref(),
             "seam-admission",
             registration,
-            crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                    lash_core_execution::NoProgressBudget::bounded(12),
-                ),
-                crate::SessionToolAccess::ambient(),
-            ),
+            lash_core_execution::testing::process_env_with_limit(1024),
         )
         .await;
         let outcome = crate::RuntimeEffectLocalExecutor::processes(
@@ -362,11 +333,27 @@ mod tests {
             crate::ProcessInput::Engine {
                 kind: "testing-fixture".to_string(),
                 payload: serde_json::json!({"marker": marker}),
+                launch: lash_core_execution::testing::fixture_engine_launch(),
             },
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
         )
         .with_start_key(Some(crate::StartKey::for_host(key)))
+    }
+
+    /// `registration` launched under `env`.
+    fn with_env(
+        mut registration: crate::ProcessRegistration,
+        env: crate::ProcessEnvRef,
+    ) -> crate::ProcessRegistration {
+        if let crate::ProcessInput::Engine { kind, payload, .. } = registration.input.as_ref() {
+            registration.input = Arc::new(crate::ProcessInput::Engine {
+                kind: kind.clone(),
+                payload: payload.clone(),
+                launch: crate::EngineLaunch::new(env, None),
+            });
+        }
+        registration
     }
 
     fn end(referrer: crate::ArtifactReferrer) -> crate::ResolvedArtifactCleanup {
@@ -377,10 +364,10 @@ mod tests {
     }
 
     async fn start_envelope(
-        env_store: &dyn crate::ProcessExecutionEnvStore,
+        env_store: &dyn crate::ProcessEnvStore,
         effect_id: &str,
         registration: crate::ProcessRegistration,
-        env_spec: crate::ProcessExecutionEnvSpec,
+        env_spec: crate::ProcessEnv,
     ) -> crate::RuntimeEffectEnvelope {
         let starter = crate::ExecutionScope::runtime_operation("runtime")
             .journal_identity()
@@ -389,9 +376,11 @@ mod tests {
             start_key: registration.start_key.clone().expect("start key"),
             starter,
         });
-        let env_ref = crate::publish_process_execution_env(env_store, &claim, &env_spec)
-            .await
-            .expect("publish referenced environment");
+        let env_ref = lash_core_execution::testing::publish_process_env_for_testing(
+            env_store, &claim, &env_spec,
+        )
+        .await
+        .expect("publish referenced environment");
         crate::RuntimeEffectEnvelope::new(
             crate::RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(
@@ -403,7 +392,7 @@ mod tests {
                 effect_id,
             ),
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
-                registration: registration.with_execution_env_ref(Some(env_ref)).into(),
+                registration: with_env(registration, env_ref).into(),
                 observers: Vec::new(),
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
@@ -452,7 +441,7 @@ mod tests {
     fn carry_env(
         from: crate::ArtifactReferrer,
         to: crate::ArtifactReferrer,
-        env_ref: &crate::ProcessExecutionEnvRef,
+        env_ref: &crate::ProcessEnvRef,
     ) -> crate::ResolvedArtifactCleanup {
         crate::ResolvedArtifactCleanup {
             referrer: from,
@@ -471,16 +460,8 @@ mod tests {
         let key = "owned-env-start";
         let backend = crate::support::sqlite_memory_store_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
-        let env_store: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
-        let env_spec = crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                lash_core_execution::NoProgressBudget::bounded(12),
-            ),
-            crate::SessionToolAccess::ambient(),
-        );
+        let env_store: Arc<dyn crate::ProcessEnvStore> = backend.process_env_store();
+        let env_spec = lash_core_execution::testing::process_env_with_limit(1024);
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let command = start_envelope(
             env_store.as_ref(),
@@ -534,7 +515,7 @@ mod tests {
             .expect("end process environment referrer");
         assert_eq!(
             env_store
-                .get_process_execution_env(&env_ref)
+                .get_process_env(&env_ref)
                 .await
                 .expect("read reclaimed environment"),
             None,
@@ -545,37 +526,33 @@ mod tests {
     /// A store that fences the start just before its first acquire, as a
     /// concurrent attempt can settle the same key before this one stages.
     struct FenceStartBeforeFirstAcquire {
-        inner: Arc<dyn crate::ProcessExecutionEnvStore>,
+        inner: Arc<dyn crate::ProcessEnvStore>,
         start: crate::ArtifactReferrer,
         interleavings: AtomicUsize,
     }
 
     #[async_trait::async_trait]
-    impl crate::ProcessExecutionEnvStore for FenceStartBeforeFirstAcquire {
-        async fn publish_process_execution_env(
+    impl crate::ProcessEnvStore for FenceStartBeforeFirstAcquire {
+        async fn publish_process_env(
             &self,
             claim: &crate::ReferrerClaim,
-            env_ref: &crate::ProcessExecutionEnvRef,
+            env_ref: &crate::ProcessEnvRef,
             bytes: &[u8],
         ) -> Result<(), crate::ArtifactStoreError> {
-            self.inner
-                .publish_process_execution_env(claim, env_ref, bytes)
-                .await
+            self.inner.publish_process_env(claim, env_ref, bytes).await
         }
 
-        async fn acquire_process_execution_env(
+        async fn acquire_process_env(
             &self,
             claim: &crate::ReferrerClaim,
-            env_ref: &crate::ProcessExecutionEnvRef,
+            env_ref: &crate::ProcessEnvRef,
         ) -> Result<(), crate::ArtifactStoreError> {
             if self.interleavings.fetch_add(1, Ordering::SeqCst) == 0 {
                 self.inner
                     .end_process_env_referrer(&end(self.start.clone()))
                     .await?;
             }
-            self.inner
-                .acquire_process_execution_env(claim, env_ref)
-                .await
+            self.inner.acquire_process_env(claim, env_ref).await
         }
 
         async fn end_process_env_referrer(
@@ -585,11 +562,11 @@ mod tests {
             self.inner.end_process_env_referrer(cleanup).await
         }
 
-        async fn get_process_execution_env(
+        async fn get_process_env(
             &self,
-            env_ref: &crate::ProcessExecutionEnvRef,
+            env_ref: &crate::ProcessEnvRef,
         ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
-            self.inner.get_process_execution_env(env_ref).await
+            self.inner.get_process_env(env_ref).await
         }
     }
 
@@ -605,24 +582,16 @@ mod tests {
         let key = "raced-staging-owner-start";
         let backend = crate::support::sqlite_memory_store_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
-        let env_spec = crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                lash_core_execution::NoProgressBudget::bounded(12),
-            ),
-            crate::SessionToolAccess::ambient(),
-        );
+        let env_spec = lash_core_execution::testing::process_env_with_limit(1024);
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let bytes = env_spec.to_store_bytes().expect("encode environment");
-        let inner: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
+        let inner: Arc<dyn crate::ProcessEnvStore> = backend.process_env_store();
         // The host pin's own edge, exactly as a host holds it.
         let subscription = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
         let subscription_claim =
             crate::ReferrerClaim::unguarded(subscription.clone()).expect("subscription pin claim");
         inner
-            .publish_process_execution_env(&subscription_claim, &env_ref, &bytes)
+            .publish_process_env(&subscription_claim, &env_ref, &bytes)
             .await
             .expect("publish the subscription environment");
         let env_store = Arc::new(FenceStartBeforeFirstAcquire {
@@ -641,8 +610,7 @@ mod tests {
                 "raced-staging-owner-start",
             ),
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
-                registration: engine_registration(key, "delivery")
-                    .with_execution_env_ref(Some(env_ref.clone()))
+                registration: with_env(engine_registration(key, "delivery"), env_ref.clone())
                     .into(),
                 observers: Vec::new(),
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
@@ -654,7 +622,7 @@ mod tests {
             crate::testing::process_engine_fixture(),
             crate::runtime::HostStartAdmission::default(),
         )
-        .with_process_env_store(Arc::clone(&env_store) as Arc<dyn crate::ProcessExecutionEnvStore>);
+        .with_process_env_store(Arc::clone(&env_store) as Arc<dyn crate::ProcessEnvStore>);
 
         let started = started_record(
             execute_start(envelope, executor)
@@ -679,7 +647,7 @@ mod tests {
             .expect("end the subscription pin");
         assert_eq!(
             inner
-                .get_process_execution_env(&env_ref)
+                .get_process_env(&env_ref)
                 .await
                 .expect("read the retained environment"),
             Some(bytes.clone()),
@@ -691,7 +659,7 @@ mod tests {
             .expect("end the process referrer");
         assert_eq!(
             inner
-                .get_process_execution_env(&env_ref)
+                .get_process_env(&env_ref)
                 .await
                 .expect("read the reclaimed environment"),
             None,
@@ -710,22 +678,9 @@ mod tests {
     async fn a_changed_content_retry_after_a_crash_keeps_the_retained_environment() {
         let backend = crate::support::sqlite_memory_store_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
-        let env_store: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
-        let env = |budget: crate::TurnBudget| {
-            crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(
-                    budget,
-                    crate::MaxToolCalls::new(1024),
-                    lash_core_execution::NoProgressBudget::bounded(12),
-                ),
-                crate::SessionToolAccess::ambient(),
-            )
-        };
-        let first_env = env(crate::TurnBudget::Unbounded);
-        let retry_env = env(crate::TurnBudget::Bounded(
-            std::num::NonZeroUsize::new(3).expect("non-zero budget"),
-        ));
+        let env_store: Arc<dyn crate::ProcessEnvStore> = backend.process_env_store();
+        let first_env = lash_core_execution::testing::process_env_with_limit(1024);
+        let retry_env = lash_core_execution::testing::process_env_with_limit(3);
         let first_ref = first_env.stable_ref().expect("first environment reference");
         let retry_ref = retry_env.stable_ref().expect("retry environment reference");
         assert_ne!(first_ref, retry_ref, "the retry submits different content");
@@ -745,20 +700,27 @@ mod tests {
         let staging = start_claim(&key);
 
         // The first attempt: staged, registered, crashed before settling.
-        crate::publish_process_execution_env(env_store.as_ref(), &staging, &first_env)
-            .await
-            .expect("stage the first attempt's environment");
+        lash_core_execution::testing::publish_process_env_for_testing(
+            env_store.as_ref(),
+            &staging,
+            &first_env,
+        )
+        .await
+        .expect("stage the first attempt's environment");
         let retained = registry
-            .register_process(registration("first").with_execution_env_ref(Some(first_ref.clone())))
+            .register_process(with_env(registration("first"), first_ref.clone()))
             .await
             .expect("the first attempt registered its process");
 
         // The retry, which no record of the first attempt answers, with
         // changed content.
-        let retry_ref =
-            crate::publish_process_execution_env(env_store.as_ref(), &staging, &retry_env)
-                .await
-                .expect("publish retry environment");
+        let retry_ref = lash_core_execution::testing::publish_process_env_for_testing(
+            env_store.as_ref(),
+            &staging,
+            &retry_env,
+        )
+        .await
+        .expect("publish retry environment");
         let envelope = crate::RuntimeEffectEnvelope::new(
             crate::RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(
@@ -770,9 +732,7 @@ mod tests {
                 "crashed-start",
             ),
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
-                registration: registration("retry")
-                    .with_execution_env_ref(Some(retry_ref.clone()))
-                    .into(),
+                registration: with_env(registration("retry"), retry_ref.clone()).into(),
                 observers: Vec::new(),
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
@@ -804,7 +764,7 @@ mod tests {
 
         assert!(
             env_store
-                .get_process_execution_env(&first_ref)
+                .get_process_env(&first_ref)
                 .await
                 .expect("read the retained environment")
                 .is_some(),
@@ -812,7 +772,7 @@ mod tests {
         );
         assert_eq!(
             env_store
-                .get_process_execution_env(&retry_ref)
+                .get_process_env(&retry_ref)
                 .await
                 .expect("read the retry's environment"),
             None,
@@ -824,7 +784,7 @@ mod tests {
             .expect("end the process edge");
         assert_eq!(
             env_store
-                .get_process_execution_env(&first_ref)
+                .get_process_env(&first_ref)
                 .await
                 .expect("read the reclaimed environment"),
             None,
@@ -845,15 +805,7 @@ mod tests {
             env_store.as_ref(),
             key,
             engine_registration(key, "context"),
-            crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                    lash_core_execution::NoProgressBudget::bounded(12),
-                ),
-                crate::SessionToolAccess::ambient(),
-            ),
+            lash_core_execution::testing::process_env_with_limit(1024),
         )
         .await;
         let executor = crate::RuntimeEffectLocalExecutor::processes(

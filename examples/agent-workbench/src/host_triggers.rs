@@ -878,25 +878,27 @@ impl HostTriggers {
         // environment for every delivery, never the registering session's.
         let env_ref = core
             .host_artifacts()
-            .publish_process_env(&subscription.pin, &delivered_process_environment())
+            .publish_process_env(&subscription.pin, &delivered_process_environment()?)
             .await?;
+        // The delivered run states its kernel settings: this build's.
+        let settings = core
+            .processes()
+            .engine_defaults(lash::process::LASH_VM_ENGINE_KIND, &serde_json::Value::Null)?;
         let lifetime = core
             .processes()
             .session_scope(&subscription.owner_session)
             .await?;
-        let request = lash::process::ProcessStartRequest::new(
-            lash::process::ProcessStartTarget::Definition {
-                definition_id: subscription.definition.id.clone(),
-                signature_claim: Some(subscription.definition.signature.clone()),
-                args,
-            },
+        let request = lash::process::ProcessStartRequest::definition(
+            subscription.definition.id.clone(),
+            Some(subscription.definition.signature.clone()),
+            args,
+            lash::process::EngineLaunch::new(env_ref, settings),
             lash::process::ProcessOriginator::host_scoped(format!(
                 "{DELIVERY_ORIGINATOR_PREFIX}{}",
                 subscription.owner_session
             )),
             lash::process::Lifetime::Until(lifetime),
         )
-        .with_env_ref(env_ref)
         .with_host_start_key(delivery.start_key());
         let operation = core
             .session_administration()
@@ -1132,17 +1134,22 @@ fn subscription_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Subscription> {
 }
 
 /// What every delivered process runs with: the host's choice, not the
-/// registering session's environment.
-fn delivered_process_environment() -> lash::process::ProcessExecutionEnvSpec {
-    lash::process::ProcessExecutionEnvSpec::new(
-        lash::plugins::AdmittedPluginConfig::default(),
-        lash::runtime::SessionPolicy::new(
-            lash::TurnBudget::bounded(32),
-            lash::MaxToolCalls::new(1024),
-            lash::NoProgressBudget::bounded(12),
-        ),
-        lash::plugins::SessionToolAccess::ambient(),
-    )
+/// registering session's environment. The workbench installs no process
+/// component, so a delivered process calls no tool.
+fn delivered_process_environment() -> Result<lash::process::ProcessEnv, HostTriggerError> {
+    let tools =
+        lash::plugins::SessionToolAccess::restricted(std::iter::empty()).map_err(|error| {
+            HostTriggerError::Lash(lash::EmbedError::from(
+                lash::plugins::PluginError::Registration(error.to_string()),
+            ))
+        })?;
+    lash::process::ProcessEnv::builder(tools, lash::MaxToolCalls::new(1024))
+        .build()
+        .map_err(|refusal| {
+            HostTriggerError::Lash(lash::EmbedError::from(
+                lash::plugins::PluginError::ProcessEnvRefused { refusal },
+            ))
+        })
 }
 
 struct TriggerRegistrationProvider {

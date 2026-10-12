@@ -642,6 +642,7 @@ impl Scenario for Steering {
         SimNodesConfig {
             lease: LeaseConfig::default(),
             decodes: self.backend().formats().decodes(),
+            serves: Vec::new(),
             max_active: 4,
         }
     }

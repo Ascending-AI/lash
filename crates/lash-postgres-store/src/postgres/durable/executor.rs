@@ -396,6 +396,11 @@ impl Call {
         hints: &head_commit::SessionHints,
         fleet: lash_core_execution::FleetFormat,
     ) -> Option<Self> {
+        // A claim-requirement rewrite takes the explicit-transaction form,
+        // which stamps it (FIG-6034 D3).
+        if tx.requires().is_some() {
+            return None;
+        }
         let mut call = Self {
             steps: serde_json::Value::Null,
             body_hashes: Vec::new(),

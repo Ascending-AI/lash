@@ -13,6 +13,7 @@ use super::*;
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
+use lash_sansio::sync::MutexExt as _;
 use std::sync::atomic::AtomicBool;
 
 mod api;
@@ -72,27 +73,77 @@ pub(in crate::runtime) struct CurrentSession {
     resident_graph_head_stale: Arc<AtomicBool>,
 }
 
-/// Who the services run for. A process runtime is keyed by its minted id and
-/// carries its captured environment: it has no session state, no session
-/// store and no frame, and every session-only service refuses it with
-/// `PluginError::NotASessionRuntime`.
+/// Who the services run for. A process runtime is keyed by its minted id: it
+/// has no session state, no session store and no frame, and every
+/// session-only service refuses it with `PluginError::NotASessionRuntime`.
+/// An engine process carries the composition its environment's components
+/// make (FIG-6034); a session-turn process carries none (D5).
 #[derive(Clone)]
 pub(in crate::runtime) enum CurrentOwner {
     Session(Box<CurrentSession>),
     Process {
         process_id: crate::ProcessId,
-        /// The environment the process captured at its start: its starter's
-        /// recorded policy and plugin config (FIG-4396).
-        environment: Box<crate::ProcessExecutionEnvSpec>,
+        engine: Option<Arc<EngineProcessParts>>,
     },
+}
+
+/// What an engine process runs under: the environment its start stated, the
+/// composition only that environment's components make, and the state sink
+/// of its step state.
+pub(in crate::runtime) struct EngineProcessParts {
+    pub(in crate::runtime) env: Arc<crate::ProcessEnv>,
+    pub(in crate::runtime) composition: crate::plugin::ProcessComposition,
+    pub(in crate::runtime) state: Arc<crate::plugin::ComponentState>,
+}
+
+/// The plugins an owner's services run under: a session's own plugin
+/// session, or, for a process, the deployment's session plugin host (a
+/// session the process creates resolves against it) and the plugin
+/// admission its segment adopted.
+#[derive(Clone)]
+pub(in crate::runtime) enum OwnerPlugins {
+    Session(Arc<crate::PluginSession>),
+    Process {
+        host: Arc<crate::PluginHost>,
+        admission: Arc<std::sync::Mutex<Option<crate::store::plugin_writers::PluginAdmission>>>,
+    },
+}
+
+impl OwnerPlugins {
+    /// The deployment's session plugin host.
+    pub(in crate::runtime) fn plugin_host(&self) -> &crate::PluginHost {
+        match self {
+            Self::Session(plugins) => plugins.host(),
+            Self::Process { host, .. } => host,
+        }
+    }
+
+    /// The plugin admission the owner writes under.
+    pub(in crate::runtime) fn plugin_admission(
+        &self,
+    ) -> Option<crate::store::plugin_writers::PluginAdmission> {
+        match self {
+            Self::Session(plugins) => plugins.plugin_admission(),
+            Self::Process { admission, .. } => admission.lock_recover().clone(),
+        }
+    }
+
+    fn adopt_plugin_admission(&self, adopted: crate::store::plugin_writers::PluginAdmission) {
+        match self {
+            Self::Session(plugins) => plugins.adopt_plugin_admission(adopted),
+            Self::Process { admission, .. } => *admission.lock_recover() = Some(adopted),
+        }
+    }
 }
 
 #[derive(Clone)]
 pub(in crate::runtime) struct CurrentOwnerCapability {
     pub(in crate::runtime) owner: CurrentOwner,
-    policy: SessionPolicy,
+    /// The policy a session's direct calls run under; a process's is its
+    /// environment's (`None` for a session-turn process, which makes none).
+    policy: Option<SessionPolicy>,
     pub(in crate::runtime) host: RuntimeHost,
-    plugins: Arc<crate::PluginSession>,
+    plugins: OwnerPlugins,
     runtime_lease_owner: crate::LeaseOwnerIdentity,
     runtime_lease_executor_id: String,
     turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
@@ -190,20 +241,60 @@ impl CurrentOwnerCapability {
         }
     }
 
-    /// The execution environment a start captures from these services: the
-    /// session's current one, or the process's captured one.
-    pub(in crate::runtime) fn execution_env_spec(
+    /// The session's own plugin session, or `NotASessionRuntime` naming
+    /// `operation` for a process runtime.
+    pub(in crate::runtime) fn session_plugins(
         &self,
-    ) -> Result<crate::ProcessExecutionEnvSpec, crate::PluginError> {
-        match &self.owner {
-            CurrentOwner::Session(session) => Ok(
-                crate::facade_support::RuntimeSessionStateFacadeOps::process_execution_env_spec(
-                    &session.snapshot.to_runtime_state(),
-                    &self.policy,
-                ),
-            ),
-            CurrentOwner::Process { environment, .. } => Ok(environment.as_ref().clone()),
+        operation: &'static str,
+    ) -> Result<&Arc<crate::PluginSession>, crate::PluginError> {
+        match (&self.plugins, &self.owner) {
+            (OwnerPlugins::Session(plugins), _) => Ok(plugins),
+            (OwnerPlugins::Process { .. }, CurrentOwner::Process { process_id, .. }) => {
+                Err(crate::PluginError::NotASessionRuntime {
+                    operation: operation.to_string(),
+                    process_id: process_id.clone(),
+                })
+            }
+            (OwnerPlugins::Process { .. }, CurrentOwner::Session(session)) => {
+                Err(crate::PluginError::Session(format!(
+                    "session `{}` runs without its plugin session",
+                    session.session_id
+                )))
+            }
         }
+    }
+
+    /// The engine process these services run for, with its composition.
+    pub(in crate::runtime) fn engine_process(
+        &self,
+    ) -> Result<(&crate::ProcessId, &Arc<EngineProcessParts>), crate::PluginError> {
+        match &self.owner {
+            CurrentOwner::Process {
+                process_id,
+                engine: Some(engine),
+            } => Ok((process_id, engine)),
+            CurrentOwner::Process { process_id, .. } => Err(crate::PluginError::Session(format!(
+                "process `{process_id}` runs a session turn, which has no composition"
+            ))),
+            CurrentOwner::Session(session) => Err(crate::PluginError::Session(format!(
+                "session `{}` is not a process",
+                session.session_id
+            ))),
+        }
+    }
+
+    /// The policy direct calls run under.
+    fn direct_policy(&self) -> Result<&SessionPolicy, crate::PluginError> {
+        self.policy.as_ref().ok_or_else(|| {
+            crate::PluginError::Session(format!(
+                "{} makes no model call",
+                match &self.owner {
+                    CurrentOwner::Process { process_id, .. } =>
+                        format!("session-turn process `{process_id}`"),
+                    CurrentOwner::Session(session) => format!("session `{}`", session.session_id),
+                }
+            ))
+        })
     }
 }
 
@@ -218,11 +309,15 @@ struct DirectCompletionCapability;
 /// What a process runtime's services are built from.
 pub(in crate::runtime) struct ProcessServicesPorts {
     pub(in crate::runtime) process_id: crate::ProcessId,
-    /// The environment the process captured at its start; its policy is
-    /// the process runtime's policy.
-    pub(in crate::runtime) environment: crate::ProcessExecutionEnvSpec,
+    /// An engine process's environment and composition; `None` for a
+    /// session-turn process.
+    pub(in crate::runtime) engine: Option<Arc<EngineProcessParts>>,
+    /// The policy direct calls run under: the environment's, for an engine
+    /// process.
+    pub(in crate::runtime) policy: Option<SessionPolicy>,
     pub(in crate::runtime) host: RuntimeHost,
-    pub(in crate::runtime) plugins: Arc<crate::PluginSession>,
+    /// The deployment's session plugin host.
+    pub(in crate::runtime) plugin_host: Arc<crate::PluginHost>,
     pub(in crate::runtime) runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub(in crate::runtime) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
 }
@@ -340,9 +435,9 @@ impl CurrentOwnerCapability {
                     runtime.resident_session.graph_head_stale_flag(),
                 ),
             })),
-            policy: runtime.state.effective_policy().clone(),
+            policy: Some(runtime.state.effective_policy().clone()),
             host: runtime.host.clone(),
-            plugins,
+            plugins: OwnerPlugins::Session(plugins),
             runtime_lease_owner: runtime.runtime_lease_owner.clone(),
             runtime_lease_executor_id: runtime.runtime_lease_executor_id.clone(),
             turn_phase_probe: runtime.turn_phase_probe.clone(),
@@ -354,7 +449,7 @@ impl CurrentOwnerCapability {
     /// `LlmProfileUnavailable`.
     fn resolve_policy(&self) -> Result<RuntimeSessionPolicy, crate::PluginError> {
         self.host
-            .resolve_owner_policy(&self.runtime_owner(), self.policy.clone())
+            .resolve_owner_policy(&self.runtime_owner(), self.direct_policy()?.clone())
     }
 }
 
@@ -374,12 +469,6 @@ impl RuntimeSessionServices {
         admission: crate::store::plugin_writers::PluginAdmission,
     ) {
         self.current.plugins.adopt_plugin_admission(admission);
-    }
-
-    /// The plugin session the owner runs under.
-    #[cfg(any(test, feature = "testing"))]
-    pub(in crate::runtime) fn plugin_session(&self) -> &Arc<crate::PluginSession> {
-        &self.current.plugins
     }
 
     pub(in crate::runtime) fn state_service(
@@ -471,27 +560,29 @@ impl RuntimeSessionServices {
     }
 
     /// The services a process runtime runs its body through, keyed by the
-    /// process's minted id: built from the host, the process's own plugin
-    /// session and its captured environment, with no session state. Its
-    /// direct calls account under the process's own owner (ADR 0127).
+    /// process's minted id: built from the host and, for an engine process,
+    /// the composition its environment's components make, with no session
+    /// state. Its direct calls account under the process's own owner
+    /// (ADR 0127).
     pub(in crate::runtime) fn for_process(ports: ProcessServicesPorts) -> Self {
         let ProcessServicesPorts {
             process_id,
-            environment,
+            engine,
+            policy,
             host,
-            plugins,
+            plugin_host,
             runtime_lease_owner,
             turn_phase_probe,
         } = ports;
         Self {
             current: CurrentOwnerCapability {
-                policy: environment.policy.clone(),
-                owner: CurrentOwner::Process {
-                    process_id,
-                    environment: Box::new(environment),
-                },
+                policy,
+                owner: CurrentOwner::Process { process_id, engine },
                 host,
-                plugins,
+                plugins: OwnerPlugins::Process {
+                    host: plugin_host,
+                    admission: Arc::default(),
+                },
                 runtime_lease_owner,
                 runtime_lease_executor_id: uuid::Uuid::new_v4().to_string(),
                 turn_phase_probe,

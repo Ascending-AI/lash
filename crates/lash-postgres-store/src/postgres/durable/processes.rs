@@ -59,11 +59,13 @@ fn process_actor(process: &ProcessId) -> Result<ActorKey, DurableError> {
 }
 
 /// Create `process`'s actor, ready, in the caller's transaction: a process
-/// registration's other half.
+/// registration's other half. A process whose environment names components
+/// carries their claim requirements from its creation on (FIG-6034 §6.2).
 pub(crate) async fn create_actor_within(
     tx: &mut PgConnection,
     process: &ProcessId,
     formats: &str,
+    requires: &[String],
     now: DurableInstant,
 ) -> Result<(), DurableError> {
     let actor = process_actor(process)?;
@@ -75,10 +77,18 @@ pub(crate) async fn create_actor_within(
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    match created {
-        Some(_) => Ok(()),
-        None => Err(DurableError::MailRefused(MailRefusal::ActorExists(actor))),
+    if created.is_none() {
+        return Err(DurableError::MailRefused(MailRefusal::ActorExists(actor)));
     }
+    if !requires.is_empty() {
+        crate::observed_sql::query(SQL.actor.stamp_requires.sql())
+            .bind(actor.as_str())
+            .bind(lash_durable::encode_requires(requires))
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+    }
+    Ok(())
 }
 
 /// Lock `process`'s actor row for the rest of the caller's transaction,

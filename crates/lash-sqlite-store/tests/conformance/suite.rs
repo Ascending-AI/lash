@@ -21,7 +21,7 @@ use lash_conformance::{
 };
 use lash_core_execution::store::{ConformanceDeployment, RuntimeStore};
 use lash_core_execution::{
-    DeploymentStore, ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity,
+    DeploymentStore, ProcessCompletionAuthority, ProcessEnvStore, ProcessIdentity,
     ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessRegistrar as _,
     ProcessRegistry, ProcessStatusFilter, SessionCatalogStore, SessionCommitStore,
 };
@@ -323,7 +323,7 @@ fn artifact_store_handles(
     let store = backend.blocking_store();
     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
         artifacts: Arc::clone(&store) as Arc<dyn lash_core::ModuleArtifactStore>,
-        process_env: Arc::clone(&store) as Arc<dyn ProcessExecutionEnvStore>,
+        process_env: Arc::clone(&store) as Arc<dyn ProcessEnvStore>,
         turn_preludes: store as Arc<dyn lash_core::TurnPreludeStore>,
     }
 }

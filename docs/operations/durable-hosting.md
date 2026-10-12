@@ -580,8 +580,9 @@ sessions and its processes.
   guessing.
 
 The other trait methods answer registration questions: `kind`,
-`program_identity`, `creation_config` (recorded on the process row and handed
-back to engine steps as `EngineStepRun::engine_config`), `start_artifacts`,
+`program_identity`, `check_settings` and `default_settings` (the engine
+settings a start states, recorded on the process row in its launch and handed
+back to engine steps as `EngineStepRun::engine_settings`), `start_artifacts`,
 `end_artifact_referrer`, `acquire_engine_artifact`, `check_args` and `resolve`.
 `check_args` checks supplied arguments against an authoritative signature;
 engines without a checkable signature return `ArgsMismatch::UnsupportedSignature`.
@@ -723,7 +724,7 @@ impl ProcessEngine for CiEngine {
         Ok((self.state(&next)?, action))
     }
 
-    // program_identity, creation_config, start_artifacts,
+    // program_identity, check_settings, default_settings, start_artifacts,
     // end_artifact_referrer, acquire_engine_artifact and resolve answer
     // "none" for this engine; see crates/lash-postgres-workers/src/process.rs.
     // check_args explicitly returns ArgsMismatch::UnsupportedSignature.

@@ -2,8 +2,8 @@
 use super::super::events::ProcessTerminal;
 use super::super::validation::prepare_process_registration;
 use super::{
-    Ancestry, LifetimeDecision, ProcessExecutionEnvRef, ProcessExternalRef, ProcessId,
-    ProcessIdentity, ProcessInput, ProcessLineage, ProcessOutcome, ProcessProvenance,
+    Ancestry, EngineLaunch, EngineSettings, LifetimeDecision, ProcessEnvRef, ProcessExternalRef,
+    ProcessId, ProcessIdentity, ProcessInput, ProcessLineage, ProcessOutcome, ProcessProvenance,
     ProcessRegistration, ProcessStarted, ProcessStatus, SessionId, StartKey,
     process_child_session_id,
 };
@@ -114,12 +114,6 @@ pub struct ProcessRecord {
     pub session_capability: Option<SessionId>,
     pub identity: ProcessIdentity,
     pub provenance: ProcessProvenance,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_ref: Option<ProcessExecutionEnvRef>,
-    /// What the process's engine recorded when the row was created: never
-    /// updated after registration (FIG-4527).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub engine_config: Option<serde_json::Value>,
     /// The process's trace scope: the cause and anchor its first
     /// registration retained, started when the row was created. Never
     /// updated after registration; a start that finds the process retained
@@ -297,6 +291,7 @@ pub(super) fn recorded_lineage(
     input: &ProcessInput,
     ancestry: &Ancestry,
     session_capability: Option<&SessionId>,
+    run: Option<&crate::TurnAddress>,
 ) -> ProcessLineage {
     let own_session = match input {
         ProcessInput::SessionTurn { create_request, .. } => Some(
@@ -312,10 +307,28 @@ pub(super) fn recorded_lineage(
         ancestry,
         session_capability,
         own_session.as_ref(),
+        run,
     )
 }
 
 impl ProcessRecord {
+    /// The launch an engine process's start sealed: its environment and
+    /// engine settings. A session-turn process has none (D5).
+    pub fn launch(&self) -> Option<&EngineLaunch> {
+        self.input.launch()
+    }
+
+    /// The environment an engine process runs under, read off its input.
+    pub fn env_ref(&self) -> Option<&ProcessEnvRef> {
+        self.launch().map(|launch| &launch.env)
+    }
+
+    /// The engine settings an engine process's start stated, read off its
+    /// input. Every run reads these and never a live default (D4).
+    pub fn engine_settings(&self) -> Option<&EngineSettings> {
+        self.launch().and_then(|launch| launch.settings.as_ref())
+    }
+
     /// The lineage this process's body starts children under, read back from
     /// its row (FIG-3607 R1).
     pub fn lineage(&self) -> ProcessLineage {
@@ -324,6 +337,7 @@ impl ProcessRecord {
             &self.input,
             &self.ancestry,
             self.session_capability.as_ref(),
+            self.provenance.run.as_ref(),
         )
     }
 
@@ -371,8 +385,6 @@ impl ProcessRecord {
             session_capability: registration.session_capability,
             identity: registration.identity,
             provenance: registration.provenance,
-            env_ref: registration.env_ref,
-            engine_config: registration.engine_config,
             trace: Some(trace),
             created_at_ms: now_ms,
             updated_at_ms: now_ms,

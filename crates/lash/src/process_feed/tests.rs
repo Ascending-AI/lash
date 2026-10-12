@@ -59,16 +59,11 @@ impl Fixture {
         let registry = Arc::clone(watched.registry());
         let commits = watched.emitted_hub().clone();
         let process_id = registry
-            .register_process(
-                lash_core::ProcessRegistration::new(
-                    lash_core::testing::held_engine_input(serde_json::Value::Null),
-                    lash_core::ProcessProvenance::host(),
-                    lash_core::Lifetime::Detached,
-                )
-                .with_execution_env_ref(Some(
-                    lash_core::testing::process_execution_env_fixture_ref(),
-                )),
-            )
+            .register_process(lash_core::ProcessRegistration::new(
+                lash_core::testing::held_engine_input(serde_json::Value::Null),
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            ))
             .await
             .expect("register the feed process")
             .id;
@@ -258,17 +253,18 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
         .expect("durable backend with no host engines");
     let process_id = backend
         .process_registry()
-        .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::Engine {
-                    kind: "absent-feed-engine".into(),
-                    payload: serde_json::Value::Null,
-                },
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
-        )
+        .register_process(lash_core::ProcessRegistration::new(
+            lash_core::ProcessInput::Engine {
+                kind: "absent-feed-engine".into(),
+                payload: serde_json::Value::Null,
+                launch: lash_core::EngineLaunch::new(
+                    lash_core::testing::process_execution_env_fixture_ref(),
+                    None,
+                ),
+            },
+            lash_core::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
         .await
         .expect("register the process")
         .id;
@@ -285,6 +281,7 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
         .register_node(&NodeSpec {
             node: NodeId::new("feed-park-fixture"),
             decodes: vec![row.formats],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

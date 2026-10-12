@@ -178,18 +178,21 @@ lash_store_sql::statements! {
         /// for the rest of the transaction: its draining flag, or no row.
         node_live = "SELECT draining FROM nodes WHERE node_id = ?1 AND boot_id = ?2 FOR SHARE";
 
-        /// Give up to `?5` actors claimable at `?1` in a format set of `?4`,
-        /// or process actors in another set with mail of kind `?6` (a
-        /// cancel) pending, to boot `?3` of node `?2`, oldest first, bumping
-        /// each epoch; returns each with the state that made it claimable
-        /// and its format set. A claim that finds no commit since the
-        /// previous claim counts one more failed activation; any commit
-        /// since resets the count.
+        /// Give up to `?5` actors claimable at `?1` in a format set of `?4`
+        /// whose claim requirements are all in `?7`, or process actors in
+        /// another set or with another requirement with mail of kind `?6`
+        /// (a cancel) pending, to boot `?3` of node `?2`, oldest first,
+        /// bumping each epoch; returns each with the state that made it
+        /// claimable, its format set and its requirements. A claim that
+        /// finds no commit since the previous claim counts one more failed
+        /// activation; any commit since resets the count.
         claim = "WITH c AS (
-                 SELECT p.actor_key, p.state, p.formats FROM actors p
+                 SELECT p.actor_key, p.state, p.formats, p.requires FROM actors p
                  WHERE ((p.state = 'ready' AND p.ready_at_ms <= ?1)
                      OR (p.state = 'waiting' AND p.next_due_ms <= ?1))
-                   AND (p.formats = ANY(?4)
+                   AND ((p.formats = ANY(?4)
+                         AND (p.requires IS NULL
+                             OR p.requires::jsonb <@ to_jsonb(?7::text[])))
                      OR (p.kind = 'process' AND EXISTS (
                          SELECT 1 FROM actor_mail m
                          WHERE m.actor_key = p.actor_key AND m.seq > p.acked_seq
@@ -206,7 +209,7 @@ lash_store_sql::statements! {
                  claimed_revision = a.state_revision
              FROM c
              WHERE a.actor_key = c.actor_key
-             RETURNING a.actor_key, a.epoch, c.state, c.formats";
+             RETURNING a.actor_key, a.epoch, c.state, c.formats, c.requires";
 
         /// Session `?2`'s write authority when its actor `?1` exists: the
         /// actor row, then the history lock (seed `1`), in that order, and
@@ -522,6 +525,12 @@ fn node_ref(stored: &str) -> Result<lash_core_store::checkpoint_graph::NodeId, D
 
 fn actor_key(stored: &str) -> Result<ActorKey, DurableError> {
     ActorKey::parse(stored).map_err(|_| corrupt("actor key", stored))
+}
+
+/// An actor's stored claim requirements.
+fn requires_of(stored: Option<String>) -> Result<Vec<String>, DurableError> {
+    lash_durable::parse_requires(stored.as_deref())
+        .map_err(|error| corrupt("actor claim requirements", &error.to_string()))
 }
 
 fn actor_state(stored: &str) -> Result<ActorState, DurableError> {
@@ -1103,6 +1112,7 @@ impl DurableStore for PostgresDurableStore {
                     Ok(NodeLease {
                         owner: lease_owner,
                         decodes: spec.decodes.clone(),
+                        serves: spec.serves.clone(),
                         ttl_millis: spec.ttl_millis,
                         expires_at,
                     })
@@ -1236,6 +1246,7 @@ impl DurableStore for PostgresDurableStore {
                         .bind(&formats)
                         .bind(limit)
                         .bind(lash_durable::domain::CANCEL_MAIL)
+                        .bind(&node.serves)
                         .fetch_all(crate::observed_sql::executor(&mut **tx))
                         .await
                         .map_err(sqlx_failure)?;
@@ -1250,7 +1261,11 @@ impl DurableStore for PostgresDurableStore {
                                 } else {
                                     ClaimCause::Ready
                                 },
-                                purpose: ClaimPurpose::of(&node.decodes, &get::<String>(row, 3)?),
+                                purpose: ClaimPurpose::of(
+                                    node,
+                                    &get::<String>(row, 3)?,
+                                    &requires_of(get::<Option<String>>(row, 4)?)?,
+                                ),
                             })
                         })
                         .collect::<Result<Vec<_>, DurableError>>()?;
@@ -1267,7 +1282,7 @@ impl DurableStore for PostgresDurableStore {
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.within(CommitCapacity::Scheduler, async {
-            let rows: Vec<(String, i64, String)> =
+            let rows: Vec<(String, i64, String, Option<String>)> =
                 crate::observed_sql::query_as(SQL.actor.owned_by.sql())
                     .bind(node.owner.node.as_str())
                     .bind(node.owner.boot.as_str())
@@ -1275,12 +1290,12 @@ impl DurableStore for PostgresDurableStore {
                     .await
                     .map_err(sqlx_failure)?;
             rows.into_iter()
-                .map(|(key, epoch, formats)| {
+                .map(|(key, epoch, formats, requires)| {
                     Ok(Claimed {
                         actor: actor_key(&key)?,
                         epoch: Epoch(epoch),
                         cause: ClaimCause::Adopted,
-                        purpose: ClaimPurpose::of(&node.decodes, &formats),
+                        purpose: ClaimPurpose::of(node, &formats, &requires_of(requires)?),
                     })
                 })
                 .collect()

@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use lash_core_execution::{
-    DeploymentStore, ProcessExecutionEnvStore, ProcessLifecycle as _, ProcessRegistrar as _,
+    DeploymentStore, ProcessEnvStore, ProcessLifecycle as _, ProcessRegistrar as _,
     ProcessRegistry, ProcessRetention as _,
 };
 use lash_postgres_store::{PostgresStorage, testing::IsolatedDatabase};
@@ -104,7 +104,7 @@ lash_conformance::process_prune_start_staging_tests!({
         return;
     };
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessExecutionEnvStore>;
+    let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessEnvStore>;
     (database, registry, env_store)
 });
 
@@ -117,17 +117,18 @@ async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configu
     lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
     let registry = storage.process_registry();
     let registered = registry
-        .register_process(
-            lash_core_execution::ProcessRegistration::new(
-                lash_core_execution::ProcessInput::Engine {
-                    kind: "test-engine".to_string(),
-                    payload: serde_json::json!({"module_ref": "module-postgres"}),
-                },
-                lash_core_execution::ProcessProvenance::host(),
-                lash_core_execution::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
-        )
+        .register_process(lash_core_execution::ProcessRegistration::new(
+            lash_core_execution::ProcessInput::Engine {
+                kind: "test-engine".to_string(),
+                payload: serde_json::json!({"module_ref": "module-postgres"}),
+                launch: lash_core::EngineLaunch::new(
+                    lash_core::testing::process_execution_env_fixture_ref(),
+                    None,
+                ),
+            },
+            lash_core_execution::ProcessProvenance::host(),
+            lash_core_execution::Lifetime::Detached,
+        ))
         .await
         .expect("register cleanup process");
     registry

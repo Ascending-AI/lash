@@ -82,7 +82,7 @@ pub type ProcessOutcomeObserver =
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work: Arc<dyn crate::ProcessWorkSubstrate>,
-    pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
+    pub process_env_store: Option<Arc<dyn crate::ProcessEnvStore>>,
     /// The required registry that admits every engine start inside its recorded step.
     pub process_engines: crate::ProcessEngineRegistry,
     /// What a host start's recorded admission consults: the session catalog
@@ -223,7 +223,7 @@ enum LocalTarget {
 /// The store a [`LoadExecutionEnv`](RuntimeEffectCommand::LoadExecutionEnv)
 /// step reads, and whose environment it is, for the refusal's message.
 pub struct ExecutionEnvLoadExecution {
-    store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    store: Arc<dyn crate::ProcessEnvStore>,
     subject: String,
 }
 
@@ -243,16 +243,16 @@ impl ExecutionEnvLoadExecution {
             ));
         };
         self.store
-            .acquire_process_execution_env(&claim, &env)
+            .acquire_process_env(&claim, &env)
             .await
             .map_err(|error| {
                 unresolved_execution_env(
                     &self.subject,
                     &env,
-                    crate::runtime::ProcessExecutionEnvLoadError::Store(error.into()),
+                    crate::runtime::ProcessEnvLoadError::Store(error.into()),
                 )
             })?;
-        match crate::runtime::load_process_execution_env(self.store.as_ref(), &env).await {
+        match crate::runtime::load_process_env(self.store.as_ref(), &env).await {
             Ok(_) => Ok(RuntimeEffectOutcome::LoadExecutionEnv { env }),
             Err(error) => Err(unresolved_execution_env(&self.subject, &env, error)),
         }
@@ -272,13 +272,13 @@ impl ExecutionEnvLoadExecution {
 /// under a healthy store loads the environment.
 pub(crate) fn unresolved_execution_env(
     subject: &str,
-    env: &crate::ProcessExecutionEnvRef,
-    error: crate::runtime::ProcessExecutionEnvLoadError,
+    env: &crate::ProcessEnvRef,
+    error: crate::runtime::ProcessEnvLoadError,
 ) -> RuntimeEffectControllerError {
-    let refusal = crate::RuntimeErrorCode::ProcessExecutionEnvRefused;
+    let refusal = crate::RuntimeErrorCode::ProcessEnvUnresolved;
     let context = format!("{subject} could not resolve its recorded execution environment `{env}`");
     match error {
-        crate::runtime::ProcessExecutionEnvLoadError::Store(store) => {
+        crate::runtime::ProcessEnvLoadError::Store(store) => {
             let mut settled = RuntimeEffectControllerError::from(store.into_turn_failure(refusal));
             settled.message = format!("{context}: {}", settled.message);
             if settled.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
@@ -522,10 +522,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     ///
     /// This is an **integrator class 3: effect-host implementor** seam for
     /// executors that realize serialized process-start commands.
-    pub fn with_process_env_store(
-        mut self,
-        store: Arc<dyn crate::ProcessExecutionEnvStore>,
-    ) -> Self {
+    pub fn with_process_env_store(mut self, store: Arc<dyn crate::ProcessEnvStore>) -> Self {
         if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
             &mut self.state
         {
@@ -649,7 +646,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// validates and holds on its first execution; replay resolves the
     /// recorded digest. `subject` names whose environment it is in a refusal.
     pub fn execution_env_load(
-        store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        store: Arc<dyn crate::ProcessEnvStore>,
         subject: impl Into<String>,
     ) -> Self {
         Self {

@@ -132,10 +132,25 @@ fn refuse(message: impl std::fmt::Display) -> ToolAttemptOutcome {
     done_without_intents(ToolOutcome::err_fmt(format_args!("{message}")))
 }
 
+/// A retryable attempt fault: it took no effect, so the attempt runs again,
+/// and it is never recorded as the call's answer or a refusal (D9). A
+/// terminal cause stays the call's failure.
+fn host_failed(error: lash_core::PluginError) -> ToolAttemptOutcome {
+    ToolAttemptOutcome::host_failed(
+        lash_core::RuntimeEffectControllerError::from(error).retryable_uncommitted_derivation(),
+    )
+}
+
+/// Declare the start the model asked for (FIG-6034 §3.6): resolve its
+/// definition, take the host's lifetime and environment policies against the
+/// attempt's recorded facts, hold the chosen launch under the attempt's
+/// execution claim, and seal it into the declaration. The declaration's
+/// launch is journaled with the outcome; realization never runs a policy.
 pub async fn execute_process_start_tool_call(
     context: &AttemptContext<'_>,
     args: &Value,
     lifetime: &lash_core::LifetimePolicy,
+    environment: &dyn lash_core::ProcessEnvPolicy,
 ) -> ToolAttemptOutcome {
     let fields = match exact_fields(args, &["definition", "definition_id", "args", "label"]) {
         Ok(fields) => fields,
@@ -158,6 +173,23 @@ pub async fn execute_process_start_tool_call(
         None => serde_json::Map::new(),
         Some(Value::Object(args)) => args.clone(),
         Some(_) => return refuse("args must be an object"),
+    };
+    // The documented `label` argument: a host-facing name for this run, never
+    // part of the process's identity (FIG-3122). Declaring it here is the only
+    // way it reaches the row — an engine derives its own label from the
+    // payload, and for Lash VM that is the lift digest, so a run the author
+    // named `probe` lists as `__process_<hash>` unless the start declares the
+    // name. A start that passes no label keeps the engine's derived one.
+    let label = match start_label(args) {
+        Ok(label) => label,
+        Err(message) => return refuse(message),
+    };
+    // The definition is read and its signature derived by its engine before
+    // any policy runs: the policy sees what will run, not the model's claim.
+    let resolved = match context.resolve_start_target(&target, run_args).await {
+        Ok(resolved) => resolved,
+        Err(lash_core::ResolveTargetError::Refused(message)) => return refuse(message),
+        Err(lash_core::ResolveTargetError::Fault(error)) => return host_failed(error),
     };
     let identity = context.intent_identity(0);
     // The lifetime is the host's policy resolved against this attempt's
@@ -191,34 +223,37 @@ pub async fn execute_process_start_tool_call(
             ));
         }
     };
-    let declaration = lash_core::ProcessStartDeclaration::new(
-        lash_core::ProcessStartTarget::Definition {
-            definition_id: target.definition_id().clone(), args: run_args,
-            signature_claim: Some(target.signature_claim().clone()),
-        },
+    // The host's environment policy states the child's environment and
+    // engine settings from the attempt's recorded run, never live config. A
+    // refusal is the tool's error; a fault is retried.
+    let choice = match environment
+        .choose(&context.start_policy_cx(&resolved, label.as_deref()))
+        .await
+    {
+        Ok(choice) => choice,
+        Err(lash_core::ProcessEnvPolicyError::Refused(refusal)) => return refuse(refusal),
+        Err(lash_core::ProcessEnvPolicyError::Fault(message)) => {
+            return host_failed(lash_core::PluginError::attempt_fault(message));
+        }
+    };
+    let launch = match context.declare_launch(&choice, &resolved).await {
+        Ok(launch) => launch,
+        Err(lash_core::HoldEnvError::Refused(refusal)) => return refuse(refusal),
+        Err(lash_core::HoldEnvError::Fault(error)) => return host_failed(error),
+    };
+    let declaration = lash_core::ProcessStartDeclaration::definition(
+        resolved.definition_id.clone(),
+        Some(resolved.signature.clone()),
+        resolved.args.clone(),
+        launch,
         originator,
         lifetime,
-    )
-    // An engine start is admitted against the execution env its own record
-    // carries, never against the live session env, so the declaration captures
-    // the attempt's environment digest here. The coordinator stores the bytes
-    // before journaling, and realization loads those exact bytes (FIG-2999).
-    .with_env_ref(match context.process_execution_env_ref() {
-        Ok(env_ref) => env_ref,
-        Err(error) => return refuse(error),
-    });
-    // The documented `label` argument: a host-facing name for this run, never
-    // part of the process's identity (FIG-3122). Declaring it here is the only
-    // way it reaches the row — an engine derives its own label from the
-    // payload, and for Lash VM that is the lift digest, so a run the author
-    // named `probe` lists as `__process_<hash>` unless the start declares the
-    // name. A start that passes no label keeps the engine's derived one.
-    let declaration = match start_label(args) {
-        Ok(None) => declaration,
-        Ok(Some(label)) => declaration.with_declared_identity(
+    );
+    let declaration = match label {
+        None => declaration,
+        Some(label) => declaration.with_declared_identity(
             lash_core::DeclaredProcessIdentity::labelled("definition", Some(label)),
         ),
-        Err(message) => return refuse(message),
     };
     // The process id is minted when the declared start is realized, after
     // this attempt seals its output, so the attempt answers the start's result

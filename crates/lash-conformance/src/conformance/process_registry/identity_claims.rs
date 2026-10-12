@@ -366,11 +366,10 @@ pub async fn scope_replay_cancel_and_trace_ignore_environment_rebinding(
     engine.input = crate::ProcessInput::Engine {
         kind: "scope-environment".into(),
         payload: serde_json::Value::Null,
+        launch: lash_core::testing::fixture_engine_launch(),
     }
     .into();
-    let request = crate::started_until_starter(engine, scope.clone())
-        .with_start_key(Some(key))
-        .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()));
+    let request = crate::started_until_starter(engine, scope.clone()).with_start_key(Some(key));
     let first = registry
         .register_process_reporting_outcome(request.clone(), &[])
         .await
@@ -383,14 +382,22 @@ pub async fn scope_replay_cancel_and_trace_ignore_environment_rebinding(
     )
     .expect("trace snapshot");
     let mut rebound = request;
-    rebound.env_ref = Some(super::super::helpers::process_registry_alternate_environment_ref());
+    rebound.input = crate::ProcessInput::Engine {
+        kind: "scope-environment".into(),
+        payload: serde_json::Value::Null,
+        launch: crate::EngineLaunch::new(
+            super::super::helpers::process_registry_alternate_environment_ref(),
+            None,
+        ),
+    }
+    .into();
     let replay = registry
         .register_process_reporting_outcome(rebound, &[])
         .await
         .expect("replay retained start");
     assert_eq!(replay.outcome, crate::ProcessRegistrationOutcome::Existing);
     assert_eq!(replay.record.id, first.record.id);
-    assert_eq!(replay.record.env_ref, first.record.env_ref);
+    assert_eq!(replay.record.env_ref(), first.record.env_ref());
     assert_eq!(replay.record.lifetime, first.record.lifetime);
     assert_eq!(
         serde_json::to_value(
@@ -442,7 +449,7 @@ pub async fn scope_replay_cancel_and_trace_ignore_environment_rebinding(
         .await
         .expect("cancel trace")
         .expect("retained process");
-    assert_eq!(cancelled.env_ref, first.record.env_ref);
+    assert_eq!(cancelled.env_ref(), first.record.env_ref());
     assert_eq!(
         cancelled
             .cancel_request

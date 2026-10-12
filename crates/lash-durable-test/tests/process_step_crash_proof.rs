@@ -78,8 +78,12 @@ impl StaticToolExecute for ExtWrite {
     }
 }
 
-fn ext_write(world: &Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
-    let definition = lash_core::ToolDefinition::raw(
+/// The component a process names to call `ext_write`.
+const EXT_WRITE: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("ext-write", lash_core::FormatVersion::ONE);
+
+fn ext_write_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
         TOOL,
         TOOL,
         "Writes x to the outside world, once.",
@@ -94,13 +98,25 @@ fn ext_write(world: &Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
     .expect("ext_write's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(lash_core::ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL));
-    Arc::new(StaticToolProvider::new(
-        vec![definition],
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL))
+}
+
+/// The process component that contributes `ext_write` over `world`.
+fn ext_write(world: &Arc<ExternalWorld>) -> Arc<dyn lash::process::ProcessComponentFactory> {
+    let provider = Arc::new(StaticToolProvider::new(
+        vec![ext_write_definition()],
         ExtWrite {
             world: Arc::clone(world),
         },
-    ))
+    ));
+    Arc::new(
+        lash_core::plugin::StaticPluginFactory::new(
+            lash_core::plugin::PluginDeclaration::initial(EXT_WRITE.component()),
+            lash_core::facade_support::PluginSpec::new().with_tool_provider(provider),
+        )
+        .as_component(EXT_WRITE.format())
+        .expect("ext_write is a process component"),
+    )
 }
 
 /// The engine: one step on its start payload, then a terminal carrying the
@@ -149,10 +165,27 @@ impl ProcessEngine for WriteEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &lash_core_execution::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, lash_core_execution::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash_core_execution::EngineSettings>,
+    ) -> std::result::Result<(), lash_core_execution::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(lash_core_execution::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<
+        Option<lash_core_execution::EngineSettings>,
+        lash_core_execution::PluginError,
+    > {
         Ok(None)
     }
 
@@ -242,31 +275,21 @@ impl ProcessEngine for WriteEngine {
     }
 }
 
-/// The environment the host's start captures: the core's plugins at their
-/// defaults, and the standard protocol's builtin renderer, which the tool's
-/// output is rendered by.
-fn environment() -> lash_core_execution::ProcessExecutionEnvSpec {
-    let mut environment = lash_core_execution::ProcessExecutionEnvSpec::new(
-        lash_core_execution::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(16),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core_execution::SessionToolAccess::ambient(),
-    );
-    environment.render = Some(lash_core::RecordedRender {
-        renderer_id: lash::render::ToolOutputRendererSlot::default()
-            .0
-            .id()
-            .to_owned(),
-        params: serde_json::to_value(lash::render::ResolvedStandardRenderConfig {
-            defaults: lash::render::ToolRenderParams::default(),
-            per_tool: std::collections::BTreeMap::new(),
-        })
-        .expect("the render config encodes"),
-    });
-    environment
+/// The environment a host start states in these laws: `ext_write` from its
+/// component.
+fn environment() -> lash_core::ProcessEnv {
+    environment_admitting(vec![ext_write_definition()])
+}
+
+/// An environment that names the `ext_write` component and admits `tools`.
+fn environment_admitting(tools: Vec<lash_core::ToolDefinition>) -> lash_core::ProcessEnv {
+    lash_core::ProcessEnv::builder(
+        lash_core::SessionToolAccess::restricted(tools).expect("the admitted tools"),
+        lash::MaxToolCalls::new(16),
+    )
+    .component(EXT_WRITE, &())
+    .build()
+    .expect("the environment builds")
 }
 
 struct StepProof {
@@ -310,7 +333,7 @@ impl StepProof {
                     .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
-                    .tools(ext_write(&self.world));
+                    .process_component(ext_write(&self.world), EXT_WRITE);
                 builder
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
                         lash::persistence::LeaseOwnerId::new("process-step-deployment"),
@@ -334,15 +357,13 @@ impl StepProof {
             .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment())
             .await
             .map_err(|error| format!("publish the environment: {error}"))?;
-        let request = lash_core::ProcessStartRequest::new(
-            lash_core::ProcessInput::Engine {
-                kind: ENGINE.to_owned(),
-                payload: serde_json::json!({ "x": 7 }),
-            },
+        let request = lash_core::ProcessStartRequest::engine(
+            ENGINE.to_owned(),
+            serde_json::json!({ "x": 7 }),
+            lash_core::EngineLaunch::new(env_ref, None),
             lash_core::ProcessOriginator::host_scoped("proof-host"),
             lash_core::LifetimeDecision::Detached,
-        )
-        .with_env_ref(env_ref);
+        );
         core.processes()
             .start(request, core.effect_host())
             .await
@@ -373,6 +394,7 @@ impl Scenario for StepProof {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: node.formats().decodes(),
+            serves: lash::testing::node_serves(&self.core()),
             max_active: 4,
         }
     }
@@ -538,7 +560,9 @@ async fn a_host_engines_once_tool_step_killed_at_every_label_runs_at_most_once()
 }
 
 /// FIG-5582: a process's restricted authority survives a file-store reopen
-/// and the engine's redrive of its parked activation.
+/// and the engine's redrive of its parked activation. Its environment names
+/// the `ext_write` component but admits none of its tools: the recorded
+/// environment still says so after the reopen, and the tool never runs.
 #[tokio::test]
 async fn restricted_process_tool_access_survives_reopen_and_redrive() {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -547,9 +571,7 @@ async fn restricted_process_tool_access_survives_reopen_and_redrive() {
     let clock = SimClock::new();
     let world = Arc::new(ExternalWorld::default());
     let unavailable = Arc::new(AtomicBool::new(true));
-    let authority =
-        lash_core::SessionToolAccess::restricted(Vec::new()).expect("no resident tools");
-    let observed = Arc::new(Mutex::new(Vec::new()));
+    let env = environment_admitting(Vec::new());
     let mut process = None;
 
     for boot in 0..2 {
@@ -561,16 +583,6 @@ async fn restricted_process_tool_access_survives_reopen_and_redrive() {
             }))
             .build()
             .expect("backend");
-        let captures = Arc::clone(&observed);
-        let probe = Arc::new(lash_core::plugin::PluginSpecFactory::new(
-            lash_core::plugin::PluginDeclaration::initial("process-authority-probe"),
-            Arc::new(move |context| {
-                if matches!(context.owner, lash_core::RuntimeOwner::Process(_)) {
-                    captures.lock_recover().push(context.tool_access.clone());
-                }
-                Ok(lash_core::plugin::PluginSpec::new())
-            }),
-        ));
         let core = lash::LashCore::standard_builder(backend.clone())
             .serve_sessions(false)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -579,16 +591,13 @@ async fn restricted_process_tool_access_survives_reopen_and_redrive() {
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
-            .tools(ext_write(&world))
-            .plugin(probe)
+            .process_component(ext_write(&world), EXT_WRITE)
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 lash::persistence::LeaseOwnerId::new("authority-law"),
                 lash::persistence::LeaseIncarnationId::new(format!("boot-{boot}")),
             ))
             .expect("core");
         if boot == 0 {
-            let mut env = environment();
-            env.tool_access = authority.clone();
             let reference = core
                 .host_artifacts()
                 .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
@@ -597,15 +606,13 @@ async fn restricted_process_tool_access_survives_reopen_and_redrive() {
             process = Some(
                 core.processes()
                     .start(
-                        lash_core::ProcessStartRequest::new(
-                            lash_core::ProcessInput::Engine {
-                                kind: ENGINE.to_owned(),
-                                payload: serde_json::json!({ "x": 7 }),
-                            },
+                        lash_core::ProcessStartRequest::engine(
+                            ENGINE.to_owned(),
+                            serde_json::json!({ "x": 7 }),
+                            lash_core::EngineLaunch::new(reference, None),
                             lash_core::ProcessOriginator::host(),
                             lash_core::LifetimeDecision::Detached,
-                        )
-                        .with_env_ref(reference),
+                        ),
                         core.effect_host(),
                     )
                     .await
@@ -632,6 +639,7 @@ async fn restricted_process_tool_access_survives_reopen_and_redrive() {
             SimNodesConfig {
                 lease: Matrix::test_lease(),
                 decodes: node.formats().decodes(),
+                serves: lash::testing::node_serves(&core),
                 max_active: 4,
             },
             activation,
@@ -660,19 +668,25 @@ async fn restricted_process_tool_access_survives_reopen_and_redrive() {
             }
         }
         assert!(reached, "the process reaches {expected:?}");
+        let record = backend
+            .process_registry()
+            .get_process(id)
+            .await
+            .expect("read the process")
+            .expect("the process is recorded");
+        let recorded = lash_core::runtime::load_process_env(
+            backend.process_env_store().as_ref(),
+            record
+                .env_ref()
+                .expect("an engine process records its environment"),
+        )
+        .await
+        .expect("the recorded environment loads");
+        assert_eq!(recorded, env, "the process keeps its restriction");
         nodes.stop("authority-node");
         nodes.quiesce().await;
         core.shutdown().await.expect("shutdown");
     }
-    let observed = observed.lock_recover();
-    assert!(
-        !observed.is_empty(),
-        "the redriven process built its tool runtime"
-    );
-    assert!(
-        observed.iter().all(|access| access == &authority),
-        "the process lost its restriction: {observed:?}"
-    );
     assert!(
         world.writes.lock_recover().is_empty(),
         "a restricted process cannot call the deployment's resident tool"

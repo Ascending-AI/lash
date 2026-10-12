@@ -19,7 +19,7 @@ pub(crate) struct BoundSession {
     process: ProcessWorkWiring,
     backend: lash_core::Backend,
     attachment_store: Arc<lash_core::facade_support::RuntimeAttachmentStore>,
-    process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    process_env_store: Arc<dyn lash_core::ProcessEnvStore>,
     process_engines: lash_core::ProcessEngineRegistry,
     catalog: Arc<dyn DeploymentStore>,
     models: Arc<dyn lash_core::LlmProfiles>,

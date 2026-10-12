@@ -162,6 +162,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
         .register_node(&NodeSpec {
             node: NodeId::new("fragment-owner"),
             decodes: vec![formats],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

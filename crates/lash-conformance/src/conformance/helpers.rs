@@ -63,32 +63,22 @@ pub(crate) async fn record_completed_attachment_write(
 /// The second published environment used by reference-count and rebinding
 /// laws: distinct bytes and therefore a distinct content-addressed reference.
 #[expect(clippy::expect_used, reason = "conformance environment fixture")]
-pub fn process_registry_alternate_environment_ref() -> crate::ProcessExecutionEnvRef {
+pub fn process_registry_alternate_environment_ref() -> crate::ProcessEnvRef {
     alternate_process_environment()
         .stable_ref()
         .expect("alternate environment encodes")
 }
 
-fn alternate_process_environment() -> crate::ProcessExecutionEnvSpec {
-    crate::ProcessExecutionEnvSpec::new(
-        crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        crate::SessionToolAccess::ambient(),
-    )
+fn alternate_process_environment() -> crate::ProcessEnv {
+    lash_core::testing::process_env_with_limit(1)
 }
 
 /// Publish the two environments registry fixtures register under. Admission
 /// requires stored bytes even when a law concerns only the registry's rows.
 #[expect(clippy::expect_used, reason = "conformance environment fixture")]
-pub async fn publish_process_registry_fixture_environments(
-    store: &dyn crate::ProcessExecutionEnvStore,
-) {
+pub async fn publish_process_registry_fixture_environments(store: &dyn crate::ProcessEnvStore) {
     lash_core::testing::process_execution_env_fixture(store).await;
-    crate::publish_process_execution_env(
+    lash_core::testing::publish_process_env_for_testing(
         store,
         &lash_core::testing::host_pin_claim_for_testing(),
         &alternate_process_environment(),

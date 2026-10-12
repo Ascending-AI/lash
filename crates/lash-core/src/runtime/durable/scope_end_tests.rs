@@ -388,6 +388,7 @@ impl World {
             .register_node(&NodeSpec {
                 node: NodeId::new(format!("law-node-{boot}")),
                 decodes: vec![FormatSet::new(SESSION_FORMATS)],
+                serves: Vec::new(),
                 ttl_millis: 600_000,
             })
             .await
@@ -1193,10 +1194,24 @@ impl crate::ProcessEngine for LawEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&crate::EngineSettings>,
+    ) -> std::result::Result<(), crate::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(crate::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
         Ok(None)
     }
 
@@ -1372,16 +1387,17 @@ async fn try_start_process(
         crate::ProcessInput::Engine {
             kind: kind.to_owned(),
             payload: serde_json::Value::Null,
+            launch: crate::EngineLaunch::new(
+                lash_core_execution::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
         },
         crate::ProcessProvenance::host(),
         crate::LifetimeDecision::Until {
             scope: scope.clone(),
             grant: crate::ScopeGrant::Ancestor,
         },
-    )
-    .with_execution_env_ref(Some(
-        lash_core_execution::testing::process_execution_env_fixture_ref(),
-    ));
+    );
     registration.ancestry = crate::Ancestry::from_scopes([scope]);
     backend
         .process_registry()
@@ -1396,6 +1412,7 @@ async fn end_process(backend: &Backend, process: &ProcessId) {
         .register_node(&NodeSpec {
             node: NodeId::new(format!("law-terminal-{process}")),
             decodes: backend.formats().decodes(),
+            serves: Vec::new(),
             ttl_millis: 600_000,
         })
         .await

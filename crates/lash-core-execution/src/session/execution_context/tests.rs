@@ -22,13 +22,11 @@ impl ToolProvider for NoopTools {
 }
 
 fn test_execution_context() -> RuntimeExecutionContext<'static> {
-    test_execution_context_with_env_store(Arc::new(
-        crate::testing::UnavailableProcessExecutionEnvStore,
-    ))
+    test_execution_context_with_env_store(Arc::new(crate::testing::UnavailableProcessEnvStore))
 }
 
 fn test_execution_context_with_env_store(
-    env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    env_store: Arc<dyn crate::ProcessEnvStore>,
 ) -> RuntimeExecutionContext<'static> {
     let plugins = crate::plugin::PluginHost::empty(
         crate::ExecutionBudgets::recommended(),
@@ -63,14 +61,8 @@ fn test_execution_context_with_env_store(
         ),
         parent_invocation: None,
         observation_call_key: None,
-        facts: crate::plugin::ExecutionFacts::of_env_spec(&crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                crate::NoProgressBudget::bounded(12),
-            ),
-            crate::SessionToolAccess::ambient(),
+        facts: crate::plugin::ExecutionFacts::of_process(&crate::testing::process_env_with_limit(
+            1024,
         )),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
@@ -89,15 +81,6 @@ fn test_execution_context_with_env_store(
         Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         Arc::new(crate::ChronologicalProjection::default()),
         crate::TurnContext::default(),
-        crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                crate::NoProgressBudget::bounded(12),
-            ),
-            crate::SessionToolAccess::ambient(),
-        ),
     )
 }
 
@@ -122,7 +105,7 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
     host_process.process_execution = Some(RuntimeProcessExecution {
         process_id: crate::process_id_for_test("host-process"),
         originator: crate::ProcessOriginator::host_scoped("automation"),
-        env_ref: None,
+        enclosing: None,
         event_context: None,
     });
     assert_eq!(
@@ -135,7 +118,7 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
     session_process.process_execution = Some(RuntimeProcessExecution {
         process_id: crate::process_id_for_test("session-process"),
         originator: crate::ProcessOriginator::session(crate::SessionScope::new("origin-session")),
-        env_ref: None,
+        enclosing: None,
         event_context: None,
     });
     assert_eq!(

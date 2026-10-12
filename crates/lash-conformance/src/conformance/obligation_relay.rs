@@ -101,10 +101,24 @@ impl crate::ProcessEngine for MissingCarryEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&crate::EngineSettings>,
+    ) -> std::result::Result<(), crate::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(crate::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
         Ok(None)
     }
 

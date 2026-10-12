@@ -799,6 +799,7 @@ mod tests {
             NodeSpec {
                 node: lash_durable::NodeId::new(name),
                 decodes: vec![lash_durable::FormatSet::new(FORMATS)],
+                serves: Vec::new(),
                 ttl_millis: 15_000,
             }
         }

@@ -59,7 +59,7 @@ fn refused(identity: &crate::ToolIntentIdentity) -> crate::ToolIntentExecutionOu
         identity: Some(identity.clone()),
         intent_index: identity.intent_index,
         kind: crate::ToolIntentKind::CancelProcess,
-        refusal: crate::ToolIntentRefusalReason::ExecutionEnvMissing,
+        refusal: crate::ToolIntentRefusalReason::IntentIndexOverflow,
     }
 }
 

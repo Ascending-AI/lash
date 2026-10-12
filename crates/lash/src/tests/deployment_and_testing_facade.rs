@@ -86,15 +86,7 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
     )
     .unwrap();
     let pin = crate::process::HostArtifactPin::mint();
-    let environment = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            crate::TurnBudget::bounded(32),
-            crate::MaxToolCalls::new(1024),
-            crate::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
+    let environment = lash_core::testing::process_env_fixture();
     let crate::workflow::WorkflowPublish::Published(publication) = core
         .host_artifacts()
         .publish_workflow(
@@ -259,15 +251,7 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
     )
     .unwrap();
     let pin = crate::process::HostArtifactPin::mint();
-    let environment = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            crate::TurnBudget::bounded(32),
-            crate::MaxToolCalls::new(1024),
-            crate::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
+    let environment = lash_core::testing::process_env_fixture();
     let crate::workflow::WorkflowPublish::Published(publication) = core
         .host_artifacts()
         .publish_workflow(

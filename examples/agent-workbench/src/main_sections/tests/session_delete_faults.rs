@@ -380,7 +380,7 @@ impl lash::StoreSet for DeleteStores {
     fn process_registry(&self) -> Arc<dyn lash::persistence::ProcessRegistry> {
         self.inner.process_registry()
     }
-    fn process_env_store(&self) -> Arc<dyn lash::persistence::ProcessExecutionEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn lash::persistence::ProcessEnvStore> {
         self.inner.process_env_store()
     }
     fn turn_prelude_store(&self) -> Arc<dyn lash::persistence::TurnPreludeStore> {

@@ -107,6 +107,7 @@ async fn node(store: &dyn DurableStore, name: &str) -> Result<NodeLease, LawBrok
         .register_node(&NodeSpec {
             node: NodeId::new(name),
             decodes: vec![formats()],
+            serves: Vec::new(),
             ttl_millis: TTL_MILLIS,
         })
         .await?)

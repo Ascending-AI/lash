@@ -55,8 +55,13 @@ impl RecordingSink {
     }
 }
 
+/// The component that serves the law's tools to a process body.
+const TOOLS_COMPONENT: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("codemode-document-tools", lash_core::FormatVersion::ONE);
+
 /// A core running RLM turns on `workers`, with the session process
-/// controls, `tools`, and `sink` tracing every record.
+/// controls, `tools`, and `sink` tracing every record. A process a cell
+/// starts runs under the turn's run with `tools`' component.
 async fn world_with_tools(
     tier: Tier,
     workers: lash::vm::WorkerService,
@@ -72,8 +77,13 @@ async fn world_with_tools(
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_core::lifetime::session_or_starter,
+                lash_core::testing::run_policy_naming(&[TOOLS_COMPONENT]),
             ),
         ))
+        .process_component(
+            lash_core::testing::tool_component(TOOLS_COMPONENT, Arc::clone(&tools)),
+            TOOLS_COMPONENT,
+        )
         .tools(tools)
         .trace_sink(sink)
     })

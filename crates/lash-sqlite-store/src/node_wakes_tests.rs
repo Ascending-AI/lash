@@ -802,6 +802,7 @@ async fn run_grouped_child(cut: &str, database: &Path) {
         .register_node(&lash_durable::NodeSpec {
             node: NodeId::new("grouped"),
             decodes: vec![formats()],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await
@@ -992,6 +993,7 @@ async fn an_owned_mail_hint_is_already_committed_with_its_mail() {
         .register_node(&lash_durable::NodeSpec {
             node: NodeId::new("hint-owner"),
             decodes: vec![formats()],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

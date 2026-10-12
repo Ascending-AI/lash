@@ -113,14 +113,18 @@ crate::statements! {
              WHERE owner_node = ?1 AND owner_boot = ?2 AND state = 'owned'
              RETURNING actor_key, epoch";
 
-        /// Every actor boot `?2` of node `?1` owns, with its epoch and
-        /// format set.
-        owned_by = "SELECT actor_key, epoch, formats FROM actors
+        /// Every actor boot `?2` of node `?1` owns, with its epoch, format
+        /// set and claim requirements.
+        owned_by = "SELECT actor_key, epoch, formats, requires FROM actors
              WHERE owner_node = ?1 AND owner_boot = ?2 AND state = 'owned'
              ORDER BY actor_key";
 
         /// Record that actor `?1`'s state is written in format set `?2`.
         stamp_formats = "UPDATE actors SET formats = ?2 WHERE actor_key = ?1";
+
+        /// Record actor `?1`'s claim requirements: the canonical JSON array
+        /// `?2`, or `NULL` for none (FIG-6034 D3).
+        stamp_requires = "UPDATE actors SET requires = ?2 WHERE actor_key = ?1";
 
         /// Up to `?3` actors in format set `?1` that have not ended, by key,
         /// after key `?2`.

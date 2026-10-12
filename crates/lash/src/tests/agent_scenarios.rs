@@ -30,16 +30,19 @@ fn scripted(responses: Vec<String>, requests: Arc<StdMutex<Vec<LlmRequest>>>) ->
         .into_handle()
 }
 
-/// An RLM core serving `provider`, with the session process controls.
+/// An RLM core serving `provider`, with the session process controls: a
+/// process a cell starts runs under the turn's run with `components`.
 fn scenario_core(
     backend: lash_core::Backend,
     provider: ProviderHandle,
+    components: &[lash_core::ProcessConfigKey<()>],
 ) -> crate::core::LashCoreBuilder {
     explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                 lash_core::lifetime::session_or_starter,
+                lash_core::testing::run_policy_naming(components),
             ),
         ))
 }
@@ -76,8 +79,13 @@ await control.finish(await handle);"#,
             ],
             Arc::clone(&requests),
         ),
+        &[lash_llm_tools::LLM_TOOLS_CONFIG],
     )
     .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
+    .process_component(
+        Arc::new(lash_llm_tools::LlmToolsComponent::default()),
+        lash_llm_tools::LLM_TOOLS_CONFIG,
+    )
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = crate::SessionId::parse("agent-scenario-process-llm-query")
         .expect("nonblank host identity");
@@ -156,6 +164,10 @@ fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
     ))
 }
 
+/// The component that serves `retrying_direct` to a process body.
+const RETRYING_DIRECT_COMPONENT: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("retrying-direct", lash_core::FormatVersion::ONE);
+
 #[async_trait]
 impl ToolProvider for RetryingDirectTools {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
@@ -216,8 +228,16 @@ await control.finish(await handle);"#,
             ],
             Arc::clone(&requests),
         ),
+        &[RETRYING_DIRECT_COMPONENT],
     )
     .tools(Arc::new(RetryingDirectTools))
+    .process_component(
+        lash_core::testing::tool_component(
+            RETRYING_DIRECT_COMPONENT,
+            Arc::new(RetryingDirectTools),
+        ),
+        RETRYING_DIRECT_COMPONENT,
+    )
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(

@@ -21,7 +21,7 @@ use lash_durable::{
 use lash_sansio::{CancelOrigin, ProcessId};
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing, SQL, integer, wake_within};
+use super::{Answer, Committing, SQL, actor_key, integer, wake_within};
 use crate::SqliteProcessRegistry;
 use crate::conn::cached_execute;
 use crate::process_registry::actor::CancelRecorded;
@@ -44,11 +44,13 @@ fn instant(ms: u64) -> rusqlite::Result<DurableInstant> {
 }
 
 /// Create `process`'s actor, ready, in the caller's transaction: a process
-/// registration's other half.
+/// registration's other half. A process whose environment names components
+/// carries their claim requirements from its creation on (FIG-6034 §6.2).
 pub(crate) fn create_actor_within(
     tx: &Connection,
     process: &ProcessId,
     formats: &str,
+    requires: &[String],
     now: DurableInstant,
 ) -> Answer<()> {
     let actor = match ActorKey::process(process.as_str()) {
@@ -62,10 +64,89 @@ pub(crate) fn create_actor_within(
             |_| Ok(()),
         )
         .optional()?;
-    Ok(match created {
-        Some(()) => Ok(()),
-        None => Err(DurableError::MailRefused(MailRefusal::ActorExists(actor))),
-    })
+    if created.is_none() {
+        return Ok(Err(DurableError::MailRefused(MailRefusal::ActorExists(
+            actor,
+        ))));
+    }
+    if !requires.is_empty() {
+        cached_execute(
+            tx,
+            SQL.actor.stamp_requires.sql(),
+            rusqlite::params![actor.as_str(), lash_durable::encode_requires(requires)],
+        )?;
+    }
+    Ok(Ok(()))
+}
+
+/// Record actor `actor`'s claim requirements (FIG-6034 §6.2).
+pub(super) fn stamp_requires(
+    tx: &Connection,
+    actor: &str,
+    requires: &[String],
+) -> rusqlite::Result<()> {
+    cached_execute(
+        tx,
+        SQL.actor.stamp_requires.sql(),
+        rusqlite::params![actor, lash_durable::encode_requires(requires)],
+    )
+    .map(drop)
+}
+
+/// Take up to `limit` actors claimable at `now` for boot `lease`: those it
+/// decodes and whose claim requirements it serves to run, and a process
+/// with a pending cancel otherwise, only for it (FIG-6034 D3).
+pub(super) fn claim_within(
+    tx: &Connection,
+    lease: &lash_durable::NodeLease,
+    now: DurableInstant,
+    limit: i64,
+) -> Answer<Vec<lash_durable::Claimed>> {
+    use lash_durable::{ClaimCause, ClaimPurpose, Claimed};
+    let owner = &lease.owner;
+    let formats = super::formats_json(&lease.decodes);
+    let serves = serde_json::Value::from(lease.serves.clone()).to_string();
+    let candidates = tx
+        .prepare_cached(SQL.sqlite.claimable.sql())?
+        .query_map(
+            rusqlite::params![now.0, formats, limit, CANCEL_MAIL, serves],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut claimed = Vec::with_capacity(candidates.len());
+    for (key, state, stored_formats, requires) in candidates {
+        let purpose = ClaimPurpose::of_stored(lease, &stored_formats, requires.as_deref());
+        let purpose = match purpose {
+            Ok(purpose) => purpose,
+            Err(error) => return Ok(Err(error)),
+        };
+        let epoch = tx.prepare_cached(SQL.sqlite.claim.sql())?.query_row(
+            rusqlite::params![key, owner.node.as_str(), owner.boot.as_str()],
+            |row| row.get::<_, i64>(0),
+        )?;
+        let actor = match actor_key(&key) {
+            Ok(actor) => actor,
+            Err(error) => return Ok(Err(error)),
+        };
+        claimed.push(Claimed {
+            actor,
+            epoch: Epoch(epoch),
+            cause: if state == "waiting" {
+                ClaimCause::Due
+            } else {
+                ClaimCause::Ready
+            },
+            purpose,
+        });
+    }
+    Ok(Ok(claimed))
 }
 
 /// Record `origin`'s cancel of `process` unless one stands, append its

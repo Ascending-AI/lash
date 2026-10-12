@@ -135,6 +135,7 @@ async fn register(backend: &lash_core::Backend, index: usize) -> NodeLease {
         .register_node(&NodeSpec {
             node: NodeId::new(format!("rlm-cell-law-{index}")),
             decodes: vec![FormatSet::new(FORMATS)],
+            serves: Vec::new(),
             ttl_millis: 600_000,
         })
         .await

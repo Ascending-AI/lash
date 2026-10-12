@@ -8,7 +8,7 @@ use crate::plugin::PluginError;
 
 use super::events::{ProcessEvent, ProcessTerminal};
 use super::model::{
-    ProcessChange, ProcessChangeCursor, ProcessExecutionEnvRef, ProcessExternalRef, ProcessId,
+    ProcessChange, ProcessChangeCursor, ProcessEnvRef, ProcessExternalRef, ProcessId,
     ProcessIdentity, ProcessInput, ProcessLifecycleState, ProcessListFilter, ProcessOriginator,
     ProcessOriginatorFilter, ProcessRecord, ProcessStarted, ProcessStatus, ProcessTombstone,
     SessionScope, WaitState,
@@ -84,7 +84,7 @@ pub struct ObservedProcess {
     pub input: ProcessInput,
     pub originator: ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_ref: Option<ProcessExecutionEnvRef>,
+    pub env_ref: Option<ProcessEnvRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caused_by: Option<crate::CausalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -582,6 +582,7 @@ impl ObservedProcess {
             ProcessInput::Engine { .. } => None,
         };
         let input = record.input.as_ref().clone();
+        let env_ref = record.env_ref().cloned();
         Self {
             process_id: record.id,
             last_event_sequence: record.last_event_sequence,
@@ -594,7 +595,7 @@ impl ObservedProcess {
             first_started: record.first_started.map(|started| *started),
             cancel_request: record.cancel_request.map(|request| *request),
             originator: record.provenance.originator,
-            env_ref: record.env_ref,
+            env_ref,
             caused_by: record.provenance.caused_by,
             external_ref: record.external_ref,
             park: ProcessParkState::NotRead,

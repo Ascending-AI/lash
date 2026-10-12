@@ -7,8 +7,8 @@ use std::sync::Arc;
 use lash::persistence::FleetFormat;
 use lash::plugins::PluginOptions;
 use lash::process::{
-    CausalRef, DeclaredProcessIdentity, Lifetime, ProcessInput, ProcessOriginator,
-    ProcessStartDeclaration, SessionTurnOutcome,
+    CausalRef, DeclaredProcessIdentity, Lifetime, ProcessOriginator, ProcessStartDeclaration,
+    SessionTurnOutcome,
 };
 use lash::rlm::{RLM_PROTOCOL_PLUGIN_ID, RlmCreateExtras, RlmSeed, TerminationMode};
 use lash::schema::JsonSchema;
@@ -382,14 +382,14 @@ impl SpawnAgent {
                 ));
             }
         };
-        let declaration = ProcessStartDeclaration::new(
-            ProcessInput::SessionTurn {
-                definition_key: SESSION_TURN_DEFINITION.to_string(),
-                create_request: prepared.create_request,
-                turn_input: Box::new(prepared.turn_input),
-                result: SessionTurnOutcome::FinalValue {
-                    schema: prepared.output_schema,
-                },
+        // A session-turn start holds no environment: the child session runs
+        // under the configuration its create request records.
+        let declaration = ProcessStartDeclaration::session_turn(
+            SESSION_TURN_DEFINITION,
+            *prepared.create_request,
+            prepared.turn_input,
+            SessionTurnOutcome::FinalValue {
+                schema: prepared.output_schema,
             },
             originator,
             lifetime,
@@ -397,15 +397,7 @@ impl SpawnAgent {
         .with_declared_identity(DeclaredProcessIdentity::labelled(
             "subagent",
             Some("spawn".to_string()),
-        ))
-        // The process that runs the child is built from the attempt's
-        // execution environment. The child session itself records only its
-        // create request.
-        .with_env_ref(
-            context
-                .process_execution_env_ref()
-                .map_err(|error| format!("spawn_agent could not capture its environment: {error}"))?,
-        );
+        ));
         let start = DeclaredStart::new(
             context,
             StartProcessIntent {

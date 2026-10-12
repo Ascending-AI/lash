@@ -1239,11 +1239,6 @@ pub mod facade_ops {
 
         fn session_operation_scope(&self, operation_id: impl Into<String>)
         -> crate::ExecutionScope;
-
-        fn process_execution_env_spec(
-            &self,
-            fallback_policy: &SessionPolicy,
-        ) -> crate::ProcessExecutionEnvSpec;
     }
 
     #[doc(hidden)]
@@ -1265,30 +1260,6 @@ pub mod facade_ops {
             operation_id: impl Into<String>,
         ) -> crate::ExecutionScope {
             crate::ExecutionScope::session_operation(&self.session_id, operation_id)
-        }
-
-        fn process_execution_env_spec(
-            &self,
-            fallback_policy: &SessionPolicy,
-        ) -> crate::ProcessExecutionEnvSpec {
-            let policy = if self.current_agent_frame().is_some() {
-                self.policy.clone()
-            } else {
-                fallback_policy.clone()
-            };
-            // The process captures the configuration its creator runs under:
-            // a running run's resolved view with the capability refs its
-            // spec bound, or the head's (FIG-4379, FIG-6021).
-            let mut spec = crate::ProcessExecutionEnvSpec::new(
-                self.admitted_plugin_config(),
-                policy,
-                self.authority.tool_access.clone(),
-            );
-            if let Some(view) = self.authority.run_view() {
-                spec.render = view.run.render.clone();
-                spec.capabilities = view.run.capabilities().clone();
-            }
-            spec
         }
     }
 }

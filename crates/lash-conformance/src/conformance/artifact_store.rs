@@ -4,21 +4,13 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 /// A writer and a new handle over the same durable store.
-pub struct ReopenableProcessExecutionEnvStore {
-    pub open: Arc<dyn crate::ProcessExecutionEnvStore>,
-    pub reopen: Arc<dyn Fn() -> Arc<dyn crate::ProcessExecutionEnvStore> + Send + Sync>,
+pub struct ReopenableProcessEnvStore {
+    pub open: Arc<dyn crate::ProcessEnvStore>,
+    pub reopen: Arc<dyn Fn() -> Arc<dyn crate::ProcessEnvStore> + Send + Sync>,
 }
 
-fn sample_env_spec() -> crate::ProcessExecutionEnvSpec {
-    crate::ProcessExecutionEnvSpec::new(
-        crate::AdmittedPluginConfig::default(),
-        SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        crate::SessionToolAccess::ambient(),
-    )
+fn sample_env_spec() -> crate::ProcessEnv {
+    lash_core::testing::process_env_with_limit(1024)
 }
 
 #[expect(
@@ -40,7 +32,7 @@ fn cleanup(referrer: crate::ArtifactReferrer) -> crate::ResolvedArtifactCleanup 
 
 pub async fn process_execution_env_store_fresh_instances<F>(make: &F)
 where
-    F: Fn() -> Arc<dyn crate::ProcessExecutionEnvStore>,
+    F: Fn() -> Arc<dyn crate::ProcessEnvStore>,
 {
     let first = make();
     let second = make();
@@ -51,20 +43,18 @@ where
     clippy::expect_used,
     reason = "conformance law validates each store operation"
 )]
-pub async fn process_env_last_referrer_reclaims_bytes(
-    store: Arc<dyn crate::ProcessExecutionEnvStore>,
-) {
+pub async fn process_env_last_referrer_reclaims_bytes(store: Arc<dyn crate::ProcessEnvStore>) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
     let (first, first_claim) = host_claim();
     let (second, second_claim) = host_claim();
     store
-        .publish_process_execution_env(&first_claim, &env_ref, &bytes)
+        .publish_process_env(&first_claim, &env_ref, &bytes)
         .await
         .expect("publish first edge");
     store
-        .acquire_process_execution_env(&second_claim, &env_ref)
+        .acquire_process_env(&second_claim, &env_ref)
         .await
         .expect("acquire second edge");
     store
@@ -72,36 +62,21 @@ pub async fn process_env_last_referrer_reclaims_bytes(
         .await
         .expect("end first referrer");
     assert_eq!(
-        store
-            .get_process_execution_env(&env_ref)
-            .await
-            .expect("read"),
+        store.get_process_env(&env_ref).await.expect("read"),
         Some(bytes.clone())
     );
     store
         .end_process_env_referrer(&cleanup(second.clone()))
         .await
         .expect("end last referrer");
-    assert_eq!(
-        store
-            .get_process_execution_env(&env_ref)
-            .await
-            .expect("read"),
-        None
-    );
+    assert_eq!(store.get_process_env(&env_ref).await.expect("read"), None);
     store
         .end_process_env_referrer(&cleanup(second))
         .await
         .expect("replayed end");
-    assert_eq!(
-        store
-            .get_process_execution_env(&env_ref)
-            .await
-            .expect("read"),
-        None
-    );
+    assert_eq!(store.get_process_env(&env_ref).await.expect("read"), None);
     let refusal = store
-        .publish_process_execution_env(&second_claim, &env_ref, &bytes)
+        .publish_process_env(&second_claim, &env_ref, &bytes)
         .await
         .expect_err("ended pin is fenced");
     assert!(
@@ -113,16 +88,14 @@ pub async fn process_env_last_referrer_reclaims_bytes(
     clippy::expect_used,
     reason = "conformance law validates each store operation"
 )]
-pub async fn process_env_carry_precedes_reclamation(
-    store: Arc<dyn crate::ProcessExecutionEnvStore>,
-) {
+pub async fn process_env_carry_precedes_reclamation(store: Arc<dyn crate::ProcessEnvStore>) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
     let (source, source_claim) = host_claim();
     let (destination, destination_claim) = host_claim();
     store
-        .publish_process_execution_env(&source_claim, &env_ref, &bytes)
+        .publish_process_env(&source_claim, &env_ref, &bytes)
         .await
         .expect("publish source");
     let transfer = crate::ResolvedArtifactCleanup {
@@ -141,15 +114,12 @@ pub async fn process_env_carry_precedes_reclamation(
             .await
             .expect("carry is idempotent");
         assert_eq!(
-            store
-                .get_process_execution_env(&env_ref)
-                .await
-                .expect("read"),
+            store.get_process_env(&env_ref).await.expect("read"),
             Some(bytes.clone())
         );
     }
     let late = store
-        .acquire_process_execution_env(&source_claim, &env_ref)
+        .acquire_process_env(&source_claim, &env_ref)
         .await
         .expect_err("source is fenced");
     assert!(
@@ -159,15 +129,9 @@ pub async fn process_env_carry_precedes_reclamation(
         .end_process_env_referrer(&cleanup(destination))
         .await
         .expect("end destination");
-    assert_eq!(
-        store
-            .get_process_execution_env(&env_ref)
-            .await
-            .expect("read"),
-        None
-    );
+    assert_eq!(store.get_process_env(&env_ref).await.expect("read"), None);
     let late = store
-        .acquire_process_execution_env(&destination_claim, &env_ref)
+        .acquire_process_env(&destination_claim, &env_ref)
         .await
         .expect_err("destination is fenced");
     assert!(matches!(
@@ -180,7 +144,7 @@ pub async fn process_env_carry_precedes_reclamation(
     clippy::expect_used,
     reason = "conformance law validates each store operation"
 )]
-pub async fn slow_process_env_writer_is_fenced(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
+pub async fn slow_process_env_writer_is_fenced(store: Arc<dyn crate::ProcessEnvStore>) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
@@ -190,7 +154,7 @@ pub async fn slow_process_env_writer_is_fenced(store: Arc<dyn crate::ProcessExec
     let writer = tokio::spawn(async move {
         resume_rx.await.expect("fence releases writer");
         writer_store
-            .publish_process_execution_env(&claim, &env_ref, &bytes)
+            .publish_process_env(&claim, &env_ref, &bytes)
             .await
     });
     store
@@ -211,18 +175,18 @@ pub async fn slow_process_env_writer_is_fenced(store: Arc<dyn crate::ProcessExec
     clippy::expect_used,
     reason = "conformance law validates each store operation"
 )]
-pub async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionEnvStore) {
-    let ReopenableProcessExecutionEnvStore { open, reopen } = reopenable;
+pub async fn process_env_survives_reopen(reopenable: ReopenableProcessEnvStore) {
+    let ReopenableProcessEnvStore { open, reopen } = reopenable;
     let open_identity = Arc::downgrade(&open);
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
     let (first, first_claim) = host_claim();
     let (second, second_claim) = host_claim();
-    open.publish_process_execution_env(&first_claim, &env_ref, &bytes)
+    open.publish_process_env(&first_claim, &env_ref, &bytes)
         .await
         .expect("publish first edge");
-    open.acquire_process_execution_env(&second_claim, &env_ref)
+    open.acquire_process_env(&second_claim, &env_ref)
         .await
         .expect("acquire second edge");
     open.end_process_env_referrer(&cleanup(first.clone()))
@@ -235,10 +199,7 @@ pub async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionE
         "reopen reused the writer handle"
     );
     assert_eq!(
-        reopened
-            .get_process_execution_env(&env_ref)
-            .await
-            .expect("read"),
+        reopened.get_process_env(&env_ref).await.expect("read"),
         Some(bytes)
     );
     reopened
@@ -250,10 +211,7 @@ pub async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionE
         .await
         .expect("end final referrer");
     assert_eq!(
-        reopened
-            .get_process_execution_env(&env_ref)
-            .await
-            .expect("read"),
+        reopened.get_process_env(&env_ref).await.expect("read"),
         None
     );
 }

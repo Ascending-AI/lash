@@ -43,13 +43,11 @@ fn started(model: &str, keyed: bool) -> lash_core::ProcessStartRequest {
     if keyed {
         create_request.model = Some(crate::LlmProfileKey::new(model));
     }
-    lash_core::ProcessStartRequest::new(
-        lash_core::ProcessInput::SessionTurn {
-            definition_key: "child-turn".into(),
-            create_request: Box::new(create_request),
-            turn_input: Box::new(crate::TurnInput::text("do the child's work")),
-            result: lash_core::SessionTurnOutcome::Turn,
-        },
+    lash_core::ProcessStartRequest::session_turn(
+        "child-turn",
+        create_request,
+        crate::TurnInput::text("do the child's work"),
+        lash_core::SessionTurnOutcome::Turn,
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,
     )
@@ -294,7 +292,7 @@ async fn a_session_turn_process_cancelled_mid_turn_ends_cancelled_and_keeps_its_
 /// metadata: its turn runs to the answer its process ends with, and its
 /// committed head keeps the metadata its creation resolved.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_partially_created_child_finishes_from_its_recorded_creation_config() -> Result<()> {
+async fn a_partially_created_child_finishes_from_its_recorded_creation_request() -> Result<()> {
     use lash_core::testing::{Script, StoreOp};
     const REDEPLOYED_WINDOW: usize = 123_456;
     let stores: Arc<dyn lash_core::StoreSet> = Arc::new(

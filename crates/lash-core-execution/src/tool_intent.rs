@@ -96,10 +96,13 @@ impl ToolIntents {
 }
 
 impl ToolIntent {
-    /// Environments the declaration needs, without their stored bytes.
-    pub fn execution_env_ref(&self) -> Option<&crate::ProcessExecutionEnvRef> {
+    /// The environment the declaration's launch names, without its stored
+    /// bytes.
+    pub fn env_ref(&self) -> Option<&crate::ProcessEnvRef> {
         match self {
-            Self::StartProcess(start) => start.declaration.env_ref.as_ref(),
+            Self::StartProcess(start) => {
+                start.declaration.input().launch().map(|launch| &launch.env)
+            }
             Self::PublishDefinition(_) | Self::GetDefinition(_) | Self::CancelProcess(_) => None,
         }
     }
@@ -388,15 +391,6 @@ pub struct StartProcessIntent {
 }
 
 impl StartProcessIntent {
-    /// Shared admission for completed intent batches and pending declared starts.
-    pub(crate) fn admission_refusal(&self) -> Option<crate::ToolIntentRefusalReason> {
-        (matches!(
-            self.declaration.input,
-            crate::ProcessStartTarget::Input(crate::ProcessInput::SessionTurn { .. })
-        ) && self.declaration.env_ref.is_none())
-        .then_some(crate::ToolIntentRefusalReason::ExecutionEnvMissing)
-    }
-
     /// Both realization routes call this and nothing else, so every redrive
     /// of one declaration presents the same start key (ADR 0107).
     pub fn into_request(&self, identity: &ToolIntentIdentity) -> crate::ProcessStartRequest {
@@ -683,8 +677,8 @@ mod tests {
             ToolIntentKind::StartProcess => {
                 ToolIntent::StartProcess(Box::new(StartProcessIntent {
                     owner: crate::RuntimeOwner::Session(session_id),
-                    declaration: crate::ProcessStartDeclaration::new(
-                        crate::testing::held_engine_input(serde_json::Value::Null),
+                    declaration: crate::testing::held_engine_declaration(
+                        serde_json::Value::Null,
                         crate::ProcessOriginator::host(),
                         crate::Lifetime::Detached,
                     ),
@@ -865,8 +859,8 @@ mod tests {
 
     #[test]
     fn start_process_intent_without_a_lifetime_is_refused() {
-        let declaration = crate::ProcessStartDeclaration::new(
-            crate::testing::held_engine_input(serde_json::Value::Null),
+        let declaration = crate::testing::held_engine_declaration(
+            serde_json::Value::Null,
             crate::ProcessOriginator::host(),
             crate::Lifetime::Detached,
         );

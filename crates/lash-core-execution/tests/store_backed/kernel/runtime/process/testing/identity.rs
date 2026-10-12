@@ -1,27 +1,27 @@
-use crate::{ProcessExecutionEnvRef, ProcessExecutionEnvSpec};
+use crate::{ProcessEnv, ProcessEnvRef};
 
 /// The env bytes an older build stored under its own family's reference:
 /// one entry, read-only.
 struct PriorFamilyEnv {
-    env_ref: ProcessExecutionEnvRef,
+    env_ref: ProcessEnvRef,
     bytes: Vec<u8>,
 }
 
 #[async_trait::async_trait]
-impl crate::ProcessExecutionEnvStore for PriorFamilyEnv {
-    async fn publish_process_execution_env(
+impl crate::ProcessEnvStore for PriorFamilyEnv {
+    async fn publish_process_env(
         &self,
         _claim: &crate::ReferrerClaim,
-        _env_ref: &ProcessExecutionEnvRef,
+        _env_ref: &ProcessEnvRef,
         _bytes: &[u8],
     ) -> Result<(), crate::ArtifactStoreError> {
         unreachable!("the prior-family entry is read-only")
     }
 
-    async fn acquire_process_execution_env(
+    async fn acquire_process_env(
         &self,
         _claim: &crate::ReferrerClaim,
-        _env_ref: &ProcessExecutionEnvRef,
+        _env_ref: &ProcessEnvRef,
     ) -> Result<(), crate::ArtifactStoreError> {
         unreachable!("the prior-family entry is read-only")
     }
@@ -33,9 +33,9 @@ impl crate::ProcessExecutionEnvStore for PriorFamilyEnv {
         unreachable!("the prior-family entry is read-only")
     }
 
-    async fn get_process_execution_env(
+    async fn get_process_env(
         &self,
-        env_ref: &ProcessExecutionEnvRef,
+        env_ref: &ProcessEnvRef,
     ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
         Ok((env_ref == &self.env_ref).then(|| self.bytes.clone()))
     }
@@ -43,36 +43,33 @@ impl crate::ProcessExecutionEnvStore for PriorFamilyEnv {
 
 #[tokio::test]
 async fn runtime_feedback_process_environment_refuses_prior_family() {
-    use crate::{
-        ProcessExecutionEnvStore, load_process_execution_env, publish_process_execution_env,
-    };
+    use crate::{ProcessEnvStore, load_process_env};
     let backend = crate::support::sqlite_memory_store_set().await;
     let store = backend.process_env_store();
-    let mut policy = crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-        lash_core_execution::NoProgressBudget::bounded(12),
-    );
-    policy.model = Some(crate::LlmProfileConfig::new(
-        crate::RecordedLlmProfile::mint(
-            crate::LlmProfileKey::new("model"),
-            crate::LlmProfileMetadata::builder("model")
-                .cache_retention(lash_core_execution::provider::CacheRetention::Short)
-                .context_window_tokens(100)
-                .build()
-                .unwrap()
-                .with_capability(crate::LlmProfileCapability {
-                    instruction_role: crate::InstructionRole::Developer,
-                    native_mid_conversation_system: true,
-                    ..Default::default()
-                }),
-        ),
+    let profile = crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
+        crate::LlmProfileKey::new("model"),
+        crate::LlmProfileMetadata::builder("model")
+            .cache_retention(lash_core_execution::provider::CacheRetention::Short)
+            .context_window_tokens(100)
+            .build()
+            .unwrap()
+            .with_capability(crate::LlmProfileCapability {
+                instruction_role: crate::InstructionRole::Developer,
+                native_mid_conversation_system: true,
+                ..Default::default()
+            }),
     ));
-    let spec = ProcessExecutionEnvSpec::new(
-        crate::AdmittedPluginConfig::default(),
-        policy,
-        crate::SessionToolAccess::ambient(),
-    );
+    let spec = ProcessEnv::builder(
+        crate::SessionToolAccess::restricted(std::iter::empty()).unwrap(),
+        crate::MaxToolCalls::new(1024),
+    )
+    .model(crate::ProcessModel::new(
+        profile,
+        Default::default(),
+        Default::default(),
+    ))
+    .build()
+    .unwrap();
     let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
         crate::HostArtifactPin::mint(),
     ))
@@ -82,14 +79,12 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
         ("process-env:v4:blake3:", "lash-process-env/v4"),
         ("process-env:v5:blake3:", "lash-process-env/v5"),
     ] {
-        let old = ProcessExecutionEnvRef::new(format!(
+        let old = ProcessEnvRef::new(format!(
             "{prefix}{}",
             crate::stable_hash::blake3_hex(domain, &bytes)
         ));
         assert!(matches!(
-            store
-                .publish_process_execution_env(&claim, &old, &bytes)
-                .await,
+            store.publish_process_env(&claim, &old, &bytes).await,
             Err(crate::ArtifactStoreError::Immutable { .. })
         ));
         // A store only accepts bytes under their own reference, so the bytes
@@ -100,21 +95,23 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
             bytes: bytes.clone(),
         };
         assert!(
-            load_process_execution_env(&prior, &old)
+            load_process_env(&prior, &old)
                 .await
                 .unwrap_err()
                 .to_string()
                 .contains("recreate")
         );
     }
-    let current = publish_process_execution_env(store.as_ref(), &claim, &spec)
-        .await
-        .unwrap();
+    let current = lash_core_execution::testing::publish_process_env_for_testing(
+        store.as_ref(),
+        &claim,
+        &spec,
+    )
+    .await
+    .unwrap();
     assert!(current.as_str().starts_with("process-env:v6:blake3:"));
     assert_eq!(
-        load_process_execution_env(store.as_ref(), &current)
-            .await
-            .unwrap(),
+        load_process_env(store.as_ref(), &current).await.unwrap(),
         spec
     );
 }

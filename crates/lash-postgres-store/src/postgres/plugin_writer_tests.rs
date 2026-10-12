@@ -17,8 +17,8 @@ use lash_core_execution::testing::store_fixtures::{
     commit_runtime_state_for_test, root_session_request,
 };
 use lash_core_execution::{
-    FormatNamespace, FormatVersion, PluginNamespaceState, PluginState,
-    ProcessExecutionEnvStore as _, RuntimeSessionState, RuntimeStore, SessionId, StoreError,
+    FormatNamespace, FormatVersion, PluginNamespaceState, PluginState, ProcessEnvStore as _,
+    RuntimeSessionState, RuntimeStore, SessionId, StoreError,
 };
 
 use crate::PostgresStorage;
@@ -171,21 +171,50 @@ fn outside(error: &StoreError, namespace: FormatNamespace, writer: u32, permitte
     );
 }
 
-async fn publish_env(storage: &PostgresStorage, format: u32) -> Result<(), StoreError> {
-    let mut config = lash_core_execution::PluginConfig::default();
-    config.insert_versioned(PLUGIN, version(format), serde_json::json!({"count": 1}));
-    let bytes = lash_core_execution::ProcessExecutionEnvSpec::new(
-        lash_core_execution::AdmittedPluginConfig::new(config, 0),
-        lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
+/// The writer a process environment's `PLUGIN` component stamps: a
+/// component's config is its own writer (FIG-6034 §3.3).
+fn component_writer() -> String {
+    format!("component:{PLUGIN}")
+}
+
+fn outside_for(
+    error: &StoreError,
+    writer_key: &str,
+    namespace: FormatNamespace,
+    writer: u32,
+    permitted: VersionRange,
+) {
+    assert!(
+        matches!(
+            error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::PluginWriterOutsideRange {
+                    plugin,
+                    namespace: found,
+                    writer: stamped,
+                    permitted: range,
+                }
+            } if plugin == writer_key && *found == namespace && *stamped == writer && *range == permitted
         ),
-        lash_core_execution::SessionToolAccess::ambient(),
+        "expected {writer_key} {namespace:?} format {writer} refused outside {permitted}: {error:?}"
+    );
+}
+
+async fn publish_env(storage: &PostgresStorage, format: u32) -> Result<(), StoreError> {
+    let bytes = lash_core_execution::ProcessEnv::builder(
+        lash_core_execution::SessionToolAccess::restricted(std::iter::empty())
+            .expect("an empty tool restriction"),
+        lash_core_execution::MaxToolCalls::new(1024),
     )
+    .component(
+        lash_core_execution::ProcessConfigKey::<serde_json::Value>::new(PLUGIN, version(format)),
+        &serde_json::json!({"count": 1}),
+    )
+    .build()
+    .expect("the environment builds")
     .to_store_bytes()
     .expect("encode the environment");
-    let env_ref = lash_core_execution::process_execution_env_ref_for_bytes(&bytes);
+    let env_ref = lash_core_execution::process_env_ref_for_bytes(&bytes);
     let claim =
         lash_core_execution::ReferrerClaim::unguarded(
             lash_core_execution::ArtifactReferrer::HostPin(
@@ -195,7 +224,7 @@ async fn publish_env(storage: &PostgresStorage, format: u32) -> Result<(), Store
         .expect("host pin claim");
     storage
         .process_env_store()
-        .publish_process_execution_env(&claim, &env_ref, &bytes)
+        .publish_process_env(&claim, &env_ref, &bytes)
         .await
         .map_err(|error| match error {
             lash_core_execution::ArtifactStoreError::Incompatible { refusal } => {
@@ -295,15 +324,23 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
     outside(&error, FormatNamespace::Config, 2, permitted);
     assert_eq!(published(&n).await, before);
 
-    // A process execution environment.
-    let error = publish_env(&n, 2)
-        .await
-        .expect_err("an environment refuses plugin config outside the range");
-    outside(&error, FormatNamespace::Config, 2, permitted);
-    assert_eq!(published(&n).await, before);
+    // A process environment. Its component's config is its own writer: the
+    // first format provisions `[1, 1]`, and a later format is refused.
     publish_env(&n, 1)
         .await
-        .expect("an environment inside the range is published");
+        .expect("an environment's first component format is published");
+    let before = published(&n).await;
+    let error = publish_env(&n, 2)
+        .await
+        .expect_err("an environment refuses component config outside the range");
+    outside_for(
+        &error,
+        &component_writer(),
+        FormatNamespace::Config,
+        2,
+        permitted,
+    );
+    assert_eq!(published(&n).await, before);
 
     assert_eq!(recorded_range(&n).await, Some((1, 1)));
     state.set_plugin_state(Some(plugin_state(1, 3)));

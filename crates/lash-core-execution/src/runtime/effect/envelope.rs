@@ -486,7 +486,7 @@ pub enum RuntimeEffectCommand {
     /// [`RuntimeEffectControllerError::retryable_uncommitted_derivation`]),
     /// and an engine runs the step again rather than recording it.
     LoadExecutionEnv {
-        env: crate::ProcessExecutionEnvRef,
+        env: crate::ProcessEnvRef,
     },
     /// Sleep for a relative duration or until an absolute wall-clock deadline.
     ///
@@ -1036,7 +1036,7 @@ pub enum RuntimeEffectOutcome {
     /// The environment a load validated and acquired under its execution.
     /// Replay resolves the same immutable bytes from this recorded digest.
     LoadExecutionEnv {
-        env: crate::ProcessExecutionEnvRef,
+        env: crate::ProcessEnvRef,
     },
     Sleep,
     LanguageRuntimeValue {

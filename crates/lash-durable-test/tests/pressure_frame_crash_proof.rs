@@ -529,6 +529,7 @@ impl Scenario for PressureFrame {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
+            serves: Vec::new(),
             max_active: 4,
         }
     }
@@ -1135,6 +1136,7 @@ impl Scenario for PromptUsage {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
+            serves: Vec::new(),
             max_active: 4,
         }
     }

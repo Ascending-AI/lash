@@ -116,17 +116,14 @@ impl ActivityTools {
     ) -> Result<lash_core::StartProcessIntent, lash_core::PluginError> {
         let session_id = call.context.session_id()?.clone();
         let agent_frame_id = call.context.agent_frame_id()?.clone();
-        let declaration = lash_core::ProcessStartDeclaration::new(
-            lash_core_execution::testing::held_engine_input(
-                serde_json::json!({ "activity-law": label }),
-            ),
+        let declaration = lash_core_execution::testing::held_engine_declaration(
+            serde_json::json!({ "activity-law": label }),
             lash_core::ProcessOriginator::Session {
                 session_id: session_id.clone(),
                 agent_frame_id: Some(agent_frame_id),
             },
             lash_core::Lifetime::Detached,
-        )
-        .with_env_ref(call.context.process_execution_env_ref()?);
+        );
         Ok(lash_core::StartProcessIntent {
             owner: lash_core::RuntimeOwner::Session(session_id),
             declaration,

@@ -356,11 +356,14 @@ pub(super) async fn compare_bounded_process_event_pages(
             lash_core::ProcessInput::Engine {
                 kind: "effect-differential".to_string(),
                 payload: serde_json::Value::Null,
+                launch: lash_core::EngineLaunch::new(
+                    lash_core::testing::process_execution_env_fixture_ref(),
+                    None,
+                ),
             },
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )
-        .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
         .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
             lash_core::ProcessIdentity::for_definition(
                 lash_core::ProcessDefinitionRef::unclaimed(

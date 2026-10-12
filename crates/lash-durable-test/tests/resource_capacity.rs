@@ -25,30 +25,10 @@ const MODEL: &str = "resource-capacity-model";
 /// How many lifecycles the census spans.
 const LIFECYCLES: usize = 32;
 
-/// The environment a process runs under: what the core's node renders and
-/// admits with.
-fn environment() -> lash_core::ProcessExecutionEnvSpec {
-    let mut environment = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(16),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
-    environment.render = Some(lash_core::RecordedRender {
-        renderer_id: lash::render::ToolOutputRendererSlot::default()
-            .0
-            .id()
-            .to_owned(),
-        params: serde_json::to_value(lash::render::ResolvedStandardRenderConfig {
-            defaults: lash::render::ToolRenderParams::default(),
-            per_tool: std::collections::BTreeMap::new(),
-        })
-        .expect("the render config encodes"),
-    });
-    environment
+/// The environment a host start states in these laws: no tools and no
+/// components.
+fn environment() -> lash_core::ProcessEnv {
+    lash_core_execution::testing::process_env_with_limit(16)
 }
 
 /// One lifecycle: a deployment that runs a process and a turn, shut down
@@ -106,15 +86,13 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
     let process = core
         .processes()
         .start(
-            lash_core::ProcessStartRequest::new(
-                lash_core::ProcessInput::Engine {
-                    kind: "testing-fixture".to_owned(),
-                    payload: json!({}),
-                },
+            lash_core::ProcessStartRequest::engine(
+                "testing-fixture".to_owned(),
+                json!({}),
+                lash_core::EngineLaunch::new(env_ref, None),
                 lash_core::ProcessOriginator::host(),
                 lash_core::LifetimeDecision::Detached,
-            )
-            .with_env_ref(env_ref),
+            ),
             core.effect_host(),
         )
         .await

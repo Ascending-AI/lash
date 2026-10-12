@@ -172,8 +172,8 @@ impl CellTools {
     /// unavailable. Runs no hook, preparation or body.
     #[must_use]
     pub(crate) fn pin(&self, call: &CellCall, now_ms: u64) -> MemberPin {
-        let definition = ProductionToolHandlers::new(self.context.clone(), None)
-            .leaf_definition(&call.invocation());
+        let definition =
+            ProductionToolHandlers::new(self.context.clone()).leaf_definition(&call.invocation());
         member_pin(
             &self.context,
             definition.as_ref().map(|definition| &definition.manifest),
@@ -248,8 +248,8 @@ impl CellTools {
     /// `call` as its observations name it: under its tool's name.
     fn named(&self, call: &CellCall) -> crate::sansio::PendingToolCall {
         let mut pending = call.pending();
-        if let Some(definition) = ProductionToolHandlers::new(self.context.clone(), None)
-            .leaf_definition(&call.invocation())
+        if let Some(definition) =
+            ProductionToolHandlers::new(self.context.clone()).leaf_definition(&call.invocation())
         {
             pending.tool_name = definition.manifest.name.clone();
         }
@@ -405,7 +405,7 @@ impl CellMembers {
         let CellMember::Tool(call) = member;
         let context = &self.tools.context;
         let Some(definition) =
-            ProductionToolHandlers::new(context.clone(), None).leaf_definition(&call.invocation())
+            ProductionToolHandlers::new(context.clone()).leaf_definition(&call.invocation())
         else {
             return Ok(());
         };

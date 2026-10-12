@@ -1092,6 +1092,9 @@ pub(super) async fn rlm_process_pending_host_tool_completion_resumes_process_awa
 -> Result<()> {
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
+    const APP_TOOLS: lash_core::ProcessConfigKey<()> =
+        lash_core::ProcessConfigKey::new("pending-app-tools", lash_core::FormatVersion::ONE);
+    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(PendingAppTools::new(key_tx));
     let core = explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
     .serve_test_llm_profile(queued_text_provider(vec![typescript_block(
         r#"
@@ -1103,11 +1106,13 @@ const handle = await processes.start({ definition: lookup });
 const result = await handle;
 await control.finish(result);"#,
     )]), mock_llm_profile_spec())
-    .tools(Arc::new(PendingAppTools::new(key_tx)))
+    .tools(Arc::clone(&tools))
+    .process_component(lash_core::testing::tool_component(APP_TOOLS, tools), APP_TOOLS)
     // ADR 0095: `processes` is catalogue presence, so a scripted cell that
-    // authors `processes.start` needs this factory installed.
+    // authors `processes.start` needs this factory installed. Its process
+    // runs under the turn's run with the app tools' component.
     .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter, lash_core::testing::run_policy_naming(&[APP_TOOLS])),
     ))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core

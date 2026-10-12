@@ -596,8 +596,7 @@ pub fn check_retained_start(
         && submitted.ancestry == retained.ancestry
         && submitted.session_capability == retained.session_capability
         && submitted.identity == retained.identity
-        && submitted.provenance == retained.provenance
-        && submitted.env_ref == retained.env_ref;
+        && submitted.provenance == retained.provenance;
     if same {
         Ok(())
     } else {
@@ -621,7 +620,6 @@ pub enum ProcessRegistrationRefusal {
     LifetimeScopeUnreachable,
     HostGrantOutsideRoot,
     SessionCapabilityUnreachable,
-    ExecutionEnvMissing,
     EmptySessionTurnDefinitionKey,
 }
 
@@ -631,7 +629,6 @@ impl ProcessRegistrationRefusal {
         Self::LifetimeScopeUnreachable,
         Self::HostGrantOutsideRoot,
         Self::SessionCapabilityUnreachable,
-        Self::ExecutionEnvMissing,
         Self::EmptySessionTurnDefinitionKey,
     ];
 }
@@ -713,34 +710,14 @@ pub(crate) fn classify_process_registration(
         }
     }
     match registration.input.as_ref() {
-        super::model::ProcessInput::Engine { .. } => {
-            if registration.env_ref.is_none() {
-                return Err(refuse(
-                    ProcessRegistrationRefusal::ExecutionEnvMissing,
-                    format!(
-                        "process `{}` requires a captured execution env",
-                        registration_name(registration)
-                    ),
-                ));
-            }
-        }
+        // An engine input carries its launch by construction (D10).
+        super::model::ProcessInput::Engine { .. } => {}
         super::model::ProcessInput::SessionTurn { definition_key, .. } => {
             if definition_key.trim().is_empty() {
                 return Err(refuse(
                     ProcessRegistrationRefusal::EmptySessionTurnDefinitionKey,
                     format!(
                         "process `{}` session-turn definition_key must not be empty",
-                        registration_name(registration)
-                    ),
-                ));
-            }
-            // A session-turn process runs under the environment its start
-            // captured, exactly as an engine process does (FIG-4396).
-            if registration.env_ref.is_none() {
-                return Err(refuse(
-                    ProcessRegistrationRefusal::ExecutionEnvMissing,
-                    format!(
-                        "process `{}` requires a captured execution env",
                         registration_name(registration)
                     ),
                 ));

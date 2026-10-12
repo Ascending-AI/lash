@@ -48,6 +48,7 @@ table lash_actors
   column owner_node text nullable
   column park_json text nullable
   column ready_at_ms bigint nullable
+  column requires text nullable
   column state text not-null
   column state_revision bigint not-null
   primary-key (actor_key)

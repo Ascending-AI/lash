@@ -47,6 +47,7 @@ impl RuntimeErrorCause {
             | Self::PluginState { .. }
             | Self::PluginFormat { .. }
             | Self::ProcessParentEnded { .. }
+            | Self::ProcessEnvRefused { .. }
             | Self::ProcessStartKeyConflict { .. }
             | Self::SchemaRefused { .. }
             | Self::ToolSchemaRefused { .. }

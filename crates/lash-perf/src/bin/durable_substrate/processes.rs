@@ -26,13 +26,14 @@ async fn start(backend: &Backend, token: &str, waits: usize) -> Result<ActorKey>
         ProcessInput::Engine {
             kind: KIND.to_owned(),
             payload: payload(token, waits),
+            launch: lash_core::EngineLaunch::new(
+                lash_core_execution::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
         },
         ProcessProvenance::host(),
         LifetimeDecision::Detached,
-    )
-    .with_execution_env_ref(Some(
-        lash_core_execution::testing::process_execution_env_fixture_ref(),
-    ));
+    );
     let record = backend
         .process_registry()
         .register_process(registration)

@@ -9,11 +9,18 @@ pub struct OwnerConfigView(OwnerConfigSource);
 #[derive(Clone, Debug)]
 enum OwnerConfigSource {
     Session(AdmittedPluginConfig),
+    /// A process's: each component's config entry in its environment.
+    Components(Arc<crate::ProcessEnv>),
 }
 
 impl OwnerConfigView {
     pub fn session(config: AdmittedPluginConfig) -> Self {
         Self(OwnerConfigSource::Session(config))
+    }
+
+    /// The config of the components `env` names.
+    pub fn components(env: Arc<crate::ProcessEnv>) -> Self {
+        Self(OwnerConfigSource::Components(env))
     }
 
     pub fn decode<T: serde::de::DeserializeOwned>(
@@ -22,12 +29,20 @@ impl OwnerConfigView {
     ) -> Result<Option<T>, serde_json::Error> {
         match &self.0 {
             OwnerConfigSource::Session(config) => config.decode(owner),
+            OwnerConfigSource::Components(env) => env
+                .components()
+                .iter()
+                .find(|entry| entry.id().as_str() == owner)
+                .map(|entry| entry.config().decode())
+                .transpose(),
         }
     }
 
+    /// The session config revision; a process has none.
     pub fn session_revision(&self) -> Option<u64> {
         match &self.0 {
             OwnerConfigSource::Session(config) => Some(config.revision),
+            OwnerConfigSource::Components(_) => None,
         }
     }
 }
@@ -44,14 +59,79 @@ pub struct ExecutionFacts {
 }
 
 impl ExecutionFacts {
-    pub fn of_env_spec(spec: &crate::ProcessExecutionEnvSpec) -> Self {
+    /// What a process runs under: its environment's. A process has no
+    /// render (D12).
+    pub fn of_process(env: &crate::ProcessEnv) -> Self {
         Self {
-            model: spec.policy.model.clone(),
-            generation: spec.policy.generation.clone(),
-            charge_safety: spec.policy.charge_safety.clone(),
-            attachment_acceptance: Arc::clone(&spec.policy.attachment_acceptance),
-            max_tool_calls: spec.policy.max_tool_calls,
-            render: spec.render.clone(),
+            model: env.model().map(|model| model.profile().clone()),
+            generation: env
+                .model()
+                .map(|model| model.generation().clone())
+                .unwrap_or_default(),
+            charge_safety: env
+                .model()
+                .map(|model| model.charge_safety().clone())
+                .unwrap_or_default(),
+            attachment_acceptance: Arc::clone(env.attachments()),
+            max_tool_calls: env.max_tool_calls(),
+            render: None,
         }
     }
+
+    /// What a turn of a logical Run runs under: the run's recorded
+    /// configuration and render (FIG-6021).
+    pub fn of_run(run: &crate::ResolvedRun) -> Self {
+        let config = run.config();
+        Self {
+            model: config.model.clone(),
+            generation: config.generation.clone(),
+            charge_safety: config.charge_safety.clone(),
+            attachment_acceptance: Arc::clone(&config.attachment_acceptance),
+            max_tool_calls: config.max_tool_calls,
+            render: run.render.clone(),
+        }
+    }
+
+    /// What an execution under `policy` runs under.
+    pub fn of_policy(policy: &crate::SessionPolicy, render: Option<crate::RecordedRender>) -> Self {
+        Self {
+            model: policy.model.clone(),
+            generation: policy.generation.clone(),
+            charge_safety: policy.charge_safety.clone(),
+            attachment_acceptance: Arc::clone(&policy.attachment_acceptance),
+            max_tool_calls: policy.max_tool_calls,
+            render,
+        }
+    }
+
+    /// These facts as one call records them (§5.4).
+    pub fn recorded_call(&self) -> RecordedCallFacts {
+        RecordedCallFacts {
+            render: self.render.clone(),
+            attachment_acceptance: Arc::clone(&self.attachment_acceptance),
+        }
+    }
+
+    /// These facts with what `call` recorded at its admission: what its
+    /// redelivery presents under.
+    #[must_use]
+    pub fn with_recorded_call(mut self, call: &RecordedCallFacts) -> Self {
+        self.render = call.render.clone();
+        self.attachment_acceptance = Arc::clone(&call.attachment_acceptance);
+        self
+    }
+}
+
+/// The facts one tool call records inline at its admission (§5.4): the only
+/// per-call readers, so its redelivery presents as its first delivery did.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedCallFacts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render: Option<crate::RecordedRender>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
+    )]
+    pub attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
 }

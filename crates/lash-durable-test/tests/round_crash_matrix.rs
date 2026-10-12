@@ -558,6 +558,7 @@ impl Scenario for RoundScenario {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: vec![FormatSet::new(FORMATS)],
+            serves: Vec::new(),
             max_active: 4,
         }
     }

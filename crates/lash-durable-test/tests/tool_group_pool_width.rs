@@ -334,6 +334,7 @@ impl Scenario for Wide {
             // and reap cadence as part of the load on its two-connection pool.
             lease: LeaseConfig::default(),
             decodes: self.backend().formats().decodes(),
+            serves: Vec::new(),
             max_active: 4,
         }
     }

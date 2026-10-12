@@ -160,7 +160,7 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         PostgresStoreSet::process_env_store(self)
     }
 
-    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessExecutionEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessEnvStore> {
         PostgresStoreSet::process_env_store(self)
     }
 

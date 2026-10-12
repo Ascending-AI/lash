@@ -3,7 +3,11 @@
 //! A step names a catalog tool or one of its engine's own bodies:
 //!
 //! - **Tool steps** resolve against the process's own catalog, which its
-//!   runtime builds from the environment its start captured. The tool's
+//!   runtime builds from only the components its environment names and the
+//!   tools that environment admits (FIG-6034). The activation builds that
+//!   composition before any step is admitted or resumed
+//!   ([`ProcessSteps::prepare`]); one this node cannot build parks the
+//!   process, so no admitted step is ever answered `Interrupted` for it. The tool's
 //!   declaration pins the step's policy and its limit within the tool
 //!   ceiling, and its body runs through the round tools a turn's round runs
 //!   on, owned by the process. The activation's first tool step builds
@@ -45,16 +49,12 @@ fn engine_kind(process: &ProcessRecord) -> Option<&str> {
 }
 
 impl DurableProcessWorker {
-    /// The catalog `process`'s steps resolve against: its runtime's, or none
-    /// when its start captured no environment.
+    /// The catalog the engine process `process`'s steps resolve against.
     async fn step_catalog(
         &self,
         process: &ProcessRecord,
     ) -> Result<Arc<ToolCatalog>, crate::PluginError> {
-        if process.env_ref.is_none() {
-            return Ok(Arc::new(ToolCatalog::default()));
-        }
-        self.runtime(process).await?.step_catalog()
+        self.engine_runtime(process).await?.step_catalog()
     }
 
     /// The tool step `execution` of `process`, which runs `step` on
@@ -72,12 +72,21 @@ impl DurableProcessWorker {
         };
         let step = match self.built_step_tools(&runtime, &process).await {
             Ok(step) => step,
-            // The tools did not build: the tool never ran, and its
-            // admission stands, so the step is answered as one that may
-            // have taken effect, never run again under `Once`.
+            // A composition this node cannot build parked the process before
+            // any step was admitted (`prepare`, FIG-6034 §7 item 11). What
+            // fails here is the activation's own build of tools whose
+            // composition did build: the tool never ran, so the step is
+            // answered as that known failure, never as one that may have
+            // taken effect.
             Err(error) => {
                 tracing::warn!(process_id = %process.id, %error, "a process tool step could not reach its tools");
-                return SettledOutput::Interrupted.into();
+                return step_failure(
+                    &process,
+                    "process_step_tools_unavailable",
+                    error.to_string(),
+                    None,
+                    None,
+                );
             }
         };
         let name = step
@@ -151,7 +160,7 @@ impl DurableProcessWorker {
     > {
         runtime
             .tools(|| async {
-                self.runtime(process)
+                self.engine_runtime(process)
                     .await?
                     .step_tools(runtime.cx().clone(), process)
                     .await
@@ -182,14 +191,76 @@ impl ProcessSteps for WorkerSteps {
             .stop_grace()
     }
 
+    /// An engine process's composition builds here, or it parks: a
+    /// missing component, an unreadable config or a refused build is the
+    /// typed park reason, and a store fault is retried.
+    async fn prepare(&self, process: &ProcessRecord) -> Result<(), StepRefusal> {
+        if engine_kind(process).is_none() {
+            return Ok(());
+        }
+        match self.0.step_catalog(process).await {
+            Ok(_) => Ok(()),
+            Err(crate::PluginError::ProcessEnvRefused { refusal }) => {
+                Err(StepRefusal::CompositionUnavailable {
+                    component: refused_component(&refusal),
+                    reason: refusal.to_string(),
+                })
+            }
+            Err(error) if error.class() == crate::PluginErrorClass::Retryable => {
+                Err(StepRefusal::Unavailable {
+                    step: String::new(),
+                    reason: error.to_string(),
+                })
+            }
+            // A contribution of a named component refused: the same refusal
+            // on every rebuild here.
+            Err(error) => Err(StepRefusal::CompositionUnavailable {
+                component: None,
+                reason: error.to_string(),
+            }),
+        }
+    }
+
+    /// What an engine process carries while it holds `steps` (§6.2): its
+    /// environment's components and the revisions its tool steps bind. A
+    /// session-turn process keeps none.
+    async fn requirements(
+        &self,
+        process: &ProcessRecord,
+        steps: &[StepRequest],
+    ) -> Result<Option<Vec<String>>, lash_core::durable_port::DurableError> {
+        if process.env_ref().is_none() {
+            return Ok(None);
+        }
+        let tools: Vec<crate::ToolId> = steps
+            .iter()
+            .filter_map(|step| match step {
+                StepRequest::Tool { tool, .. } => Some(tool.clone()),
+                StepRequest::Engine { .. } => None,
+            })
+            .collect();
+        let unavailable = |error: crate::PluginError| {
+            lash_core::durable_port::DurableError::Store(lash_core::durable_port::StoreFailure {
+                kind: lash_core::durable_port::StoreFailureKind::Unavailable,
+                message: error.to_string(),
+            })
+        };
+        let runtime = self.0.engine_runtime(process).await.map_err(unavailable)?;
+        runtime
+            .step_requirements(&tools)
+            .map(Some)
+            .map_err(unavailable)
+    }
+
+    /// The `max_tool_calls` the process's environment states (FIG-4546).
     async fn max_tool_calls(
         &self,
         process: &ProcessRecord,
     ) -> Result<Option<MaxToolCalls>, StepRefusal> {
-        let Some(env_ref) = process.env_ref.as_ref() else {
+        let Some(env_ref) = process.env_ref() else {
             return Ok(None);
         };
-        let environment = lash_core_execution::runtime::load_process_execution_env(
+        let environment = lash_core_execution::runtime::load_process_env(
             self.0
                 .config
                 .runtime_host
@@ -203,9 +274,7 @@ impl ProcessSteps for WorkerSteps {
             step: String::new(),
             reason: error.to_string(),
         })?;
-        Ok(Some(
-            lash_core_execution::plugin::ExecutionFacts::of_env_spec(&environment).max_tool_calls,
-        ))
+        Ok(Some(environment.max_tool_calls()))
     }
 
     async fn admit(
@@ -337,14 +406,14 @@ impl DurableProcessWorker {
         token: tokio_util::sync::CancellationToken,
     ) -> MemberOutcome {
         let Some(engine) = engine_kind(&process) else {
-            return engine_step_failure(
+            return step_failure(
                 &process,
                 "engine_step_without_engine",
                 "an engine step belongs to a process with no engine".to_owned(),
-                crate::ToolFailureCause::EngineStepWithoutEngine {
+                Some(crate::ToolFailureCause::EngineStepWithoutEngine {
                     step: step.0,
                     step_kind: kind.0,
-                },
+                }),
                 None,
             );
         };
@@ -366,15 +435,15 @@ impl DurableProcessWorker {
                     }
                     crate::EngineStepRefusal::UndeclaredStep { .. } => "engine_step_undeclared",
                 };
-                return engine_step_failure(
+                return step_failure(
                     &process,
                     code,
                     refusal.to_string(),
-                    crate::ToolFailureCause::EngineStepRegistrationUnavailable {
+                    Some(crate::ToolFailureCause::EngineStepRegistrationUnavailable {
                         engine: engine.to_owned(),
                         step: step.0,
                         step_kind: kind.0,
-                    },
+                    }),
                     Some(serde_json::json!({ "registration_refusal": refusal })),
                 );
             }
@@ -383,15 +452,15 @@ impl DurableProcessWorker {
             Ok(catalog) => catalog,
             Err(error) => {
                 tracing::warn!(process_id = %process.id, %error, "an engine step could not read its catalog");
-                return engine_step_failure(
+                return step_failure(
                     &process,
                     "engine_step_catalog_unreadable",
                     error.to_string(),
-                    crate::ToolFailureCause::EngineStepCatalogUnreadable {
+                    Some(crate::ToolFailureCause::EngineStepCatalogUnreadable {
                         engine: engine.to_owned(),
                         step: step.0,
                         step_kind: kind.0,
-                    },
+                    }),
                     Some(
                         serde_json::json!({ "catalog_error": crate::ToolIntentCommandFailure::from(&error) }),
                     ),
@@ -401,7 +470,7 @@ impl DurableProcessWorker {
         let backend = cx.backend().clone();
         let run = EngineStepRun {
             process: process.id.clone(),
-            engine_config: process.engine_config.clone(),
+            engine_settings: process.engine_settings().cloned(),
             tool_catalog,
             now: cx.now(),
             clock: Arc::clone(cx.clock()),
@@ -413,18 +482,37 @@ impl DurableProcessWorker {
     }
 }
 
+/// The component a composition refusal names, when it names one.
+fn refused_component(refusal: &crate::ProcessEnvRefusal) -> Option<String> {
+    use crate::ProcessEnvRefusal as Refusal;
+    match refusal {
+        Refusal::DuplicateComponent { id }
+        | Refusal::ComponentNotInstalled { id }
+        | Refusal::ConfigFormatUnreadable { id, .. }
+        | Refusal::ConfigRefused { id, .. }
+        | Refusal::ComponentBuildFailed { id, .. }
+        | Refusal::ConfigWriterOutsideFleetRange { id, .. } => Some(id.clone()),
+        Refusal::DuplicatePresenter { second, .. } | Refusal::DuplicateToolName { second, .. } => {
+            Some(second.clone())
+        }
+        _ => None,
+    }
+}
+
 /// Retain the known pre-body failure as process-owned attempt material.
 #[expect(clippy::expect_used, reason = "a tool failure is serializable data")]
-fn engine_step_failure(
+fn step_failure(
     process: &ProcessRecord,
     code: &str,
     message: String,
-    cause: crate::ToolFailureCause,
+    cause: Option<crate::ToolFailureCause>,
     source: Option<serde_json::Value>,
 ) -> MemberOutcome {
     use lash_core_execution::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
-    let mut failure = crate::ToolFailure::runtime(crate::ToolFailureClass::Internal, code, message)
-        .with_cause(cause);
+    let mut failure = crate::ToolFailure::runtime(crate::ToolFailureClass::Internal, code, message);
+    if let Some(cause) = cause {
+        failure = failure.with_cause(cause);
+    }
     failure.raw = source.map(crate::ToolValue::untrusted_json);
     let output = crate::ToolCallOutput::failure(failure);
     SettledOutput::Failed(

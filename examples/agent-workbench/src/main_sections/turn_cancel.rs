@@ -218,21 +218,21 @@ pub(crate) async fn cancel_turn_with_driver(
         .authorize(WorkbenchAuthorizationAction::CancelTurn {
             session_id: session_id.clone(),
         })?;
-    let cancellations = state
-        .cancel_turns_for_session_with_driver(
-            &session_id,
-            driver,
-            query.mode,
-            terminal_attach_timeout,
-        )
-        .await?;
+    // Boxed: the cancellation's future outweighs the handler's own.
+    let cancellations = Box::pin(state.cancel_turns_for_session_with_driver(
+        &session_id,
+        driver,
+        query.mode,
+        terminal_attach_timeout,
+    ))
+    .await?;
     let mut cancelled_processes = Vec::new();
     for receipt in cancellations
         .iter()
         .filter(|receipt| receipt.cancellation_is_in_force())
     {
         cancelled_processes
-            .extend(cancel_processes_parented_by_turn(&state, receipt.address()).await);
+            .extend(Box::pin(cancel_processes_parented_by_turn(&state, receipt.address())).await);
     }
     state.trace_for_session(
         &session_id,

@@ -144,10 +144,27 @@ impl ProcessEngine for ProofEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &lash_core_execution::ProcessExecutionEnvSpec,
-    ) -> Result<Option<Value>, lash_core_execution::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash_core_execution::EngineSettings>,
+    ) -> std::result::Result<(), lash_core_execution::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(lash_core_execution::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<
+        Option<lash_core_execution::EngineSettings>,
+        lash_core_execution::PluginError,
+    > {
         Ok(None)
     }
 
@@ -400,13 +417,14 @@ fn registration(payload: Value, parent: Option<&ProcessId>) -> ProcessRegistrati
         ProcessInput::Engine {
             kind: KIND.to_owned(),
             payload,
+            launch: lash_core::EngineLaunch::new(
+                lash_core_execution::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
         },
         ProcessProvenance::host(),
         lifetime,
-    )
-    .with_execution_env_ref(Some(
-        lash_core_execution::testing::process_execution_env_fixture_ref(),
-    ));
+    );
     if let Some(parent) = parent {
         registration.ancestry = Ancestry::from_scopes([ScopeId::process(parent.clone())]);
     }
@@ -558,6 +576,7 @@ impl Scenario for Proof {
                 .expect("the database assembles the backend first")
                 .formats()
                 .decodes(),
+            serves: Vec::new(),
             max_active: 8,
         }
     }

@@ -226,6 +226,7 @@ impl Deployment {
                     drain: Drain::default(),
                     sessions: Arc::new(sessions),
                     processes: Some(Arc::new(processes)),
+                    serves: Vec::new(),
                 },
                 async move {
                     let _ = stopped.await;

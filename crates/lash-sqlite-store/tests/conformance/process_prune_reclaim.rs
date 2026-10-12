@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::{DeploymentStore, ProcessExecutionEnvStore, ProcessRegistry};
+use lash_core_execution::{DeploymentStore, ProcessEnvStore, ProcessRegistry};
 
 use super::SUBSTRATE;
 use crate::backend_fixture::TestBackend;
@@ -61,6 +61,6 @@ lash_conformance::process_definition_tests!({
 lash_conformance::process_prune_start_staging_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
-    let env_store = backend.blocking_store() as Arc<dyn ProcessExecutionEnvStore>;
+    let env_store = backend.blocking_store() as Arc<dyn ProcessEnvStore>;
     (backend, registry, env_store)
 });

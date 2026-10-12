@@ -158,6 +158,7 @@ impl Scenario for Fencing {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: vec![FormatSet::new(FORMATS)],
+            serves: Vec::new(),
             max_active: 8,
         }
     }

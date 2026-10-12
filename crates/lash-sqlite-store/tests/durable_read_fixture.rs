@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lash_core_execution::{DeploymentStore, ProcessExecutionEnvStore};
+use lash_core_execution::{DeploymentStore, ProcessEnvStore};
 use lash_sqlite_store::{SqliteStoreSet, SqliteStoreSetOptions};
 use serde::{Deserialize, Serialize};
 
@@ -196,7 +196,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
         store: Arc::clone(&runtime) as Arc<dyn DeploymentStore>,
         processes: Arc::clone(&processes)
             as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
-        process_envs: runtime as Arc<dyn ProcessExecutionEnvStore>,
+        process_envs: runtime as Arc<dyn ProcessEnvStore>,
     }
 }
 

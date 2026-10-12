@@ -821,20 +821,30 @@ impl ToolIntentIngress {
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::ToolIntent,
     ) -> Result<(RealizedIntent, bool), lash_core::PluginError> {
-        if let Some(env_ref) = intent.execution_env_ref() {
+        // The launch the declaration sealed is held under this realization's
+        // journal guard until registration carries it onto the record. A
+        // published environment is only acquired: nothing is admitted or
+        // chosen here.
+        if let Some(env_ref) = intent.env_ref() {
             let claim = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
                 self.scope
                     .journal_identity()
                     .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
             ));
-            self.core
-                .env
-                .core
-                .durability
-                .process_env_store
-                .acquire_process_execution_env(&claim, env_ref)
-                .await
-                .map_err(lash_core::PluginError::from)?;
+            lash_core::hold_process_env(
+                &lash_core::ProcessEnvPorts::published_only(
+                    self.core.env.core.durability.process_env_store.as_ref(),
+                ),
+                &claim,
+                &lash_core::ProcessEnvSelection::Published(env_ref.clone()),
+            )
+            .await
+            .map_err(|error| match error {
+                lash_core::HoldEnvError::Refused(refusal) => {
+                    lash_core::PluginError::ProcessEnvRefused { refusal }
+                }
+                lash_core::HoldEnvError::Fault(error) => error,
+            })?;
         }
         let command = match intent {
             lash_core::ToolIntent::StartProcess(intent) => {

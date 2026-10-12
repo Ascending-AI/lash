@@ -42,7 +42,6 @@ fn ordinary_call(label: &str) -> SingletonToolCall {
         },
         available: vec![PluginRevision::new("tools", BehaviorRevision::ONE)],
         cancel: ExternalCancelPolicy::CancelExternalWork,
-        environment: None,
     }
 }
 

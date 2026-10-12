@@ -261,8 +261,8 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
                     ("child", lash_core::lifetime::session_or_starter(&cx)),
                     ("until", lash_core::lifetime::starter(&cx)),
                 ] {
-                    let request = lash_core::ProcessStartRequest::new(
-                        lash_core::testing::held_engine_input(serde_json::Value::Null),
+                    let request = lash_core::testing::held_engine_request(
+                        serde_json::Value::Null,
                         lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
                             session.clone(),
                         )),
@@ -280,6 +280,8 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
             });
         let backend = sqlite_memory_store_backend().await;
         let registry = backend.process_registry();
+        lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
+            .await;
         let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
             .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .plugin(lash_core::testing::process_engine_plugin_fixture())

@@ -85,6 +85,7 @@ pub struct ActorTx {
     ack: Option<MailSeq>,
     release: Option<Release>,
     formats: Option<FormatSet>,
+    requires: Option<Vec<String>>,
     graph: BTreeMap<NodeId, EncodedNode>,
     reads: BTreeSet<NodeId>,
     budget: Option<GraphCommitBudget>,
@@ -132,6 +133,7 @@ impl ActorTx {
             ack: None,
             release: None,
             formats: None,
+            requires: None,
             graph: BTreeMap::new(),
             reads: BTreeSet::new(),
             budget: None,
@@ -333,6 +335,20 @@ impl ActorTx {
     /// commit on: from then, only a node that decodes `formats` claims it.
     pub fn stamp_formats(&mut self, formats: FormatSet) -> &mut Self {
         self.formats = Some(formats);
+        self
+    }
+
+    /// The claim requirements this transaction records for the actor, if it
+    /// rewrites them.
+    #[must_use]
+    pub fn requires(&self) -> Option<&[String]> {
+        self.requires.as_deref()
+    }
+
+    /// Record that, from this commit on, only a node serving every one of
+    /// `requires` claims the actor to run it (FIG-6034 D3).
+    pub fn set_requires(&mut self, requires: Vec<String>) -> &mut Self {
+        self.requires = Some(requires);
         self
     }
 

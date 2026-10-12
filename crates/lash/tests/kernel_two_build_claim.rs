@@ -108,6 +108,8 @@ fn serving(
         boot,
         cells,
         lash::durable::DurableSettings::standard(),
+        Vec::new(),
+        None,
     )
 }
 
@@ -122,16 +124,44 @@ fn idling(
 ) -> (lash::Backend, lash::LashCore) {
     let mut settings = lash::durable::DurableSettings::standard();
     settings.idle_evict = Duration::from_millis(200);
-    serving_under(stores, build, boot, cells, settings)
+    serving_under(stores, build, boot, cells, settings, Vec::new(), None)
 }
 
-/// [`serving`] under the durable `settings`.
+/// A start policy that counts its calls and states nothing: a law that
+/// installs it shows how often a start's environment was chosen.
+struct CountingPolicy(Arc<std::sync::atomic::AtomicUsize>);
+
+#[async_trait::async_trait]
+impl lash::process::ProcessEnvPolicy for CountingPolicy {
+    async fn choose(
+        &self,
+        _cx: &lash::process::ProcessEnvCx<'_>,
+    ) -> Result<lash::process::ProcessStartChoice, lash::process::ProcessEnvPolicyError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(lash::process::ProcessEnvPolicyError::Refused(
+            lash::process::ProcessEnvRefusal::Policy {
+                reason: "the counting policy states no environment".to_owned(),
+            },
+        ))
+    }
+}
+
+/// A process component a core of these laws installs, and its key.
+type Component = (
+    Arc<dyn lash::process::ProcessComponentFactory>,
+    lash::process::ProcessConfigKey<()>,
+);
+
+/// [`serving`] under the durable `settings`, installing `components`, and
+/// process controls under a policy counting into `policy` when it is given.
 fn serving_under(
     stores: &Arc<dyn StoreSet>,
     build: Build,
     boot: &str,
     cells: &[&str],
     settings: lash::durable::DurableSettings,
+    components: Vec<Component>,
+    policy: Option<Arc<std::sync::atomic::AtomicUsize>>,
 ) -> (lash::Backend, lash::LashCore) {
     let kernel_one = matches!(
         build,
@@ -192,7 +222,20 @@ fn serving_under(
     } else {
         factory
     };
-    let core = lash::LashCore::rlm_builder(backend.clone(), factory)
+    let builder = components.into_iter().fold(
+        lash::LashCore::rlm_builder(backend.clone(), factory),
+        |builder, (component, key)| builder.process_component(component, key),
+    );
+    let builder = match policy {
+        Some(calls) => builder.plugin(Arc::new(
+            lash::process_controls::SessionProcessAdminPluginFactory::new(
+                lash::process::lifetime::session_or_starter,
+                Arc::new(CountingPolicy(calls)),
+            ),
+        )),
+        None => builder,
+    };
+    let core = builder
         .serve_test_llm_profile(
             provider,
             lash::LlmProfileMetadata::builder(MODEL)
@@ -215,28 +258,15 @@ fn serving_under(
     (backend, core)
 }
 
-fn environment() -> lash_core::ProcessExecutionEnvSpec {
-    let mut environment = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(16),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
-    environment.render = Some(lash_core::RecordedRender {
-        renderer_id: lash::render::ToolOutputRendererSlot::default()
-            .0
-            .id()
-            .to_owned(),
-        params: serde_json::to_value(lash::render::ResolvedStandardRenderConfig {
-            defaults: lash::render::ToolRenderParams::default(),
-            per_tool: std::collections::BTreeMap::new(),
-        })
-        .expect("the render config encodes"),
-    });
-    environment
+/// The environment a kernel process of these laws runs under: no tools and
+/// no components.
+fn environment() -> lash::process::ProcessEnv {
+    lash::process::ProcessEnv::builder(
+        lash_core::SessionToolAccess::restricted(std::iter::empty()).expect("no tools"),
+        lash::MaxToolCalls::new(16),
+    )
+    .build()
+    .expect("the environment builds")
 }
 
 /// Publishes the worker document under a host pin, and answers the start
@@ -273,20 +303,31 @@ async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
 }
 
 async fn start(core: &lash::LashCore, payload: serde_json::Value) -> lash_core::ProcessId {
+    start_under(core, &environment(), payload).await
+}
+
+/// [`start`] under `env`, with the kernel engine's default settings.
+async fn start_under(
+    core: &lash::LashCore,
+    env: &lash::process::ProcessEnv,
+    payload: serde_json::Value,
+) -> lash_core::ProcessId {
     let env_ref = core
         .host_artifacts()
-        .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment())
+        .publish_process_env(&lash_core::HostArtifactPin::mint(), env)
         .await
         .expect("the environment is published");
-    let request = lash_core::ProcessStartRequest::new(
-        lash_core::ProcessInput::Engine {
-            kind: KIND.to_owned(),
-            payload,
-        },
+    let settings = core
+        .processes()
+        .engine_defaults(KIND, &payload)
+        .expect("the kernel engine's default settings");
+    let request = lash_core::ProcessStartRequest::engine(
+        KIND.to_owned(),
+        payload,
+        lash_core::EngineLaunch::new(env_ref, settings),
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,
-    )
-    .with_env_ref(env_ref);
+    );
     core.processes()
         .start(request, core.effect_host())
         .await
@@ -457,10 +498,23 @@ async fn a_process_parked_by_build_n_is_claimed_migrated_and_resumed_by_build_n_
             .await
             .expect("an in-memory store set opens"),
     );
-    let (old_backend, old) = core(&stores, true, "build-n");
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = |build, boot| {
+        serving_under(
+            &stores,
+            build,
+            boot,
+            &[],
+            lash::durable::DurableSettings::standard(),
+            Vec::new(),
+            Some(Arc::clone(&calls)),
+        )
+    };
+    let (old_backend, old) = counted(Build::N, "build-n");
     let payload = payload(&old_backend, WORKER).await;
     let process = start(&old, payload).await;
     let actor = ActorKey::process(process.as_str()).expect("a process actor key");
+    let launched = launch_of(&old_backend, &process).await;
 
     // Build N parks the process in its first sleep and lets go of it.
     let parked = waiting(&old_backend, &actor).await;
@@ -477,7 +531,7 @@ async fn a_process_parked_by_build_n_is_claimed_migrated_and_resumed_by_build_n_
     assert_eq!(survey["unmigrated"], 1, "{survey}");
     assert_eq!(survey["refused"], serde_json::json!([]), "{survey}");
 
-    let (new_backend, new) = core(&stores, false, "build-n-plus-1");
+    let (new_backend, new) = counted(Build::NPlus1, "build-n-plus-1");
     let output = tokio::time::timeout(
         Duration::from_secs(60),
         new.processes().await_output(&process),
@@ -490,6 +544,14 @@ async fn a_process_parked_by_build_n_is_claimed_migrated_and_resumed_by_build_n_
     };
     assert!(output.is_success(), "the process failed: {output:?}");
     assert_eq!(output.value_for_projection(), serde_json::json!("second"));
+    // Adoption carries the process's launch as it was declared: its
+    // environment, settings and components, and no policy chooses again.
+    assert_eq!(launch_of(&new_backend, &process).await, launched);
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "no start policy ran"
+    );
 
     let ended = new_backend
         .durable()
@@ -506,6 +568,44 @@ async fn a_process_parked_by_build_n_is_claimed_migrated_and_resumed_by_build_n_
         ended.formats
     );
     assert_ne!(ended.formats, written);
+}
+
+/// What `process` was launched under: its environment's reference, its
+/// engine settings, and the components its environment names.
+async fn launch_of(
+    backend: &lash::Backend,
+    process: &lash_core::ProcessId,
+) -> (
+    Option<lash_core::ProcessEnvRef>,
+    Option<lash::process::EngineSettings>,
+    Vec<String>,
+) {
+    let record = backend
+        .process_registry()
+        .get_process(process)
+        .await
+        .expect("the process is read")
+        .expect("the process is registered");
+    let env_ref = record
+        .env_ref()
+        .cloned()
+        .expect("a kernel process has an environment");
+    let bytes = backend
+        .stores()
+        .process_env_store()
+        .get_process_env(&env_ref)
+        .await
+        .expect("the environment store reads")
+        .expect("the environment is stored");
+    let env = lash::process::ProcessEnv::from_store_bytes(&bytes).expect("the environment decodes");
+    (
+        Some(env_ref),
+        record.engine_settings().cloned(),
+        env.components()
+            .iter()
+            .map(|entry| entry.id().to_string())
+            .collect(),
+    )
 }
 
 /// The session `id` of `core`, created if it is not there.
@@ -1444,4 +1544,361 @@ async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allo
         started.is_err(),
         "the closing build's node serves once no run depends on the retired helpers: {started:?}"
     );
+}
+
+// --- NO-CLAIM-WITHOUT-COMPONENT (FIG-6034, D3) -----------------------------
+
+/// The component a held kernel process names, and the tool it provides.
+const HOLD: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new("kernel-claim-hold", lash::plugins::FormatVersion::ONE);
+const HOLD_TOOL: &str = "kernel_claim_hold";
+
+/// `worker()` performs the hold tool once and answers what it answered.
+const HOLDING_WORKER: &str = r#"kernel 1
+numbers float
+effect hold.run(input: Any) -> Any
+entry worker() -> Any
+
+fn worker() {
+  let request = {n: 1}
+  let got = perform hold.run(request) as Any
+  return got
+}
+
+main {
+  finish null
+}
+"#;
+
+fn hold_definition() -> lash::tools::ToolDefinition {
+    use lash::tools::ToolDefinitionBindingExt as _;
+    let object = serde_json::json!({ "type": "object", "additionalProperties": true });
+    lash::tools::ToolDefinition::raw(
+        HOLD_TOOL,
+        HOLD_TOOL,
+        "Holds, then answers.",
+        object.clone(),
+        object,
+    )
+    .expect("the hold tool's schemas")
+    .with_execution(Duration::from_secs(120))
+    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(4).unwrap(),
+        1,
+        1,
+    ))
+    .with_tool_binding(lash::tools::ToolBinding::new(["hold"], "run"))
+}
+
+/// The hold tool's deliveries, per process run. It outlives every build.
+#[derive(Default)]
+struct Holds {
+    deliveries: std::sync::atomic::AtomicUsize,
+    entered: tokio::sync::Notify,
+}
+
+/// The hold tool's body: it holds forever on a build that `holds`, and
+/// answers `"released"` on one that does not.
+struct HoldBody {
+    holds: bool,
+    seen: Arc<Holds>,
+}
+
+#[async_trait::async_trait]
+impl lash::tools::StaticToolExecute for HoldBody {
+    async fn execute(&self, _call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+        self.seen
+            .deliveries
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if self.holds {
+            self.seen.entered.notify_one();
+            std::future::pending::<()>().await;
+        }
+        lash::tools::ToolOutcome::ok(serde_json::json!("released")).into()
+    }
+}
+
+/// The hold component at behaviour `revision`.
+struct HoldComponent {
+    revision: lash::plugins::BehaviorRevision,
+    body: Arc<dyn lash::tools::ToolProvider>,
+}
+
+impl lash::process::ProcessComponentFactory for HoldComponent {
+    fn declaration(&self) -> lash::process::ProcessComponentDeclaration {
+        lash::process::ProcessComponentDeclaration {
+            behavior_revision: self.revision,
+            ..lash::process::ProcessComponentDeclaration::initial(HOLD.component(), HOLD.format())
+                .expect("the component id")
+        }
+    }
+
+    fn config_type(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<()>()
+    }
+
+    fn validate(
+        &self,
+        entry: &lash::process::ProcessComponentEntry,
+        _env: &lash::process::ProcessEnv,
+    ) -> Result<(), lash::process::ProcessEnvRefusal> {
+        entry.config().decode::<()>().map_err(|error| {
+            lash::process::ProcessEnvRefusal::ConfigRefused {
+                id: entry.id().to_string(),
+                reason: error.to_string(),
+            }
+        })
+    }
+
+    fn build(
+        &self,
+        _cx: &lash::process::ProcessComponentContext<'_>,
+    ) -> Result<lash::process::ProcessComponentSpec, lash::plugins::PluginError> {
+        let mut spec = lash::process::ProcessComponentSpec::default();
+        spec.tool_providers.push(Arc::clone(&self.body));
+        Ok(spec)
+    }
+}
+
+/// The hold component at `revision`, its body holding when `holds`.
+fn hold_component(revision: u32, holds: bool, seen: &Arc<Holds>) -> Component {
+    (
+        Arc::new(HoldComponent {
+            revision: lash::plugins::BehaviorRevision::new(revision).expect("a revision"),
+            body: Arc::new(lash::tools::StaticToolProvider::new(
+                vec![hold_definition()],
+                HoldBody {
+                    holds,
+                    seen: Arc::clone(seen),
+                },
+            )),
+        }),
+        HOLD,
+    )
+}
+
+/// The environment a held process runs under: the hold tool, from its
+/// component.
+fn hold_environment() -> lash::process::ProcessEnv {
+    lash::process::ProcessEnv::builder(
+        lash_core::SessionToolAccess::restricted([hold_definition()]).expect("the hold tool"),
+        lash::MaxToolCalls::new(16),
+    )
+    .component(HOLD, &())
+    .build()
+    .expect("the environment builds")
+}
+
+/// A core of build N+1 that installs `components`.
+fn with_components(
+    stores: &Arc<dyn StoreSet>,
+    boot: &str,
+    components: Vec<Component>,
+) -> (lash::Backend, lash::LashCore) {
+    serving_under(
+        stores,
+        Build::NPlus1,
+        boot,
+        &[],
+        lash::durable::DurableSettings::standard(),
+        components,
+        None,
+    )
+}
+
+/// The worker document as `core` admits it under `env`: each effect with
+/// the signature `env`'s catalog offers it under.
+async fn payload_under(
+    core: &lash::LashCore,
+    backend: &lash::Backend,
+    env: &lash::process::ProcessEnv,
+    text: &str,
+) -> serde_json::Value {
+    let environment = core
+        .host_artifacts()
+        .workflow_environment(env)
+        .await
+        .expect("the environment is read")
+        .expect("the core reads workflow documents");
+    let mut document = lash::workflow::document::parse_document(text).expect("the document parses");
+    for (effect, signature) in &mut document.manifest.effects {
+        *signature = environment
+            .effects()
+            .get(effect)
+            .unwrap_or_else(|| panic!("the environment offers `{effect}`"))
+            .clone();
+    }
+    document.manifest.functions =
+        lash::workflow::graph::requirements(&document, environment.functions()).functions;
+    lash::workflow::graph::admit(&document, &environment.checker())
+        .expect("the document is admitted");
+    let identity = lash_vm_runtime::KernelDocuments::new(backend.module_artifacts())
+        .publish(
+            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+                lash_core::HostArtifactPin::mint(),
+            ))
+            .expect("a host pin is unguarded"),
+            &document,
+        )
+        .await
+        .expect("the document publishes");
+    serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+        document: identity,
+        entry: lash::workflow::document::Name::new("worker"),
+        args: serde_json::Map::new(),
+    })
+    .expect("the input encodes")
+}
+
+/// The actor row of `process` once no node owns it.
+async fn unowned(
+    backend: &lash::Backend,
+    process: &lash_core::ProcessId,
+) -> lash_core::durable_port::ActorSnapshot {
+    let actor = ActorKey::process(process.as_str()).expect("a process actor key");
+    for _ in 0..3000 {
+        let row = backend
+            .durable()
+            .actor(&actor)
+            .await
+            .expect("the actor row is read")
+            .expect("the process has its actor");
+        if row.owner.is_none() {
+            return row;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the process stayed owned for half a minute")
+}
+
+/// What the later build lacks of the component the processes' steps are
+/// bound to.
+#[derive(Clone, Copy, Debug)]
+enum Lacks {
+    /// It does not install the component.
+    Component,
+    /// It installs the component at another behaviour revision.
+    Revision,
+}
+
+/// Build N starts two processes whose environment names the hold component
+/// at revision 1; each parks its hold step unsettled and build N stops. A
+/// later build that `lacks` what the steps are bound to serves for a
+/// bounded window and claims neither to run it. A cancel sent meanwhile
+/// ends one engine-free; a build that has the component claims the other,
+/// whose step completes.
+async fn a_later_build_without_the_component_never_claims_its_process(lacks: Lacks) {
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let seen = Arc::new(Holds::default());
+    let env = hold_environment();
+
+    let (backend, first) =
+        with_components(&stores, "claim-n", vec![hold_component(1, true, &seen)]);
+    let payload = payload_under(&first, &backend, &env, HOLDING_WORKER).await;
+    let cancelled = start_under(&first, &env, payload.clone()).await;
+    let completed = start_under(&first, &env, payload).await;
+    for _ in 0..2 {
+        tokio::time::timeout(Duration::from_secs(60), seen.entered.notified())
+            .await
+            .expect("each process's hold step is delivered");
+    }
+    first.shutdown().await.expect("build N stops");
+    drop(first);
+    let before = [
+        unowned(&backend, &cancelled).await,
+        unowned(&backend, &completed).await,
+    ];
+    let delivered = seen.deliveries.load(std::sync::atomic::Ordering::SeqCst);
+
+    let later = match lacks {
+        Lacks::Component => Vec::new(),
+        Lacks::Revision => vec![hold_component(2, false, &seen)],
+    };
+    let (later_backend, later) = with_components(&stores, "claim-n-plus-1", later);
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            later.processes().await_output(&completed),
+        )
+        .await
+        .is_err(),
+        "{lacks:?}: the process does not end on a build without its component"
+    );
+    for (process, before) in [&cancelled, &completed].into_iter().zip(&before) {
+        let row = unowned(&later_backend, process).await;
+        assert_eq!(
+            row.epoch, before.epoch,
+            "{lacks:?}: the build never claimed the process"
+        );
+        assert!(
+            later_backend
+                .process_registry()
+                .get_process(process)
+                .await
+                .expect("the process is read")
+                .is_some_and(|record| !matches!(
+                    record.lifecycle,
+                    lash_core::ProcessLifecycleState::Terminal { .. }
+                )),
+            "{lacks:?}: the admitted step stays unsettled"
+        );
+    }
+    assert_eq!(
+        seen.deliveries.load(std::sync::atomic::Ordering::SeqCst),
+        delivered,
+        "{lacks:?}: no body ran on the later build"
+    );
+
+    later
+        .processes()
+        .cancel(&cancelled, later.effect_host())
+        .await
+        .expect("the cancel is requested");
+    let output = tokio::time::timeout(
+        Duration::from_secs(60),
+        later.processes().await_output(&cancelled),
+    )
+    .await
+    .expect("the cancelled process ends within a minute")
+    .expect("its end is read");
+    assert!(
+        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+            if matches!(output.outcome, lash_core::ToolCallOutcome::Cancelled(_))),
+        "{lacks:?}: the cancel ends the process engine-free: {output:?}"
+    );
+    later.shutdown().await.expect("the later build stops");
+    drop(later);
+
+    let (_, capable) = with_components(
+        &stores,
+        "claim-capable",
+        vec![hold_component(1, false, &seen)],
+    );
+    let output = tokio::time::timeout(
+        Duration::from_secs(60),
+        capable.processes().await_output(&completed),
+    )
+    .await
+    .expect("the capable build ends the process within a minute")
+    .expect("its end is read");
+    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("{lacks:?}: the process ended without an answer: {output:?}");
+    };
+    assert!(output.is_success(), "{lacks:?}: {output:?}");
+    assert_eq!(output.value_for_projection(), serde_json::json!("released"));
+    capable.shutdown().await.expect("the capable build stops");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_build_lacking_the_component_never_claims_a_process_that_names_it() {
+    a_later_build_without_the_component_never_claims_its_process(Lacks::Component).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_build_serving_another_revision_never_claims_a_step_bound_to_the_first() {
+    a_later_build_without_the_component_never_claims_its_process(Lacks::Revision).await;
 }

@@ -229,9 +229,15 @@ match core
 }
 ```
 
-Lash checks the document against `env_spec`, the environment a process of
-the definition would run under, including the tool catalogue its plugins
-resolve, and publishes the definition of the named entry under your pin.
+Lash checks the document against `env_spec`, the `ProcessEnv` a process of
+the definition would run under: the tools it admits, contributed by the
+process components it names (each registered on the builder with
+`LashCoreBuilder::process_component`), and publishes the definition of the
+named entry under your pin. Start the process under the same environment:
+publish it with `host_artifacts().publish_process_env(&pin, &env_spec)`,
+and pass that reference, with the engine settings
+`core.processes().engine_defaults(kind, &payload)` answers, as the
+`EngineLaunch` of `ProcessStartRequest::definition`.
 Every other entry of the document is reachable from it by function
 reference, so one publication is all a run needs.
 
@@ -329,9 +335,10 @@ diagnostic, and the document stays readable, editable, publishable and
 runnable.
 
 `HostArtifacts::import_typescript_workflow(source, &environment).await` takes
-whole workflow source and the `ProcessExecutionEnvSpec` you pass to
+whole workflow source and the `ProcessEnv` you pass to
 `workflow_environment` and `publish_workflow`. Lash builds the dialect
-environment from that tool catalogue and the worker's function registry,
+environment from the tools that environment admits from the process
+components it names, and the worker's function registry,
 lowers the source, and admits the document. It runs no effect and publishes
 nothing. Exported async declarations and const-bound async literals (including
 `export const digest = process(async (inbox: string) => { return inbox; });`)

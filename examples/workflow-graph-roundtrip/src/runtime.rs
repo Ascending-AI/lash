@@ -27,22 +27,26 @@ pub(crate) enum RunError {
     Overlay(#[from] lash::workflow::WorkflowOverlayFoldError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Environment(#[from] ProcessEnvRefusal),
     #[error("{0}")]
     Invalid(String),
 }
 
+/// The process component that contributes the host's tools to a workflow
+/// process: its config is `()`.
+const HOST_TOOLS: ProcessConfigKey<()> =
+    ProcessConfigKey::new("workflow-host-tools", lash::plugins::FormatVersion::ONE);
+
 /// The environment a process of a saved workflow runs under, which is the
-/// environment lash admits the workflow against.
-fn environment() -> ProcessExecutionEnvSpec {
-    ProcessExecutionEnvSpec::new(
-        lash::plugins::AdmittedPluginConfig::default(),
-        lash::runtime::SessionPolicy::new(
-            lash::TurnBudget::bounded(32),
-            lash::MaxToolCalls::new(1024),
-            lash::NoProgressBudget::bounded(12),
-        ),
-        lash::plugins::SessionToolAccess::ambient(),
-    )
+/// environment lash admits the workflow against: the host's tools, from the
+/// one component that provides them.
+fn environment() -> Result<ProcessEnv, RunError> {
+    let tools = lash::plugins::SessionToolAccess::restricted(crate::display::tool_definitions())
+        .map_err(|error| RunError::Invalid(error.to_string()))?;
+    Ok(ProcessEnv::builder(tools, lash::MaxToolCalls::new(1024))
+        .component(HOST_TOOLS, &())
+        .build()?)
 }
 
 /// A saved version as lash holds it: the definition a run starts, the
@@ -50,23 +54,21 @@ fn environment() -> ProcessExecutionEnvSpec {
 #[derive(Clone)]
 pub(crate) struct Published {
     pub(crate) definition: ProcessDefinition,
-    env_ref: ProcessExecutionEnvRef,
+    launch: EngineLaunch,
     pub(crate) pin: HostArtifactPin,
 }
 
 impl Published {
     pub(crate) fn start_request(&self, key: &str) -> ProcessStartRequest {
-        ProcessStartRequest::new(
-            ProcessStartTarget::Definition {
-                definition_id: self.definition.id.clone(),
-                signature_claim: Some(self.definition.signature.clone()),
-                args: Default::default(),
-            },
+        ProcessStartRequest::definition(
+            self.definition.id.clone(),
+            Some(self.definition.signature.clone()),
+            Default::default(),
+            self.launch.clone(),
             ProcessOriginator::host(),
             Lifetime::Detached,
         )
         .with_host_start_key(key)
-        .with_env_ref(self.env_ref.clone())
     }
 }
 
@@ -81,7 +83,7 @@ pub(crate) struct Publication {
 /// signatures, and its library functions.
 pub(crate) async fn workflow_environment(core: &LashCore) -> Result<WorkflowEnvironment, RunError> {
     core.host_artifacts()
-        .workflow_environment(&environment())
+        .workflow_environment(&environment()?)
         .await?
         .ok_or_else(|| RunError::Invalid("this core reads no workflow documents".into()))
 }
@@ -114,7 +116,12 @@ pub(crate) async fn publish(
 ) -> Result<Publication, RunError> {
     let pin = HostArtifactPin::mint();
     let artifacts = core.host_artifacts();
-    let environment = core.resolve_process_environment(environment())?;
+    let environment = environment()?;
+    // The kernel settings a run of the saved version states: this build's
+    // dialect and bounds, chosen once at publication.
+    let settings = core
+        .processes()
+        .engine_defaults(LASH_VM_ENGINE_KIND, &serde_json::Value::Null)?;
     let result = async {
         match artifacts
             .publish_workflow(&pin, draft, entry, &environment)
@@ -125,7 +132,7 @@ pub(crate) async fn publish(
                 Ok(Publication {
                     published: Published {
                         definition: publication.definition,
-                        env_ref,
+                        launch: EngineLaunch::new(env_ref, settings),
                         pin: pin.clone(),
                     },
                     correspondence: publication.correspondence,
@@ -538,6 +545,16 @@ impl WorkflowHost {
 
 pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
     let tools = Arc::new(crate::display::HostTools::default());
+    let provider: Arc<dyn lash::tools::ToolProvider> =
+        Arc::new(lash::tools::StaticToolProvider::new(
+            crate::display::tool_definitions(),
+            tools.as_ref().clone(),
+        ));
+    let host_tools = lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(HOST_TOOLS.component()),
+        lash::plugins::PluginSpec::new().with_tool_provider(provider),
+    )
+    .as_component(HOST_TOOLS.format())?;
     let workers = lash::vm::WorkerService::default();
     let bounds = lash::vm::RunBounds {
         charge: 1_000_000,
@@ -550,10 +567,7 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
             lash::vm::TYPESCRIPT_DIALECT,
             bounds,
         )))
-        .tools(Arc::new(lash::tools::StaticToolProvider::new(
-            crate::display::tool_definitions(),
-            tools.as_ref().clone(),
-        )))
+        .process_component(Arc::new(host_tools), HOST_TOOLS)
         .trace_level(lash::tracing::TraceLevel::Extended)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())

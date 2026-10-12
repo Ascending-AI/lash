@@ -62,10 +62,24 @@ impl lash_core::ProcessEngine for PayloadGatedEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &lash_core::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, lash_core::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash_core::EngineSettings>,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(lash_core::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<lash_core::EngineSettings>, lash_core::PluginError> {
         Ok(None)
     }
 

@@ -138,7 +138,7 @@ impl StoreSet for LawStores {
     fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
         self.inner.process_registry()
     }
-    fn process_env_store(&self) -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn lash_core::ProcessEnvStore> {
         self.inner.process_env_store()
     }
     fn turn_prelude_store(&self) -> Arc<dyn lash_core_execution::TurnPreludeStore> {

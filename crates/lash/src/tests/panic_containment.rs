@@ -10,6 +10,10 @@ use crate::support::TurnInput;
 use lash_core::llm::types::LlmOutputPart;
 use std::collections::VecDeque;
 
+/// The component that serves the panicking tool to a process body.
+const PANIC_COMPONENT: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("panic-tool", lash_core::FormatVersion::ONE);
+
 /// The fixture echo tool panics during future construction or polling.
 #[derive(Default)]
 struct PanicTool {
@@ -224,9 +228,14 @@ await control.finish("must not finish");"#
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(model, mock_llm_profile_spec())
             .tools(tool.clone())
+            .process_component(
+                lash_core::testing::tool_component(PANIC_COMPONENT, tool.clone()),
+                PANIC_COMPONENT,
+            )
             .plugin(Arc::new(
                 lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                     lash_core::lifetime::session_or_starter,
+                    lash_core::testing::run_policy_naming(&[PANIC_COMPONENT]),
                 ),
             ))
             .build(crate::testing::runtime_lease_owner())?;

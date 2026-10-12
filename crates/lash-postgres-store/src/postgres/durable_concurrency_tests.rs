@@ -50,6 +50,7 @@ async fn node(store: &PostgresDurableStore, name: &str) -> NodeLease {
         .register_node(&NodeSpec {
             node: NodeId::new(name),
             decodes: vec![formats()],
+            serves: Vec::new(),
             ttl_millis: i64::try_from(TTL.as_millis()).expect("ttl fits"),
         })
         .await

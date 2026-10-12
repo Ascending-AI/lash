@@ -159,11 +159,20 @@ impl lash_core::ToolProvider for Probe {
     }
 }
 
+/// The component that serves the probe to a process body.
+const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("process-probe", lash_core::FormatVersion::ONE);
+
 /// A core running RLM turns with the probe, its model the registered
-/// scripts.
+/// scripts. A process a cell starts runs under the turn's run with the
+/// probe's component.
 async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
     let witness = Arc::clone(witness);
     World::new(tier, move |backend| {
+        let probe: Arc<dyn lash_core::ToolProvider> = Arc::new(Probe {
+            witness,
+            backend: backend.clone(),
+        });
         lash::LashCore::rlm_builder(
             backend.clone(),
             served::rlm(backend, None, sim::untimed_workers()),
@@ -171,12 +180,14 @@ async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_core::lifetime::starter,
+                lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
             ),
         ))
-        .tools(Arc::new(Probe {
-            witness,
-            backend: backend.clone(),
-        }))
+        .process_component(
+            lash_core::testing::tool_component(PROBE_COMPONENT, Arc::clone(&probe)),
+            PROBE_COMPONENT,
+        )
+        .tools(probe)
     })
     .await
 }

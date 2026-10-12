@@ -32,6 +32,7 @@ pub(super) async fn node(store: &dyn DurableStore, name: &str) -> Result<NodeLea
         .register_node(&NodeSpec {
             node: NodeId::new(name),
             decodes: vec![formats()],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await?)

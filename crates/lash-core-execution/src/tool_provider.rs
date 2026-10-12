@@ -18,7 +18,19 @@ mod session;
 
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
-pub use isolation::IsolatedProcessRequest;
+pub use isolation::{IsolatedProcessRequest, IsolatedStart};
+
+/// Why a start's definition target did not resolve.
+#[derive(Debug, thiserror::Error)]
+pub enum ResolveTargetError {
+    /// The definition is not stored, or refutes the claim made of it: the
+    /// start's tool error.
+    #[error("{0}")]
+    Refused(String),
+    /// A store fault: retryable, never recorded as a refusal.
+    #[error(transparent)]
+    Fault(PluginError),
+}
 pub use session::ToolSessionLlmProfile;
 
 /// Integrator class 3 session reads available inside a recorded leaf attempt.
@@ -201,12 +213,13 @@ pub struct AttemptContext<'run> {
     /// running inside one, and the child takes the declaring session's own.
     process_spawn_provenance: Option<crate::ProcessSpawnProvenance>,
     process_lineage: Option<crate::ProcessLineage>,
-    /// The execution-environment reference this attempt inherits from the
-    /// durable process it runs inside — already published under a durable
-    /// owner, so a declaration carrying it publishes nothing at realization.
-    /// `None` outside a process execution, where the spec must be published.
-    inherited_process_execution_env_ref: Option<crate::ProcessExecutionEnvRef>,
-    execution_env_spec: Option<crate::ProcessExecutionEnvSpec>,
+    /// The process this attempt runs inside, with its recorded environment
+    /// and settings: what a nested start's policy may inherit. `None`
+    /// outside a process execution.
+    enclosing_env: Option<Arc<crate::EnclosingProcess>>,
+    /// The execution scope the attempt runs under: what a launch it
+    /// declares is held under.
+    execution_scope: crate::ExecutionScope,
     completion: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     tool_execution_route: ToolExecutionRoute,
@@ -233,6 +246,22 @@ impl<'run> AttemptContext<'run> {
     /// rebuilt from live config. `None` outside a turn.
     pub fn resolved_run(&self) -> Option<&crate::ResolvedRun> {
         self.resolved_run.as_deref()
+    }
+
+    /// The capability refs the attempt runs with, by slot (D18): the running
+    /// turn's recorded run's, or inside a process its environment's. Empty
+    /// outside both.
+    pub fn run_capabilities(
+        &self,
+    ) -> &std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef> {
+        static NONE: std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef> =
+            std::collections::BTreeMap::new();
+        if let Some(run) = self.resolved_run.as_deref() {
+            return run.capabilities();
+        }
+        self.enclosing_env
+            .as_deref()
+            .map_or(&NONE, |enclosing| enclosing.env.capabilities())
     }
 
     pub fn fleet_format(&self) -> crate::FleetFormat {
@@ -314,11 +343,11 @@ impl<'run> AttemptContext<'run> {
                 .as_ref()
                 .and_then(|runtime| runtime.process_spawn_provenance()),
             process_lineage: context.process_lineage(),
-            inherited_process_execution_env_ref: context
+            enclosing_env: context
                 .runtime_execution_context
                 .as_ref()
-                .and_then(|runtime| runtime.inherited_process_execution_env_ref()),
-            execution_env_spec: context.execution_env_spec.clone(),
+                .and_then(crate::RuntimeExecutionContext::enclosing_env),
+            execution_scope: context.effect_controller.execution_scope().clone(),
             completion,
             phase_probe,
             tool_execution_route: context.tool_execution_route.clone(),
@@ -445,26 +474,101 @@ impl<'run> AttemptContext<'run> {
     pub fn process_spawn_provenance(&self) -> Option<&crate::ProcessSpawnProvenance> {
         self.process_spawn_provenance.as_ref()
     }
-    /// The immutable environment this attempt declares by reference.
-    /// The runtime stores it under the declaring journal before recording the result.
-    pub fn process_execution_env_ref(&self) -> Result<crate::ProcessExecutionEnvRef, PluginError> {
-        if let Some(env_ref) = self.inherited_process_execution_env_ref.as_ref() {
-            return Ok(env_ref.clone());
-        }
-        self.execution_env_spec
-            .as_ref()
+    /// The definition `target` names, read and verified before a start
+    /// policy runs (D8): its engine's authoritative signature, a supplied
+    /// signature claim verified against it, and the payload a start with
+    /// `args` runs.
+    ///
+    /// # Errors
+    ///
+    /// [`ResolveTargetError::Refused`] for a definition that is not stored
+    /// or a claim it refutes, a tool error; [`ResolveTargetError::Fault`]
+    /// for a store fault.
+    pub async fn resolve_start_target(
+        &self,
+        target: &crate::ProcessDefinitionTarget,
+        args: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<crate::ResolvedStartTarget, ResolveTargetError> {
+        let engines = &self.definition_engines;
+        let ports = engines.artifact_ports().ok_or_else(|| {
+            ResolveTargetError::Fault(PluginError::Session(
+                "a definition start requires the runtime's artifact stores".into(),
+            ))
+        })?;
+        let definition_id = target.definition_id();
+        let resolved = ports
+            .read_definition(engines, definition_id)
+            .await
+            .map_err(ResolveTargetError::Fault)?
             .ok_or_else(|| {
-                PluginError::Session(
-                    "process execution environment requires a runtime context".into(),
-                )
-            })?
-            .stable_ref()
-            .map_err(|error| {
-                PluginError::Session(format!(
-                    "failed to encode process execution environment: {error}"
+                ResolveTargetError::Refused(format!(
+                    "process definition `{definition_id}` is not stored"
                 ))
-            })
+            })?;
+        if let crate::ProcessDefinitionTarget::Definition(claimed) = target {
+            engines
+                .verify_definition_claim(&resolved.draft, claimed)
+                .await
+                .map_err(|error| ResolveTargetError::Refused(error.to_string()))?;
+        }
+        let payload = resolved
+            .start_payload(&args)
+            .map_err(|error| ResolveTargetError::Refused(error.to_string()))?;
+        Ok(crate::ResolvedStartTarget {
+            definition_id: resolved.id().clone(),
+            engine_kind: resolved.draft.engine_kind().as_str().to_owned(),
+            signature: resolved.definition.signature.clone(),
+            payload,
+            args,
+        })
     }
+
+    /// What a start policy decides `target`'s start with (§3.6): the
+    /// starting turn's recorded run, the catalog this attempt was offered
+    /// and, inside a process, the enclosing process's environment.
+    pub fn start_policy_cx<'a>(
+        &'a self,
+        target: &'a crate::ResolvedStartTarget,
+        label: Option<&'a str>,
+    ) -> crate::ProcessEnvCx<'a> {
+        crate::ProcessEnvCx::new(
+            &self.owner,
+            target,
+            label,
+            self.resolved_run.as_deref(),
+            self.tool_catalog.as_deref(),
+            self.enclosing_env.as_deref(),
+            &self.definition_engines,
+        )
+    }
+
+    /// Hold the environment `choice` states under this attempt's execution
+    /// claim and check its settings against `target`'s engine: the sealed
+    /// launch a declaration carries (D9, D10). An `Inherit` choice holds the
+    /// enclosing process's own environment.
+    ///
+    /// # Errors
+    ///
+    /// [`HoldEnvError::Refused`](crate::HoldEnvError::Refused) for a typed
+    /// refusal, a tool error; [`HoldEnvError::Fault`](crate::HoldEnvError::Fault)
+    /// for a retryable fault.
+    pub async fn declare_launch(
+        &self,
+        choice: &crate::ProcessStartChoice,
+        target: &crate::ResolvedStartTarget,
+    ) -> Result<crate::DeclaredLaunch, crate::HoldEnvError> {
+        let launch = crate::runtime::process::hold_launch(
+            &self.definition_engines,
+            &self.execution_scope,
+            self.enclosing_env.as_deref(),
+            choice,
+            &target.engine_kind,
+            &target.payload,
+        )
+        .await?;
+        Ok(crate::DeclaredLaunch::held(launch))
+    }
+
     /// Integrator class 3 decode of the sealed payload into a provider-owned type.
     pub fn decode_prepared_payload<T>(&self) -> Result<T, serde_json::Error>
     where
@@ -552,7 +656,6 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) completion: ToolCompletionState,
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) facts: crate::plugin::ExecutionFacts,
-    pub(crate) execution_env_spec: Option<crate::ProcessExecutionEnvSpec>,
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
 }
 
@@ -607,7 +710,6 @@ pub(crate) struct ToolContextBuilder<'run> {
     completion: ToolCompletionState,
     parent_invocation: Option<crate::RuntimeInvocation>,
     facts: crate::plugin::ExecutionFacts,
-    execution_env_spec: Option<crate::ProcessExecutionEnvSpec>,
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
 }
 
@@ -636,7 +738,6 @@ impl<'run> ToolContextBuilder<'run> {
             completion: ToolCompletionState::default(),
             parent_invocation: dispatch.parent_invocation.clone(),
             facts: dispatch.facts.clone(),
-            execution_env_spec: None,
             child_execution_trace_hook: None,
         }
     }
@@ -653,7 +754,6 @@ impl<'run> ToolContextBuilder<'run> {
         mut self,
         context: crate::RuntimeExecutionContext<'run>,
     ) -> Self {
-        self.execution_env_spec = Some(context.tool_run_env_spec());
         self.runtime_execution_context = Some(context);
         self
     }
@@ -700,7 +800,6 @@ impl<'run> ToolContextBuilder<'run> {
             completion: self.completion,
             parent_invocation: self.parent_invocation,
             facts: self.facts,
-            execution_env_spec: self.execution_env_spec,
             child_execution_trace_hook: self.child_execution_trace_hook,
         }
     }
@@ -760,7 +859,6 @@ impl<'run> ToolContext<'run> {
             completion: self.completion.clone(),
             parent_invocation: self.parent_invocation.clone(),
             facts: self.facts.clone(),
-            execution_env_spec: self.execution_env_spec.clone(),
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
         })
     }
@@ -779,14 +877,10 @@ impl<'run> ToolContext<'run> {
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         direct_completions: crate::DirectCompletionClient<'run>,
     ) -> ToolContextBuilder<'run> {
-        let execution_env_spec = crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                crate::NoProgressBudget::bounded(12),
-            ),
-            crate::SessionToolAccess::ambient(),
+        let policy = crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         );
         ToolContextBuilder {
             owner: crate::ExecutionOwner::SessionFrame {
@@ -810,8 +904,7 @@ impl<'run> ToolContext<'run> {
             call_id: lash_sansio::ToolCallId::fixture("tool-context"),
             completion: ToolCompletionState::default(),
             parent_invocation: None,
-            facts: crate::plugin::ExecutionFacts::of_env_spec(&execution_env_spec),
-            execution_env_spec: Some(execution_env_spec),
+            facts: crate::plugin::ExecutionFacts::of_policy(&policy, None),
             child_execution_trace_hook: None,
         }
     }
@@ -1291,7 +1384,7 @@ impl<'a> ToolCall<'a> {
 /// undeclared intent kind — is refused before anything it declares is
 /// realized. An isolated call runs in the registered process engine its
 /// manifest names, started with the payload its provider's
-/// [`isolated_start_payload`](Self::isolated_start_payload) answers. A
+/// [`isolated_start`](Self::isolated_start) answers. A
 /// manifest holds only a valid declaration and its host-set bounds, and an
 /// isolated tool registers only where its engine is registered, so no call
 /// is refused for its tool's configuration.
@@ -1365,14 +1458,22 @@ pub trait ToolProvider: Send + Sync + 'static {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome;
-    /// The start payload of the process an isolated call (its manifest
-    /// declares `isolated`) runs as, in the engine its manifest names.
-    /// Admission asks once, before any preparation, check or body, and
-    /// records the answer; a replay or recovery never asks again. The
-    /// default starts the engine on the call's arguments. An isolated call
-    /// never falls back to `execute`.
-    fn isolated_start_payload(&self, call: IsolatedProcessRequest<'_>) -> serde_json::Value {
-        call.args.clone()
+    /// The start of the process an isolated call (its manifest names an
+    /// isolation engine) runs: the engine's payload, the environment and the
+    /// engine settings (D6). Admission asks once and records the answer; a
+    /// replay or recovery never asks again. An isolated call never falls
+    /// back to `execute`, and a provider that states no start refuses it.
+    ///
+    /// # Errors
+    ///
+    /// The call's typed refusal, its tool error.
+    fn isolated_start(
+        &self,
+        _call: IsolatedProcessRequest<'_>,
+    ) -> Result<IsolatedStart, crate::ProcessEnvRefusal> {
+        Err(crate::ProcessEnvRefusal::Policy {
+            reason: "this provider states no isolated start".into(),
+        })
     }
 }
 

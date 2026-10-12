@@ -18,7 +18,7 @@ pub use crate::plugin::{
     SessionObserverIntent,
 };
 pub use crate::runtime::UnavailableProcessService;
-pub use crate::runtime::{load_process_execution_env, publish_process_execution_env};
+pub use crate::runtime::load_process_env;
 pub use crate::session::{RuntimeExecutionTracing, Session};
 
 use crate::runtime::process::{ObservedWorkItem, ProcessRecord, ProcessWorkObserver};
@@ -122,14 +122,6 @@ pub fn emit_tool_call_completed(
             },
         )
     });
-}
-
-/// The digest-only start registration after its execution holds the environment.
-pub async fn process_start_execution_env(
-    context: &crate::RuntimeExecutionContext<'_>,
-    registration: crate::ProcessStartRegistration,
-) -> Result<crate::ProcessStartRegistration, crate::PluginError> {
-    context.process_start_execution_env(registration).await
 }
 
 // `RuntimeExecutionContext`'s process-handle and process-await operations:

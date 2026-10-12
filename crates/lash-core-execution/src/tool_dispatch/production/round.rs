@@ -209,7 +209,7 @@ impl ProductionToolHandlers<'_> {
                 .composition
                 .tool_run_binding(&invocation.tool_id, source)
                 .map_err(crate::RuntimeEffectControllerError::from)?;
-            let start = self
+            match self
                 .bind_isolated(
                     owner,
                     &invocation.id,
@@ -218,24 +218,32 @@ impl ProductionToolHandlers<'_> {
                     engine,
                     &binding.executable,
                 )
-                .map_err(crate::RuntimeEffectControllerError::from)?;
-            self.isolated
-                .lock_recover()
-                .insert(invocation.id.clone(), start);
+                .await
+            {
+                Ok(start) => {
+                    self.isolated
+                        .lock_recover()
+                        .insert(invocation.id.clone(), start);
+                }
+                Err(crate::HoldEnvError::Refused(refusal)) => {
+                    return Ok((
+                        MemberEnd::Final(self.refused_isolated_call(call, &refusal)),
+                        Vec::new(),
+                    ));
+                }
+                Err(crate::HoldEnvError::Fault(error)) => {
+                    return Err(crate::RuntimeEffectControllerError::from(error).into());
+                }
+            }
         }
         let declaration = definition.manifest.declaration().clone();
-        let mut environment = self.environment.clone();
-        let singleton = self
-            .admit_leaf(
-                owner,
-                &invocation,
-                definition,
-                self.context.parent_invocation().cloned(),
-                &self.context.tool_run_env_spec(),
-                &self.context.tool_observation_attribution(),
-                &mut environment,
-            )
-            .await?;
+        let singleton = self.admit_leaf(
+            owner,
+            &invocation,
+            definition,
+            self.context.parent_invocation().cloned(),
+            &self.context.tool_observation_attribution(),
+        )?;
         let scope = self
             .context
             .dispatch()
@@ -285,11 +293,37 @@ impl ProductionToolHandlers<'_> {
         })
     }
 
+    /// The answer of `call`, an isolated call whose start its provider or
+    /// environment refused (D6): its tool error. No admission observes it,
+    /// so its activity pair is observed here, as an unavailable call's is.
+    fn refused_isolated_call(
+        &self,
+        call: &crate::sansio::PendingToolCall,
+        refusal: &crate::ProcessEnvRefusal,
+    ) -> CompletedCall {
+        let output = ToolCallOutput::failure(crate::ToolFailure::runtime(
+            crate::ToolFailureClass::InvalidRequest,
+            "process_env_refused",
+            refusal.to_string(),
+        ));
+        self.observed_unadmitted(call, output)
+    }
+
     /// The answer of `call`, whose tool the catalog does not name. No
     /// admission observes it, so its activity pair is observed here, in
     /// order, as an admitted call's is (FIG-5353).
     fn unavailable_call(&self, call: &crate::sansio::PendingToolCall) -> CompletedCall {
-        let completed = answered(call, unavailable());
+        self.observed_unadmitted(call, unavailable())
+    }
+
+    /// `call` answered `output` without an admission: its activity pair is
+    /// observed here, in order.
+    fn observed_unadmitted(
+        &self,
+        call: &crate::sansio::PendingToolCall,
+        output: ToolCallOutput,
+    ) -> CompletedCall {
+        let completed = answered(call, output);
         self.context.emit_tool_call_started(
             call.call_id.as_str(),
             &crate::tool_dispatch::ToolCallIds::of_pending(call),
@@ -392,7 +426,6 @@ pub(super) fn member_body(
                 // member's cancel, which its owner fires on a turn cancel.
                 let mut handlers = ProductionToolHandlers::new(
                     context.clone().with_cancellation_token(token.clone()),
-                    None,
                 )
                 .with_completion_key(key.clone())
                 .with_admitted_declaration(execution.draft().declaration().cloned())

@@ -122,6 +122,7 @@ fn config(backend: &Backend) -> SimNodesConfig {
     SimNodesConfig {
         lease: LeaseConfig::default(),
         decodes: backend.formats().decodes(),
+        serves: Vec::new(),
         max_active: 4,
     }
 }
@@ -197,7 +198,7 @@ impl ProcessSteps for KernelSteps {
             };
             let run = EngineStepRun {
                 process: process.id.clone(),
-                engine_config: process.engine_config.clone(),
+                engine_settings: process.engine_settings().cloned(),
                 tool_catalog: Arc::new(lash_core_execution::ToolCatalog::default()),
                 now: lash_durable::DurableInstant(
                     i64::try_from(SimClock::timestamp_ms_at(self.clock.logical_ms()))
@@ -280,26 +281,27 @@ async fn seed(backend: &Backend) {
         entry: lash::workflow::document::Name::new("worker"),
         args: serde_json::Map::new(),
     };
-    let mut registration = ProcessRegistration::new(
-        ProcessInput::Engine {
-            kind: LASH_VM_ENGINE_KIND.to_owned(),
-            payload: serde_json::to_value(&input).expect("the input encodes"),
-        },
-        ProcessProvenance::host(),
-        LifetimeDecision::Detached,
-    )
-    .with_execution_env_ref(Some(
-        lash_core_execution::testing::process_execution_env_fixture(
-            backend.process_env_store().as_ref(),
-        )
-        .await,
-    ));
-    registration.engine_config = Some(
+    let settings = lash_core::EngineSettings::new(
         serde_json::to_value(lash_vm_runtime::KernelRecordedSettings::new(
             lash_vm_runtime::TYPESCRIPT_DIALECT,
             bounds(),
         ))
         .expect("the settings encode"),
+    );
+    let registration = ProcessRegistration::new(
+        ProcessInput::Engine {
+            kind: LASH_VM_ENGINE_KIND.to_owned(),
+            payload: serde_json::to_value(&input).expect("the input encodes"),
+            launch: lash_core::EngineLaunch::new(
+                lash_core_execution::testing::process_execution_env_fixture(
+                    backend.process_env_store().as_ref(),
+                )
+                .await,
+                Some(settings),
+            ),
+        },
+        ProcessProvenance::host(),
+        LifetimeDecision::Detached,
     );
     let id = backend
         .process_registry()

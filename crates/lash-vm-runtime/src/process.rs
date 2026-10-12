@@ -122,10 +122,10 @@ pub(crate) fn failure(
     lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(failure))
 }
 
-/// What a process records at creation: the dialect its documents are
-/// written in, which a worker must install to run it, and the bounds every
-/// run of it is held to. Every run reads both back from the record
-/// (FIG-5990).
+/// The kernel engine's settings, which a start states and its row records
+/// (FIG-6034 D4): the dialect its documents are written in, which a worker
+/// must install to run it, and the bounds every run of it is held to. Every
+/// run reads both back from the record (FIG-5990).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KernelRecordedSettings {
@@ -426,12 +426,41 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
         )
     }
 
-    fn creation_config(
+    /// A kernel start states its settings: they decode strictly, and name
+    /// the dialect this engine's workers serve. A stored definition records
+    /// no dialect, so nothing else is compared.
+    fn check_settings(
         &self,
-        _env_spec: &lash_core::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, lash_core::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash_core::EngineSettings>,
+    ) -> Result<(), lash_core::PluginError> {
+        let Some(settings) = settings else {
+            return Err(lash_core::PluginError::Registration(
+                "a kernel process start states its settings".to_owned(),
+            ));
+        };
+        let settings: KernelRecordedSettings = serde_json::from_value(settings.value().clone())
+            .map_err(|error| {
+                lash_core::PluginError::Registration(format!(
+                    "the kernel settings do not decode: {error}"
+                ))
+            })?;
+        if settings.dialect != self.dialect {
+            return Err(lash_core::PluginError::Registration(format!(
+                "the kernel settings name dialect `{}`, and this engine's workers serve `{}`",
+                settings.dialect, self.dialect
+            )));
+        }
+        Ok(())
+    }
+
+    /// This build's dialect and bounds. Only a starter asks for them.
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<Option<lash_core::EngineSettings>, lash_core::PluginError> {
         serde_json::to_value(KernelRecordedSettings::new(&self.dialect, self.bounds))
-            .map(Some)
+            .map(|value| Some(lash_core::EngineSettings::new(value)))
             .map_err(|error| lash_core::PluginError::Registration(error.to_string()))
     }
 
@@ -605,7 +634,6 @@ impl lash_core::EngineSteps for KernelEngineSteps {
 pub fn admit_kernel_process(
     _kind: &'static str,
     payload: &serde_json::Value,
-    _env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
 ) -> Result<lash_core::ProcessIdentity, lash_core::PluginError> {
     let definition = payload_definition(payload)?;
     let mut identity = lash_core::ProcessIdentity::labelled(

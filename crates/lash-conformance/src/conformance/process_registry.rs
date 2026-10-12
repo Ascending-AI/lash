@@ -443,11 +443,14 @@ pub(super) fn executed_registration(id: &str) -> ProcessRegistration {
         ProcessInput::Engine {
             kind: "conformance".to_string(),
             payload: serde_json::json!({"suite": "process_registry", "id": id}),
+            launch: crate::EngineLaunch::new(
+                lash_core::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
         },
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         definition_identity(
             lash_core::ProcessDefinitionRef::unclaimed(
@@ -949,17 +952,18 @@ async fn refolded_process_record_matches_stored_projection(
     case: &str,
 ) {
     let base = writer
-        .register_process(
-            ProcessRegistration::new(
-                ProcessInput::Engine {
-                    kind: "refold-conformance".to_string(),
-                    payload: serde_json::json!({"case": case}),
-                },
-                ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
-        )
+        .register_process(ProcessRegistration::new(
+            ProcessInput::Engine {
+                kind: "refold-conformance".to_string(),
+                payload: serde_json::json!({"case": case}),
+                launch: crate::EngineLaunch::new(
+                    lash_core::testing::process_execution_env_fixture_ref(),
+                    None,
+                ),
+            },
+            ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
         .await
         .expect("register refold process");
     let process_id = &base.id.clone();
@@ -1227,6 +1231,7 @@ pub async fn waiting_processes_remain_in_the_non_terminal_scan(registry: Arc<dyn
                 ProcessInput::Engine {
                     kind: "waiting-non-terminal-scan".to_string(),
                     payload: serde_json::Value::Null,
+                    launch: crate::EngineLaunch::new(env_ref.clone(), None),
                 },
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
@@ -1239,8 +1244,7 @@ pub async fn waiting_processes_remain_in_the_non_terminal_scan(registry: Arc<dyn
                     ),
                     None::<String>,
                 ),
-            ))
-            .with_execution_env_ref(Some(env_ref.clone())),
+            )),
         )
         .await
         .expect("register waiting process");

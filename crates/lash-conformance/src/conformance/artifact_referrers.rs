@@ -157,15 +157,7 @@ where
     let artifact = module("pinned");
     let module_ref = artifact.key();
     let module_bytes = artifact.to_store_bytes().expect("module bytes");
-    let env = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
+    let env = lash_core::testing::process_env_with_limit(1024);
     let env_ref = env.stable_ref().expect("env ref");
     let env_bytes = env.to_store_bytes().expect("env bytes");
     let (pin, claim) = pin_claim();
@@ -176,7 +168,7 @@ where
         .expect("publish module");
     handles
         .process_env
-        .publish_process_execution_env(&claim, &env_ref, &env_bytes)
+        .publish_process_env(&claim, &env_ref, &env_bytes)
         .await
         .expect("publish environment");
     assert_eq!(
@@ -190,7 +182,7 @@ where
     assert_eq!(
         handles
             .process_env
-            .get_process_execution_env(&env_ref)
+            .get_process_env(&env_ref)
             .await
             .expect("read"),
         Some(env_bytes.clone())
@@ -216,7 +208,7 @@ where
     assert_eq!(
         handles
             .process_env
-            .get_process_execution_env(&env_ref)
+            .get_process_env(&env_ref)
             .await
             .expect("read"),
         None
@@ -231,7 +223,7 @@ where
     );
     let env_error = handles
         .process_env
-        .publish_process_execution_env(&claim, &env_ref, &env_bytes)
+        .publish_process_env(&claim, &env_ref, &env_bytes)
         .await
         .expect_err("released pin refuses environment");
     assert!(matches!(env_error, ArtifactStoreError::ReferrerEnded { referrer } if referrer == pin));
@@ -243,7 +235,7 @@ where
         .expect("fresh pin publishes");
     handles
         .process_env
-        .publish_process_execution_env(&fresh, &env_ref, &env_bytes)
+        .publish_process_env(&fresh, &env_ref, &env_bytes)
         .await
         .expect("fresh pin publishes environment");
     assert_eq!(
@@ -257,7 +249,7 @@ where
     assert_eq!(
         handles
             .process_env
-            .get_process_execution_env(&env_ref)
+            .get_process_env(&env_ref)
             .await
             .expect("read"),
         Some(env_bytes)
@@ -278,15 +270,7 @@ where
     let artifact = module("idempotent");
     let key = artifact.key();
     let bytes = artifact.to_store_bytes().expect("module bytes");
-    let env = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
+    let env = lash_core::testing::process_env_with_limit(1024);
     let env_ref = env.stable_ref().expect("env ref");
     let env_bytes = env.to_store_bytes().expect("env bytes");
     let (source, source_claim) = pin_claim();
@@ -298,7 +282,7 @@ where
         .expect("publish source");
     handles
         .process_env
-        .publish_process_execution_env(&source_claim, &env_ref, &env_bytes)
+        .publish_process_env(&source_claim, &env_ref, &env_bytes)
         .await
         .expect("publish source environment");
     let module_carry = ResolvedArtifactCleanup {
@@ -342,7 +326,7 @@ where
     assert_eq!(
         handles
             .process_env
-            .get_process_execution_env(&env_ref)
+            .get_process_env(&env_ref)
             .await
             .expect("read carried environment"),
         Some(env_bytes)
@@ -379,7 +363,7 @@ where
         assert_eq!(
             handles
                 .process_env
-                .get_process_execution_env(&env_ref)
+                .get_process_env(&env_ref)
                 .await
                 .expect("read reclaimed environment"),
             None
@@ -456,25 +440,9 @@ where
 {
     let fixture = make();
     let store = &fixture.open.process_env;
-    let spec = lash_core::ProcessExecutionEnvSpec::new(
-        {
-            // A captured environment as large as a session with 128 KiB of
-            // recorded protocol prompt.
-            let mut plugin_config =
-                lash_core::PluginConfig::for_protocol(Some("protocol".to_string()));
-            plugin_config.insert(
-                "protocol",
-                serde_json::json!({ "prompt": { "instructions": ["x".repeat(128 * 1024)] } }),
-            );
-            lash_core::AdmittedPluginConfig::new(plugin_config, 0)
-        },
-        lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
+    // A stated environment as large as one with 128 KiB of component
+    // config.
+    let spec = lash_core::testing::process_env_of_size(128 * 1024);
     let first_ref = spec.stable_ref().expect("first captured digest");
     let second_ref = spec.clone().stable_ref().expect("second captured digest");
     assert_eq!(
@@ -492,7 +460,7 @@ where
     let bytes = spec.to_store_bytes().expect("environment bytes");
     for env_ref in [&first_ref, &second_ref] {
         store
-            .publish_process_execution_env(&claim, env_ref, &bytes)
+            .publish_process_env(&claim, env_ref, &bytes)
             .await
             .expect("capture publishes");
     }
@@ -504,7 +472,7 @@ where
     ));
     for reader in [&first, &second] {
         store
-            .acquire_process_execution_env(
+            .acquire_process_env(
                 &ReferrerClaim::unguarded(reader.clone()).expect("process claim"),
                 &first_ref,
             )
@@ -519,7 +487,7 @@ where
     assert_eq!(
         reopened
             .process_env
-            .get_process_execution_env(&first_ref)
+            .get_process_env(&first_ref)
             .await
             .expect("read after declaration"),
         Some(bytes.clone())
@@ -531,7 +499,7 @@ where
         .expect("first process ends");
     assert_eq!(
         store
-            .get_process_execution_env(&second_ref)
+            .get_process_env(&second_ref)
             .await
             .expect("read after first process"),
         Some(bytes)
@@ -543,7 +511,7 @@ where
         .expect("last process ends");
     assert_eq!(
         store
-            .get_process_execution_env(&first_ref)
+            .get_process_env(&first_ref)
             .await
             .expect("read after last reader"),
         None
@@ -553,12 +521,12 @@ where
         .await
         .expect("cleanup replay");
     assert!(
-        matches!(store.acquire_process_execution_env(&claim, &first_ref).await,
+        matches!(store.acquire_process_env(&claim, &first_ref).await,
         Err(ArtifactStoreError::ReferrerEnded { referrer }) if referrer == declaration)
     );
     let ended_claim = ReferrerClaim::unguarded(second.clone()).expect("ended process claim");
     assert!(
-        matches!(store.publish_process_execution_env(&ended_claim, &first_ref, &spec.to_store_bytes().expect("bytes")).await,
+        matches!(store.publish_process_env(&ended_claim, &first_ref, &spec.to_store_bytes().expect("bytes")).await,
         Err(ArtifactStoreError::ReferrerEnded { referrer }) if referrer == second)
     );
 }
@@ -571,15 +539,7 @@ where
     F: Fn() -> ReopenableArtifactStore,
 {
     let handles = make().open;
-    let env = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
+    let env = lash_core::testing::process_env_with_limit(1024);
     let env_ref = env.stable_ref().expect("environment reference");
     let env_bytes = env.to_store_bytes().expect("environment bytes");
     let claims = [
@@ -609,14 +569,11 @@ where
                 .await,
             handles
                 .process_env
-                .publish_process_execution_env(&claim, &env_ref, &env_bytes)
+                .publish_process_env(&claim, &env_ref, &env_bytes)
                 .await,
             handles
                 .process_env
-                .acquire_process_execution_env(
-                    &claim,
-                    &lash_core::ProcessExecutionEnvRef::new("missing-env"),
-                )
+                .acquire_process_env(&claim, &lash_core::ProcessEnvRef::new("missing-env"))
                 .await,
             handles
                 .artifacts
@@ -685,7 +642,7 @@ where
     assert_eq!(
         handles
             .process_env
-            .get_process_execution_env(&env_ref)
+            .get_process_env(&env_ref)
             .await
             .expect("read"),
         None

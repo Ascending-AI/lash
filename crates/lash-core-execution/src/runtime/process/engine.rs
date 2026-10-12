@@ -6,7 +6,7 @@ use super::definition_ref::{
 };
 use super::engine_state::{EngineAction, EngineEvent, EngineState, EngineStateFormat};
 use super::events::ProcessAwaitOutput;
-use super::model::{ProcessExecutionEnvSpec, ProcessIdentity};
+use super::model::{EngineSettings, ProcessIdentity};
 
 /// Result of one process invocation.
 #[derive(Clone, Debug, PartialEq)]
@@ -109,7 +109,8 @@ pub trait ProcessEngine: Send + Sync {
     fn state_format(&self) -> EngineStateFormat;
 
     /// How long a cancelled process may run best-effort steps before lash
-    /// forces its terminal. Recorded in `engine_config` at creation.
+    /// forces its terminal. A live engine control, read when the cancel's
+    /// `Started` is handled; it is not recorded with the process.
     fn cancel_grace(&self) -> std::time::Duration;
 
     /// The executable generation a run of `payload` would run as (FIG-3571),
@@ -117,13 +118,24 @@ pub trait ProcessEngine: Send + Sync {
     /// payload the engine refuses anyway.
     fn program_identity(&self, payload: &serde_json::Value) -> Option<crate::ExecutableGeneration>;
 
-    /// What a process created now under `env_spec` records with its row
-    /// (FIG-4527), or `None` for an engine with no such configuration. Asked
-    /// once, at registration; every activation reads it back from the row.
-    fn creation_config(
+    /// Check the settings a starter states for a start of `payload` (D4):
+    /// pure, called before the start is durable. It refuses an engine that
+    /// requires settings and gets none, and settings it cannot decode or does
+    /// not serve. Every run of the process reads the checked settings back
+    /// from its row, never a live default.
+    fn check_settings(
         &self,
-        env_spec: &ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, crate::PluginError>;
+        payload: &serde_json::Value,
+        settings: Option<&EngineSettings>,
+    ) -> Result<(), crate::PluginError>;
+
+    /// This build's default settings for a start of `payload`, or `None` for
+    /// an engine with no settings. Only a starter calls it, explicitly; lash
+    /// never calls it to fill a start's settings.
+    fn default_settings(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<Option<EngineSettings>, crate::PluginError>;
 
     /// The next state and action for `event` over `state`: synchronous and
     /// effect-free. The same state and event always give the same answer.
@@ -358,39 +370,27 @@ impl AdmittedProcessIdentity {
 #[derive(Clone, Copy)]
 pub struct ProcessEngineAdmission {
     kind: &'static str,
-    admit: fn(
-        &'static str,
-        &serde_json::Value,
-        Option<&ProcessExecutionEnvSpec>,
-    ) -> Result<ProcessIdentity, crate::PluginError>,
+    admit: fn(&'static str, &serde_json::Value) -> Result<ProcessIdentity, crate::PluginError>,
 }
 
 impl ProcessEngineAdmission {
     pub const fn new(
         kind: &'static str,
-        admit: fn(
-            &'static str,
-            &serde_json::Value,
-            Option<&ProcessExecutionEnvSpec>,
-        ) -> Result<ProcessIdentity, crate::PluginError>,
+        admit: fn(&'static str, &serde_json::Value) -> Result<ProcessIdentity, crate::PluginError>,
     ) -> Self {
         Self { kind, admit }
     }
 
     pub const fn accepting(kind: &'static str) -> Self {
-        Self::new(kind, |kind, _, _| Ok(ProcessIdentity::new(kind)))
+        Self::new(kind, |kind, _| Ok(ProcessIdentity::new(kind)))
     }
 
     pub fn kind(self) -> &'static str {
         self.kind
     }
 
-    pub fn admit(
-        self,
-        payload: &serde_json::Value,
-        env_spec: Option<&ProcessExecutionEnvSpec>,
-    ) -> Result<ProcessIdentity, crate::PluginError> {
-        (self.admit)(self.kind, payload, env_spec)
+    pub fn admit(self, payload: &serde_json::Value) -> Result<ProcessIdentity, crate::PluginError> {
+        (self.admit)(self.kind, payload)
     }
 }
 
@@ -491,6 +491,9 @@ pub struct ProcessEngineRegistry {
     document_providers: Arc<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
     state_migrations: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineStateMigration>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
+    /// The process components a new environment is admitted against and a
+    /// process is composed from (FIG-6034).
+    components: crate::plugin::ProcessComponentRegistry,
 }
 
 /// A [`ProcessEngineRegistry`] held weakly: it keeps no engine alive.
@@ -503,6 +506,7 @@ pub struct WeakProcessEngineRegistry {
     state_migrations:
         std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineStateMigration>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
+    components: crate::plugin::ProcessComponentRegistry,
 }
 
 impl WeakProcessEngineRegistry {
@@ -516,6 +520,7 @@ impl WeakProcessEngineRegistry {
             document_providers: self.document_providers.upgrade()?,
             state_migrations: self.state_migrations.upgrade()?,
             artifact_ports: self.artifact_ports.clone(),
+            components: self.components.clone(),
         })
     }
 }
@@ -567,7 +572,29 @@ impl ProcessEngineRegistry {
             document_providers: Arc::downgrade(&self.document_providers),
             state_migrations: Arc::downgrade(&self.state_migrations),
             artifact_ports: self.artifact_ports.clone(),
+            components: self.components.clone(),
         }
+    }
+
+    /// This registry with `components` as the process components it admits
+    /// environments against and composes processes from.
+    #[must_use]
+    pub fn with_components(mut self, components: crate::plugin::ProcessComponentRegistry) -> Self {
+        self.components = components;
+        self
+    }
+
+    pub fn components(&self) -> &crate::plugin::ProcessComponentRegistry {
+        &self.components
+    }
+
+    /// The ports a start holds its environment through: the artifact
+    /// stores' environment store, admitting new environments against this
+    /// registry's components.
+    pub fn env_ports(&self) -> Option<super::ProcessEnvPorts<'_>> {
+        self.artifact_ports
+            .as_deref()
+            .map(|ports| super::ProcessEnvPorts::admitting(ports.env().as_ref(), &self.components))
     }
 
     #[must_use]
@@ -621,6 +648,7 @@ impl ProcessEngineRegistry {
             document_providers: Arc::new(document_providers),
             state_migrations: Arc::new(state_migrations),
             artifact_ports: self.artifact_ports,
+            components: self.components,
         }
     }
 
@@ -719,9 +747,43 @@ impl ProcessEngineRegistry {
         self.engines.get(kind).cloned()
     }
 
+    /// Have the `kind` engine check the settings a start of `payload`
+    /// states (D4).
+    ///
+    /// # Errors
+    ///
+    /// The engine is not configured, or it refuses the settings.
+    pub fn check_settings(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+        settings: Option<&EngineSettings>,
+    ) -> Result<(), crate::PluginError> {
+        self.require(kind)?.check_settings(payload, settings)
+    }
+
+    /// The `kind` engine's default settings for a start of `payload`: an
+    /// explicit starter helper, never called by lash to fill a start.
+    ///
+    /// # Errors
+    ///
+    /// The engine is not configured, or it has no defaults for `payload`.
+    pub fn default_settings(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Result<Option<EngineSettings>, crate::PluginError> {
+        self.require(kind)?.default_settings(payload)
+    }
+
     /// Resolve the engine a `ProcessInput::Engine` start names, refusing a kind
     /// this host never registered.
     ///
+    /// The kinds of the engines registered here.
+    pub fn engine_kinds(&self) -> std::collections::BTreeSet<String> {
+        self.engines.keys().cloned().collect()
+    }
+
     pub fn require(&self, kind: &str) -> Result<Arc<dyn ProcessEngine>, crate::PluginError> {
         self.get(kind).ok_or_else(|| {
             crate::PluginError::Session(format!("process engine `{kind}` is not configured"))
@@ -740,7 +802,6 @@ impl ProcessEngineRegistry {
         &self,
         kind: &str,
         payload: &serde_json::Value,
-        env_spec: Option<&ProcessExecutionEnvSpec>,
     ) -> Result<AdmittedProcessIdentity, crate::PluginError> {
         let identity = self
             .admissions
@@ -749,7 +810,7 @@ impl ProcessEngineRegistry {
             .ok_or_else(|| {
                 crate::PluginError::Session(format!("process engine `{kind}` is not configured"))
             })?
-            .admit(payload, env_spec)?;
+            .admit(payload)?;
         let Some(reference) = identity.definition.clone() else {
             return Ok(AdmittedProcessIdentity::admitted(identity));
         };

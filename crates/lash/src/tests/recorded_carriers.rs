@@ -52,7 +52,7 @@ async fn rlm_core_at(path: &std::path::Path, budgets: crate::ExecutionBudgets) -
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn reopened_rlm_session_and_process_runtime_run_under_recorded_budgets_and_authority() {
+async fn a_reopened_rlm_session_and_its_process_worker_run_under_recorded_budgets_and_authority() {
     let directory = tempfile::tempdir().expect("SQLite test directory");
     let path = directory.path().join("lash.db");
     let budgets = stated_budgets();
@@ -62,8 +62,7 @@ async fn reopened_rlm_session_and_process_runtime_run_under_recorded_budgets_and
     assert_ne!(authority, crate::plugins::SessionToolAccess::ambient());
     let id = SessionId::from("recorded-carriers");
 
-    // The first host creates the session and starts a process under the
-    // session's recorded plugin configuration, then goes away.
+    // The first host creates the session, then goes away.
     let core = rlm_core_at(&path, budgets.clone()).await;
     core.session(id.clone())
         .create(crate::SessionCreation::root(
@@ -72,42 +71,6 @@ async fn reopened_rlm_session_and_process_runtime_run_under_recorded_budgets_and
         ))
         .await
         .expect("created");
-    let head =
-        lash_core::SessionCommitStore::load_session_head_meta(core.store_factory.as_ref(), &id)
-            .await
-            .expect("head read")
-            .expect("persisted head")
-            .config;
-    let environment = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::new(head.plugin_config.clone(), head.config_revision),
-        head.session_policy(),
-        authority.clone(),
-    );
-    assert!(
-        !environment.plugin_config.config.is_empty(),
-        "the session records its RLM configuration"
-    );
-    let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
-        core.env.core.durability.process_env_store.as_ref(),
-        &lash_core::testing::host_pin_claim_for_testing(),
-        &environment,
-    )
-    .await
-    .expect("published environment");
-    let process_id = core
-        .process_registry
-        .clone()
-        .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::testing::held_engine_input(serde_json::Value::Null),
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(env_ref)),
-        )
-        .await
-        .expect("registered process")
-        .id;
     core.shutdown().await.expect("shutdown");
     drop(core);
 
@@ -130,43 +93,12 @@ async fn reopened_rlm_session_and_process_runtime_run_under_recorded_budgets_and
     assert_eq!(plugins.execution_budgets(), budgets);
     assert_eq!(plugins.tool_access(), authority);
 
-    // The process runtime is handed a plugin host constructed under another
-    // budget: it runs under its host config's, and under the plugin
-    // configuration its environment recorded.
-    let process = core
-        .process_registry
-        .clone()
-        .get_process(&process_id)
-        .await
-        .expect("process read")
-        .expect("the process survives the reopen");
+    // A process worker the reopened host serves runs under the host's
+    // stated budgets.
     let worker = core
         .durable_process_worker_config()
         .expect("process worker config");
     assert_eq!(worker.runtime_host.control.execution_budgets, budgets);
-    let runtime = lash_core::runtime::ProcessRuntimeContext::for_record(
-        lash_core::runtime::ProcessRuntimePorts {
-            host: worker.runtime_host.clone(),
-            plugin_host: Arc::new(
-                Arc::unwrap_or_clone(Arc::clone(&worker.plugin_host))
-                    .with_execution_budgets(crate::ExecutionBudgets::recommended()),
-            ),
-            process_work: worker.process_work().clone(),
-            lease_owner: worker.lease_owner.clone(),
-            turn_phase_probe: None,
-        },
-        &process,
-    )
-    .await
-    .expect("process runtime");
-    let plugins = runtime.plugin_session();
-    assert_eq!(plugins.execution_budgets(), budgets);
-    assert_eq!(plugins.admitted_plugin_config(), environment.plugin_config);
-    assert_eq!(
-        plugins.tool_access(),
-        authority,
-        "a reopened process keeps its recorded tool restriction"
-    );
     drop(session);
     core.shutdown().await.expect("shutdown");
 }

@@ -57,6 +57,11 @@ pub struct NodeServe {
     /// Runs the claimed processes. A node given none claims no process: it
     /// decodes only the session actor's formats.
     pub processes: Option<Arc<dyn Activation>>,
+    /// The claim requirements the node's process components serve
+    /// ([`ProcessComponentRegistry::serves`](crate::plugin::ProcessComponentRegistry::serves)):
+    /// it runs a process only when it serves every requirement the process
+    /// carries (FIG-6034 D3).
+    pub serves: Vec<String>,
 }
 
 /// Serve `backend` as one node until `stop` completes or the node loses its
@@ -113,6 +118,7 @@ pub async fn serve(
         RunnerConfig {
             node: serve.node,
             decodes,
+            serves: serve.serves,
             lease: backend.config().lease(),
             max_active: settings.max_active,
             claim_batch: settings.claim_batch,

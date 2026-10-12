@@ -76,6 +76,7 @@ async fn register(durable: &Arc<dyn DurableStore>, node: &str) -> NodeLease {
         .register_node(&NodeSpec {
             node: NodeId::new(node),
             decodes: vec![FormatSet::new(SESSION_ACTOR_FORMATS)],
+            serves: Vec::new(),
             ttl_millis: 60_000,
         })
         .await

@@ -882,6 +882,7 @@ mod tests {
             SimNodesConfig {
                 lease: Matrix::test_lease(),
                 decodes: vec![FormatSet::new(FORMATS)],
+                serves: Vec::new(),
                 max_active: 1,
             }
         }
@@ -1056,6 +1057,7 @@ mod tests {
             SimNodesConfig {
                 lease: self.lease,
                 decodes: vec![FormatSet::new(FORMATS)],
+                serves: Vec::new(),
                 max_active: 1,
             }
         }

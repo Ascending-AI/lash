@@ -11,8 +11,8 @@
 use std::sync::Arc;
 
 use crate::{
-    AttachmentStore, Backend, Clock, DeploymentStore, ModuleArtifactStore,
-    ProcessExecutionEnvStore, ProcessRegistry, StoreBindingId, StoreSet,
+    AttachmentStore, Backend, Clock, DeploymentStore, ModuleArtifactStore, ProcessEnvStore,
+    ProcessRegistry, StoreBindingId, StoreSet,
 };
 
 /// A decorator of one obligation kind's ledger.
@@ -33,7 +33,7 @@ pub struct LayeredBackend {
     clock: Arc<dyn Clock>,
     session_store_factory: Arc<dyn DeploymentStore>,
     process_registry: Arc<dyn ProcessRegistry>,
-    process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+    process_env_store: Arc<dyn ProcessEnvStore>,
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
@@ -83,7 +83,7 @@ impl LayeredBackend {
     /// Replace the process-execution-environment store with `layer` over it.
     pub fn map_process_env_store(
         mut self,
-        layer: impl FnOnce(Arc<dyn ProcessExecutionEnvStore>) -> Arc<dyn ProcessExecutionEnvStore>,
+        layer: impl FnOnce(Arc<dyn ProcessEnvStore>) -> Arc<dyn ProcessEnvStore>,
     ) -> Self {
         self.process_env_store = layer(self.process_env_store);
         self
@@ -229,7 +229,7 @@ impl LayeredStores {
     /// Replace the process-execution-environment store with `layer` over it.
     pub fn map_process_env_store(
         mut self,
-        layer: impl FnOnce(Arc<dyn ProcessExecutionEnvStore>) -> Arc<dyn ProcessExecutionEnvStore>,
+        layer: impl FnOnce(Arc<dyn ProcessEnvStore>) -> Arc<dyn ProcessEnvStore>,
     ) -> Self {
         self.0.process_env_store = layer(self.0.process_env_store);
         self
@@ -296,7 +296,7 @@ struct LayeredStoreSet {
     clock: Arc<dyn Clock>,
     session_store_factory: Arc<dyn DeploymentStore>,
     process_registry: Arc<dyn ProcessRegistry>,
-    process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+    process_env_store: Arc<dyn ProcessEnvStore>,
     attachment_store: Arc<dyn AttachmentStore>,
     attachment_referrers: Arc<dyn crate::AttachmentReferrers>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
@@ -346,7 +346,7 @@ impl StoreSet for LayeredStoreSet {
         self.inner.tool_material_store()
     }
 
-    fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn ProcessEnvStore> {
         Arc::clone(&self.process_env_store)
     }
 

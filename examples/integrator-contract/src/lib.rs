@@ -246,10 +246,17 @@ impl ProcessEngine for Integrator {
     fn cancel_grace(&self) -> std::time::Duration {
         unreachable!("external signature witness")
     }
-    fn creation_config(
+    fn check_settings(
         &self,
-        env: &ProcessExecutionEnvSpec,
-    ) -> Result<Option<lash::messages::JsonValue>, PluginError> {
+        payload: &lash::messages::JsonValue,
+        settings: Option<&lash::process::EngineSettings>,
+    ) -> Result<(), PluginError> {
+        unreachable!("external signature witness")
+    }
+    fn default_settings(
+        &self,
+        payload: &lash::messages::JsonValue,
+    ) -> Result<Option<lash::process::EngineSettings>, PluginError> {
         unreachable!("external signature witness")
     }
     fn advance(
@@ -287,19 +294,19 @@ impl ProcessEngine for Integrator {
 }
 
 #[lash::async_trait]
-impl ProcessExecutionEnvStore for Integrator {
-    async fn publish_process_execution_env(
+impl ProcessEnvStore for Integrator {
+    async fn publish_process_env(
         &self,
         claim: &ReferrerClaim,
-        env_ref: &ProcessExecutionEnvRef,
+        env_ref: &ProcessEnvRef,
         bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
         unreachable!("external signature witness")
     }
-    async fn acquire_process_execution_env(
+    async fn acquire_process_env(
         &self,
         claim: &ReferrerClaim,
-        env_ref: &ProcessExecutionEnvRef,
+        env_ref: &ProcessEnvRef,
     ) -> Result<(), ArtifactStoreError> {
         unreachable!("external signature witness")
     }
@@ -309,9 +316,9 @@ impl ProcessExecutionEnvStore for Integrator {
     ) -> Result<(), ArtifactStoreError> {
         unreachable!("external signature witness")
     }
-    async fn get_process_execution_env(
+    async fn get_process_env(
         &self,
-        env_ref: &ProcessExecutionEnvRef,
+        env_ref: &ProcessEnvRef,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         unreachable!("external signature witness")
     }

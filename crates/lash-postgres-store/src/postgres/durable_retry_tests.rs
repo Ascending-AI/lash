@@ -368,6 +368,7 @@ async fn node(store: &PostgresDurableStore) -> NodeLease {
         .register_node(&NodeSpec {
             node: NodeId::new("retry-law"),
             decodes: vec![formats()],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

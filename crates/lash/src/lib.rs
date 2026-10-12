@@ -410,7 +410,7 @@ pub mod observe {
 /// counts the runs apart from it.
 pub mod tools {
     #[cfg(feature = "codemode")]
-    pub use lash_llm_tools::LlmToolsPluginFactory;
+    pub use lash_llm_tools::{LLM_TOOLS_CONFIG, LlmToolsComponent, LlmToolsPluginFactory};
     pub use lash_sansio::ToolPresentationConfig;
     pub use lash_sansio::schema_contract::OutputSchemaLimits;
     // The vocabulary this module's signatures name (the facade-completeness rule).
@@ -430,16 +430,17 @@ pub mod tools {
     pub use lash_core::sansio::PendingToolCall;
     pub use lash_core::{
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
-        CompactToolContract, ExecutionOwner, IsolatedProcessRequest, PendingCompletion,
-        PendingResolver, PreparedToolCall, StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES,
-        TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3,
-        ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
-        ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContract,
-        ToolDefinition, ToolDirectCompletionClient, ToolDiscovery, ToolDraft, ToolExecutionGrant,
-        ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolIntent,
-        ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-        ToolIntentLimits, ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure,
-        ToolIntents, ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
+        CompactToolContract, ExecutionOwner, IsolatedProcessRequest, IsolatedStart,
+        PendingCompletion, PendingResolver, PreparedToolCall, ResolveTargetError,
+        StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
+        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, ToolArgumentProjectionPolicy,
+        ToolAttachmentClient, ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolCallOutput,
+        ToolCallRecord, ToolCatalogEntry, ToolContract, ToolDefinition, ToolDirectCompletionClient,
+        ToolDiscovery, ToolDraft, ToolExecutionGrant, ToolFailure, ToolFailureCause,
+        ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntentCommandFailure,
+        ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentLimits,
+        ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure, ToolIntents,
+        ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
         ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRegistry, ToolSessionLlmProfile,
         ToolValue, ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
         facade_support::ReconfigureError, facade_support::ToolSourceHandle,
@@ -721,7 +722,7 @@ pub mod persistence {
         AttachmentRootSet, AttachmentSettlementOutcome, AttachmentStore, AttachmentStoreError,
         AttachmentStoreFailureClass, AttachmentStorePersistence, AttachmentSweepGeneration,
         AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, EmptyRootSetPolicy,
-        MAX_ATTACHMENT_DELETE_ATTEMPTS, ProcessExecutionEnvStore, StoredAttachment, StoredBlobRef,
+        MAX_ATTACHMENT_DELETE_ATTEMPTS, ProcessEnvStore, StoredAttachment, StoredBlobRef,
         TurnPreludeStore, attachments::AttachmentReclamationFailure,
         facade_support::AttachmentGcFence, facade_support::AttachmentReclamationReport,
         facade_support::RuntimeAttachmentStore, facade_support::reclaim_unreferenced_attachments,
@@ -851,7 +852,7 @@ pub mod plugins {
         ResolvedProcessDefinition, ServedOnlyRange, WeakProcessEngineRegistry,
     };
     pub use lash_core_store::session_identity::FrameNodeIdError;
-    pub use lash_core_worker::execution::runtime::ProcessExecutionEnvLoadError;
+    pub use lash_core_worker::execution::runtime::ProcessEnvLoadError;
     pub use lash_protocol_standard::BatchSugar;
     pub use lash_sansio::{
         AttachmentMaterializationNotice, CheckpointResumeAction, CompletionCandidate,
@@ -868,6 +869,10 @@ pub mod plugins {
         TurnDriverPreamble as GenericTurnDriverPreamble,
     };
 
+    /// What an engine registry holds beside its engines: the process
+    /// components installed on the deployment, and the environment ports a
+    /// start's launch is held through (FIG-6034).
+    pub use lash_core::ProcessEnvPorts;
     /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
     pub use lash_core::TurnDriverConfig;
     /// A turn's prepared request history, as its prelude records it.
@@ -962,6 +967,10 @@ pub mod plugins {
         ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations,
         ToolResultRegistrations, TurnRegistrations,
     };
+    /// What an execution runs under: its model, generation, charge safety,
+    /// attachment rules, tool-call limit and render, and what one tool call
+    /// records of them at its admission (FIG-6034).
+    pub use lash_core::plugin::{ExecutionFacts, RecordedCallFacts};
     /// Host-mediated JSON state: a plugin reads its namespace through a
     /// read-only [`PluginStateView`] and changes it only by returning
     /// [`StateCommands`] from a tool body or a before-turn, after-turn,
@@ -1001,6 +1010,7 @@ pub mod plugins {
     /// factory that wraps another (the RLM factory, say) forwards it so the
     /// wrapped factory's process engines are still contributed (FIG-4373).
     pub use lash_core::plugin::{PluginExecutionTrace, ProcessEngineContributionContext};
+    pub use lash_core::plugin::{ProcessComponentRegistry, ProcessComposition};
     /// Engine registry and narrowed execution contexts used to host custom process engines.
     pub use lash_core::runtime::ProcessEngineRegistry;
     /// Engine-extension contracts for a tool call's admission, attempts,
@@ -1193,6 +1203,26 @@ pub mod process {
         ProcessObservationStreamItem,
     };
     pub use crate::process_history::{ProcessEventsRead, ProcessHistoryContinuation};
+    /// The environment and engine settings a process runs under, which its
+    /// starter states (FIG-6034), and the process components an environment
+    /// names.
+    pub use lash_core::plugin::{
+        ProcessComponentContext, ProcessComponentDeclaration, ProcessComponentFactory,
+        ProcessComponentHost, ProcessComponentPorts, ProcessComponentSpec, ProcessSessionReads,
+        StaticProcessComponent,
+    };
+    pub use lash_core::{
+        DeclaredLaunch, EnclosingProcess, EngineLaunch, EngineSettings, HoldEnvError,
+        ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId, ProcessComponentIdError,
+        ProcessConfigKey, ProcessEnv, ProcessEnvBuilder, ProcessEnvChoice, ProcessEnvCx,
+        ProcessEnvPolicy, ProcessEnvPolicyError, ProcessEnvRefusal, ProcessLimits, ProcessModel,
+        ProcessStartChoice, ResolvedStartTarget,
+    };
+    /// Explicit environment choices for a start policy. None is a default:
+    /// a host states which it uses.
+    pub mod env {
+        pub use lash_core::runtime::env_policy::policy;
+    }
     /// The origin of a lifecycle cancellation submitted to a registry.
     pub use lash_core::CancelOrigin;
     pub use lash_core::SessionTurnOutcome;
@@ -1220,15 +1250,15 @@ pub mod process {
         ProcessDefinitionTarget, ProcessDefinitionValue, ProcessEffectNodeReport,
         ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
         ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError,
-        ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt, ProcessEventHistoryRetention,
-        ProcessEventKind, ProcessEventLite, ProcessEventPage, ProcessEventPageEvents,
-        ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease,
-        ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-        ProcessExternalRef, ProcessIdentity, ProcessInput, ProcessLifecycleFact, ProcessLineage,
-        ProcessListMode, ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter,
-        ProcessProvenance, ProcessPruneReport, ProcessRegistration, ProcessRegistrationOutcome,
-        ProcessRegistryCursor, ProcessResumeRefusal, ProcessRosterCursor, ProcessRosterTokenError,
-        ProcessService, ProcessSessionDeleteReport, ProcessSignature, ProcessStartOptions,
+        ProcessEngineKind, ProcessEnvRef, ProcessEvent, ProcessEventAppendReceipt,
+        ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite, ProcessEventPage,
+        ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
+        ProcessEventReadOutcome, ProcessEventRelease, ProcessExecutionContext, ProcessExternalRef,
+        ProcessIdentity, ProcessInput, ProcessLifecycleFact, ProcessLineage, ProcessListMode,
+        ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter, ProcessProvenance,
+        ProcessPruneReport, ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistryCursor,
+        ProcessResumeRefusal, ProcessRosterCursor, ProcessRosterTokenError, ProcessService,
+        ProcessSessionDeleteReport, ProcessSignature, ProcessStartOptions,
         ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget, ProcessStarted,
         ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessWorkSubstrate,
         ProcessWorkWiring, ProjectionWatermark, RetiredProcessStatus, ScopeGrant, ScopeId,
@@ -1462,10 +1492,15 @@ pub mod mcp {
 /// [`LashCoreBuilder::plugin`](crate::LashCoreBuilder::plugin) instead of
 /// declaring these tools itself. Its [`Lifetime`](crate::process::Lifetime)
 /// policy, for example [`lifetime::session_or_starter`](crate::process::lifetime::session_or_starter),
-/// decides the lifetime of every process a model's `start_process` declares.
+/// decides the lifetime of every process a model's `start_process` declares,
+/// and its [`ProcessEnvPolicy`](crate::process::ProcessEnvPolicy) the
+/// environment and engine settings. A process whose environment names
+/// [`PROCESS_CONTROLS_CONFIG`]'s component gets the same tools through
+/// [`ProcessControlsComponent`].
 pub mod process_controls {
     pub use lash_plugin_process_controls::{
-        ProcessControlTool, SessionProcessAdminPluginFactory, process_tool_definition,
+        PROCESS_CONTROLS_CONFIG, ProcessControlTool, ProcessControlsComponent,
+        SessionProcessAdminPluginFactory, process_tool_definition,
     };
 }
 

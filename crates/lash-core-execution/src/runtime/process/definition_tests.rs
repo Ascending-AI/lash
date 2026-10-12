@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use super::*;
+use crate::ProcessIdentity;
 use crate::identity_json::{optional_payloads_equal, payload_leaf, payloads_equal};
 use crate::runtime::process::definition_ref::ProcessDefinitionResolution;
 use crate::runtime::process::engine::{
     ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
 };
-use crate::{ProcessExecutionEnvSpec, ProcessIdentity};
 
 const SIGNED_ENGINE_KIND: &str = "signed-engine";
 
@@ -132,10 +132,24 @@ impl ProcessEngine for SignedEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&crate::EngineSettings>,
+    ) -> std::result::Result<(), crate::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(crate::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
         Ok(None)
     }
 
@@ -151,7 +165,6 @@ impl ProcessEngine for SignedEngine {
 fn admit_signed(
     kind: &'static str,
     payload: &serde_json::Value,
-    _env: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<ProcessIdentity, crate::PluginError> {
     Ok(ProcessIdentity::for_definition(
         ProcessDefinitionRef::unclaimed(kind, payload.clone()),

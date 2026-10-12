@@ -1015,29 +1015,10 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
     core.shutdown().await.expect("the core shuts down");
 }
 
-/// The execution environment a host start publishes for the held engine.
-fn process_environment() -> lash_core_execution::ProcessExecutionEnvSpec {
-    let mut environment = lash_core_execution::ProcessExecutionEnvSpec::new(
-        lash_core_execution::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(16),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core_execution::SessionToolAccess::ambient(),
-    );
-    environment.render = Some(lash_core::RecordedRender {
-        renderer_id: lash::render::ToolOutputRendererSlot::default()
-            .0
-            .id()
-            .to_owned(),
-        params: serde_json::to_value(lash::render::ResolvedStandardRenderConfig {
-            defaults: lash::render::ToolRenderParams::default(),
-            per_tool: std::collections::BTreeMap::new(),
-        })
-        .expect("the render config encodes"),
-    });
-    environment
+/// The environment a host start states in these laws: no tools and no
+/// components.
+fn process_environment() -> lash_core::ProcessEnv {
+    lash_core_execution::testing::process_env_with_limit(16)
 }
 
 /// A host start observes only the sessions it names: a default start
@@ -1066,12 +1047,13 @@ async fn a_host_start_observes_only_the_sessions_it_names(tier: Tier) {
         ("default-start", Vec::new()),
         ("explicit-start", vec![parent_id.clone()]),
     ] {
-        let mut request = lash_core::ProcessStartRequest::new(
-            lash_core_execution::testing::held_engine_input(serde_json::json!({ "start": label })),
+        let mut request = lash_core::ProcessStartRequest::engine(
+            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+            serde_json::json!({ "start": label }),
+            lash_core::EngineLaunch::new(env_ref.clone(), None),
             lash_core::ProcessOriginator::host(),
             lash_core::LifetimeDecision::Detached,
         )
-        .with_env_ref(env_ref.clone())
         .with_host_start_key(label);
         request.observers = observers;
         let receipt = world
@@ -1120,12 +1102,13 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
             .publish_process_env(&lash_core::HostArtifactPin::mint(), &process_environment())
             .await
             .expect("publish the environment");
-        let request = lash_core::ProcessStartRequest::new(
-            lash_core_execution::testing::held_engine_input(serde_json::json!({ "work": 1 })),
+        let request = lash_core::ProcessStartRequest::engine(
+            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+            serde_json::json!({ "work": 1 }),
+            lash_core::EngineLaunch::new(env_ref, None),
             lash_core::ProcessOriginator::host(),
             lash_core::LifetimeDecision::Detached,
         )
-        .with_env_ref(env_ref)
         .with_host_start_key("lost-host-start-ack");
         // The host loses its acknowledgement; only the database keeps the id.
         let _ = world
@@ -1175,9 +1158,14 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
                 .expect("the same host request recovers its id");
             assert_eq!(retry.process_id, original_id);
             let mut changed = request.clone();
-            changed.input =
-                lash_core_execution::testing::held_engine_input(serde_json::json!({ "work": 2 }))
-                    .into();
+            let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::Engine {
+                payload,
+                ..
+            }) = &mut changed.input
+            else {
+                unreachable!("the request starts an engine")
+            };
+            *payload = serde_json::json!({ "work": 2 });
             let error = world
                 .core
                 .processes()

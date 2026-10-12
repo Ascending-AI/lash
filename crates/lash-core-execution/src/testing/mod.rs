@@ -66,29 +66,59 @@ pub fn process_work_wiring_for_registry(
     crate::ProcessWorkWiring::new(watched, port)
 }
 
+/// The fixed fixture process environment: no tools, no components, a
+/// tool-call limit of 1024.
 #[cfg(any(test, feature = "testing"))]
-fn process_execution_env_fixture_spec() -> crate::ProcessExecutionEnvSpec {
-    crate::ProcessExecutionEnvSpec::new(
-        crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            crate::NoProgressBudget::bounded(12),
-        ),
-        crate::SessionToolAccess::ambient(),
+pub fn process_env_fixture() -> crate::ProcessEnv {
+    process_env_with_limit(1024)
+}
+
+/// An environment whose one component, `fixture-payload`, carries a config
+/// of about `bytes` bytes: the size of a large stated environment. No
+/// registry installs the component, so it is written to a store directly,
+/// never admitted.
+#[cfg(any(test, feature = "testing"))]
+#[expect(clippy::expect_used, reason = "fixture environment")]
+pub fn process_env_of_size(bytes: usize) -> crate::ProcessEnv {
+    const PAYLOAD: crate::ProcessConfigKey<serde_json::Value> =
+        crate::ProcessConfigKey::new("fixture-payload", crate::FormatVersion::ONE);
+    crate::ProcessEnv::builder(
+        crate::SessionToolAccess::restricted(std::iter::empty())
+            .expect("an empty tool restriction is valid"),
+        crate::MaxToolCalls::new(1024),
     )
+    .component(
+        PAYLOAD,
+        &serde_json::json!({ "payload": "x".repeat(bytes) }),
+    )
+    .build()
+    .expect("the fixture process environment encodes")
+}
+
+/// A component-free environment that admits no tool and holds at most
+/// `max_tool_calls` calls at once: distinct limits are distinct environments.
+#[cfg(any(test, feature = "testing"))]
+#[expect(clippy::expect_used, reason = "fixture environment")]
+pub fn process_env_with_limit(max_tool_calls: usize) -> crate::ProcessEnv {
+    crate::ProcessEnv::builder(
+        crate::SessionToolAccess::restricted(std::iter::empty())
+            .expect("an empty tool restriction is valid"),
+        crate::MaxToolCalls::new(max_tool_calls),
+    )
+    .build()
+    .expect("the fixture process environment encodes")
 }
 
 /// Publishes the fixed fixture execution environment into `env_store`, held
 /// by a fresh host pin the fixture never releases, and returns its reference.
 #[cfg(any(test, feature = "testing"))]
 pub async fn process_execution_env_fixture(
-    env_store: &dyn crate::ProcessExecutionEnvStore,
-) -> crate::ProcessExecutionEnvRef {
-    crate::publish_process_execution_env(
+    env_store: &dyn crate::ProcessEnvStore,
+) -> crate::ProcessEnvRef {
+    publish_process_env_for_testing(
         env_store,
         &host_pin_claim_for_testing(),
-        &process_execution_env_fixture_spec(),
+        &process_env_fixture(),
     )
     .await
     .expect("fixed process execution environment fixture publishes")
@@ -119,23 +149,38 @@ pub async fn process_roster_records_for_fixture(
 /// environment in every store: a subscription draft that records the
 /// reference, and never loads it, takes this instead of publishing.
 #[cfg(any(test, feature = "testing"))]
-pub fn process_execution_env_fixture_ref() -> crate::ProcessExecutionEnvRef {
-    process_execution_env_fixture_spec()
+pub fn process_execution_env_fixture_ref() -> crate::ProcessEnvRef {
+    process_env_fixture()
         .stable_ref()
         .expect("fixed process execution environment fixture encodes")
 }
 
-/// FIG-2999: a recorded start declares its own execution env, so a fixture
-/// whose `ProcessService` realizes a recorded intent publishes that env the way
-/// the runtime's own start command does instead of leaving the registration
-/// without a reference.
+/// The launch of an engine start under the fixture environment, with no
+/// engine settings.
 #[cfg(any(test, feature = "testing"))]
-pub async fn publish_process_execution_env_for_testing(
-    env_store: &dyn crate::ProcessExecutionEnvStore,
+pub fn fixture_engine_launch() -> crate::EngineLaunch {
+    crate::EngineLaunch::new(process_execution_env_fixture_ref(), None)
+}
+
+/// Publish `env` under `claim` through the one hold path, admitted against
+/// no installed component: what a fixture whose environment names none uses.
+#[cfg(any(test, feature = "testing"))]
+pub async fn publish_process_env_for_testing(
+    env_store: &dyn crate::ProcessEnvStore,
     claim: &crate::ReferrerClaim,
-    spec: &crate::ProcessExecutionEnvSpec,
-) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
-    crate::publish_process_execution_env(env_store, claim, spec).await
+    env: &crate::ProcessEnv,
+) -> Result<crate::ProcessEnvRef, crate::PluginError> {
+    let components = crate::plugin::ProcessComponentRegistry::new();
+    crate::hold_process_env(
+        &crate::ProcessEnvPorts::admitting(env_store, &components),
+        claim,
+        &crate::ProcessEnvSelection::New(env.clone()),
+    )
+    .await
+    .map_err(|error| match error {
+        crate::HoldEnvError::Refused(refusal) => crate::PluginError::ProcessEnvRefused { refusal },
+        crate::HoldEnvError::Fault(error) => error,
+    })
 }
 
 /// A claim under a freshly minted host pin: an unguarded referrer a fixture
@@ -159,12 +204,89 @@ pub fn held_engine_input(payload: serde_json::Value) -> crate::ProcessInput {
     crate::ProcessInput::Engine {
         kind: HELD_PROCESS_ENGINE_KIND.to_string(),
         payload,
+        launch: fixture_engine_launch(),
     }
 }
 
-/// A registration of [`held_engine_input`] under the fixture execution
-/// environment reference, which every registration carries. Publish it with
-/// [`process_execution_env_fixture`] in the store receiving the registration.
+/// `launch` as a declaration states it once its environment is held: what a
+/// fixture declares when no start-policy round produced it.
+#[cfg(any(test, feature = "testing"))]
+pub fn declared_launch_for_testing(launch: crate::EngineLaunch) -> crate::DeclaredLaunch {
+    crate::DeclaredLaunch::held(launch)
+}
+
+/// A process component of `key`'s id whose only contribution is
+/// `provider`'s tools, its config `()` (FIG-6034 §3.2): what a fixture
+/// registers so a process whose environment names `key` can call them.
+#[cfg(any(test, feature = "testing"))]
+#[expect(clippy::expect_used, reason = "a tool provider is a process component")]
+pub fn tool_component(
+    key: crate::ProcessConfigKey<()>,
+    provider: std::sync::Arc<dyn crate::ToolProvider>,
+) -> std::sync::Arc<dyn crate::plugin::ProcessComponentFactory> {
+    std::sync::Arc::new(
+        crate::plugin::StaticPluginFactory::new(
+            crate::plugin::PluginDeclaration::initial(key.component()),
+            crate::plugin::PluginSpec::new().with_tool_provider(provider),
+        )
+        .as_component(key.format())
+        .expect("a tool provider is a process component"),
+    )
+}
+
+/// A start policy that inherits inside a process and, outside one, states
+/// the starting turn's run naming each of `keys` with config `()`.
+#[cfg(any(test, feature = "testing"))]
+pub fn run_policy_naming(
+    keys: &[crate::ProcessConfigKey<()>],
+) -> std::sync::Arc<dyn crate::ProcessEnvPolicy> {
+    let keys = keys.to_vec();
+    crate::runtime::env_policy::policy::inherit_or(crate::runtime::env_policy::policy::from_run(
+        move |_| {
+            keys.iter()
+                .map(|key| crate::ProcessComponentEntry::new(*key, &(), std::iter::empty()))
+                .collect()
+        },
+    ))
+}
+
+/// A host start of [`held_engine_input`] under the fixture environment,
+/// which the host must have published (see [`process_execution_env_fixture`]).
+#[cfg(any(test, feature = "testing"))]
+pub fn held_engine_request(
+    payload: serde_json::Value,
+    originator: crate::ProcessOriginator,
+    lifetime: impl Into<crate::LifetimeDecision>,
+) -> crate::ProcessStartRequest {
+    crate::ProcessStartRequest::engine(
+        HELD_PROCESS_ENGINE_KIND,
+        payload,
+        fixture_engine_launch(),
+        originator,
+        lifetime,
+    )
+}
+
+/// A declared start of [`held_engine_input`]: the declaration a recorded
+/// start of the held engine journals, its launch the fixture environment.
+#[cfg(any(test, feature = "testing"))]
+pub fn held_engine_declaration(
+    payload: serde_json::Value,
+    originator: crate::ProcessOriginator,
+    lifetime: impl Into<crate::LifetimeDecision>,
+) -> crate::ProcessStartDeclaration {
+    crate::ProcessStartDeclaration::engine(
+        HELD_PROCESS_ENGINE_KIND,
+        payload,
+        crate::DeclaredLaunch::held(fixture_engine_launch()),
+        originator,
+        lifetime,
+    )
+}
+
+/// A registration of [`held_engine_input`], whose launch names the fixture
+/// environment. Publish it with [`process_execution_env_fixture`] in the
+/// store receiving the registration.
 #[cfg(any(test, feature = "testing"))]
 pub fn held_engine_registration(
     payload: serde_json::Value,
@@ -172,7 +294,6 @@ pub fn held_engine_registration(
     lifetime: impl Into<crate::LifetimeDecision>,
 ) -> crate::ProcessRegistration {
     crate::ProcessRegistration::new(held_engine_input(payload), provenance, lifetime)
-        .with_execution_env_ref(Some(process_execution_env_fixture_ref()))
 }
 
 /// Engine fixture whose process runs until it is cancelled, and then answers
@@ -240,10 +361,24 @@ impl crate::ProcessEngine for HeldProcessEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&crate::EngineSettings>,
+    ) -> std::result::Result<(), crate::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(crate::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
         Ok(None)
     }
 
@@ -338,10 +473,24 @@ impl crate::ProcessEngine for FixtureProcessEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&crate::EngineSettings>,
+    ) -> std::result::Result<(), crate::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(crate::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
         Ok(None)
     }
 
@@ -1207,9 +1356,9 @@ pub async fn execute_effect_locally(
 /// It keeps nothing, so it is not a persistence store: it stands where a test
 /// needs *a* port it never publishes through.
 #[derive(Debug, Default)]
-pub struct UnavailableProcessExecutionEnvStore;
+pub struct UnavailableProcessEnvStore;
 
-impl UnavailableProcessExecutionEnvStore {
+impl UnavailableProcessEnvStore {
     fn refused() -> crate::ArtifactStoreError {
         crate::ArtifactStoreError::Backend(
             "this context has no process execution environment store".into(),
@@ -1218,20 +1367,20 @@ impl UnavailableProcessExecutionEnvStore {
 }
 
 #[async_trait::async_trait]
-impl crate::ProcessExecutionEnvStore for UnavailableProcessExecutionEnvStore {
-    async fn publish_process_execution_env(
+impl crate::ProcessEnvStore for UnavailableProcessEnvStore {
+    async fn publish_process_env(
         &self,
         _claim: &crate::ReferrerClaim,
-        _env_ref: &crate::ProcessExecutionEnvRef,
+        _env_ref: &crate::ProcessEnvRef,
         _bytes: &[u8],
     ) -> Result<(), crate::ArtifactStoreError> {
         Err(Self::refused())
     }
 
-    async fn acquire_process_execution_env(
+    async fn acquire_process_env(
         &self,
         _claim: &crate::ReferrerClaim,
-        _env_ref: &crate::ProcessExecutionEnvRef,
+        _env_ref: &crate::ProcessEnvRef,
     ) -> Result<(), crate::ArtifactStoreError> {
         Err(Self::refused())
     }
@@ -1243,9 +1392,9 @@ impl crate::ProcessExecutionEnvStore for UnavailableProcessExecutionEnvStore {
         Ok(())
     }
 
-    async fn get_process_execution_env(
+    async fn get_process_env(
         &self,
-        _env_ref: &crate::ProcessExecutionEnvRef,
+        _env_ref: &crate::ProcessEnvRef,
     ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
         Ok(None)
     }
@@ -1295,7 +1444,7 @@ pub fn runtime_services_without_ports(
     crate::RuntimeServices::new(
         plugins,
         Arc::new(crate::RuntimeAttachmentStore::unavailable()),
-        Arc::new(UnavailableProcessExecutionEnvStore),
+        Arc::new(UnavailableProcessEnvStore),
     )
 }
 
@@ -1347,13 +1496,13 @@ pub fn code_execution_context_with_process_dependencies<'run>(
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
     processes: Arc<dyn crate::ProcessService>,
-    execution_env_spec: crate::ProcessExecutionEnvSpec,
+    facts: crate::plugin::ExecutionFacts,
 ) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .provider(provider)
         .tool_catalog(tool_catalog)
         .processes(processes)
-        .execution_env_spec(execution_env_spec)
+        .facts(facts)
         .build()
         .into_runtime()
 }
@@ -1378,6 +1527,7 @@ pub fn code_execution_context_for_process<'run>(
         .into_runtime()
         .with_process_execution(
             &crate::ProcessRecord::from_registration(registration.clone(), process_id),
+            None,
             None,
         )
 }
@@ -1562,7 +1712,7 @@ pub async fn execute_tool_intents_with_services_and_hook(
 /// here too.
 struct EffectBackedProcessService {
     registry: Arc<dyn crate::ProcessRegistry>,
-    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    process_env_store: Arc<dyn crate::ProcessEnvStore>,
 }
 
 impl EffectBackedProcessService {
@@ -1869,7 +2019,7 @@ fn admitted_registration(
 
 pub fn effect_backed_process_service(
     registry: Arc<dyn crate::ProcessRegistry>,
-    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    process_env_store: Arc<dyn crate::ProcessEnvStore>,
 ) -> Arc<dyn crate::ProcessService> {
     Arc::new(EffectBackedProcessService {
         registry,

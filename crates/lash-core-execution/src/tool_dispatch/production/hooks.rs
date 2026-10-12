@@ -37,7 +37,7 @@ impl ProductionToolHandlers<'_> {
                 },
             }]);
         }
-        let (dispatch, _) = self.dispatch(&prepared.input).await?;
+        let dispatch = self.dispatch(&prepared.input);
         let record = match dispatch
             .composition
             .check_tool_args(
@@ -152,7 +152,7 @@ impl ProductionToolHandlers<'_> {
                 },
             }]);
         }
-        let (dispatch, _) = self.dispatch(&prepared.input).await?;
+        let dispatch = self.dispatch(&prepared.input);
         let original = captured.original.unwrap_or_else(|| captured.output.clone());
         let (original, _) = ToolResultCandidate::split(original);
         let (candidate, _) = ToolResultCandidate::split(captured.output);
@@ -273,7 +273,7 @@ impl ProductionToolHandlers<'_> {
             .get(call_id)
             .cloned()
             .ok_or_else(|| fault("the final has no hydrated admission".to_owned()))?;
-        let (dispatch, _) = self.dispatch(&prepared.input).await.map_err(fault)?;
+        let dispatch = self.dispatch(&prepared.input);
         let mut outcomes = self
             .declarations
             .lock_recover()
@@ -290,7 +290,7 @@ impl ProductionToolHandlers<'_> {
             call_id: call_id.clone(),
             tool_id: prepared.call.tool_id,
             tool_name: prepared.call.tool_name.clone(),
-            render: prepared.input.render.clone(),
+            render: prepared.input.facts.render.clone(),
             args: prepared.call.args.clone(),
             output,
             duration_ms: 0,

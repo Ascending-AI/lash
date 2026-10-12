@@ -38,7 +38,7 @@ impl From<ActorContext> for TestEffectController {
 #[derive(Clone)]
 pub struct TestExecutionPorts {
     pub effect_host: ActorContext,
-    pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    pub process_env_store: Arc<dyn crate::ProcessEnvStore>,
     pub artifact_ports: Option<crate::runtime::ArtifactReferrerPorts>,
     pub process_engines: crate::ProcessEngineRegistry,
     pub attachment_store: Arc<dyn crate::AttachmentStore>,
@@ -97,7 +97,7 @@ impl TestExecutionPorts {
     /// system clock.
     pub fn over_host(
         effect_host: ActorContext,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_env_store: Arc<dyn crate::ProcessEnvStore>,
     ) -> Self {
         Self {
             effect_host,
@@ -133,8 +133,8 @@ pub struct TestExecutionContextBuilder<'run> {
     processes: Arc<dyn crate::ProcessService>,
     process_engines: crate::ProcessEngineRegistry,
     direct_completions: Option<crate::DirectCompletionClient<'run>>,
-    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-    execution_env_spec: crate::ProcessExecutionEnvSpec,
+    process_env_store: Arc<dyn crate::ProcessEnvStore>,
+    facts: crate::plugin::ExecutionFacts,
     turn_context: crate::TurnContext,
     session_host_mode: TestSessionHostMode,
     session_lifecycle: Option<Arc<dyn crate::plugin::SessionLifecycleService>>,
@@ -174,8 +174,7 @@ pub struct TestExecutionContextBuilder<'run> {
 
 pub struct BuiltTestExecutionContext<'run> {
     pub dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
-    pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-    pub execution_env_spec: crate::ProcessExecutionEnvSpec,
+    pub process_env_store: Arc<dyn crate::ProcessEnvStore>,
     pub turn_context: crate::TurnContext,
     pub runtime_parent_invocation: Option<crate::RuntimeInvocation>,
     /// Which cell of the turn this context executes; see
@@ -210,7 +209,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
     fn assemble(
         effect_host: Option<ActorContext>,
         effect_controller: Option<TestEffectController>,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_env_store: Arc<dyn crate::ProcessEnvStore>,
         artifact_ports: Option<crate::runtime::ArtifactReferrerPorts>,
         process_engines: crate::ProcessEngineRegistry,
         attachment_store: Arc<dyn crate::AttachmentStore>,
@@ -228,14 +227,13 @@ impl<'run> TestExecutionContextBuilder<'run> {
             },
             direct_completions: None,
             process_env_store,
-            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(
+            facts: crate::plugin::ExecutionFacts::of_policy(
+                &crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),
                 ),
-                crate::SessionToolAccess::ambient(),
+                None,
             ),
             turn_context: crate::TurnContext::default(),
             session_host_mode: TestSessionHostMode::Independent,
@@ -270,7 +268,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
         Self::assemble(
             None,
             Some(effect_controller.into()),
-            Arc::new(super::UnavailableProcessExecutionEnvStore),
+            Arc::new(super::UnavailableProcessEnvStore),
             None,
             crate::ProcessEngineRegistry::new(),
             Arc::new(crate::attachments::UnavailableAttachmentStore),
@@ -316,11 +314,9 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
-    pub fn execution_env_spec(
-        mut self,
-        execution_env_spec: crate::ProcessExecutionEnvSpec,
-    ) -> Self {
-        self.execution_env_spec = execution_env_spec;
+    /// The facts the context runs and presents under.
+    pub fn facts(mut self, facts: crate::plugin::ExecutionFacts) -> Self {
+        self.facts = facts;
         self
     }
 
@@ -530,6 +526,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
                             &crate::Ancestry::root(),
                             None,
                             None,
+                            None,
                         ))
                     }
                     _ => None,
@@ -556,7 +553,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             }),
             parent_invocation: self.dispatch_parent_invocation,
             observation_call_key: None,
-            facts: crate::plugin::ExecutionFacts::of_env_spec(&self.execution_env_spec),
+            facts: self.facts,
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: self.session_id,
                 agent_frame_id: crate::FrameNodeId::new("test-frame")
@@ -573,7 +570,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
         BuiltTestExecutionContext {
             dispatch,
             process_env_store: self.process_env_store,
-            execution_env_spec: self.execution_env_spec,
             turn_context: self.turn_context,
             runtime_parent_invocation: self.runtime_parent_invocation,
             protocol_iteration: self.protocol_iteration,
@@ -600,7 +596,6 @@ impl<'run> BuiltTestExecutionContext<'run> {
             attachment_store,
             Arc::new(crate::ChronologicalProjection::default()),
             self.turn_context,
-            self.execution_env_spec,
         );
         let parent_invocation = self
             .runtime_parent_invocation

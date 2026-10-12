@@ -147,15 +147,9 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
         ),
         parent_invocation: None,
         observation_call_key: None,
-        facts: crate::plugin::ExecutionFacts::of_env_spec(&crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                lash_core_execution::NoProgressBudget::bounded(12),
-            ),
-            crate::SessionToolAccess::ambient(),
-        )),
+        facts: crate::plugin::ExecutionFacts::of_process(
+            &lash_core_execution::testing::process_env_with_limit(1024),
+        ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: crate::SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),

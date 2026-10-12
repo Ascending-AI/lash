@@ -736,7 +736,7 @@ impl Session {
         observer: Arc<dyn crate::engine::ObservationSink>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
         turn_context: crate::TurnContext,
-        execution_env_spec: crate::ProcessExecutionEnvSpec,
+        facts: crate::plugin::ExecutionFacts,
     ) -> Result<RuntimeExecutionContext<'run>, crate::PluginError> {
         let tool_surface = self.active_tool_surface_entry()?;
         let dispatch = Arc::new(ToolDispatchContext {
@@ -763,7 +763,7 @@ impl Session {
             direct_completions: direct_completions.clone(),
             parent_invocation: None,
             observation_call_key: None,
-            facts: crate::plugin::ExecutionFacts::of_env_spec(&execution_env_spec),
+            facts,
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: session_id.clone(),
                 agent_frame_id,
@@ -781,7 +781,6 @@ impl Session {
             Arc::clone(&self.services.attachment_store),
             chronological_projection,
             turn_context,
-            execution_env_spec,
         ))
         .map(|context| {
             context

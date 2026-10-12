@@ -53,12 +53,12 @@ pub async fn spawn(world: &World, call: &ToolCallId) -> Result<Vec<StoreLocalEff
         ProcessInput::Engine {
             kind: KIND.to_owned(),
             payload: ends_at_once("spawned"),
+            launch: lash_core_execution::EngineLaunch::new(env, None),
         },
         ProcessProvenance::host(),
         LifetimeDecision::Detached,
     )
-    .with_start_key(Some(spawn_key(call)))
-    .with_execution_env_ref(Some(env));
+    .with_start_key(Some(spawn_key(call)));
     let staged = executor(world)?
         .stage_start(registration.into(), Vec::new(), Default::default())
         .await

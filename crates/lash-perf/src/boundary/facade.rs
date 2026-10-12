@@ -559,33 +559,31 @@ async fn lifecycle(
     let mut ids = std::collections::BTreeSet::new();
     for n in 0..operations {
         let start = Instant::now();
-        let request = lash_core::ProcessStartRequest::new(
-            lash_core::ProcessInput::SessionTurn {
-                definition_key: "boundary-child".into(),
-                create_request: Box::new(lash_core::SessionCreateRequest::child(
-                    lash::plugins::SessionToolAccess::ambient(),
-                    "lifecycle-parent",
-                    lash_core::SessionStartPoint::Empty,
-                    lash_core::SessionPolicy {
-                        model: Some(lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
-                            lash::LlmProfileKey::new("boundary-model"),
-                            metadata()?,
-                        ))),
-                        ..lash_core::SessionPolicy::new(
-                            lash::TurnBudget::Unbounded,
-                            lash::MaxToolCalls::new(1024),
-                            lash::NoProgressBudget::bounded(12),
-                        )
-                    },
-                    Default::default(),
-                )),
-                turn_input: Box::new(lash::TurnInput::text(if n % 2 == 1 {
-                    "boundary-process-hold".to_owned()
-                } else {
-                    format!("child-{n}")
-                })),
-                result: lash_core::SessionTurnOutcome::Turn,
-            },
+        let request = lash_core::ProcessStartRequest::session_turn(
+            "boundary-child",
+            lash_core::SessionCreateRequest::child(
+                lash::plugins::SessionToolAccess::ambient(),
+                "lifecycle-parent",
+                lash_core::SessionStartPoint::Empty,
+                lash_core::SessionPolicy {
+                    model: Some(lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
+                        lash::LlmProfileKey::new("boundary-model"),
+                        metadata()?,
+                    ))),
+                    ..lash_core::SessionPolicy::new(
+                        lash::TurnBudget::Unbounded,
+                        lash::MaxToolCalls::new(1024),
+                        lash::NoProgressBudget::bounded(12),
+                    )
+                },
+                Default::default(),
+            ),
+            lash::TurnInput::text(if n % 2 == 1 {
+                "boundary-process-hold".to_owned()
+            } else {
+                format!("child-{n}")
+            }),
+            lash_core::SessionTurnOutcome::Turn,
             lash_core::ProcessOriginator::host(),
             lash_core::LifetimeDecision::Detached,
         );

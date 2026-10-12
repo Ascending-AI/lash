@@ -103,11 +103,11 @@ fn processes_area_witnesses() {
     );
     // W0095: lash::persistence::LeaseOwnerIdentity::engine_process_execution_id [function]
     let _ = lash::persistence::LeaseOwnerIdentity::engine_process_execution_id;
-    // W0096: lash::persistence::ProcessExecutionEnvStore [trait]
-    fn trait_witness_0096<T: lash::persistence::ProcessExecutionEnvStore>() {}
-    // W0097: lash::persistence::ProcessExecutionEnvStore::get_process_execution_env [function]
-    fn meth_0097<T: lash::persistence::ProcessExecutionEnvStore>(_: &T) {
-        let _ = T::get_process_execution_env;
+    // W0096: lash::persistence::ProcessEnvStore [trait]
+    fn trait_witness_0096<T: lash::persistence::ProcessEnvStore>() {}
+    // W0097: lash::persistence::ProcessEnvStore::get_process_env [function]
+    fn meth_0097<T: lash::persistence::ProcessEnvStore>(_: &T) {
+        let _ = T::get_process_env;
     }
     // W0111: lash::plugins::PluginError::ProcessAlreadyTerminal [variant]
     variant_witness(|value: &lash::plugins::PluginError| {
@@ -358,18 +358,14 @@ fn processes_area_witnesses() {
     let _ = lash::process::ProcessExecutionContext::with_causal_invocation;
     // W0195: lash::process::ProcessExecutionContext::with_execution_write_authority [function]
     let _ = lash::process::ProcessExecutionContext::with_execution_write_authority;
-    // W0196: lash::process::ProcessExecutionEnvSpec::from_store_bytes [function]
-    let _ = lash::process::ProcessExecutionEnvSpec::from_store_bytes;
-    // W0197: lash::process::ProcessExecutionEnvSpec::plugin_config [field]
-    field_witness(|value: &lash::process::ProcessExecutionEnvSpec| {
-        let _ = &value.plugin_config;
-    });
-    // W0198: lash::process::ProcessExecutionEnvSpec::policy [field]
-    field_witness(|value: &lash::process::ProcessExecutionEnvSpec| {
-        let _ = &value.policy;
-    });
-    // W0199: lash::process::ProcessExecutionEnvSpec::to_store_bytes [function]
-    let _ = lash::process::ProcessExecutionEnvSpec::to_store_bytes;
+    // W0196: lash::process::ProcessEnv::from_store_bytes [function]
+    let _ = lash::process::ProcessEnv::from_store_bytes;
+    // W0197: lash::process::ProcessEnv::components [function]
+    let _ = lash::process::ProcessEnv::components;
+    // W0198: lash::process::ProcessEnv::tools [function]
+    let _ = lash::process::ProcessEnv::tools;
+    // W0199: lash::process::ProcessEnv::to_store_bytes [function]
+    let _ = lash::process::ProcessEnv::to_store_bytes;
     // W0200: lash::persistence::ProcessHandleView::new [function]
     let _ = lash::persistence::ProcessHandleView::new(todo!(), todo!(), todo!());
     // W0201: lash::process::ProcessIdentity::definition [field]
@@ -593,10 +589,6 @@ fn processes_area_witnesses() {
     let _ = lash::process::ProcessStartOptions::with_spawn_provenance;
     // W0286: lash::process::ProcessStartRequest [struct]
     type_witness::<lash::process::ProcessStartRequest>();
-    // W0288: lash::process::ProcessStartRequest::env_ref [field]
-    field_witness(|value: &lash::process::ProcessStartRequest| {
-        let _ = &value.env_ref;
-    });
     // W0292: lash::process::ProcessStartRequest::identity [field]
     field_witness(|value: &lash::process::ProcessStartRequest| {
         let _ = &value.identity;
@@ -607,9 +599,12 @@ fn processes_area_witnesses() {
     });
     // W0294: lash::process::ProcessStartRequest::into_registration [function]
     let _ = lash::process::ProcessStartRequest::into_registration;
-    // W0296: lash::process::ProcessStartRequest::new [function]
-    let _ = lash::process::ProcessStartRequest::new(
-        todo!() as lash::process::ProcessStartTarget,
+    // W0296: lash::process::ProcessStartRequest::definition [function]
+    let _ = lash::process::ProcessStartRequest::definition(
+        todo!(),
+        None,
+        serde_json::Map::new(),
+        todo!() as lash::process::EngineLaunch,
         todo!(),
         lash::process::LifetimeDecision::Detached,
     );
@@ -621,8 +616,6 @@ fn processes_area_witnesses() {
     field_witness(|value: &lash::process::ProcessStartRequest| {
         let _ = &value.originator;
     });
-    // W0300: lash::process::ProcessStartRequest::with_env_ref [function]
-    let _ = lash::process::ProcessStartRequest::with_env_ref;
     // W0305: lash::process::ProcessStartRequest::with_observers [function]
     let _ = lash::process::ProcessStartRequest::with_observers(
         todo!(),
@@ -636,4 +629,638 @@ fn processes_area_witnesses() {
     variant_witness(|value: &lash::process::ProcessStatus| {
         matches!(value, lash::process::ProcessStatus::Waiting)
     });
+}
+
+/// FIG-6034 laws 3 and 9 on SQLite memory: a process builds only the
+/// components its environment names, in env order, and an environment
+/// with ambient tools is refused wherever it is stated.
+#[cfg(all(feature = "sqlite", feature = "rlm", feature = "worker"))]
+#[allow(
+    clippy::expect_used,
+    reason = "a law's setup failing is the law failing"
+)]
+mod named_component_laws {
+    use std::collections::{BTreeMap, VecDeque};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use lash::plugins::{AfterToolContributions, FormatVersion, HookKey, PluginError};
+    use lash::process::{
+        ProcessComponentContext, ProcessComponentDeclaration, ProcessComponentEntry,
+        ProcessComponentFactory, ProcessComponentSpec, ProcessConfigKey, ProcessEnv,
+        ProcessEnvRefusal,
+    };
+    use lash::tools::ToolDefinitionBindingExt as _;
+    use lash_sansio::sync::MutexExt as _;
+
+    const MODEL: &str = "named-components";
+    /// Cross-cutting: no tools, one result check.
+    const CHECK: ProcessConfigKey<()> = ProcessConfigKey::new("evidence-check", FormatVersion::ONE);
+    /// The tool's component, with a result check of its own.
+    const A: ProcessConfigKey<()> = ProcessConfigKey::new("evidence-a", FormatVersion::ONE);
+    /// Installed and never named.
+    const B: ProcessConfigKey<()> = ProcessConfigKey::new("evidence-b", FormatVersion::ONE);
+    /// A presenter each, and a second owner of A's tool name.
+    const PRESENTER_1: ProcessConfigKey<()> =
+        ProcessConfigKey::new("evidence-presenter-1", FormatVersion::ONE);
+    const PRESENTER_2: ProcessConfigKey<()> =
+        ProcessConfigKey::new("evidence-presenter-2", FormatVersion::ONE);
+    const TWIN: ProcessConfigKey<()> = ProcessConfigKey::new("evidence-twin", FormatVersion::ONE);
+    const A_TOOL: &str = "evidence_a_tool";
+    const ISOLATED_TOOL: &str = "evidence_isolated";
+
+    /// What every component and plugin of the deployment did.
+    #[derive(Default)]
+    struct Witness {
+        /// Builds per component id.
+        builds: Mutex<BTreeMap<String, usize>>,
+        /// The result checks that ran, by owner, in order.
+        hooks: Mutex<Vec<String>>,
+        /// Session plugin builds for a process owner.
+        process_plugin_builds: AtomicUsize,
+    }
+
+    impl Witness {
+        fn builds(&self, key: ProcessConfigKey<()>) -> usize {
+            self.builds
+                .lock_recover()
+                .get(key.component())
+                .copied()
+                .unwrap_or_default()
+        }
+
+        fn take_hooks(&self) -> Vec<String> {
+            std::mem::take(&mut *self.hooks.lock_recover())
+        }
+    }
+
+    fn a_definition(name: &str) -> lash::tools::ToolDefinition {
+        let object = serde_json::json!({ "type": "object", "additionalProperties": true });
+        lash::tools::ToolDefinition::raw(
+            format!("tool:{name}"),
+            name,
+            "Answers `a`.",
+            object.clone(),
+            object,
+        )
+        .expect("the tool's schemas")
+        .with_execution(std::time::Duration::from_secs(60))
+        .with_tool_binding(lash::tools::ToolBinding::new(["tools"], name))
+    }
+
+    struct AnswerA;
+
+    #[async_trait::async_trait]
+    impl lash::tools::StaticToolExecute for AnswerA {
+        async fn execute(
+            &self,
+            _call: lash::tools::ToolCall<'_>,
+        ) -> lash::tools::ToolAttemptOutcome {
+            lash::tools::ToolOutcome::ok(serde_json::json!("a")).into()
+        }
+    }
+
+    fn a_provider() -> Arc<dyn lash::tools::ToolProvider> {
+        Arc::new(lash::tools::StaticToolProvider::new(
+            vec![a_definition(A_TOOL)],
+            AnswerA,
+        ))
+    }
+
+    /// What one counting component contributes.
+    #[derive(Clone, Copy)]
+    enum Shape {
+        Check,
+        Tool,
+        Nothing,
+        Presenter,
+    }
+
+    struct Counting {
+        key: ProcessConfigKey<()>,
+        shape: Shape,
+        witness: Arc<Witness>,
+    }
+
+    impl ProcessComponentFactory for Counting {
+        fn declaration(&self) -> ProcessComponentDeclaration {
+            ProcessComponentDeclaration::initial(self.key.component(), self.key.format())
+                .expect("the component id")
+        }
+
+        fn config_type(&self) -> std::any::TypeId {
+            std::any::TypeId::of::<()>()
+        }
+
+        fn validate(
+            &self,
+            entry: &ProcessComponentEntry,
+            _env: &ProcessEnv,
+        ) -> Result<(), ProcessEnvRefusal> {
+            entry
+                .config()
+                .decode::<()>()
+                .map_err(|error| ProcessEnvRefusal::ConfigRefused {
+                    id: entry.id().to_string(),
+                    reason: error.to_string(),
+                })
+        }
+
+        fn build(
+            &self,
+            _cx: &ProcessComponentContext<'_>,
+        ) -> Result<ProcessComponentSpec, PluginError> {
+            *self
+                .witness
+                .builds
+                .lock_recover()
+                .entry(self.key.component().to_owned())
+                .or_default() += 1;
+            let id = self.key.component().to_owned();
+            let witness = Arc::clone(&self.witness);
+            let check: lash::plugins::ToolResultCheckHook = Arc::new(move |_input| {
+                witness.hooks.lock_recover().push(id.clone());
+                Box::pin(async { Ok(AfterToolContributions::default()) })
+            });
+            let key = HookKey::new("record").expect("a hook key");
+            let mut spec = ProcessComponentSpec::default();
+            match self.shape {
+                Shape::Check => spec.tool_result_checks.push((key, check)),
+                Shape::Tool => {
+                    spec.tool_providers.push(a_provider());
+                    spec.tool_result_checks.push((key, check));
+                }
+                Shape::Presenter => {
+                    spec.presenter = Some(Arc::new(|input| {
+                        Box::pin(async move { Ok(input.previous) })
+                    }));
+                }
+                Shape::Nothing => {}
+            }
+            Ok(spec)
+        }
+    }
+
+    /// A session plugin that counts the builds made for a process.
+    struct CountingPlugin(Arc<Witness>);
+
+    impl lash::plugins::PluginDefinition for CountingPlugin {
+        fn declaration() -> lash::plugins::PluginDeclaration {
+            lash::plugins::PluginDeclaration::initial("evidence-counting-plugin")
+        }
+    }
+
+    struct Inert;
+
+    impl lash::plugins::SessionPlugin for Inert {
+        fn id(&self) -> &'static str {
+            "evidence-counting-plugin"
+        }
+
+        fn register(&self, _reg: &mut lash::plugins::PluginRegistrar) -> Result<(), PluginError> {
+            Ok(())
+        }
+    }
+
+    impl lash::plugins::PluginFactory for CountingPlugin {
+        fn id(&self) -> &'static str {
+            "evidence-counting-plugin"
+        }
+
+        fn build(
+            &self,
+            ctx: &lash::plugins::PluginSessionContext,
+        ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, PluginError> {
+            if matches!(ctx.owner, lash_core::RuntimeOwner::Process(_)) {
+                self.0.process_plugin_builds.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(Arc::new(Inert))
+        }
+    }
+
+    /// The environment a policy states: the turn's run with `keys`, or
+    /// one with ambient tools.
+    #[derive(Clone)]
+    enum Stated {
+        Named(Vec<ProcessConfigKey<()>>),
+        Ambient,
+    }
+
+    struct Policy(Arc<Mutex<Stated>>);
+
+    #[async_trait::async_trait]
+    impl lash::process::ProcessEnvPolicy for Policy {
+        async fn choose(
+            &self,
+            cx: &lash::process::ProcessEnvCx<'_>,
+        ) -> Result<lash::process::ProcessStartChoice, lash::process::ProcessEnvPolicyError>
+        {
+            let stated = self.0.lock_recover().clone();
+            let env = match stated {
+                Stated::Ambient => ambient_env(),
+                Stated::Named(keys) => {
+                    let (Some(run), Some(offered)) = (cx.run, cx.offered) else {
+                        return Err(lash::process::ProcessEnvPolicyError::Fault(
+                            "no recorded run".into(),
+                        ));
+                    };
+                    let entries = keys
+                        .iter()
+                        .map(|key| ProcessComponentEntry::new(*key, &(), []))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(lash::process::ProcessEnvPolicyError::Refused)?;
+                    ProcessEnv::from_run(run, offered, entries)
+                        .map_err(lash::process::ProcessEnvPolicyError::Refused)?
+                }
+            };
+            Ok(lash::process::ProcessStartChoice {
+                env: lash::process::ProcessEnvChoice::New(env),
+                engine_settings: cx.engine_defaults()?,
+            })
+        }
+    }
+
+    fn ambient_env() -> ProcessEnv {
+        ProcessEnv::builder(
+            lash::plugins::SessionToolAccess::ambient(),
+            lash::MaxToolCalls::new(16),
+        )
+        .build()
+        .expect("an ambient environment builds; admission refuses it")
+    }
+
+    /// A tool isolated in the held engine whose provider states an
+    /// ambient environment.
+    struct AmbientIsolated;
+
+    fn isolated_definition() -> lash::tools::ToolDefinition {
+        a_definition(ISOLATED_TOOL)
+            .isolated_in(lash_core::testing::HELD_PROCESS_ENGINE_KIND)
+            .expect("an isolated tool names its engine")
+    }
+
+    #[async_trait::async_trait]
+    impl lash::tools::ToolProvider for AmbientIsolated {
+        fn tool_manifests(&self) -> Vec<lash::tools::ToolManifest> {
+            vec![isolated_definition().manifest()]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<lash::tools::ToolContract>> {
+            (name == ISOLATED_TOOL).then(|| Arc::new(isolated_definition().contract()))
+        }
+
+        async fn execute(
+            &self,
+            _call: lash::tools::ToolCall<'_>,
+        ) -> lash::tools::ToolAttemptOutcome {
+            lash::tools::ToolOutcome::ok(serde_json::json!("ordinary body")).into()
+        }
+
+        fn isolated_start(
+            &self,
+            call: lash_core::IsolatedProcessRequest<'_>,
+        ) -> Result<lash_core::IsolatedStart, ProcessEnvRefusal> {
+            Ok(lash_core::IsolatedStart {
+                payload: call.args.clone(),
+                env: lash::process::ProcessEnvChoice::New(ambient_env()),
+                engine_settings: None,
+            })
+        }
+    }
+
+    struct World {
+        core: lash::LashCore,
+        stores: Arc<dyn lash::StoreSet>,
+        witness: Arc<Witness>,
+        stated: Arc<Mutex<Stated>>,
+        cells: Arc<Mutex<VecDeque<String>>>,
+    }
+
+    async fn world() -> World {
+        let stores: Arc<dyn lash::StoreSet> = Arc::new(
+            lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .expect("SQLite stores"),
+        );
+        let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(&stores))
+            .process_engine(Arc::new(lash_core::testing::HeldProcessEngine))
+            .build()
+            .expect("the backend assembles");
+        let witness = Arc::new(Witness::default());
+        let stated = Arc::new(Mutex::new(Stated::Named(Vec::new())));
+        let cells: Arc<Mutex<VecDeque<String>>> = Arc::default();
+        let queue = Arc::clone(&cells);
+        let model = lash::testing::TestProvider::builder()
+            .kind(MODEL)
+            .complete(move |_request| {
+                let code = queue
+                    .lock_recover()
+                    .pop_front()
+                    .unwrap_or_else(|| "await control.finish(\"idle\");".to_owned());
+                async move {
+                    Ok(lash::provider::LlmResponse {
+                        parts: vec![lash::direct::LlmOutputPart::Text {
+                            text: format!("<typescript>\n{code}\n</typescript>"),
+                            response_meta: None,
+                        }],
+                        ..Default::default()
+                    })
+                }
+            })
+            .build()
+            .into_handle();
+        let rlm = lash::rlm::RlmProtocolPluginFactory::new(
+            lash::rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash::rlm::RlmChannel::Cell)
+                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                .build(),
+            lash::rlm::CellDialect::typescript(),
+        )
+        .with_worker_service(lash::vm::WorkerService::default());
+        let mut builder = lash::LashCore::rlm_builder(backend, rlm)
+            .serve_test_llm_profile(
+                model,
+                lash::LlmProfileMetadata::builder(MODEL)
+                    .cache_retention(lash::provider::CacheRetention::Short)
+                    .context_window_tokens(200_000)
+                    .build()
+                    .expect("the model's metadata"),
+            )
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(lash::DataRetention::standard())
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
+            .tools(a_provider())
+            .tools(Arc::new(AmbientIsolated))
+            .plugin(Arc::new(CountingPlugin(Arc::clone(&witness))))
+            .plugin(Arc::new(
+                lash::process_controls::SessionProcessAdminPluginFactory::new(
+                    |_: &lash::process::StartCx| lash::process::Lifetime::Detached,
+                    Arc::new(Policy(Arc::clone(&stated))),
+                ),
+            ));
+        for (key, shape) in [
+            (CHECK, Shape::Check),
+            (A, Shape::Tool),
+            (B, Shape::Nothing),
+            (PRESENTER_1, Shape::Presenter),
+            (PRESENTER_2, Shape::Presenter),
+            (TWIN, Shape::Tool),
+        ] {
+            builder = builder.process_component(
+                Arc::new(Counting {
+                    key,
+                    shape,
+                    witness: Arc::clone(&witness),
+                }),
+                key,
+            );
+        }
+        let core = builder
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                lash::persistence::LeaseOwnerId::new("named-components"),
+                lash::persistence::LeaseIncarnationId::new("named-components-boot"),
+            ))
+            .expect("the core builds");
+        World {
+            core,
+            stores,
+            witness,
+            stated,
+            cells,
+        }
+    }
+
+    impl World {
+        /// Run one turn in a fresh session `name` whose cell is `code`, and
+        /// answer its finished value.
+        async fn run(&self, name: &str, code: &str) -> serde_json::Value {
+            self.cells.lock_recover().push_back(code.to_owned());
+            let session = self
+                .core
+                .session(lash::SessionId::try_from(name.to_owned()).expect("a session id"))
+                .create(lash::SessionCreation::root(
+                    lash::plugins::SessionToolAccess::ambient(),
+                    lash::SessionSpec::new(
+                        MODEL,
+                        lash::TurnBudget::Unbounded,
+                        lash::MaxToolCalls::new(64),
+                    )
+                    .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+                ))
+                .await
+                .expect("the session is created");
+            let output = tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                session.send(lash::TurnInput::text(name)).output(),
+            )
+            .await
+            .expect("the turn settles within a minute")
+            .expect("the turn answers");
+            output
+                .finished()
+                .map(|(_, value)| value.clone())
+                .unwrap_or_else(|| panic!("the cell finishes: {output:?}"))
+        }
+
+        /// A process a cell starts under `keys`, which calls A's tool once:
+        /// the result checks that ran for the call, in order.
+        async fn hooks_under(&self, name: &str, keys: &[ProcessConfigKey<()>]) -> Vec<String> {
+            *self.stated.lock_recover() = Stated::Named(keys.to_vec());
+            self.witness.take_hooks();
+            let value = self
+                .run(
+                    name,
+                    &format!(
+                        "const body = async () => await tools.{A_TOOL}({{}});\n\
+                         const handle = await processes.start({{ definition: body }});\n\
+                         await control.finish(await handle);"
+                    ),
+                )
+                .await;
+            assert_eq!(value, serde_json::json!("a"), "the process called A's tool");
+            self.witness.take_hooks()
+        }
+
+        async fn stored(&self, env: &ProcessEnv) -> bool {
+            self.stores
+                .process_env_store()
+                .get_process_env(&env.stable_ref().expect("the env's reference"))
+                .await
+                .expect("the env store reads")
+                .is_some()
+        }
+
+        async fn publish(&self, env: &ProcessEnv) -> Result<(), ProcessEnvRefusal> {
+            match self
+                .core
+                .host_artifacts()
+                .publish_process_env(&lash::process::HostArtifactPin::mint(), env)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(lash::EmbedError::Plugin(PluginError::ProcessEnvRefused { refusal })) => {
+                    Err(refusal)
+                }
+                Err(other) => panic!("the publish answers a typed refusal: {other:?}"),
+            }
+        }
+    }
+
+    fn env_of(keys: &[ProcessConfigKey<()>]) -> ProcessEnv {
+        keys.iter()
+            .fold(
+                ProcessEnv::builder(
+                    lash::plugins::SessionToolAccess::restricted([a_definition(A_TOOL)])
+                        .expect("the tool"),
+                    lash::MaxToolCalls::new(16),
+                ),
+                |builder, key| builder.component(*key, &()),
+            )
+            .build()
+            .expect("the environment builds")
+    }
+
+    /// ONLY-NAMED-COMPONENTS (M2, D11, D12).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_process_builds_only_the_components_its_environment_names_in_env_order() {
+        let world = world().await;
+        let check = CHECK.component().to_owned();
+        let a = A.component().to_owned();
+
+        assert_eq!(
+            world.hooks_under("named-check-a", &[CHECK, A]).await,
+            vec![check.clone(), a.clone()],
+            "check's hook runs, before A's own"
+        );
+        assert!(world.witness.builds(CHECK) > 0 && world.witness.builds(A) > 0);
+        assert_eq!(
+            world.witness.builds(B),
+            0,
+            "an unnamed component never builds"
+        );
+        assert_eq!(
+            world.witness.process_plugin_builds.load(Ordering::SeqCst),
+            0,
+            "no session plugin builds for a process"
+        );
+
+        assert_eq!(
+            world.hooks_under("named-a-check", &[A, CHECK]).await,
+            vec![a.clone(), check.clone()],
+            "swapping the order swaps the hooks"
+        );
+        assert_ne!(
+            env_of(&[CHECK, A]).stable_ref().unwrap(),
+            env_of(&[A, CHECK]).stable_ref().unwrap(),
+            "the order is part of the env's address"
+        );
+        assert_eq!(
+            world.hooks_under("named-a", &[A]).await,
+            vec![a],
+            "an omitted check does not run"
+        );
+        assert_eq!(world.witness.builds(B), 0);
+
+        let uninstalled = ProcessConfigKey::<()>::new("evidence-uninstalled", FormatVersion::ONE);
+        let unreadable = ProcessConfigKey::<()>::new(A.component(), FormatVersion::new(2).unwrap());
+        let malformed = ProcessEnv::builder(
+            lash::plugins::SessionToolAccess::restricted(std::iter::empty()).unwrap(),
+            lash::MaxToolCalls::new(16),
+        )
+        .component(
+            ProcessConfigKey::<i64>::new(CHECK.component(), FormatVersion::ONE),
+            &7,
+        )
+        .build()
+        .unwrap();
+        let cases: [(&str, ProcessEnv, fn(&ProcessEnvRefusal) -> bool); 5] = [
+            ("uninstalled", env_of(&[uninstalled]), |refusal| {
+                matches!(refusal, ProcessEnvRefusal::ComponentNotInstalled { .. })
+            }),
+            ("malformed config", malformed, |refusal| {
+                matches!(refusal, ProcessEnvRefusal::ConfigRefused { .. })
+            }),
+            (
+                "unreadable config format",
+                env_of(&[unreadable]),
+                |refusal| matches!(refusal, ProcessEnvRefusal::ConfigFormatUnreadable { .. }),
+            ),
+            (
+                "duplicate presenter",
+                env_of(&[PRESENTER_1, PRESENTER_2]),
+                |refusal| matches!(refusal, ProcessEnvRefusal::DuplicatePresenter { .. }),
+            ),
+            ("duplicate tool name", env_of(&[A, TWIN]), |refusal| {
+                matches!(refusal, ProcessEnvRefusal::DuplicateToolName { .. })
+            }),
+        ];
+        for (case, env, expected) in cases {
+            let refusal = world
+                .publish(&env)
+                .await
+                .expect_err(&format!("{case}: the publish refuses"));
+            assert!(expected(&refusal), "{case}: {refusal:?}");
+            assert!(!world.stored(&env).await, "{case}: nothing is stored");
+        }
+        world.core.shutdown().await.expect("the core shuts down");
+    }
+
+    /// AMBIENT-REFUSED (D7).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_environment_with_ambient_tools_is_refused_wherever_it_is_stated() {
+        let world = world().await;
+        let ambient = ambient_env();
+        assert_eq!(
+            world.publish(&ambient).await,
+            Err(ProcessEnvRefusal::AmbientTools)
+        );
+        assert!(!world.stored(&ambient).await, "nothing is stored");
+
+        *world.stated.lock_recover() = Stated::Ambient;
+        let value = world
+            .run(
+                "ambient-starts",
+                &format!(
+                    "const body = async () => 1;\n\
+                     let started; try {{ await processes.start({{ definition: body }}); started = \"started\"; }} catch (e) {{ started = String(e?.message ?? e); }}\n\
+                     let isolated; try {{ await tools.{ISOLATED_TOOL}({{}}); isolated = \"ran\"; }} catch (e) {{ isolated = String(e?.message ?? e); }}\n\
+                     await control.finish({{ started: started, isolated: isolated }});"
+                ),
+            )
+            .await;
+        for start in ["started", "isolated"] {
+            let answer = value[start].as_str().unwrap_or_default();
+            assert!(
+                answer.contains("ambient"),
+                "the {start} start is the call's tool error: {value}"
+            );
+        }
+        let processes = world
+            .core
+            .processes()
+            .list(
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..Default::default()
+                },
+                std::num::NonZeroUsize::new(4).unwrap(),
+                None,
+            )
+            .await
+            .expect("the processes list")
+            .processes;
+        assert!(processes.is_empty(), "no start registered: {processes:?}");
+
+        let restricted = env_of(&[A]);
+        world
+            .publish(&restricted)
+            .await
+            .expect("restricted access passes");
+        assert!(world.stored(&restricted).await);
+        world.core.shutdown().await.expect("the core shuts down");
+    }
 }

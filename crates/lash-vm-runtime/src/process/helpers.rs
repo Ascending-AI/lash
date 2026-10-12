@@ -400,7 +400,8 @@ pub async fn survey_helper_processes(
             .list_processes_page(&filter, PAGE, continuation)
             .await?;
         for record in page.records {
-            let lash_core::ProcessInput::Engine { kind, payload } = record.input.as_ref() else {
+            let lash_core::ProcessInput::Engine { kind, payload, .. } = record.input.as_ref()
+            else {
                 continue;
             };
             if kind != super::LASH_VM_ENGINE_KIND {

@@ -451,52 +451,28 @@ impl LashCore {
         crate::artifacts::HostArtifacts::new(self)
     }
 
-    /// Resolve the protocol's result rendering before a host publishes a
-    /// process environment. The published environment retains this decision,
-    /// so deferred results resume under the same renderer as inline results.
-    #[cfg(feature = "codemode")]
-    pub fn resolve_process_environment(
-        &self,
-        mut environment: lash_core::ProcessExecutionEnvSpec,
-    ) -> Result<lash_core::ProcessExecutionEnvSpec> {
-        let plugins = self.process_plugins(&environment)?;
-        environment.render = plugins
-            .protocol_driver()
-            .resolve_render(&environment.plugin_config.config.protocol_turn_options())?;
-        Ok(environment)
-    }
-
-    /// The tool catalogue a process created under `environment` resolves:
-    /// its own plugin session's tools, built as its runtime builds them.
+    /// The tool catalogue a process created under `env` resolves: the tools
+    /// only the components `env` names provide that its tools admit, built
+    /// with no process, as its runtime builds them (FIG-6034 §3.7). Nothing
+    /// of a session builds.
     #[cfg(feature = "codemode")]
     pub(crate) fn process_tool_catalog(
         &self,
-        environment: &lash_core::ProcessExecutionEnvSpec,
+        env: &lash_core::ProcessEnv,
     ) -> Result<Arc<lash_core::ToolCatalog>> {
-        Ok(self.process_plugins(environment)?.resolved_tool_catalog()?)
-    }
-
-    #[cfg(feature = "codemode")]
-    fn process_plugins(
-        &self,
-        environment: &lash_core::ProcessExecutionEnvSpec,
-    ) -> Result<Arc<lash_core::plugin::PluginSession>> {
-        let plugin_host = build_plugin_host(
-            self.protocol_factory.as_ref(),
-            self.plugin_factories.as_ref(),
-            &self.env.core,
-        )?;
-        let plugins = plugin_host.defer_session(
-            lash_core::plugin::PluginSessionRequest::process_creation(
-                lash_core::mint_process_id(),
-                lash_core::plugin::SessionAuthorityContext {
-                    tool_access: environment.tool_access.clone(),
-                    plugin_config: environment.plugin_config.clone(),
-                },
-            ),
-        )?;
-        plugins.materialize()?;
-        Ok(plugins)
+        let engines = &self.env.core.process_engines;
+        let components = engines.components();
+        let composition = components
+            .compose(env, None)
+            .map_err(|refusal| lash_core::PluginError::ProcessEnvRefused { refusal })?;
+        // The catalog is resolved before any process exists: its owner is a
+        // fresh process id that no record will carry.
+        Ok(Arc::new(composition.tool_catalog(
+            lash_core::RuntimeOwner::Process(lash_core::mint_process_id()),
+            env.tools(),
+            &components.host().extensions,
+            engines.engine_kinds(),
+        )?))
     }
 
     /// Check start arguments against a retained definition's authoritative signature.
@@ -728,6 +704,10 @@ pub struct LashCoreBuilder {
     delta_coalescing: Option<crate::DeltaCoalescing>,
     tool_providers: Vec<Arc<dyn ToolProvider>>,
     plugin_stack: PluginStack,
+    /// The process components a process environment may name (FIG-6034),
+    /// and the first registration refused, reported at build.
+    process_components: lash_core::plugin::ProcessComponentRegistry,
+    process_component_refusal: Option<lash_core::PluginError>,
     recovery_lease: Option<lash_core::engine::RecoveryLeaseConfig>,
     recovery_pass: lash_core::engine::RecoveryPassBudget,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
@@ -794,6 +774,8 @@ impl LashCoreBuilder {
             delta_coalescing: None,
             tool_providers: Vec::new(),
             plugin_stack: PluginStack::default(),
+            process_components: lash_core::plugin::ProcessComponentRegistry::new(),
+            process_component_refusal: None,
             recovery_lease: None,
             recovery_pass: lash_core::engine::RecoveryPassBudget::default(),
             process_tool_visibility_filter: None,
@@ -945,6 +927,23 @@ impl LashCoreBuilder {
 
     pub fn plugin(mut self, plugin: Arc<dyn PluginFactory>) -> Self {
         self.plugin_stack.push(plugin);
+        self
+    }
+
+    /// Install the process component `factory` under `key`, the config key
+    /// its environment entries are written with (FIG-6034 §3.2). A process
+    /// builds only the components its environment names; a session never
+    /// builds one. A refused registration is the build's error.
+    pub fn process_component<T: 'static>(
+        mut self,
+        factory: Arc<dyn lash_core::plugin::ProcessComponentFactory>,
+        key: lash_core::ProcessConfigKey<T>,
+    ) -> Self {
+        if let Err(error) = self.process_components.register(factory, key)
+            && self.process_component_refusal.is_none()
+        {
+            self.process_component_refusal = Some(error);
+        }
         self
     }
 
@@ -1185,6 +1184,9 @@ impl LashCoreBuilder {
         if protocol_factory.is_none() {
             return Err(EmbedError::MissingProtocolPlugin);
         }
+        if let Some(refusal) = self.process_component_refusal.take() {
+            return Err(refusal.into());
+        }
         let backend = self.backend.clone();
         let store_factory = backend.session_store_factory();
         let data_retention = self
@@ -1282,6 +1284,18 @@ impl LashCoreBuilder {
         // A plugin whose declaration contradicts itself refuses the build
         // before anything runs under it.
         default_plugin_host.composition()?;
+        // Every runtime of this core, its workers' too, composes a process
+        // from these components and nothing else (FIG-6034 §5.1).
+        let mut core = core;
+        core.process_engines = core.process_engines.clone().with_components(
+            std::mem::take(&mut self.process_components).with_host(
+                lash_core::plugin::ProcessComponentHost {
+                    tracing: core.tracing.clone(),
+                    extensions: default_plugin_host.extensions().clone(),
+                    sessions: None,
+                },
+            ),
+        );
         // Every backend supplies a process registry, so process lifecycle
         // is available on every core. Threaded to every plugin host so core
         // installs the same plugin-contributed process engines wherever it

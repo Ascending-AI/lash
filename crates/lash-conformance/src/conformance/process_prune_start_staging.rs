@@ -13,7 +13,7 @@ use lash_core::runtime::artifact_cleanup::{
 )]
 pub async fn prune_and_late_transfer_fences(
     registry: Arc<dyn crate::ProcessRegistry>,
-    env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    env_store: Arc<dyn crate::ProcessEnvStore>,
 ) {
     let key = crate::StartKey::for_host("prune-referrer-fences");
     let starter = crate::ExecutionScope::runtime_operation("prune-referrer-fences")
@@ -24,19 +24,11 @@ pub async fn prune_and_late_transfer_fences(
         start_key: key.clone(),
         starter,
     });
-    let spec = crate::ProcessExecutionEnvSpec::new(
-        crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        crate::SessionToolAccess::ambient(),
-    );
+    let spec = lash_core::testing::process_env_with_limit(1024);
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env");
     env_store
-        .publish_process_execution_env(&start_claim, &env_ref, &bytes)
+        .publish_process_env(&start_claim, &env_ref, &bytes)
         .await
         .expect("stage under start");
     let registered = registry
@@ -45,12 +37,12 @@ pub async fn prune_and_late_transfer_fences(
                 crate::ProcessInput::Engine {
                     kind: "test-engine".to_owned(),
                     payload: serde_json::Value::Null,
+                    launch: crate::EngineLaunch::new(env_ref.clone(), None),
                 },
                 crate::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
-            .with_start_key(Some(key))
-            .with_execution_env_ref(Some(env_ref.clone())),
+            .with_start_key(Some(key)),
         )
         .await
         .expect("register keyed process");
@@ -71,7 +63,7 @@ pub async fn prune_and_late_transfer_fences(
         .expect("settle start");
     assert_eq!(
         env_store
-            .get_process_execution_env(&env_ref)
+            .get_process_env(&env_ref)
             .await
             .expect("load process env"),
         Some(bytes.clone())
@@ -104,7 +96,7 @@ pub async fn prune_and_late_transfer_fences(
         .expect("apply process cleanup");
     assert_eq!(
         env_store
-            .get_process_execution_env(&env_ref)
+            .get_process_env(&env_ref)
             .await
             .expect("read reclaimed env"),
         None
@@ -115,7 +107,7 @@ pub async fn prune_and_late_transfer_fences(
             _ => crate::ReferrerClaim::unguarded(referrer.clone()).expect("process claim"),
         };
         let refusal = env_store
-            .publish_process_execution_env(&claim, &env_ref, &bytes)
+            .publish_process_env(&claim, &env_ref, &bytes)
             .await
             .expect_err("ended referrer is fenced");
         assert!(matches!(
@@ -128,10 +120,7 @@ pub async fn prune_and_late_transfer_fences(
         .await
         .expect("late carry skips fenced process");
     assert_eq!(
-        env_store
-            .get_process_execution_env(&env_ref)
-            .await
-            .expect("read"),
+        env_store.get_process_env(&env_ref).await.expect("read"),
         None
     );
 }
@@ -167,11 +156,12 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
         )
     };
     // An engine start: it carries an environment to stage.
-    let engine_start = || {
+    let engine_start = |env: crate::ProcessEnvRef| {
         crate::ProcessRegistration::new(
             crate::ProcessInput::Engine {
                 kind: "testing-fixture".to_owned(),
                 payload: serde_json::Value::Null,
+                launch: crate::EngineLaunch::new(env, None),
             },
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
@@ -216,27 +206,14 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
         starter,
     };
     let (stores_a, stores_b) = (stores(&starter_a), stores(&starter_b));
-    let spec = |budget| {
-        crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(
-                budget,
-                crate::MaxToolCalls::new(1024),
-                lash_core::NoProgressBudget::bounded(12),
-            ),
-            crate::SessionToolAccess::ambient(),
-        )
-    };
-    let spec_b = spec(crate::TurnBudget::Unbounded);
-    let spec_a = spec(crate::TurnBudget::Bounded(
-        std::num::NonZeroUsize::new(3).expect("a nonzero budget"),
-    ));
+    let spec_b = lash_core::testing::process_env_with_limit(1024);
+    let spec_a = lash_core::testing::process_env_with_limit(3);
     let env_b = spec_b.stable_ref().expect("B's environment ref");
     let bytes_b = spec_b.to_store_bytes().expect("B's environment bytes");
     assert_ne!(spec_a.stable_ref().expect("A's environment ref"), env_b);
 
     for (starter, spec) in [(&starter_a, &spec_a), (&starter_b, &spec_b)] {
-        crate::publish_process_execution_env(
+        lash_core::testing::publish_process_env_for_testing(
             env_store.as_ref(),
             &crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(starter.clone())),
             spec,
@@ -245,18 +222,16 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
         .expect("publish captured environment");
     }
     let paused = faults.pause_next_registration();
-    let start_b = crate::register_process_start(
-        &stores_b,
-        engine_start().with_execution_env_ref(Some(env_b.clone())),
-        &[],
-    );
+    let start_b = crate::register_process_start(&stores_b, engine_start(env_b.clone()), &[]);
     let refuse_a = async {
         // B has staged under `Start(key)` and holds before its row.
         paused.wait_until_validated().await;
         let refused = crate::register_process_start(
             &stores_a,
-            crate::started_until_starter(engine_start(), ended_scope.clone())
-                .with_execution_env_ref(Some(spec_a.stable_ref().expect("A environment"))),
+            crate::started_until_starter(
+                engine_start(spec_a.stable_ref().expect("A environment")),
+                ended_scope.clone(),
+            ),
             &[],
         )
         .await
@@ -275,7 +250,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
         started_b.disposition,
         crate::ProcessRegistrationOutcome::Created
     );
-    assert_eq!(started_b.record.env_ref.as_ref(), Some(&env_b));
+    assert_eq!(started_b.record.env_ref(), Some(&env_b));
 
     // The relay applies A's abandonment: `Start(key)` carries nothing.
     env_store
@@ -287,7 +262,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
         .expect("apply Start(key)'s end");
     assert_eq!(
         env_store
-            .get_process_execution_env(&env_b)
+            .get_process_env(&env_b)
             .await
             .expect("load B's environment"),
         Some(bytes_b),
@@ -331,11 +306,12 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         )
         .await
         .expect("publish the module under the starter's pin");
-    let engine_start = || {
+    let engine_start = |env: crate::ProcessEnvRef| {
         crate::ProcessRegistration::new(
             crate::ProcessInput::Engine {
                 kind: MODULE_NAMING_ENGINE.to_owned(),
                 payload: serde_json::json!({ "module": module_ref }),
+                launch: crate::EngineLaunch::new(env, None),
             },
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
@@ -430,23 +406,8 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         executor: "conformance process start",
         starter: &starter_b,
     };
-    let spec = |budget| {
-        crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(
-                budget,
-                crate::MaxToolCalls::new(1024),
-                lash_core::NoProgressBudget::bounded(12),
-            ),
-            crate::SessionToolAccess::ambient(),
-        )
-    };
-    let spec_a = spec(crate::TurnBudget::Bounded(
-        std::num::NonZeroUsize::new(5).expect("a nonzero budget"),
-    ));
-    let spec_b = spec(crate::TurnBudget::Bounded(
-        std::num::NonZeroUsize::new(7).expect("a nonzero budget"),
-    ));
+    let spec_a = lash_core::testing::process_env_with_limit(5);
+    let spec_b = lash_core::testing::process_env_with_limit(7);
     let (env_a, env_b) = (
         spec_a.stable_ref().expect("A's environment ref"),
         spec_b.stable_ref().expect("B's environment ref"),
@@ -455,7 +416,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
     assert_ne!(env_a, env_b);
 
     for (starter, spec) in [(&starter_a, &spec_a), (&starter_b, &spec_b)] {
-        crate::publish_process_execution_env(
+        lash_core::testing::publish_process_env_for_testing(
             env_store.as_ref(),
             &crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(starter.clone())),
             spec,
@@ -466,20 +427,15 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
     let a_read_the_key = faults_a.pause_next_start_key_read();
     let refuse_a = crate::register_process_start(
         &stores_a,
-        crate::started_until_starter(engine_start(), ended_scope)
-            .with_execution_env_ref(Some(env_a.clone())),
+        crate::started_until_starter(engine_start(env_a.clone()), ended_scope),
         &[],
     );
     let start_b = async {
         // A has staged, been refused, and read the key: no record yet.
         a_read_the_key.wait_until_validated().await;
-        let started = crate::register_process_start(
-            &stores_b,
-            engine_start().with_execution_env_ref(Some(env_b.clone())),
-            &[],
-        )
-        .await
-        .expect("B registers under the key");
+        let started = crate::register_process_start(&stores_b, engine_start(env_b.clone()), &[])
+            .await
+            .expect("B registers under the key");
         // The starter's own hold on the module ends with its start.
         ports
             .modules()
@@ -503,7 +459,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         started_b.disposition,
         crate::ProcessRegistrationOutcome::Created
     );
-    assert_eq!(started_b.record.env_ref.as_ref(), Some(&env_b));
+    assert_eq!(started_b.record.env_ref(), Some(&env_b));
     assert_eq!(
         relay_on_end.verdict.get(),
         Some(&lash_core::runtime::obligations::relay::RelayVerdict::Delivered),
@@ -533,7 +489,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         let env_store = Arc::clone(&env_store);
         async move {
             env_store
-                .get_process_execution_env(&env_ref)
+                .get_process_env(&env_ref)
                 .await
                 .expect("read an environment")
         }
@@ -644,10 +600,24 @@ impl crate::ProcessEngine for ModuleNamingEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&crate::EngineSettings>,
+    ) -> std::result::Result<(), crate::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(crate::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
         Ok(None)
     }
 
@@ -700,8 +670,8 @@ impl ArtifactCleanupAuthorities for KeyRecords {
             .await
             .map_err(|error| error.to_string())?
             .map(|record| RetainedStart {
+                env_ref: record.env_ref().cloned(),
                 process_id: record.id,
-                env_ref: record.env_ref,
                 input: record.input,
                 definition_id: record.identity.definition_id,
             }))
@@ -824,29 +794,18 @@ impl crate::ArtifactCleanupLedger for RelayOnEnd {
 )]
 pub async fn two_starts_share_one_captured_environment(
     registry: Arc<dyn crate::ProcessRegistry>,
-    env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    env_store: Arc<dyn crate::ProcessEnvStore>,
 ) {
     let starter = crate::ExecutionScope::runtime_operation("shared-captured-environment")
         .journal_identity()
         .expect("starter");
     let declaration = crate::ArtifactReferrer::Execution(starter.clone());
     let claim = crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(starter.clone()));
-    // A captured environment as large as a session with 128 KiB of recorded
-    // protocol prompt.
-    let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
-    plugin_config.insert(
-        "protocol",
-        serde_json::json!({ "prompt": { "instructions": ["x".repeat(128 * 1024)] } }),
-    );
-    let spec = crate::ProcessExecutionEnvSpec::new(
-        crate::AdmittedPluginConfig::new(plugin_config, 0),
-        crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        crate::SessionToolAccess::ambient(),
-    );
+    // A stated environment as large as one with 128 KiB of component
+    // config, written to the store directly: no registry installs its
+    // component.
+    let spec = lash_core::testing::process_env_of_size(128 * 1024);
+    let spec_bytes = spec.to_store_bytes().expect("environment bytes");
     let engines = crate::testing::process_engine_fixture();
     let stores = crate::ProcessStartStores {
         tracing: None,
@@ -861,7 +820,9 @@ pub async fn two_starts_share_one_captured_environment(
     };
     let mut records = Vec::new();
     for key in ["shared-environment-first", "shared-environment-second"] {
-        let env_ref = crate::publish_process_execution_env(env_store.as_ref(), &claim, &spec)
+        let env_ref = spec.stable_ref().expect("environment reference");
+        env_store
+            .publish_process_env(&claim, &env_ref, &spec_bytes)
             .await
             .expect("capture environment");
         let start_key = crate::StartKey::for_host(key);
@@ -871,12 +832,12 @@ pub async fn two_starts_share_one_captured_environment(
                 crate::ProcessInput::Engine {
                     kind: "testing-fixture".to_owned(),
                     payload: serde_json::Value::Null,
+                    launch: crate::EngineLaunch::new(env_ref.clone(), None),
                 },
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )
-            .with_start_key(Some(start_key.clone()))
-            .with_execution_env_ref(Some(env_ref.clone())),
+            .with_start_key(Some(start_key.clone())),
             &[],
         )
         .await
@@ -902,7 +863,7 @@ pub async fn two_starts_share_one_captured_environment(
         records.push(record);
     }
     assert_ne!(records[0].id, records[1].id);
-    assert_eq!(records[0].env_ref, records[1].env_ref);
+    assert_eq!(records[0].env_ref(), records[1].env_ref());
     env_store
         .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
             referrer: declaration,
@@ -910,7 +871,7 @@ pub async fn two_starts_share_one_captured_environment(
         })
         .await
         .expect("declaration journal ends");
-    let env_ref = records[0].env_ref.as_ref().expect("shared environment");
+    let env_ref = records[0].env_ref().expect("shared environment");
     for (index, record) in records.iter().enumerate() {
         env_store
             .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
@@ -921,7 +882,7 @@ pub async fn two_starts_share_one_captured_environment(
             .expect("process ends");
         assert_eq!(
             env_store
-                .get_process_execution_env(env_ref)
+                .get_process_env(env_ref)
                 .await
                 .expect("stored copy")
                 .is_some(),

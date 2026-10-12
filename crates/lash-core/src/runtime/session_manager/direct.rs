@@ -158,42 +158,42 @@ struct DirectReplayPosition<'a> {
 
 impl CurrentOwnerCapability {
     /// What an owned call of these services composes its prompt from: the
-    /// session's recorded plan, config and committed view, or, for a
-    /// process, its captured config under the default plan.
+    /// session's recorded plan, config and committed view, or, for an
+    /// engine process, its components' sections and config under the
+    /// default plan (D16).
     fn owned_prompt(
         &self,
         facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
-    ) -> crate::runtime::owned_call::OwnedPrompt {
-        let config = crate::OwnerConfigView::session(self.plugins.admitted_plugin_config());
-        match self.session() {
-            Some(session) => {
-                let state = session.snapshot.to_runtime_state();
-                crate::runtime::owned_call::OwnedPrompt {
-                    facts,
-                    composition: self.plugins.composition(),
-                    state: self.plugins.clone(),
-                    render_pool: self.plugins.prompt_render_pool().clone(),
-                    plan: state.authority.prompt_plan.clone(),
-                    config,
-                    frame: state.current_frame_node_id.clone(),
-                    session: Some(crate::SessionReadView::from_runtime_state(
-                        &state,
-                        state.effective_policy().clone(),
-                        state.effective_protocol_turn_options(),
-                    )),
-                }
-            }
-            None => crate::runtime::owned_call::OwnedPrompt {
+    ) -> Result<crate::runtime::owned_call::OwnedPrompt, crate::PluginError> {
+        if let Some(session) = self.session() {
+            let plugins = self.session_plugins("owned_prompt")?;
+            let state = session.snapshot.to_runtime_state();
+            return Ok(crate::runtime::owned_call::OwnedPrompt {
                 facts,
-                composition: self.plugins.composition(),
-                state: self.plugins.clone(),
-                render_pool: self.plugins.prompt_render_pool().clone(),
-                plan: Default::default(),
-                config,
-                frame: None,
-                session: None,
-            },
+                composition: plugins.composition(),
+                state: plugins.clone(),
+                render_pool: plugins.prompt_render_pool().clone(),
+                plan: state.authority.prompt_plan.clone(),
+                config: crate::OwnerConfigView::session(plugins.admitted_plugin_config()),
+                frame: state.current_frame_node_id.clone(),
+                session: Some(crate::SessionReadView::from_runtime_state(
+                    &state,
+                    state.effective_policy().clone(),
+                    state.effective_protocol_turn_options(),
+                )),
+            });
         }
+        let (_, engine) = self.engine_process()?;
+        Ok(crate::runtime::owned_call::OwnedPrompt {
+            facts,
+            composition: Arc::clone(&engine.composition.composition),
+            state: engine.state.clone(),
+            render_pool: self.plugins.plugin_host().prompt_render_pool().clone(),
+            plan: Default::default(),
+            config: crate::OwnerConfigView::components(Arc::clone(&engine.env)),
+            frame: None,
+            session: None,
+        })
     }
 
     /// The session an owned call's admission belongs to: the owning
@@ -256,7 +256,7 @@ impl DirectCompletionCapability {
             cx: &context.effect_controller,
             key,
             purpose,
-            prompt: current.owned_prompt(facts),
+            prompt: current.owned_prompt(facts)?,
             request,
             binding: binding.clone(),
             attachment_store: Arc::clone(&current.host.core.durability.attachment_store),
@@ -307,10 +307,10 @@ impl DirectCompletionCapability {
         );
         let local_executor = crate::RuntimeEffectLocalExecutor::direct(
             binding,
-            current.execution_facts().map_or_else(
-                || current.policy.charge_safety.clone(),
-                |facts| facts.charge_safety,
-            ),
+            match current.execution_facts() {
+                Some(facts) => facts.charge_safety,
+                None => current.direct_policy()?.charge_safety.clone(),
+            },
             current.host.core.control.execution_budgets.clone(),
             admitted,
             current.runtime_owner(),
@@ -368,10 +368,10 @@ impl DirectCompletionCapability {
             .map_err(|error| crate::PluginError::Session(error.to_string()))?;
         // A durable direct completion renders attachments under its session's
         // recorded acceptance rules, never a caller's.
-        normalized.attachment_acceptance = context.current.execution_facts().map_or_else(
-            || Arc::clone(&context.current.policy.attachment_acceptance),
-            |facts| facts.attachment_acceptance,
-        );
+        normalized.attachment_acceptance = match context.current.execution_facts() {
+            Some(facts) => facts.attachment_acceptance,
+            None => Arc::clone(&context.current.direct_policy()?.attachment_acceptance),
+        };
         let (response, usage, llm_call) = self
             .run_direct_call(
                 &context,
@@ -415,10 +415,10 @@ impl DirectCompletionCapability {
             ));
         }
         request.model = policy.llm_profile_config().clone();
-        request.attachment_acceptance = context.current.execution_facts().map_or_else(
-            || Arc::clone(&context.current.policy.attachment_acceptance),
-            |facts| facts.attachment_acceptance,
-        );
+        request.attachment_acceptance = match context.current.execution_facts() {
+            Some(facts) => facts.attachment_acceptance,
+            None => Arc::clone(&context.current.direct_policy()?.attachment_acceptance),
+        };
         let replay = crate::RuntimeReplay {
             key: request.scope.request_id.clone(),
             attribution: None,

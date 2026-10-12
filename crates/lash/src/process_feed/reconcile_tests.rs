@@ -175,14 +175,11 @@ async fn a_follower_on_one_core_observes_the_terminal_another_core_commits() {
 
     let committer = core_b.process_registry.clone();
     let process_id = committer
-        .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::testing::held_engine_input(serde_json::Value::Null),
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
-        )
+        .register_process(lash_core::ProcessRegistration::new(
+            lash_core::testing::held_engine_input(serde_json::Value::Null),
+            lash_core::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
         .await
         .expect("register on core B")
         .id;
@@ -295,14 +292,11 @@ async fn a_local_commit_is_published_once_however_many_feeds_are_open() {
         .expect("standard core");
     let registry = core.process_registry.clone();
     let process_id = registry
-        .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::testing::held_engine_input(serde_json::Value::Null),
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
-        )
+        .register_process(lash_core::ProcessRegistration::new(
+            lash_core::testing::held_engine_input(serde_json::Value::Null),
+            lash_core::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
         .await
         .expect("register the process")
         .id;

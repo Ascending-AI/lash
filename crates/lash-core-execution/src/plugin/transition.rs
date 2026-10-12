@@ -32,7 +32,7 @@ pub enum PluginTransitionBase {
         head: crate::store::SessionHeadRef,
     },
     Process {
-        environment: crate::ProcessExecutionEnvRef,
+        environment: crate::ProcessEnvRef,
         segment: crate::ExecutionScope,
     },
 }

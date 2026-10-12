@@ -260,7 +260,10 @@ fn rlm_core_in_dialect(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lifetime),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lifetime,
+                lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
+            ),
         ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("artifact-referrers-worker"),

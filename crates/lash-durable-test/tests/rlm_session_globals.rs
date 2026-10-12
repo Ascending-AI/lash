@@ -43,7 +43,10 @@ fn builder(backend: &lash::Backend) -> lash::LashCoreBuilder {
         served::rlm(backend, Some(Arc::new(GrantFetch)), sim::untimed_workers()),
     )
     .plugin(Arc::new(
-        lash::process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::starter),
+        lash::process_controls::SessionProcessAdminPluginFactory::new(
+            lash_core::lifetime::starter,
+            lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
+        ),
     ))
     .tools(Arc::new(Fetch))
 }

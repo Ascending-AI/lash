@@ -84,10 +84,24 @@ impl ProcessEngine for SignedEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&crate::EngineSettings>,
+    ) -> std::result::Result<(), crate::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(crate::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
         Ok(None)
     }
 
@@ -106,7 +120,6 @@ impl ProcessEngine for SignedEngine {
 fn admit_signed(
     kind: &'static str,
     payload: &serde_json::Value,
-    _env: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<ProcessIdentity, crate::PluginError> {
     let signature = match payload.get("signature") {
         Some(claim) => ProcessSignature::known(claim.clone()),
@@ -139,7 +152,6 @@ async fn an_unclaimed_reference_adopts_the_artifact_signature() {
         .admit(
             SIGNED_ENGINE_KIND,
             &serde_json::json!({"program": "payout"}),
-            None,
         )
         .await
         .expect("an unclaimed reference is admitted");
@@ -251,6 +263,7 @@ async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
             crate::ProcessInput::Engine {
                 kind: SIGNED_ENGINE_KIND.to_string(),
                 payload: serde_json::json!({"program": "payout"}),
+                launch: crate::testing::fixture_engine_launch(),
             },
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,

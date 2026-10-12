@@ -449,14 +449,11 @@ async fn append_facts(
         .await;
     let registry = node.stores.process_registry();
     let process = registry
-        .register_process(
-            ProcessRegistration::new(
-                lash_core::testing::held_engine_input(serde_json::Value::Null),
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
-        )
+        .register_process(ProcessRegistration::new(
+            lash_core::testing::held_engine_input(serde_json::Value::Null),
+            lash_core::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
         .await?
         .id;
     let authority =

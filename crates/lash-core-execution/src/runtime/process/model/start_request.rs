@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    LifetimeDecision, ProcessProvenance, ProcessStartRegistration, ProcessStartTarget, SessionId,
+    DeclaredLaunch, EngineLaunch, LifetimeDecision, ProcessInput, ProcessProvenance,
+    ProcessStartRegistration, ProcessStartTarget, SessionId,
 };
 
 /// A start request as a leaf tool attempt declares it: everything a process
@@ -16,13 +17,13 @@ use super::{
 #[serde(deny_unknown_fields)]
 pub struct ProcessStartDeclaration {
     /// What the start runs: an input, or the definition one is resolved from.
-    pub input: ProcessStartTarget,
+    /// An engine-bearing target carries the launch its declaring attempt
+    /// held ([`DeclaredLaunch`]); only the constructors set it.
+    input: ProcessStartTarget,
     /// The lifetime the declaring attempt chose from its start context,
     /// journaled with the declaration: realization never re-runs the policy
     /// (FIG-3607 R4b).
     pub lifetime: LifetimeDecision,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_ref: Option<super::ProcessExecutionEnvRef>,
     pub originator: super::ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<super::DeclaredProcessIdentity>,
@@ -31,26 +32,88 @@ pub struct ProcessStartDeclaration {
 }
 
 impl ProcessStartDeclaration {
-    /// Declare a process start for store and durable-substrate implementors.
-    /// The key is absent by construction; realization derives it.
-    pub fn new(
-        input: impl Into<ProcessStartTarget>,
+    fn of_target(
+        input: ProcessStartTarget,
         originator: super::ProcessOriginator,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
         Self {
-            input: input.into(),
+            input,
             lifetime: lifetime.into(),
-            env_ref: None,
             originator,
             identity: None,
             observers: Vec::new(),
         }
     }
 
-    pub fn with_env_ref(mut self, env_ref: super::ProcessExecutionEnvRef) -> Self {
-        self.env_ref = Some(env_ref);
-        self
+    /// Declare an engine start under `launch`, the launch the declaring
+    /// attempt held. The key is absent by construction; realization derives
+    /// it.
+    pub fn engine(
+        kind: impl Into<String>,
+        payload: serde_json::Value,
+        launch: DeclaredLaunch,
+        originator: super::ProcessOriginator,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        Self::of_target(
+            ProcessStartTarget::Input(ProcessInput::Engine {
+                kind: kind.into(),
+                payload,
+                launch: launch.into_launch(),
+            }),
+            originator,
+            lifetime,
+        )
+    }
+
+    /// Declare a start of the definition `definition_id` names under
+    /// `launch`, the launch the declaring attempt held.
+    pub fn definition(
+        definition_id: super::super::ProcessDefinitionId,
+        signature_claim: Option<super::super::ProcessSignature>,
+        args: serde_json::Map<String, serde_json::Value>,
+        launch: DeclaredLaunch,
+        originator: super::ProcessOriginator,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        Self::of_target(
+            ProcessStartTarget::Definition {
+                definition_id,
+                signature_claim,
+                args,
+                launch: launch.into_launch(),
+            },
+            originator,
+            lifetime,
+        )
+    }
+
+    /// Declare a session-turn start. It holds no environment: its child
+    /// session runs under its own configuration (D5).
+    pub fn session_turn(
+        definition_key: impl Into<String>,
+        create_request: crate::SessionCreateRequest,
+        turn_input: crate::TurnInput,
+        result: super::SessionTurnOutcome,
+        originator: super::ProcessOriginator,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        Self::of_target(
+            ProcessStartTarget::Input(ProcessInput::SessionTurn {
+                definition_key: definition_key.into(),
+                create_request: Box::new(create_request),
+                turn_input: Box::new(turn_input),
+                result,
+            }),
+            originator,
+            lifetime,
+        )
+    }
+
+    /// What the start runs.
+    pub fn input(&self) -> &ProcessStartTarget {
+        &self.input
     }
 
     pub fn with_declared_identity(mut self, declared: super::DeclaredProcessIdentity) -> Self {
@@ -74,7 +137,6 @@ impl ProcessStartDeclaration {
             start_key: Some(start_key),
             input: self.input,
             lifetime: self.lifetime,
-            env_ref: self.env_ref,
             originator: self.originator,
             identity: self.identity,
             observers: self.observers,
@@ -102,8 +164,6 @@ pub struct ProcessStartRequest {
     /// What ends the process. A host start is a root: `Detached`, or `Until`
     /// a session the host looked up.
     pub lifetime: LifetimeDecision,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_ref: Option<super::ProcessExecutionEnvRef>,
     pub originator: super::ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<super::DeclaredProcessIdentity>,
@@ -118,26 +178,87 @@ pub struct ProcessStartRequest {
 }
 
 impl ProcessStartRequest {
-    /// Constructs a `ProcessStartRequest` for store and durable-substrate implementors while
-    /// persisting and coordinating durable process execution.
-    ///
-    /// The request carries no process id: the registrar mints one. An
-    /// idempotent host start adds a key with [`Self::with_host_start_key`].
-    pub fn new(
-        input: impl Into<ProcessStartTarget>,
+    fn of_target(
+        input: ProcessStartTarget,
         originator: super::ProcessOriginator,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
         Self {
             start_key: None,
-            input: input.into(),
+            input,
             lifetime: lifetime.into(),
-            env_ref: None,
             originator,
             identity: None,
             observers: Vec::new(),
             trace_cause: lash_trace::TraceCause::Root,
         }
+    }
+
+    /// A host's start of an engine input under `launch`: the environment
+    /// the host published and the engine settings it states, sealed with the
+    /// start's lifetime (M3). The request carries no process id: the
+    /// registrar mints one. An idempotent host start adds a key with
+    /// [`Self::with_host_start_key`].
+    pub fn engine(
+        kind: impl Into<String>,
+        payload: serde_json::Value,
+        launch: EngineLaunch,
+        originator: super::ProcessOriginator,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        Self::of_target(
+            ProcessStartTarget::Input(ProcessInput::Engine {
+                kind: kind.into(),
+                payload,
+                launch,
+            }),
+            originator,
+            lifetime,
+        )
+    }
+
+    /// A host's start of the definition `definition_id` names, under
+    /// `launch`.
+    pub fn definition(
+        definition_id: super::super::ProcessDefinitionId,
+        signature_claim: Option<super::super::ProcessSignature>,
+        args: serde_json::Map<String, serde_json::Value>,
+        launch: EngineLaunch,
+        originator: super::ProcessOriginator,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        Self::of_target(
+            ProcessStartTarget::Definition {
+                definition_id,
+                signature_claim,
+                args,
+                launch,
+            },
+            originator,
+            lifetime,
+        )
+    }
+
+    /// A host's start of a session turn. It states no environment: its
+    /// child session runs under its own configuration (D5).
+    pub fn session_turn(
+        definition_key: impl Into<String>,
+        create_request: crate::SessionCreateRequest,
+        turn_input: crate::TurnInput,
+        result: super::SessionTurnOutcome,
+        originator: super::ProcessOriginator,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        Self::of_target(
+            ProcessStartTarget::Input(ProcessInput::SessionTurn {
+                definition_key: definition_key.into(),
+                create_request: Box::new(create_request),
+                turn_input: Box::new(turn_input),
+                result,
+            }),
+            originator,
+            lifetime,
+        )
     }
 
     /// Links the start to `context`, the caller's trace context. An
@@ -209,13 +330,6 @@ impl ProcessStartRequest {
         }
     }
 
-    /// Sets the environment digest carried by a `ProcessStartRequest` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_env_ref(mut self, env_ref: super::ProcessExecutionEnvRef) -> Self {
-        self.env_ref = Some(env_ref);
-        self
-    }
-
     /// A request never pins a definition reference: only the engine registry can, and only
     /// after resolving it against the engine's stored artifact.
     pub fn with_declared_identity(mut self, declared: super::DeclaredProcessIdentity) -> Self {
@@ -233,20 +347,6 @@ impl ProcessStartRequest {
         self
     }
 
-    /// Drops the key a caller happened to carry, leaving the declaration a leaf
-    /// attempt records. The key is re-derived from the attempt identity at
-    /// realization, never carried across the journal.
-    pub fn into_declaration(self) -> ProcessStartDeclaration {
-        ProcessStartDeclaration {
-            input: self.input,
-            lifetime: self.lifetime,
-            env_ref: self.env_ref,
-            originator: self.originator,
-            identity: self.identity,
-            observers: self.observers,
-        }
-    }
-
     /// Extracts the registration outcome for store and durable-substrate implementors while
     /// persisting and coordinating durable process execution.
     pub fn into_registration(self) -> ProcessStartRegistration {
@@ -256,7 +356,6 @@ impl ProcessStartRequest {
             self.lifetime,
         )
         .with_start_key(self.start_key)
-        .with_execution_env_ref(self.env_ref)
         .with_trace(lash_trace::TraceScopeOffer::caused_by(self.trace_cause));
         if let Some(identity) = self.identity {
             registration = registration.with_declared_identity(identity);

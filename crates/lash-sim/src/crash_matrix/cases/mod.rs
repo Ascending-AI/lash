@@ -153,13 +153,14 @@ pub async fn register(
         ProcessInput::Engine {
             kind: KIND.to_owned(),
             payload,
+            launch: lash_core_execution::EngineLaunch::new(
+                lash_core_execution::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
         },
         ProcessProvenance::host(),
         lifetime,
-    )
-    .with_execution_env_ref(Some(
-        lash_core_execution::testing::process_execution_env_fixture_ref(),
-    ));
+    );
     if let Some(scope) = scope {
         registration.ancestry = Ancestry::from_scopes([scope]);
     }

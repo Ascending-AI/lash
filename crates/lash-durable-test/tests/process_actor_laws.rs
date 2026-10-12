@@ -115,10 +115,27 @@ impl ProcessEngine for LawEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &lash_core_execution::ProcessExecutionEnvSpec,
-    ) -> Result<Option<Value>, lash_core_execution::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&lash_core_execution::EngineSettings>,
+    ) -> std::result::Result<(), lash_core_execution::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(lash_core_execution::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<
+        Option<lash_core_execution::EngineSettings>,
+        lash_core_execution::PluginError,
+    > {
         Ok(None)
     }
 
@@ -333,6 +350,7 @@ impl World {
             SimNodesConfig {
                 lease: LeaseConfig::default(),
                 decodes: backend.formats().decodes(),
+                serves: Vec::new(),
                 max_active: 8,
             },
             activation,
@@ -425,13 +443,14 @@ fn registration(payload: Value) -> ProcessRegistration {
         ProcessInput::Engine {
             kind: KIND.to_owned(),
             payload,
+            launch: lash_core::EngineLaunch::new(
+                lash_core_execution::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
         },
         ProcessProvenance::host(),
         LifetimeDecision::Detached,
     )
-    .with_execution_env_ref(Some(
-        lash_core_execution::testing::process_execution_env_fixture_ref(),
-    ))
 }
 
 /// The first value under `key` anywhere in `value`.

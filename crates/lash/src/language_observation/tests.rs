@@ -85,12 +85,11 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     let started = core
         .processes()
         .start(
-            lash_core::ProcessStartRequest::new(
-                lash_core::testing::held_engine_input(serde_json::Value::Null),
+            lash_core::testing::held_engine_request(
+                serde_json::Value::Null,
                 lash_core::ProcessOriginator::host(),
                 lash_core::LifetimeDecision::Detached,
-            )
-            .with_env_ref(lash_core::testing::process_execution_env_fixture_ref()),
+            ),
             core.effect_host(),
         )
         .await
@@ -424,16 +423,11 @@ impl Dispatch {
 
     async fn register(&self) -> ProcessId {
         self.registry
-            .register_process(
-                lash_core::ProcessRegistration::new(
-                    lash_core::testing::held_engine_input(serde_json::Value::Null),
-                    lash_core::ProcessProvenance::host(),
-                    lash_core::Lifetime::Detached,
-                )
-                .with_execution_env_ref(Some(
-                    lash_core::testing::process_execution_env_fixture_ref(),
-                )),
-            )
+            .register_process(lash_core::ProcessRegistration::new(
+                lash_core::testing::held_engine_input(serde_json::Value::Null),
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            ))
             .await
             .expect("register process")
             .id

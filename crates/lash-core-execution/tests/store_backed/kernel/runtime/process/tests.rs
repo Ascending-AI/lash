@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::support::prelude::*;
 
 use crate::runtime::process::{
-    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessExecutionEnvSpec, ProcessInput,
-    ProcessObserverBy, ProcessProvenance, ProcessRegistration, ProjectionWatermark,
+    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessInput, ProcessObserverBy,
+    ProcessProvenance, ProcessRegistration, ProjectionWatermark,
 };
 use crate::{Lifetime, ProcessRegistry, SessionId, StoreSet as _};
 
@@ -27,11 +27,14 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
         ProcessInput::Engine {
             kind: "test-engine".to_string(),
             payload: serde_json::json!({"module_ref": "module-1"}),
+            launch: lash_core_execution::EngineLaunch::new(
+                crate::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
         },
         ProcessProvenance::host(),
         Lifetime::Detached,
-    )
-    .with_execution_env_ref(Some(crate::testing::process_execution_env_fixture_ref()));
+    );
     let registered = registry
         .register_process(registration)
         .await
@@ -213,20 +216,12 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
 }
 
 /// The store's refusals carry the typed reasons, so every caller downstream of
-/// `ProcessExecutionEnvStore` classifies by code.
+/// `ProcessEnvStore` classifies by code.
 #[tokio::test]
 async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
     let backend = crate::support::sqlite_memory_store_set().await;
     let store = backend.process_env_store();
-    let spec = ProcessExecutionEnvSpec::new(
-        crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            lash_core_execution::NoProgressBudget::bounded(12),
-        ),
-        crate::SessionToolAccess::ambient(),
-    );
+    let spec = lash_core_execution::testing::process_env_with_limit(1024);
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
     let staged = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
@@ -241,7 +236,7 @@ async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
         .await
         .expect("retire destination owner");
     store
-        .publish_process_execution_env(&staged_claim, &env_ref, &bytes)
+        .publish_process_env(&staged_claim, &env_ref, &bytes)
         .await
         .expect("stage env");
 
@@ -259,16 +254,13 @@ async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
         .await
         .expect("a carry into an ended destination does not revive its edge");
     assert_eq!(
-        store
-            .get_process_execution_env(&env_ref)
-            .await
-            .expect("read env"),
+        store.get_process_env(&env_ref).await.expect("read env"),
         None,
     );
     let destination_claim =
         crate::ReferrerClaim::unguarded(retired_destination.clone()).expect("destination claim");
     let destination_error = store
-        .publish_process_execution_env(&destination_claim, &env_ref, &bytes)
+        .publish_process_env(&destination_claim, &env_ref, &bytes)
         .await
         .expect_err("the destination remains fenced");
     assert!(
@@ -306,7 +298,7 @@ async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
         .await
         .expect("retire staged owner");
     let retired_error = store
-        .publish_process_execution_env(&staged_claim, &env_ref, &bytes)
+        .publish_process_env(&staged_claim, &env_ref, &bytes)
         .await
         .expect_err("a retired staging owner refuses publication");
     assert!(

@@ -199,8 +199,8 @@ impl<'a> StarterFacts<'a> {
     /// The deployment facts of the runtime `current` serves.
     pub(in crate::runtime::session_manager) fn of(current: &'a CurrentOwnerCapability) -> Self {
         Self {
-            plugin_host: current.plugins.host(),
-            protocol_plugin_id: current.plugins.host().protocol_plugin_id(),
+            plugin_host: current.plugins.plugin_host(),
+            protocol_plugin_id: current.plugins.plugin_host().protocol_plugin_id(),
             plugin_admission: current.plugins.plugin_admission().unwrap_or_default(),
             models: current.host.core.providers.models.as_ref(),
         }
@@ -399,7 +399,7 @@ async fn materialize_session_init(
 ) -> Result<MaterializedSession, crate::PluginError> {
     let plugins = current
         .plugins
-        .host()
+        .plugin_host()
         .defer_session(PluginSessionRequest::creation(
             &plan.session_id,
             plan.plugin_config.clone(),
@@ -819,7 +819,7 @@ async fn reopen_committed_session(
         tool_access: state.authority.tool_access.clone(),
         plugin_config: state.admitted_plugin_config(),
     };
-    let plugin_host = current.plugins.host();
+    let plugin_host = current.plugins.plugin_host();
     let plugins = match state.plugin_state() {
         Some(snapshot) => plugin_host.defer_session(PluginSessionRequest::rematerialization(
             state.session_id.clone(),
@@ -1349,7 +1349,7 @@ mod tests {
     /// refusal as its typed cause, not as message text, and the cause
     /// survives the plugin boundary's encoding.
     #[test]
-    fn a_refused_child_creation_config_carries_its_typed_cause() {
+    fn a_refused_child_creation_request_carries_its_typed_cause() {
         let mut request = SessionCreateRequest::root(
             crate::SessionToolAccess::ambient(),
             crate::SessionStartPoint::Empty,

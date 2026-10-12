@@ -142,9 +142,9 @@ async fn kernel_run(
         Err(error) => return Err(RunFault(error.to_string())),
     };
     let settings: KernelRecordedSettings = match run
-        .engine_config
+        .engine_settings
         .as_ref()
-        .map(|config| serde_json::from_value(config.clone()))
+        .map(|settings| serde_json::from_value(settings.value().clone()))
     {
         Some(Ok(settings)) => settings,
         Some(Err(error)) => {

@@ -32,11 +32,10 @@ impl RuntimeExecutionContext<'_> {
 pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     fn new(
         dispatch: Arc<ToolDispatchContext<'run>>,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_env_store: Arc<dyn crate::ProcessEnvStore>,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
         turn_context: crate::TurnContext,
-        execution_env_spec: crate::ProcessExecutionEnvSpec,
     ) -> Self;
 
     /// The tool-execution context this run lends its tool calls.
@@ -47,12 +46,14 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     fn with_tracing(self, tracing: Option<RuntimeExecutionTracing>) -> Self;
 
     /// Run this execution inside `process`: what it reads off the process it
-    /// runs in (its id, originator and captured environment) and what the
-    /// children it starts inherit come from the process's recorded facts.
+    /// runs in (its id, originator, and for an engine process `env`, its
+    /// recorded environment) and what the children it starts inherit come
+    /// from the process's recorded facts.
     #[must_use]
     fn with_process_execution(
         self,
         process: &crate::ProcessRecord,
+        env: Option<Arc<crate::ProcessEnv>>,
         event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self;
 
@@ -85,12 +86,12 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
 impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'run> {
     fn new(
         dispatch: Arc<ToolDispatchContext<'run>>,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_env_store: Arc<dyn crate::ProcessEnvStore>,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
         turn_context: crate::TurnContext,
-        execution_env_spec: crate::ProcessExecutionEnvSpec,
     ) -> Self {
+        let facts = dispatch.facts.clone();
         Self {
             tool_fault_retry: crate::runtime::PollPacing::fault_standard(),
             dispatch,
@@ -106,8 +107,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             // recorded `F` with `with_fleet_format`, as every context over a
             // durable store must (the session's and the process runner's).
             fleet_format: crate::FleetFormat::current(),
-            facts: crate::plugin::ExecutionFacts::of_env_spec(&execution_env_spec),
-            execution_env_spec,
+            facts,
             process_execution: None,
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
@@ -146,6 +146,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
     fn with_process_execution(
         mut self,
         process: &crate::ProcessRecord,
+        env: Option<Arc<crate::ProcessEnv>>,
         event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self {
         // The lineage the process's body starts children under (FIG-3607 R1),
@@ -159,7 +160,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         self.process_execution = Some(RuntimeProcessExecution {
             process_id: process.id.clone(),
             originator: process.provenance.originator.clone(),
-            env_ref: process.env_ref.clone(),
+            enclosing: enclosing_process(process, env),
             event_context: event_context.into(),
         });
         self
@@ -208,4 +209,22 @@ impl RuntimeExecutionContext<'_> {
     ) -> Result<bool, crate::RuntimeEffectControllerError> {
         Ok(self.turn_cancel.is_observed())
     }
+}
+
+/// `process` with its recorded environment `env`, when it is an engine
+/// process: what a child it starts may inherit.
+fn enclosing_process(
+    process: &crate::ProcessRecord,
+    env: Option<Arc<crate::ProcessEnv>>,
+) -> Option<Arc<crate::EnclosingProcess>> {
+    let crate::ProcessInput::Engine { kind, launch, .. } = process.input.as_ref() else {
+        return None;
+    };
+    Some(Arc::new(crate::EnclosingProcess {
+        process: process.id.clone(),
+        env_ref: launch.env.clone(),
+        env: Arc::unwrap_or_clone(env?),
+        engine_kind: kind.clone(),
+        settings: launch.settings.clone(),
+    }))
 }

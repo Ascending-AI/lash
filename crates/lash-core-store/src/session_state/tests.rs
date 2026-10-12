@@ -820,8 +820,6 @@ fn capped_plugin_config(cap: u64) -> crate::PluginConfig {
 /// head's.
 #[test]
 fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
-    use crate::session_state::facade_ops::RuntimeSessionStateFacadeOps as _;
-
     let policy = crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
@@ -854,11 +852,6 @@ fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
     state.install_run_view(&resolved);
     let expected = crate::AdmittedPluginConfig::new(capped_plugin_config(12), 4);
     assert_eq!(state.admitted_plugin_config(), expected);
-    assert_eq!(
-        state.process_execution_env_spec(&policy).plugin_config,
-        expected,
-        "a process the run starts captures the run's admitted configuration"
-    );
 }
 
 /// FIG-4379: every frame open captures the installed configuration, so a

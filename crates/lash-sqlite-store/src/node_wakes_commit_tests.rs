@@ -16,6 +16,7 @@ async fn an_empty_wake_capture_is_one_read() {
         .register_node(&lash_durable::NodeSpec {
             node: NodeId::new("capture-owner"),
             decodes: vec![formats()],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await
@@ -199,6 +200,7 @@ pub(super) async fn lost_hint_reaches_the_claim_poll() {
         .register_node(&lash_durable::NodeSpec {
             node: NodeId::new("doomed"),
             decodes: vec![formats()],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

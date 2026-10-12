@@ -86,7 +86,7 @@ pub struct RuntimeServices {
     pub plugins: Arc<PluginSession>,
 
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
-    pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    pub process_env_store: Arc<dyn crate::ProcessEnvStore>,
     pub clock: Arc<dyn crate::Clock>,
     /// The session's view of the store it persists through.
     pub store: Option<crate::store::SessionStore>,
@@ -127,7 +127,7 @@ impl RuntimeServices {
     pub fn new(
         plugins: Arc<PluginSession>,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_env_store: Arc<dyn crate::ProcessEnvStore>,
     ) -> Self {
         Self {
             plugins,
@@ -157,7 +157,7 @@ impl RuntimeServices {
 
     pub fn with_process_env_store(
         mut self,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_env_store: Arc<dyn crate::ProcessEnvStore>,
     ) -> Self {
         self.process_env_store = process_env_store;
         self
@@ -171,7 +171,7 @@ impl PersistentRuntimeServices {
         plugins: Arc<PluginSession>,
         store: crate::store::SessionStore,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_env_store: Arc<dyn crate::ProcessEnvStore>,
     ) -> Self {
         Self(RuntimeServices {
             plugins,

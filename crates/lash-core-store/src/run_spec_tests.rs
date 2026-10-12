@@ -160,9 +160,7 @@ fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
 }
 
 #[test]
-fn recorded_render_survives_run_and_detached_environment_round_trip() {
-    use crate::session_state::facade_ops::RuntimeSessionStateFacadeOps;
-
+fn recorded_render_survives_a_run_round_trip() {
     let record = RecordedRender {
         renderer_id: "lash.ax.v1".to_owned(),
         params: serde_json::json!({
@@ -170,29 +168,11 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
             "preview": lash_render::RenderParams::preview(),
         }),
     };
-    let authority = crate::SessionToolAccess::restricted(Vec::new()).expect("no resident tools");
-    let mut config = snapshot();
-    config.tool_access = authority.clone();
-    let mut resolved = ResolvedRun::snapshot(config);
+    let mut resolved = ResolvedRun::snapshot(snapshot());
     resolved.render = Some(record.clone());
     let encoded = serde_json::to_vec(&resolved).expect("encode run");
     let decoded: ResolvedRun = serde_json::from_slice(&encoded).expect("decode run");
-    assert_eq!(decoded.render, Some(record.clone()));
-
-    let mut state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-        crate::NoProgressBudget::bounded(12),
-    ));
-    state.install_run_view(&decoded);
-    let env = state.process_execution_env_spec(&state.policy);
-    assert_eq!(env.render, Some(record.clone()));
-    assert_eq!(env.tool_access, authority);
-    let env_bytes = env.to_store_bytes().expect("encode env");
-    let restored =
-        crate::ProcessExecutionEnvSpec::from_store_bytes(&env_bytes).expect("decode env");
-    assert_eq!(restored.render, Some(record));
-    assert_eq!(restored.tool_access, authority);
+    assert_eq!(decoded.render, Some(record));
 }
 
 #[test]
@@ -484,75 +464,6 @@ fn a_redundant_resolved_override_normalizes_to_the_snapshot() {
         })
         .unwrap();
     assert_eq!(normalized, run);
-}
-
-/// A7 (FIG-6021): a process captures the resolved config of the run that
-/// creates it, never the session's: the run's options in its plugin config
-/// with the spec hash that derived them, its narrowed tool access, and the
-/// capability refs its spec bound. A restart reads the stored capture, and a
-/// later session config change reaches neither it nor what it binds.
-#[test]
-fn a_process_captures_its_runs_resolved_config_across_a_restart_and_later_config() {
-    use crate::session_state::facade_ops::RuntimeSessionStateFacadeOps;
-
-    let narrowed = crate::SessionToolAccess::restricted(Vec::new()).expect("no resident tools");
-    let mut spec = RunSpec::overrides(RunOverrides {
-        tool_access: Some(narrowed.clone()),
-        owners: protocol_options(serde_json::json!({ "replace": "run" })),
-        ..RunOverrides::default()
-    });
-    spec.capabilities.insert(
-        SlotId::new("search"),
-        CapabilityRef {
-            contract: ContractRef::new("search", 1),
-            binding: BindingId::new("search:team"),
-            args: serde_json::Value::Null,
-        },
-    );
-    let resolved = spec
-        .resolve(&snapshot(), None, &catalog(), &MapOwner)
-        .expect("resolve");
-    let mut state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-        crate::NoProgressBudget::bounded(12),
-    ));
-    state.install_run_view(&resolved);
-    let captured = state.process_execution_env_spec(&state.policy);
-    let restarted = crate::ProcessExecutionEnvSpec::from_store_bytes(
-        &captured.to_store_bytes().expect("encode env"),
-    )
-    .expect("decode env");
-    assert_eq!(restarted, captured, "a restart reads the stored capture");
-    assert_eq!(
-        restarted.plugin_config.config.get("protocol"),
-        Some(&serde_json::json!({ "keep": 1, "replace": "run" })),
-        "the run's options, not the session's namespace"
-    );
-    assert_eq!(restarted.plugin_config.revision, 7);
-    assert_eq!(restarted.plugin_config.spec, spec.hash().expect("hash"));
-    assert_eq!(restarted.tool_access, narrowed);
-    assert_eq!(restarted.capabilities, spec.capabilities);
-
-    // The run ends and the session's config moves on.
-    state.take_run_view().expect("the run's view");
-    state
-        .authority
-        .plugin_config
-        .insert("protocol", serde_json::json!({ "replace": "later" }));
-    state.config_revision += 1;
-    let later = state.process_execution_env_spec(&state.policy);
-    assert_ne!(later, captured, "a later start captures the later config");
-    assert_eq!(later.plugin_config.spec, None);
-    assert!(later.capabilities.is_empty());
-    assert_eq!(
-        crate::ProcessExecutionEnvSpec::from_store_bytes(
-            &captured.to_store_bytes().expect("encode env"),
-        )
-        .expect("decode env"),
-        restarted,
-        "the running process's capture is unchanged by the later config"
-    );
 }
 
 /// OWNER-ADMISSION (FIG-6021): a stored spec states each owner once; a spec

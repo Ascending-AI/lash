@@ -57,8 +57,7 @@ lash_conformance::artifact_referrer_tests!({
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                 artifacts: Arc::new(open_storage.lash_vm_artifact_store())
                     as Arc<dyn lash_core::ModuleArtifactStore>,
-                process_env: Arc::new(open_storage.process_env_store())
-                    as Arc<dyn ProcessExecutionEnvStore>,
+                process_env: Arc::new(open_storage.process_env_store()) as Arc<dyn ProcessEnvStore>,
                 turn_preludes: Arc::new(open_storage.process_env_store())
                     as Arc<dyn lash_core::TurnPreludeStore>,
             };
@@ -76,7 +75,7 @@ lash_conformance::artifact_referrer_tests!({
                         artifacts: Arc::new(reopened.lash_vm_artifact_store())
                             as Arc<dyn lash_core::ModuleArtifactStore>,
                         process_env: Arc::new(reopened.process_env_store())
-                            as Arc<dyn ProcessExecutionEnvStore>,
+                            as Arc<dyn ProcessEnvStore>,
                         turn_preludes: Arc::new(reopened.process_env_store())
                             as Arc<dyn lash_core::TurnPreludeStore>,
                     }

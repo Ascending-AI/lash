@@ -439,11 +439,14 @@ fn registration(label: &str) -> ProcessRegistration {
         ProcessInput::Engine {
             kind: "store-contract-property".to_string(),
             payload: serde_json::json!({"label": label}),
+            launch: crate::EngineLaunch::new(
+                lash_core::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
         },
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
 }
 
 fn invocation_authority(

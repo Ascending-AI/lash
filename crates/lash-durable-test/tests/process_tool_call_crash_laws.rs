@@ -147,6 +147,10 @@ fn cell() -> lash_core::llm::types::LlmResponse {
     ))
 }
 
+/// The component that serves the probe to a process body.
+const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("process-holding-probe", lash_core::FormatVersion::ONE);
+
 /// The scenario, fresh for every matrix cell.
 struct Holding {
     dialect: Dialect,
@@ -225,8 +229,18 @@ impl Holding {
                     .plugin(Arc::new(
                         lash::process_controls::SessionProcessAdminPluginFactory::new(|_| {
                             lash_core::Lifetime::Detached
-                        }),
+                        },
+                        lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),),
                     ))
+                    .process_component(
+                        lash_core::testing::tool_component(
+                            PROBE_COMPONENT,
+                            Arc::new(Probe {
+                                world: Arc::clone(&self.world),
+                            }),
+                        ),
+                        PROBE_COMPONENT,
+                    )
                     .tools(Arc::new(Probe {
                         world: Arc::clone(&self.world),
                     }))
@@ -360,6 +374,7 @@ impl Scenario for Holding {
                 .0
                 .formats()
                 .decodes(),
+            serves: lash::testing::node_serves(&self.core()),
             max_active: 8,
         }
     }

@@ -59,6 +59,16 @@ pub enum ProcessParkReason {
     /// It runs a turn in a child session, and the node that claimed it runs
     /// no session turns.
     UnservedSessionTurn,
+    /// The composition its environment names does not build on the node
+    /// that claimed it (FIG-6034): a component is missing, its config does
+    /// not decode, or it refused to build. Nothing of the process ran or
+    /// settled for it.
+    CompositionUnavailable {
+        /// The component that did not build, when one is named.
+        component: Option<String>,
+        /// Why, in words.
+        message: String,
+    },
     /// The store refused its commits as corrupt, its terminal too.
     CommitRefused {
         /// The store's account.
@@ -165,6 +175,7 @@ impl ProcessParkReason {
             Self::AdvanceRefused { .. } => "advance_refused",
             Self::UnservedSessionTurn => "unserved_session_turn",
             Self::CommitRefused { .. } => "commit_refused",
+            Self::CompositionUnavailable { .. } => "composition_unavailable",
         }
     }
 }

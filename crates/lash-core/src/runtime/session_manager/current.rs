@@ -95,13 +95,23 @@ impl CurrentOwnerCapability {
         session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         self.known_session(session_id)?;
-        Ok(Arc::new(self.plugins.tool_catalog()?))
+        Ok(Arc::new(
+            self.session_plugins("tool_catalog_by_id")?.tool_catalog()?,
+        ))
     }
 
     pub(in crate::runtime::session_manager) fn current_tool_registry(
         &self,
     ) -> Result<Arc<crate::ToolRegistry>, crate::PluginError> {
-        Ok(self.plugins.tool_registry())
+        match &self.owner {
+            super::CurrentOwner::Process {
+                engine: Some(engine),
+                ..
+            } => Ok(Arc::clone(&engine.composition.registry)),
+            _ => Ok(self
+                .session_plugins("current_tool_registry")?
+                .tool_registry()),
+        }
     }
 
     pub(in crate::runtime::session_manager) async fn snapshot_current(
@@ -182,11 +192,15 @@ impl CurrentOwnerCapability {
 }
 
 impl super::CurrentOwnerCapability {
+    /// An engine process's facts: its environment's.
     pub(super) fn execution_facts(&self) -> Option<crate::plugin::ExecutionFacts> {
         match &self.owner {
-            super::CurrentOwner::Session(_) => None,
-            super::CurrentOwner::Process { environment, .. } => {
-                Some(crate::plugin::ExecutionFacts::of_env_spec(environment))
+            super::CurrentOwner::Process {
+                engine: Some(engine),
+                ..
+            } => Some(crate::plugin::ExecutionFacts::of_process(&engine.env)),
+            super::CurrentOwner::Process { engine: None, .. } | super::CurrentOwner::Session(_) => {
+                None
             }
         }
     }

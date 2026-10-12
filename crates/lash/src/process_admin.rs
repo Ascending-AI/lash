@@ -212,38 +212,30 @@ impl Processes {
         }
     }
 
-    /// The environment a host's session-turn start captures when its start
-    /// names none (FIG-4396). No session starts it, so nothing recorded
-    /// stands beneath it and the core keeps no default (FIG-4594): the
-    /// environment is the policy the request itself states, with no model
-    /// minted, and no plugin configuration. It is a function of what the
-    /// host stated, so the start-key fence that compares it compares only
-    /// that, and a retry on a deployment whose host changed what it passes
-    /// elsewhere presents the same start. The child's plugin config is
-    /// admitted here, on the core's plugin set, before anything is
-    /// registered.
+    /// Check a host's session-turn start before anything is registered. A
+    /// session-turn process carries no environment (FIG-6034 D5): its child
+    /// session runs under the configuration its create request states. No
+    /// session starts it, so nothing recorded stands beneath it and the core
+    /// keeps no default (FIG-4594): the request states its policy and model,
+    /// and the child's plugin config is admitted here, on the core's plugin
+    /// set.
     ///
     /// # Errors
     ///
     /// [`EmbedError::SessionTurnStartUnspecified`] when the request leaves
     /// its policy or its model unstated.
-    fn host_session_turn_environment(
+    fn check_host_session_turn(
         &self,
         create_request: &lash_core::SessionCreateRequest,
-    ) -> Result<lash_core::ProcessExecutionEnvSpec> {
+    ) -> Result<()> {
         if let Some(unstated) = create_request.unstated_root_config() {
             return Err(EmbedError::SessionTurnStartUnspecified { unstated });
         }
-        let Some(policy) = create_request.policy.clone() else {
+        if create_request.policy.is_none() {
             return Err(EmbedError::SessionTurnStartUnspecified {
                 unstated: lash_core::UnstatedSessionConfig::Policy,
             });
-        };
-        let environment = lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::AdmittedPluginConfig::default(),
-            policy,
-            create_request.tool_access.clone(),
-        );
+        }
         crate::support::build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),
@@ -259,21 +251,18 @@ impl Processes {
             &lash_core::store::plugin_writers::PluginAdmission::default(),
         )
         .map_err(lash_core::SessionError::from)?;
-        Ok(environment)
+        Ok(())
     }
 
     fn host_session_turn_admission(
         &self,
         request: lash_core::SessionCreateRequest,
-        environment: Option<lash_core::ProcessExecutionEnvSpec>,
     ) -> lash_core::runtime::SessionTurnAdmission {
         let core = self.core.clone();
-        Arc::new(move |fresh, claim| {
+        Arc::new(move |fresh, _claim| {
             let core = core.clone();
             let request = request.clone();
-            let environment = environment.clone();
             Box::pin(async move {
-                let env_store = core.env.core.durability.process_env_store.as_ref();
                 if fresh && let Some(key) = request.model.as_ref() {
                     // The reasoning the key's binding runs with: the
                     // request's own, else the default selection. Nothing
@@ -298,25 +287,23 @@ impl Processes {
                         )
                     })?;
                 }
-                // The environment lash derived for the start is published
-                // under its staging claim; one the host stated is already
-                // stored, and staging acquires it under the same claim.
-                if let Some(environment) = environment {
-                    lash_core::publish_process_execution_env(env_store, &claim, &environment)
-                        .await?;
-                }
                 Ok(())
             })
         })
     }
 
     /// Start a process, refusing a session-turn child's model key whose
-    /// reasoning is unsupported before any environment or process is
-    /// written. The refusal retains `RuntimeErrorCode::ReasoningRefused`.
+    /// reasoning is unsupported before any process is written. The refusal
+    /// retains `RuntimeErrorCode::ReasoningRefused`.
     ///
-    /// A session-turn start a host issues with no captured environment is a
-    /// root creation, and takes an explicit spec like every other
-    /// (FIG-4594): build its create request with
+    /// An engine or definition start states its launch: the environment the
+    /// host published under a pin ([`HostArtifacts::publish_process_env`](crate::artifacts::HostArtifacts::publish_process_env))
+    /// and its engine settings, which staging holds under the start's key
+    /// and seals onto the row; lash fills in neither (FIG-6034).
+    ///
+    /// A session-turn start carries no environment: it is a root creation,
+    /// and takes an explicit spec like every other (FIG-4594): build its
+    /// create request with
     /// [`SessionCreateRequest::with_spec`](lash_core::SessionCreateRequest::with_spec).
     /// One that leaves its policy or model unstated is refused with
     /// [`EmbedError::SessionTurnStartUnspecified`] and nothing is
@@ -352,39 +339,21 @@ impl Processes {
         // live, so a replay after the session was deleted answers the start
         // its first run made (ADR 0105 §1).
         let observers = request.observers.clone();
-        let mut registration = request.into_registration();
-        let host_session_turn_environment = match registration.input.as_ref() {
-            lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
-                create_request,
-                ..
-            }) if registration.env_ref.is_none() => {
-                Some(self.host_session_turn_environment(create_request)?)
-            }
-            _ => None,
-        };
+        let registration = request.into_registration();
         // A host start is its own operation (ADR 0113 §3.3): its staging
-        // holds the environment under `Start(key)` until registration carries
-        // it onto the record. The caller's context names no execution of the
-        // start's own: the core's host context is one scope every host start
-        // shares, settled at once.
+        // holds the stated environment under `Start(key)` until registration
+        // carries it onto the record. The caller's context names no execution
+        // of the start's own: the core's host context is one scope every host
+        // start shares, settled at once.
         let mut session_turn_admission = None;
         if let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
             create_request,
             ..
         }) = registration.input.as_ref()
         {
-            if let Some(environment) = host_session_turn_environment.as_ref() {
-                let env_ref = environment.stable_ref().map_err(|error| {
-                    lash_core::PluginError::Session(format!(
-                        "failed to encode process execution env: {error}"
-                    ))
-                })?;
-                registration.env_ref = Some(env_ref);
-            }
-            session_turn_admission = Some(self.host_session_turn_admission(
-                create_request.as_ref().clone(),
-                host_session_turn_environment,
-            ));
+            self.check_host_session_turn(create_request)?;
+            session_turn_admission =
+                Some(self.host_session_turn_admission(create_request.as_ref().clone()));
         }
         let start_key = registration.start_key.clone();
         let command = lash_core::ProcessCommand::Start {
@@ -502,6 +471,25 @@ impl Processes {
         })
     }
 
+    /// This build's default engine settings for a start of `payload` on
+    /// engine `kind`, for a host that chooses to state them. Lash never
+    /// calls it to fill a start's settings: a start states its own, and
+    /// every run reads what its row records (FIG-6034 D4).
+    ///
+    /// # Errors
+    ///
+    /// No engine of `kind` is registered, or the engine refuses `payload`.
+    pub fn engine_defaults(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Result<Option<lash_core::EngineSettings>> {
+        Ok(self
+            .core
+            .host_process_engines
+            .default_settings(kind, payload)?)
+    }
+
     /// Read the process with its park state from this core's actor store.
     /// A retained terminal reports `NotParked`; this read never reports `NotRead`.
     pub async fn get(
@@ -530,7 +518,7 @@ impl Processes {
                 process_id: process_id.clone(),
             }));
         };
-        let lash_core::ProcessInput::Engine { kind, payload } = &process.input else {
+        let lash_core::ProcessInput::Engine { kind, payload, .. } = &process.input else {
             return Ok(WorkflowRead::Unsupported {
                 engine_kind: process.identity.kind.clone(),
             });

@@ -91,6 +91,11 @@ pub enum RuntimeErrorCause {
         start_key: Option<crate::process_identity::StartKey>,
         parent: Box<crate::scope_identity::ScopeId>,
     },
+    /// A process environment was refused at admission, or a start named
+    /// one that is not published (FIG-6034).
+    ProcessEnvRefused {
+        refusal: Box<crate::process_env::ProcessEnvRefusal>,
+    },
     /// A host start key already names a different start.
     ProcessStartKeyConflict {
         start_key: crate::process_identity::StartKey,

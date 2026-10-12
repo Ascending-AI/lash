@@ -307,7 +307,6 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
     let tool_context = authority.apply_execution_binding(
         tool_context.with_prepared_payload(prepared.prepared_payload.clone()),
     );
-    let completion_context = tool_context.clone();
     let attempt_result = Box::pin(execute_leaf_tool_attempt(
         context,
         &authority,
@@ -387,67 +386,5 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
 
     let mut outcome = normalized_outcome(context, &ids, tool_name, args, result).await;
     outcome.intents = intents;
-    hold_declared_execution_environments(
-        context,
-        attempt_done(outcome),
-        completion_context.execution_env_spec.as_ref(),
-    )
-    .await
-}
-
-async fn hold_declared_execution_environments(
-    context: &ToolDispatchContext<'_>,
-    launch: crate::ToolAttemptLaunch,
-    captured_spec: Option<&crate::ProcessExecutionEnvSpec>,
-) -> Result<crate::ToolAttemptLaunch, crate::RuntimeEffectControllerError> {
-    let mut env_refs: Vec<_> = match &launch {
-        crate::ToolAttemptLaunch::Done { intents, .. }
-            if super::intent_executor::admit_batch(
-                &context.owner.runtime_owner(),
-                intents,
-                context.state.data_limits().tool_intents,
-            )
-            .is_none() =>
-        {
-            intents
-                .intents
-                .iter()
-                .filter_map(crate::ToolIntent::execution_env_ref)
-                .cloned()
-                .collect()
-        }
-        crate::ToolAttemptLaunch::Done { .. } => Vec::new(),
-    };
-    env_refs.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
-    env_refs.dedup();
-    if !env_refs.is_empty() {
-        let captured_spec = captured_spec.ok_or_else(|| {
-            crate::PluginError::Session(
-                "process execution environment requires a runtime context".into(),
-            )
-        })?;
-        let ports = context.process_engines.artifact_ports().ok_or_else(|| {
-            crate::PluginError::Session(
-                "an environment declaration requires the runtime's artifact stores".to_string(),
-            )
-        })?;
-        let claim =
-            crate::session::execution_claim_of(context.effect_controller.execution_scope())?;
-        let captured_ref = captured_spec
-            .stable_ref()
-            .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-        for env_ref in env_refs {
-            if env_ref == captured_ref {
-                crate::publish_process_execution_env(ports.env().as_ref(), &claim, captured_spec)
-                    .await?;
-            } else {
-                ports
-                    .env()
-                    .acquire_process_execution_env(&claim, &env_ref)
-                    .await
-                    .map_err(crate::PluginError::from)?;
-            }
-        }
-    }
-    Ok(launch)
+    Ok(attempt_done(outcome))
 }

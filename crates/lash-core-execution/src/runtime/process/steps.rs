@@ -90,6 +90,15 @@ pub enum StepRefusal {
     /// The step names an engine body the process's engine does not declare.
     #[error(transparent)]
     Engine(#[from] super::engine_state::EngineStepRefusal),
+    /// The process's composition does not build on this node (FIG-6034):
+    /// the activation parks it before any step is admitted or resumed.
+    #[error("the process's composition does not build here: {reason}")]
+    CompositionUnavailable {
+        /// The component that did not build, when one is named.
+        component: Option<String>,
+        /// Why.
+        reason: String,
+    },
 }
 
 /// The tools a process's tool steps run: the catalog they resolve against,
@@ -225,6 +234,37 @@ pub trait ProcessSteps: Send + Sync {
         step: &StepRequest,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal>;
+
+    /// Build `process`'s composition, before the activation admits or
+    /// resumes any step of it (§5.1). [`StepRefusal::CompositionUnavailable`]
+    /// parks the process and settles nothing; any other refusal is a fault
+    /// the next pass meets again.
+    ///
+    /// # Errors
+    ///
+    /// [`StepRefusal`].
+    async fn prepare(&self, process: &ProcessRecord) -> Result<(), StepRefusal> {
+        let _ = process;
+        Ok(())
+    }
+
+    /// The claim requirements `process` carries while it holds `steps`
+    /// (§6.2): its environment's components' config tokens, and the
+    /// revision token of every component a tool step among `steps` is
+    /// bound to. `None` when these steps keep no requirement, so the
+    /// activation leaves what the actor carries alone.
+    ///
+    /// # Errors
+    ///
+    /// The composition cannot answer; the pass is retried.
+    async fn requirements(
+        &self,
+        process: &ProcessRecord,
+        steps: &[StepRequest],
+    ) -> Result<Option<Vec<String>>, lash_durable::DurableError> {
+        let _ = (process, steps);
+        Ok(None)
+    }
 
     /// How long a step body whose token was cancelled may still answer:
     /// the runtime's

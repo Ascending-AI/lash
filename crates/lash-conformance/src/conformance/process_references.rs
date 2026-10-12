@@ -94,17 +94,17 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
                     ProcessInput::Engine {
                         kind: "reference-test".to_string(),
                         payload: serde_json::Value::Null,
+                        launch: crate::EngineLaunch::new(env_ref, None),
                     },
                     ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )
-                .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                    definition_identity(
+                .with_admitted_identity(
+                    lash_core::AdmittedProcessIdentity::for_testing(definition_identity(
                         lash_core::ProcessDefinitionRef::unclaimed("reference-test", definition),
                         None::<String>,
-                    ),
-                ))
-                .with_execution_env_ref(Some(env_ref)),
+                    )),
+                ),
             )
             .await
             .expect("register reference process");

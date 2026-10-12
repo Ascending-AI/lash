@@ -102,7 +102,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// is judged against, tool by tool (FIG-3587). `None` means the dispatch
     /// catalog is live.
     live_tool_catalog: Option<Arc<crate::ToolCatalog>>,
-    pub(super) process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    pub(super) process_env_store: Arc<dyn crate::ProcessEnvStore>,
     /// `F` this execution's durable writers emit — recorded by the bound
     /// session's store, so a stamped surface version is the fleet's, not the
     /// build's newest (FIG-3796). Contexts with no store default to the
@@ -119,7 +119,6 @@ pub struct RuntimeExecutionContext<'run> {
     /// `None` outside a run, as in a process's execution.
     resolved_run: Option<Arc<crate::ResolvedRun>>,
     facts: crate::plugin::ExecutionFacts,
-    execution_env_spec: crate::ProcessExecutionEnvSpec,
     process_execution: Option<RuntimeProcessExecution>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
@@ -205,7 +204,10 @@ pub struct RuntimeExecutionContext<'run> {
 pub(crate) struct RuntimeProcessExecution {
     pub process_id: ProcessId,
     pub originator: crate::ProcessOriginator,
-    pub env_ref: Option<crate::ProcessExecutionEnvRef>,
+    /// The process's recorded environment and settings, for an engine
+    /// process whose runtime loaded them: what its children may inherit and
+    /// the capability refs its execution binds.
+    pub enclosing: Option<Arc<crate::EnclosingProcess>>,
     pub event_context: Option<RuntimeExecutionProcessEventContext>,
 }
 
@@ -480,7 +482,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             logical_run: self.logical_run.clone(),
             resolved_run: self.resolved_run.clone(),
             facts: self.facts.clone(),
-            execution_env_spec: self.execution_env_spec.clone(),
             process_execution: self.process_execution.clone(),
             parent_invocation: self.parent_invocation.clone(),
             turn_phase_probe: self.turn_phase_probe.clone(),
@@ -613,26 +614,16 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.facts.max_tool_calls
     }
 
-    pub fn with_execution_env_spec(
-        mut self,
-        execution_env_spec: crate::ProcessExecutionEnvSpec,
-    ) -> Self {
-        self.facts = crate::plugin::ExecutionFacts::of_env_spec(&execution_env_spec);
-        self.execution_env_spec = execution_env_spec;
+    /// The facts this execution runs and presents under.
+    pub(crate) fn execution_facts(&self) -> &crate::plugin::ExecutionFacts {
+        &self.facts
+    }
+
+    /// This context running and presenting under `facts`: a recorded call's.
+    #[must_use]
+    pub(crate) fn with_execution_facts(mut self, facts: crate::plugin::ExecutionFacts) -> Self {
+        self.facts = facts;
         self
-    }
-
-    pub(crate) async fn recorded_tool_run_env_spec(
-        &self,
-        reference: &crate::ProcessExecutionEnvRef,
-    ) -> Result<crate::ProcessExecutionEnvSpec, crate::PluginError> {
-        crate::load_process_execution_env(self.process_env_store.as_ref(), reference)
-            .await
-            .map_err(Into::into)
-    }
-
-    pub(crate) fn tool_run_env_spec(&self) -> crate::ProcessExecutionEnvSpec {
-        self.execution_env_spec.clone()
     }
 
     pub fn recorded_render(&self) -> Option<&crate::RecordedRender> {
@@ -640,8 +631,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     pub fn with_recorded_render(mut self, recorded: crate::RecordedRender) -> Self {
-        self.facts.render = Some(recorded.clone());
-        self.execution_env_spec.render = Some(recorded);
+        self.facts.render = Some(recorded);
         self
     }
 
@@ -770,13 +760,20 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// The capability refs this execution binds, by slot: the ones its
-    /// logical Run's recorded spec names, or the ones a process captured
-    /// from the run that created it (FIG-6021). Both reach it through its
-    /// execution environment.
+    /// logical Run's recorded spec names (FIG-6021), or the ones the
+    /// environment of the process it runs inside states (FIG-6034).
     pub fn run_capabilities(
         &self,
     ) -> &std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef> {
-        &self.execution_env_spec.capabilities
+        static NONE: std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef> =
+            std::collections::BTreeMap::new();
+        if let Some(run) = self.resolved_run.as_deref() {
+            return run.capabilities();
+        }
+        self.process_execution
+            .as_ref()
+            .and_then(|execution| execution.enclosing.as_deref())
+            .map_or(&NONE, |enclosing| enclosing.env.capabilities())
     }
 
     /// The complete turn-cancel trio for one wait built from this execution:
@@ -983,48 +980,38 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// Capture a start's environment under this execution before its command
-    /// is journaled. The command carries only the published digest.
-    pub(crate) async fn process_start_execution_env(
-        &self,
-        registration: crate::ProcessStartRegistration,
-    ) -> Result<crate::ProcessStartRegistration, crate::PluginError> {
-        if registration.env_ref.is_some() {
-            return Ok(registration);
-        }
-        let claim = execution_claim_of(self.dispatch.effect_controller.execution_scope())?;
-        let env_ref = self.capture_execution_env(&claim).await?;
-        Ok(registration.with_execution_env_ref(Some(env_ref)))
-    }
-
-    /// Publish or acquire this execution's environment under `claim` before
-    /// persisting its digest in a start or a tool run. An ended referrer
-    /// refuses acquisition; it cannot resurrect a reclaimed environment.
-    pub(crate) async fn capture_execution_env(
-        &self,
-        claim: &crate::ReferrerClaim,
-    ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
-        if let Some(env_ref) = self.inherited_process_execution_env_ref() {
-            self.process_env_store
-                .acquire_process_execution_env(claim, &env_ref)
-                .await
-                .map_err(crate::PluginError::from)?;
-            return Ok(env_ref);
-        }
-        crate::publish_process_execution_env(
-            self.process_env_store.as_ref(),
-            claim,
-            &self.execution_env_spec,
-        )
-        .await
-    }
-
-    pub(crate) fn inherited_process_execution_env_ref(
-        &self,
-    ) -> Option<crate::ProcessExecutionEnvRef> {
+    /// The process this context runs inside, with its recorded environment
+    /// and settings, when its runtime loaded them.
+    pub(crate) fn enclosing_env(&self) -> Option<Arc<crate::EnclosingProcess>> {
         self.process_execution
             .as_ref()
-            .and_then(|exec| exec.env_ref.clone())
+            .and_then(|execution| execution.enclosing.clone())
+    }
+
+    /// Hold the environment `registration`'s launch names under this
+    /// execution's claim before its command is journaled (D10). A
+    /// session-turn start names none.
+    async fn hold_start_env(
+        &self,
+        registration: &crate::ProcessStartRegistration,
+    ) -> Result<(), crate::PluginError> {
+        let Some(launch) = registration.input.launch() else {
+            return Ok(());
+        };
+        let claim = execution_claim_of(self.dispatch.effect_controller.execution_scope())?;
+        crate::hold_process_env(
+            &crate::ProcessEnvPorts::published_only(self.process_env_store.as_ref()),
+            &claim,
+            &crate::ProcessEnvSelection::Published(launch.env.clone()),
+        )
+        .await
+        .map(drop)
+        .map_err(|error| match error {
+            crate::HoldEnvError::Refused(refusal) => {
+                crate::PluginError::ProcessEnvRefused { refusal }
+            }
+            crate::HoldEnvError::Fault(error) => error,
+        })
     }
 
     /// The start context a code-executor's child start draws its lifetime
@@ -1045,12 +1032,9 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> crate::ToolInvocationReply {
         let _phase = self.named_phase("process.start_child");
         let registration = request.into_registration();
-        let registration = match self.process_start_execution_env(registration).await {
-            Ok(registration) => registration,
-            Err(error) => {
-                return crate::ToolInvocationReply::error(serde_json::json!(error.to_string()));
-            }
-        };
+        if let Err(error) = self.hold_start_env(&registration).await {
+            return crate::ToolInvocationReply::error(serde_json::json!(error.to_string()));
+        }
         // A redrive presents the same start key and gets the retained process
         // back untouched (ADR 0107), so the attempt bound it recorded stands
         // whatever this attempt resolved.

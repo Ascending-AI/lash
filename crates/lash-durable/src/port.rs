@@ -72,6 +72,9 @@ pub struct NodeSpec {
     pub node: NodeId,
     /// The format sets this build decodes; it claims only actors in one.
     pub decodes: Vec<FormatSet>,
+    /// The claim requirements this build serves: it runs an actor only when
+    /// the actor's requirements are a subset (FIG-6034 D3).
+    pub serves: Vec<String>,
     /// How long one heartbeat keeps the lease, in milliseconds. Hosts take
     /// it from a validated [`LeaseConfig`](crate::LeaseConfig).
     pub ttl_millis: i64,
@@ -84,6 +87,8 @@ pub struct NodeLease {
     pub owner: Owner,
     /// The format sets it decodes.
     pub decodes: Vec<FormatSet>,
+    /// The claim requirements it serves.
+    pub serves: Vec<String>,
     /// How long one heartbeat keeps the lease, in milliseconds.
     pub ttl_millis: i64,
     /// When the lease expires unless renewed, as of the registration.
@@ -131,25 +136,70 @@ pub struct Claimed {
 /// What a node claimed an actor for (ADR 0106 §1, ADR 0132 §11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClaimPurpose {
-    /// The node decodes the actor's format set: it runs the actor.
+    /// The node decodes the actor's format set and serves every claim
+    /// requirement it carries: it runs the actor.
     Run,
-    /// The node does not decode the actor's format set and claimed it only
-    /// for its pending cancel: the activation ends it from registry state
-    /// and never reads its state or calls its engine.
+    /// The node does not decode the actor's format set, or does not serve a
+    /// requirement it carries, and claimed it only for its pending cancel:
+    /// the activation ends it from registry state and never reads its state
+    /// or calls its engine.
     CancelOnly,
 }
 
 impl ClaimPurpose {
-    /// The purpose a node that decodes `decodes` claims an actor stored in
-    /// `formats` for.
+    /// The purpose `node` claims an actor stored in `formats` and requiring
+    /// `requires` for (FIG-6034 D3: a build that lacks a requirement never
+    /// claims the actor to run it).
     #[must_use]
-    pub fn of(decodes: &[FormatSet], formats: &str) -> Self {
-        if decodes.iter().any(|set| set.as_str() == formats) {
+    pub fn of(node: &NodeLease, formats: &str, requires: &[String]) -> Self {
+        if node.decodes.iter().any(|set| set.as_str() == formats)
+            && requires
+                .iter()
+                .all(|required| node.serves.contains(required))
+        {
             Self::Run
         } else {
             Self::CancelOnly
         }
     }
+
+    /// [`Self::of`] an actor whose requirements are stored as `requires`,
+    /// the canonical JSON array or `NULL`.
+    ///
+    /// # Errors
+    ///
+    /// The stored requirements do not decode: the row is corrupt.
+    pub fn of_stored(
+        node: &NodeLease,
+        formats: &str,
+        requires: Option<&str>,
+    ) -> Result<Self, crate::DurableError> {
+        let requires = parse_requires(requires).map_err(|error| {
+            crate::DurableError::Store(crate::StoreFailure {
+                kind: crate::StoreFailureKind::Corrupt,
+                message: format!("actor claim requirements: {error}"),
+            })
+        })?;
+        Ok(Self::of(node, formats, &requires))
+    }
+}
+
+/// The claim requirements a store recorded for an actor, as the canonical
+/// JSON array it stores; none for `NULL`.
+///
+/// # Errors
+///
+/// The stored text is not a JSON array of strings.
+pub fn parse_requires(stored: Option<&str>) -> Result<Vec<String>, serde_json::Error> {
+    stored.map_or(Ok(Vec::new()), serde_json::from_str)
+}
+
+/// The canonical stored spelling of `requires`: a JSON array, sorted and
+/// deduplicated.
+#[must_use]
+pub fn encode_requires(requires: &[String]) -> String {
+    let set: std::collections::BTreeSet<&String> = requires.iter().collect();
+    serde_json::Value::from(set.into_iter().map(String::as_str).collect::<Vec<_>>()).to_string()
 }
 
 /// One actor a reap released.

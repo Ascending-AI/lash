@@ -175,6 +175,7 @@ pub async fn owner_commit(stores: &dyn StoreSet) -> crate::facade_support::sql::
         .register_node(&NodeSpec {
             node: NodeId::new("sql-work-owner"),
             decodes: vec![formats.clone()],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

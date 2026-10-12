@@ -156,7 +156,7 @@ fn decode_stored_edge(kind: &str, id: &str) -> Result<ArtifactReferrer, StoreErr
 /// its process. The writer orders this acquisition against source cleanup.
 pub(crate) fn acquire_process_env_tx(
     tx: &rusqlite::Connection,
-    env: &lash_core_execution::ProcessExecutionEnvRef,
+    env: &lash_core_execution::ProcessEnvRef,
     process: &lash_core_execution::ProcessId,
 ) -> Result<(), lash_core_execution::PluginError> {
     let referrer = ArtifactReferrer::ProcessRecord(process.clone());
@@ -751,11 +751,11 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessExecutionEnvStore for SqliteStore {
-    async fn publish_process_execution_env(
+impl lash_core_execution::ProcessEnvStore for SqliteStore {
+    async fn publish_process_env(
         &self,
         claim: &ReferrerClaim,
-        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+        env_ref: &lash_core_execution::ProcessEnvRef,
         bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
@@ -769,10 +769,8 @@ impl lash_core_execution::ProcessExecutionEnvStore for SqliteStore {
             });
         }
         let plugin_publication =
-            lash_core_execution::store::plugin_writers::PluginPublication::of_process_execution_env(
-                bytes,
-            )
-            .map_err(|error| ArtifactStoreError::Encode(error.to_string()))?;
+            lash_core_execution::store::plugin_writers::PluginPublication::of_process_env(bytes)
+                .map_err(|error| ArtifactStoreError::Encode(error.to_string()))?;
         self.publish_artifact_ref_blob(
             PROCESS_ENV_NAMESPACE,
             env_ref.as_str().to_owned(),
@@ -784,10 +782,10 @@ impl lash_core_execution::ProcessExecutionEnvStore for SqliteStore {
         .await
     }
 
-    async fn acquire_process_execution_env(
+    async fn acquire_process_env(
         &self,
         claim: &ReferrerClaim,
-        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+        env_ref: &lash_core_execution::ProcessEnvRef,
     ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
             return Err(ArtifactStoreError::Encode(
@@ -810,9 +808,9 @@ impl lash_core_execution::ProcessExecutionEnvStore for SqliteStore {
             .await
     }
 
-    async fn get_process_execution_env(
+    async fn get_process_env(
         &self,
-        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+        env_ref: &lash_core_execution::ProcessEnvRef,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
             return Err(ArtifactStoreError::StoredDataCorrupt {
@@ -1109,23 +1107,15 @@ mod tests {
 
     #[tokio::test]
     async fn process_environment_publish_acquire_and_end_preserve_other_namespace() {
-        use lash_core_execution::ProcessExecutionEnvStore;
+        use lash_core_execution::ProcessEnvStore;
         let (_dir, store) = store().await;
-        let spec = lash_core_execution::ProcessExecutionEnvSpec::new(
-            lash_core_execution::AdmittedPluginConfig::default(),
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
-                lash_core::NoProgressBudget::bounded(12),
-            ),
-            lash_core_execution::SessionToolAccess::ambient(),
-        );
+        let spec = lash_core_execution::testing::process_env_with_limit(1024);
         let bytes = spec.to_store_bytes().expect("encode environment");
         let env_ref = spec.stable_ref().expect("environment reference");
         let source = pin();
         let other = pin();
         store
-            .publish_process_execution_env(
+            .publish_process_env(
                 &ReferrerClaim::unguarded(source.clone()).expect("source claim"),
                 &env_ref,
                 &bytes,
@@ -1133,7 +1123,7 @@ mod tests {
             .await
             .expect("publish environment");
         store
-            .acquire_process_execution_env(
+            .acquire_process_env(
                 &ReferrerClaim::unguarded(other.clone()).expect("other claim"),
                 &env_ref,
             )
@@ -1156,7 +1146,7 @@ mod tests {
             .expect("end first environment referrer");
         assert_eq!(
             store
-                .get_process_execution_env(&env_ref)
+                .get_process_env(&env_ref)
                 .await
                 .expect("read environment"),
             Some(bytes)

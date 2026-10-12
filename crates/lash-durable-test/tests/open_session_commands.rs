@@ -317,6 +317,7 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: backend.formats().decodes(),
+            serves: Vec::new(),
             max_active: 1,
         },
         Arc::new(SessionActivation::new(

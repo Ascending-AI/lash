@@ -238,51 +238,6 @@ impl ProcessCapability {
             .unwrap_or_else(|| crate::SessionScope::new(session_id))
     }
 
-    async fn capture_execution_env(
-        &self,
-        current: &CurrentOwnerCapability,
-        registration: &crate::ProcessStartRegistration,
-        scope: &crate::ProcessOpScope<'_>,
-    ) -> Result<
-        (
-            Option<crate::ProcessExecutionEnvRef>,
-            Option<crate::ProcessExecutionEnvSpec>,
-        ),
-        crate::PluginError,
-    > {
-        let claim = crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(
-            scope
-                .effect_controller
-                .execution_scope()
-                .journal_identity()
-                .map_err(|error| crate::PluginError::Session(error.to_string()))?,
-        ));
-        if let Some(env_ref) = registration.env_ref.clone() {
-            current
-                .host
-                .core
-                .durability
-                .process_env_store
-                .acquire_process_execution_env(&claim, &env_ref)
-                .await
-                .map_err(crate::PluginError::from)?;
-            let spec = crate::load_process_execution_env(
-                current.host.core.durability.process_env_store.as_ref(),
-                &env_ref,
-            )
-            .await?;
-            return Ok((Some(env_ref), Some(spec)));
-        }
-        let spec = current.execution_env_spec()?;
-        let env_ref = crate::publish_process_execution_env(
-            current.host.core.durability.process_env_store.as_ref(),
-            &claim,
-            &spec,
-        )
-        .await?;
-        Ok((Some(env_ref), Some(spec)))
-    }
-
     /// K5 stages the Run's admitted registration on the same process
     /// executor as recorded intents, as a store-local effect of the call
     /// that declared it. No live tool policy is consulted.
@@ -300,26 +255,7 @@ impl ProcessCapability {
             crate::ProcessOriginator::Host { .. } => Vec::new(),
         };
         let registration = with_admitted_start_cx(current, registration, &scope).await?;
-        let env_spec = if matches!(
-            registration.input.as_ref(),
-            crate::ProcessStartTarget::Input(crate::ProcessInput::SessionTurn { .. })
-        ) {
-            match registration.env_ref.as_ref() {
-                Some(reference) => Some(
-                    crate::load_process_execution_env(
-                        current.host.core.durability.process_env_store.as_ref(),
-                        reference,
-                    )
-                    .await?,
-                ),
-                None => None,
-            }
-        } else {
-            None
-        };
-        let registration = self
-            .admit_session_turn_start(current, registration, env_spec.as_ref())
-            .await?;
+        let registration = self.admit_session_turn_start(current, registration)?;
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
         let execution_context = options.execution_context(&scope);
         let staged = self
@@ -350,9 +286,6 @@ impl ProcessCapability {
             .parent_invocation
             .as_ref()
             .and_then(crate::RuntimeInvocation::causal_ref);
-        let (env_ref, validation_env_spec) = self
-            .capture_execution_env(current, &registration, &scope)
-            .await?;
         // Children started *by a process* inherit the chain's provenance (the
         // run context provides it); in-session starts stamp the creating
         // session. Only the explicit `options.initial_observers` set creates
@@ -362,15 +295,11 @@ impl ProcessCapability {
             Some(spawn) => spawn.originator,
             None => crate::ProcessOriginator::session(creator_scope.clone()),
         };
-        let registration = registration
-            .with_process_provenance(
-                crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
-            )
-            .with_execution_env_ref(env_ref);
+        let registration = registration.with_process_provenance(
+            crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
+        );
         let registration = with_admitted_start_cx(current, registration, &scope).await?;
-        let registration = self
-            .admit_session_turn_start(current, registration, validation_env_spec.as_ref())
-            .await?;
+        let registration = self.admit_session_turn_start(current, registration)?;
         let execution_context = options.execution_context(&scope);
         let runner = ProcessCommandRunner::new(
             current,
@@ -403,23 +332,6 @@ impl ProcessCapability {
             .parent_invocation
             .as_ref()
             .and_then(crate::RuntimeInvocation::causal_ref);
-        let env_spec = if matches!(
-            &request.input,
-            crate::ProcessStartTarget::Input(crate::ProcessInput::SessionTurn { .. })
-        ) {
-            match request.env_ref.as_ref() {
-                Some(env_ref) => Some(
-                    crate::load_process_execution_env(
-                        current.host.core.durability.process_env_store.as_ref(),
-                        env_ref,
-                    )
-                    .await?,
-                ),
-                None => None,
-            }
-        } else {
-            None
-        };
         // A leaf start declares no observer edge (#1534 gives the *run* its own
         // possession, which is what makes `await handle` reachable). Observation
         // is the other half: without an edge the declaring session cannot see
@@ -469,8 +381,7 @@ impl ProcessCapability {
             .with_consumer_hold(scope.consumer_hold.clone());
         let registration = with_admitted_start_cx(current, registration, &scope).await?;
         let registration = self
-            .admit_session_turn_start(current, registration, env_spec.as_ref())
-            .await?
+            .admit_session_turn_start(current, registration)?
             .with_host_facing_label(declared_label);
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
         let execution_context = options.execution_context(&scope);
@@ -484,24 +395,18 @@ impl ProcessCapability {
     }
 
     /// Check the session child's creation facts against this deployment's
-    /// plugin set.
-    async fn admit_session_turn_start(
+    /// plugin set. A session-turn start carries no environment (D5): its
+    /// child is a session with its own configuration.
+    fn admit_session_turn_start(
         &self,
         current: &CurrentOwnerCapability,
         registration: crate::ProcessStartRegistration,
-        env_spec: Option<&crate::ProcessExecutionEnvSpec>,
     ) -> Result<crate::ProcessStartRegistration, crate::PluginError> {
         if let crate::ProcessStartTarget::Input(crate::ProcessInput::SessionTurn {
             create_request,
             ..
         }) = registration.input.as_ref()
         {
-            if env_spec.is_none() {
-                return Err(crate::PluginError::Session(format!(
-                    "process `{}` requires a captured execution env",
-                    registration.refusal_name()
-                )));
-            }
             super::super::session_init::admit_session_turn_child(
                 current,
                 create_request,

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use lash::durable::{DurableStore, NodeWakes};
 use lash::persistence::{
     ArtifactCleanupLedger, AttachmentReferrers, AttachmentStore, DeploymentStore,
-    ModuleArtifactStore, ObligationLedger, ProcessDefinitionStore, ProcessExecutionEnvStore,
+    ModuleArtifactStore, ObligationLedger, ProcessDefinitionStore, ProcessEnvStore,
     ProcessRegistry, RecoveryLeaderStore, ToolMaterialStore, TurnPreludeStore,
 };
 use lash::runtime::Clock;
@@ -62,7 +62,7 @@ impl StoreSet for IntegratorStores {
         self.substrate.process_registry()
     }
 
-    fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn ProcessEnvStore> {
         self.substrate.process_env_store()
     }
 

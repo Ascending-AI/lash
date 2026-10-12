@@ -68,7 +68,10 @@ impl CurrentOwnerCapability {
             .to_vec();
         let locally_derived_leaf_node_id = graph.leaf_node_id().cloned();
         state
-            .capture_plugin_states(&self.plugins, self.fleet_format())
+            .capture_plugin_states(
+                self.session_plugins("append_session_nodes")?,
+                self.fleet_format(),
+            )
             .map_err(crate::PluginError::Runtime)?;
         let mut commit =
             crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(

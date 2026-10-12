@@ -979,6 +979,7 @@ impl Scenario for L4 {
                 .expect("the database is built first")
                 .formats()
                 .decodes(),
+            serves: Vec::new(),
             max_active: 4,
         }
     }

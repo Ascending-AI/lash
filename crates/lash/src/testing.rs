@@ -146,6 +146,13 @@ pub fn node_activation(
     ))
 }
 
+/// The claim requirements `core`'s process components serve: what a
+/// simulated node of the core serves, so it runs the processes the core's
+/// own node would (FIG-6034 D3).
+pub fn node_serves(core: &crate::LashCore) -> Vec<String> {
+    core.env.core.process_engines.components().serves()
+}
+
 /// Decode a command's recorded outcome while explicitly settling fixture setup.
 /// These conversions are test support; hosts can decode their own settlement.
 pub trait AdminFixtureOutcome: Sized {

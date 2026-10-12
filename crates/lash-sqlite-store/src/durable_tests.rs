@@ -215,6 +215,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
         .register_node(&NodeSpec {
             node: NodeId::new("prompt-bytes-owner"),
             decodes: vec![formats],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await
@@ -371,6 +372,7 @@ async fn a_lost_fence_in_a_write_batch_refuses_only_its_own_commit() {
         .register_node(&NodeSpec {
             node: NodeId::new("batch-owner"),
             decodes: vec![formats],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await
@@ -528,6 +530,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
         .register_node(&NodeSpec {
             node: NodeId::new("fragment-owner"),
             decodes: vec![formats],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

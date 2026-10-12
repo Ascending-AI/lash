@@ -170,7 +170,31 @@ impl DelegationPluginFactory {
     fn config_mut(&mut self) -> &mut ChildConfig {
         Arc::make_mut(&mut self.child)
     }
+
+    /// The same `spawn_agent` as a process component (FIG-6034): a process
+    /// whose environment names [`DELEGATION_CONFIG`] delegates as a session
+    /// does, its children created from this factory's configuration.
+    /// Register it with [`lash::LashCoreBuilder::process_component`].
+    #[expect(
+        clippy::expect_used,
+        reason = "the spec fills only a tool provider, which a process component admits"
+    )]
+    pub fn component(&self) -> Arc<dyn lash::process::ProcessComponentFactory> {
+        Arc::new(
+            lash::plugins::StaticPluginFactory::new(
+                <Self as PluginDefinition>::declaration(),
+                lash::plugins::PluginSpec::new()
+                    .with_tool_provider(tool::spawn_provider(Arc::clone(&self.child))),
+            )
+            .as_component(DELEGATION_CONFIG.format())
+            .expect("spawn_agent is a process component"),
+        )
+    }
 }
+
+/// The config key a process environment names for `spawn_agent`.
+pub const DELEGATION_CONFIG: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new(DELEGATION_PLUGIN_ID, lash::plugins::FormatVersion::ONE);
 
 impl PluginDefinition for DelegationPluginFactory {
     fn declaration() -> PluginDeclaration {

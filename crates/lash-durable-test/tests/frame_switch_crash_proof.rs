@@ -278,6 +278,7 @@ impl Scenario for FrameSwitch {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
+            serves: Vec::new(),
             max_active: 4,
         }
     }
@@ -501,6 +502,7 @@ async fn postgres_matrix_guards_allow_slow_registration_and_claim() {
         .register_node(&NodeSpec {
             node: NodeId::new("slow-matrix-node"),
             decodes: Vec::new(),
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await;

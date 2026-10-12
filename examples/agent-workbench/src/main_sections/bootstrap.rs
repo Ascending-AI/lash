@@ -193,9 +193,12 @@ pub(crate) fn configure_workbench_plugins(
             .with_approvals(approvals)
             .with_host_triggers(host_triggers),
     ));
+    // A process a turn starts runs the turn's recorded model and tools; the
+    // workbench installs no process component, so its processes call none.
     plugins.push(Arc::new(
         lash::process_controls::SessionProcessAdminPluginFactory::new(
             lash::process::lifetime::session_or_starter,
+            lash::process::env::policy::from_run(|_| Ok(Vec::new())),
         ),
     ));
     plugins.push(delegation);

@@ -218,11 +218,14 @@ pub async fn a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_
                 ProcessInput::Engine {
                     kind: ABSENT_ENGINE_KIND.to_owned(),
                     payload: json!({}),
+                    launch: crate::EngineLaunch::new(
+                        crate::testing::process_execution_env_fixture_ref(),
+                        None,
+                    ),
                 },
                 ProcessProvenance::host(),
                 LifetimeDecision::Detached,
-            )
-            .with_execution_env_ref(Some(crate::testing::process_execution_env_fixture_ref())),
+            ),
         )
         .await?;
         eventually(SETTLE, "the process parked", || async {

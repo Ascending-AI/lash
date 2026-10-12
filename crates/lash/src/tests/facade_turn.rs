@@ -930,6 +930,7 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
         .register_node(&NodeSpec {
             node: NodeId::new("settled-operation-fixture"),
             decodes: vec![snapshot.formats],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

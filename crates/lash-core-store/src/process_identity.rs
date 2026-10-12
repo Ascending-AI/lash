@@ -5,14 +5,15 @@
 const LASH_STABLE_IDENTITY_DOMAIN_VERSION: &str = "lash-stable-identity/v2";
 
 /// version_surface = "coexist"
-/// version_guard(items(PROCESS_ENV_PREFIX_VERSION, process_execution_env_ref_for_bytes))
+/// version_guard(items(PROCESS_ENV_PREFIX_VERSION, process_env_ref_for_bytes))
 const PROCESS_ENV_PREFIX_VERSION: &str = "process-env:v6:blake3:";
 
 /// version_surface = "coexist"
-/// version_guard(items(LASH_PROCESS_ENV_DOMAIN_VERSION, process_execution_env_ref_for_bytes))
+/// version_guard(items(LASH_PROCESS_ENV_DOMAIN_VERSION, process_env_ref_for_bytes))
 const LASH_PROCESS_ENV_DOMAIN_VERSION: &str = "lash-process-env/v6";
 
 use crate::ProcessId;
+pub use crate::process_env::*;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -410,66 +411,6 @@ pub fn process_id_for_test(label: &str) -> ProcessId {
     ProcessId::fixture(label)
 }
 
-/// The configuration a process runs under, captured when it is created
-/// (FIG-6021): the resolved configuration of the run that created it — its
-/// effective plugin configuration with the spec hash that derived it, its
-/// tool authority and render — and the capability refs that run's spec
-/// bound. Every runtime built for the process, after a restart or for a
-/// nested start, reads this snapshot and never the session's later config.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProcessExecutionEnvSpec {
-    /// The plugin configuration the process's creator ran under, at its
-    /// config revision and with the spec hash that derived it (FIG-4379).
-    pub plugin_config: crate::AdmittedPluginConfig,
-    pub policy: crate::SessionPolicy,
-    /// The tool authority captured at creation and used by every process runtime.
-    pub tool_access: crate::SessionToolAccess,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub render: Option<crate::run_spec::RecordedRender>,
-    /// The capability refs the creating run's spec bound, which the
-    /// process's deferred tool resolutions receive as that run's did.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub capabilities:
-        std::collections::BTreeMap<crate::run_spec::SlotId, crate::run_spec::CapabilityRef>,
-}
-impl ProcessExecutionEnvSpec {
-    /// Constructs a `ProcessExecutionEnvSpec` for protocol and process-engine implementors running a durable process.
-    pub fn new(
-        plugin_config: crate::AdmittedPluginConfig,
-        policy: crate::SessionPolicy,
-        tool_access: crate::SessionToolAccess,
-    ) -> Self {
-        Self {
-            plugin_config,
-            policy,
-            tool_access,
-            render: None,
-            capabilities: std::collections::BTreeMap::new(),
-        }
-    }
-
-    /// Content-addresses the exact bytes persisted by [`Self::to_store_bytes`].
-    ///
-    /// The policy contains execution settings, with the owning session named
-    /// only by its runtime state. Identical captured settings therefore share
-    /// an environment reference across sessions.
-    /// These bytes follow the final binary's serde-json feature set. Shapes
-    /// and golden vectors change in place until the 1.0 version freeze ends.
-    pub fn stable_ref(&self) -> Result<ProcessExecutionEnvRef, serde_json::Error> {
-        self.to_store_bytes()
-            .map(|bytes| process_execution_env_ref_for_bytes(&bytes))
-    }
-
-    /// Serializes a process execution environment for continuation-store implementors, preserving the stable reference alongside plugin and protocol state.
-    pub fn to_store_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
-        serde_json::to_vec(self)
-    }
-
-    pub fn from_store_bytes(bytes: &[u8]) -> Result<Self, serde_json::Error> {
-        serde_json::from_slice(bytes)
-    }
-}
 /// Durable lifecycle status of a process row.
 ///
 /// This enum has no `#[serde(other)]` fallback arm, by design: a store that
@@ -701,11 +642,12 @@ impl fmt::Display for RetiredProcessStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// The content address of one stored [`ProcessEnv`](crate::process_env::ProcessEnv).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ProcessExecutionEnvRef(String);
-impl ProcessExecutionEnvRef {
-    /// Constructs a `ProcessExecutionEnvRef` for store and durable-substrate implementors suspending or resuming durable process execution.
+pub struct ProcessEnvRef(String);
+impl ProcessEnvRef {
+    /// Constructs a `ProcessEnvRef` for store and durable-substrate implementors suspending or resuming durable process execution.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -716,19 +658,19 @@ impl ProcessExecutionEnvRef {
     }
 
     /// Verify that this reference addresses exactly one valid encoded
-    /// process-execution environment.
+    /// process environment.
     pub fn matches_store_bytes(&self, bytes: &[u8]) -> bool {
-        ProcessExecutionEnvSpec::from_store_bytes(bytes).is_ok()
-            && process_execution_env_ref_for_bytes(bytes) == *self
+        crate::process_env::ProcessEnv::from_store_bytes(bytes).is_ok()
+            && process_env_ref_for_bytes(bytes) == *self
     }
 }
-impl fmt::Display for ProcessExecutionEnvRef {
+impl fmt::Display for ProcessEnvRef {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
 }
-pub fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
-    ProcessExecutionEnvRef::new(format!(
+pub fn process_env_ref_for_bytes(bytes: &[u8]) -> ProcessEnvRef {
+    ProcessEnvRef::new(format!(
         "{PROCESS_ENV_PREFIX_VERSION}{}",
         crate::stable_hash::blake3_hex(LASH_PROCESS_ENV_DOMAIN_VERSION, bytes)
     ))

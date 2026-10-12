@@ -32,6 +32,10 @@ const PUT_BLOB: &str = "put_blob";
 const HOLD: &str = "hold";
 const START_TURN_CHILD: &str = "start_turn_child";
 
+/// The component that serves the law's tools to a process body.
+const BLOB_COMPONENT: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("attachment-referrer-tools", lash_core::FormatVersion::ONE);
+
 /// How long a law waits for a referrer state, running the cleanup relay's due
 /// pass as it goes.
 const SETTLE: Duration = Duration::from_secs(30);
@@ -193,16 +197,11 @@ impl BlobTools {
         .map_err(|error| error.to_string())?;
         // The child runs in the session its process id derives.
         create_request.session_id = None;
-        let declaration = lash_core::ProcessStartDeclaration::new(
-            lash_core::ProcessInput::SessionTurn {
-                definition_key: "law-session-turn:v1".to_owned(),
-                create_request: Box::new(create_request),
-                turn_input: Box::new(
-                    lash::TurnInput::text("read the attached input")
-                        .with_attachment(stored),
-                ),
-                result: lash_core::SessionTurnOutcome::Turn,
-            },
+        let declaration = lash_core::ProcessStartDeclaration::session_turn(
+            "law-session-turn:v1".to_owned(),
+            create_request,
+            lash::TurnInput::text("read the attached input").with_attachment(stored),
+            lash_core::SessionTurnOutcome::Turn,
             lash_core::ProcessOriginator::Session {
                 session_id,
                 agent_frame_id: Some(
@@ -217,14 +216,7 @@ impl BlobTools {
         .with_declared_identity(lash_core::DeclaredProcessIdentity::labelled(
             "law-session-turn",
             None::<String>,
-        ))
-        // A session-turn start runs under the environment its declaring
-        // attempt captured (FIG-4396).
-        .with_env_ref(
-            context
-                .process_execution_env_ref()
-                .map_err(|error| error.to_string())?,
-        );
+        ));
         Ok(lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!("started")),
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
@@ -473,9 +465,19 @@ impl Law {
         .tools(Arc::new(BlobTools {
             witness: Arc::clone(witness),
         }))
+        .process_component(
+            lash_core::testing::tool_component(
+                BLOB_COMPONENT,
+                Arc::new(BlobTools {
+                    witness: Arc::clone(witness),
+                }),
+            ),
+            BLOB_COMPONENT,
+        )
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_core::lifetime::session_or_starter,
+                lash_core::testing::run_policy_naming(&[BLOB_COMPONENT]),
             ),
         ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -1229,23 +1231,17 @@ impl lash_core::AttachmentReferrers for AdoptionCut {
 /// A host's detached SessionTurn start under host key `key`, whose child
 /// turn reads `input`.
 fn host_start(key: &str, input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
-    lash_core::ProcessStartRequest::new(
-        lash_core::ProcessInput::SessionTurn {
-            definition_key: "law-host-start-input:v1".to_owned(),
-            create_request: Box::new(
-                lash_core::SessionCreateRequest::root(
-                    lash::plugins::SessionToolAccess::ambient(),
-                    lash_core::SessionStartPoint::Empty,
-                    lash_core::PluginOptions::default(),
-                )
-                .with_spec(&served::spec(1024))
-                .expect("a root spec states its model and turn budget"),
-            ),
-            turn_input: Box::new(
-                lash::TurnInput::text("read the host upload").with_attachment(input),
-            ),
-            result: lash_core::SessionTurnOutcome::Turn,
-        },
+    lash_core::ProcessStartRequest::session_turn(
+        "law-host-start-input:v1".to_owned(),
+        lash_core::SessionCreateRequest::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            lash_core::SessionStartPoint::Empty,
+            lash_core::PluginOptions::default(),
+        )
+        .with_spec(&served::spec(1024))
+        .expect("a root spec states its model and turn budget"),
+        lash::TurnInput::text("read the host upload").with_attachment(input),
+        lash_core::SessionTurnOutcome::Turn,
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )

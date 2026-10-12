@@ -11,8 +11,7 @@ use lash_durable::{
 
 use crate::runtime::actor::projection::ProjectionProviders;
 use crate::{
-    AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessExecutionEnvStore,
-    ProcessRegistry,
+    AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessEnvStore, ProcessRegistry,
 };
 
 /// The identity of one store set: the storage it names, such as a SQLite
@@ -598,7 +597,7 @@ impl Backend {
     }
 
     /// The store of process execution environments.
-    pub fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
+    pub fn process_env_store(&self) -> Arc<dyn ProcessEnvStore> {
         self.inner.stores.process_env_store()
     }
 
@@ -696,7 +695,7 @@ pub trait StoreSet: Send + Sync {
     fn process_registry(&self) -> Arc<dyn ProcessRegistry>;
 
     /// The store of process execution environments.
-    fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore>;
+    fn process_env_store(&self) -> Arc<dyn ProcessEnvStore>;
 
     /// The store of turns' recorded preparation, journaled by digest
     /// (FIG-5133), over the artifact referrer edges the cleanup relay ends.

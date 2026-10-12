@@ -353,15 +353,15 @@ mod tests {
         let watched = watch_process_registry(raw);
         let _sink = watched.add_event_sink(Arc::new(sink.clone()));
         let (registry, _hub) = watched_parts(watched);
-        let mut lifecycle_registration = ProcessRegistration::new(
+        let lifecycle_registration = ProcessRegistration::new(
             ProcessInput::Engine {
                 kind: "test".to_string(),
                 payload: serde_json::json!({}),
+                launch: lash_core_execution::testing::fixture_engine_launch(),
             },
             ProcessProvenance::host(),
             crate::Lifetime::Detached,
         );
-        lifecycle_registration.env_ref = Some(crate::testing::process_execution_env_fixture_ref());
         let lifecycle_id = registry
             .register_process(lifecycle_registration)
             .await

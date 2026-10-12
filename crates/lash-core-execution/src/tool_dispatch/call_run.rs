@@ -165,14 +165,13 @@ pub(crate) fn start_hold_key(call_id: &ToolCallId) -> String {
     format!("{call_id}:start")
 }
 
-/// Bind a call's declared start to the Run: its environment, and a consumer
-/// hold carrying the call's cancel policy.
+/// Bind a call's declared start to the Run: a consumer hold carrying the
+/// call's cancel policy. The start's environment is its own launch's.
 pub(crate) fn bind_start(
     call: &SingletonToolCall,
     cancels: bool,
     mut registration: ProcessStartRegistration,
 ) -> Result<DeclaredStartObligation, DeclaredStartObligationRefusal> {
-    registration.env_ref = call.environment.clone();
     registration.consumer_hold = Some(ConsumerHold {
         key: start_hold_key(&call.call_id),
         owner: ScopeId::Opener(call.owner.clone()),
@@ -253,7 +252,6 @@ impl<'a> AdmittedToolCall<'a> {
         let prepared = handlers.prepare(&call).await.map_err(fault)?;
         let request = SingletonPreparedRequest {
             arguments: call.arguments.clone(),
-            environment: call.environment.clone(),
             prepared,
             state_snapshot,
             isolation,

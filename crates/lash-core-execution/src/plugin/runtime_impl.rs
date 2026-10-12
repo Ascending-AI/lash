@@ -52,20 +52,6 @@ impl<'a> PluginSessionRequest<'a> {
         }
     }
 
-    /// A process runtime's plugin session, built from the process's captured
-    /// execution environment. No session lookup finds it.
-    pub fn process_creation(process_id: crate::ProcessId, config: SessionAuthorityContext) -> Self {
-        Self {
-            owner: RuntimeOwner::Process(process_id),
-            materialization: PluginSessionMaterializationRequest::Creation {
-                config,
-                seed_snapshot: None,
-            },
-            tool_catalog_overlay: ToolCatalogContribution::default(),
-            tool_snapshot: None,
-        }
-    }
-
     pub fn rematerialization(
         session_id: impl Into<SessionId>,
         snapshot: &'a PluginState,
@@ -795,7 +781,7 @@ impl PluginHost {
     }
 }
 
-fn build_tool_registry(
+pub(crate) fn build_tool_registry(
     contributions: &PluginContributions,
     tool_snapshot: Option<crate::ToolState>,
 ) -> Result<Arc<crate::ToolRegistry>, PluginError> {

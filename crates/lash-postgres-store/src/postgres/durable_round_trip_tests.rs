@@ -68,6 +68,7 @@ async fn owned(name: &'static str) -> Option<Owned> {
         .register_node(&NodeSpec {
             node: NodeId::new("round-trips"),
             decodes: vec![formats.clone()],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         })
         .await

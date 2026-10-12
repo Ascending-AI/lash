@@ -337,30 +337,25 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
         .host_artifacts()
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
-            &lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::AdmittedPluginConfig::default(),
-                lash_core::SessionPolicy::new(
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(16),
-                    lash_core::NoProgressBudget::bounded(12),
-                ),
-                lash_core::SessionToolAccess::ambient(),
-            ),
+            &lash_core_execution::testing::process_env_with_limit(16),
         )
         .await
         .expect("the environment is published");
+    // The host states the creating deployment's kernel settings.
+    let settings = first
+        .processes()
+        .engine_defaults(lash_vm_runtime::LASH_VM_ENGINE_KIND, &payload)
+        .expect("the kernel states its settings");
     let started = first
         .processes()
         .start(
-            lash_core::ProcessStartRequest::new(
-                lash_core::ProcessInput::Engine {
-                    kind: lash_vm_runtime::LASH_VM_ENGINE_KIND.to_owned(),
-                    payload,
-                },
+            lash_core::ProcessStartRequest::engine(
+                lash_vm_runtime::LASH_VM_ENGINE_KIND.to_owned(),
+                payload,
+                lash_core::EngineLaunch::new(env_ref, settings),
                 lash_core::ProcessOriginator::host(),
                 lash_core::LifetimeDecision::Detached,
-            )
-            .with_env_ref(env_ref),
+            ),
             first.effect_host(),
         )
         .await
@@ -373,9 +368,9 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
         .expect("read the process")
         .expect("the process is recorded");
     let recorded = record
-        .engine_config
-        .as_ref()
-        .expect("creation records engine settings");
+        .engine_settings()
+        .expect("the start records engine settings")
+        .value();
     assert_eq!(
         recorded["charge"],
         serde_json::json!(1_000_000),

@@ -16,8 +16,7 @@ use crate::tool_run::{
     CallDecision, DeclarationRefusal, ExternalCancelPolicy, HookCause, ToolDeclaration,
 };
 use crate::{
-    EffectOpener, ProcessExecutionEnvRef, ProcessId, ProcessStartRegistration,
-    RuntimeEffectControllerError, StartKey,
+    EffectOpener, ProcessId, ProcessStartRegistration, RuntimeEffectControllerError, StartKey,
 };
 
 /// One tool call to run in its owning Run.
@@ -40,9 +39,6 @@ pub struct SingletonToolCall {
     /// What a cancellation of the Run after a declared start launched does
     /// to the process it launched.
     pub cancel: ExternalCancelPolicy,
-    /// The execution environment the Run owns. A declared start lash
-    /// executes is bound to it; a Run without one admits no such start.
-    pub environment: Option<ProcessExecutionEnvRef>,
 }
 
 /// The prepared request admission made (A): the request as issued and the
@@ -51,7 +47,6 @@ pub struct SingletonToolCall {
 #[derive(Clone, Debug)]
 pub struct SingletonPreparedRequest {
     pub arguments: serde_json::Value,
-    pub environment: Option<ProcessExecutionEnvRef>,
     pub prepared: serde_json::Value,
     /// The plugin namespace at admission.
     pub state_snapshot: Option<Arc<crate::plugin::PluginNamespaceState>>,
@@ -122,8 +117,7 @@ pub enum SingletonCapture {
     Refused {
         refusal: DeclarationRefusal,
     },
-    /// A declared start that cannot be an obligation: keyless, or a start
-    /// lash executes in a Run that owns no environment.
+    /// A declared start that cannot be an obligation: keyless.
     StartRefused {
         refusal: DeclaredStartObligationRefusal,
     },

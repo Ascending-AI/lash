@@ -134,6 +134,13 @@ impl From<PluginError> for RuntimeEffectControllerError {
                     parent: Box::new(parent.clone()),
                 })
                 .into(),
+            ref err @ PluginError::ProcessEnvRefused { ref refusal } => {
+                RuntimeError::new(RuntimeErrorCode::ProcessEnvRefused, err.to_string())
+                    .with_cause(crate::RuntimeErrorCause::ProcessEnvRefused {
+                        refusal: Box::new(refusal.clone()),
+                    })
+                    .into()
+            }
             ref err @ PluginError::StartKeyConflict { ref start_key } => {
                 RuntimeError::new(RuntimeErrorCode::ProcessStartKeyConflict, err.to_string())
                     .with_cause(crate::RuntimeErrorCause::ProcessStartKeyConflict {

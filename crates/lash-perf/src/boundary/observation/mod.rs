@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use lash::process::{
-    HostArtifactPin, Lifetime, ProcessDefinition, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessOriginator, ProcessStartRequest, ProcessStartTarget,
+    EngineLaunch, HostArtifactPin, Lifetime, ProcessConfigKey, ProcessDefinition, ProcessEnv,
+    ProcessOriginator, ProcessStartRequest,
 };
 use lash_core::ToolDefinitionBindingExt;
 
@@ -93,24 +93,43 @@ struct Tools {
     meter: Meter,
 }
 
+/// The process component that contributes the workload tool to a
+/// workload's processes: its config is `()`.
+const WORKLOAD_TOOLS: ProcessConfigKey<()> =
+    ProcessConfigKey::new("workload-tools", lash::plugins::FormatVersion::ONE);
+
+/// The workload's one tool, `mark`.
+fn mark_definition() -> Result<lash_core::ToolDefinition> {
+    Ok(lash_core::ToolDefinition::raw(
+        "tool:mark",
+        "mark",
+        "Synthetic observation workload step",
+        serde_json::json!({"type":"object","properties":{"key":{"type":"string"}},
+            "required":["key"],"additionalProperties":false}),
+        serde_json::json!({"type":"object"}),
+    )?
+    .with_execution(Duration::from_secs(120))
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], "mark").with_authority_type("Tools")))
+}
+
 impl Tools {
     fn new(meter: &Meter) -> Result<Self> {
         Ok(Self {
-            mark: lash_core::ToolDefinition::raw(
-                "tool:mark",
-                "mark",
-                "Synthetic observation workload step",
-                serde_json::json!({"type":"object","properties":{"key":{"type":"string"}},
-                    "required":["key"],"additionalProperties":false}),
-                serde_json::json!({"type":"object"}),
-            )?
-            .with_execution(Duration::from_secs(120))
-            .with_tool_binding(
-                lash_core::ToolBinding::new(["tools"], "mark").with_authority_type("Tools"),
-            ),
+            mark: mark_definition()?,
             meter: meter.clone(),
         })
     }
+}
+
+/// `tools` as the process component a workload's environment names.
+fn workload_component(
+    tools: Arc<dyn lash_core::ToolProvider>,
+) -> Result<lash::process::StaticProcessComponent> {
+    Ok(lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(WORKLOAD_TOOLS.component()),
+        lash::plugins::PluginSpec::new().with_tool_provider(tools),
+    )
+    .as_component(WORKLOAD_TOOLS.format())?)
 }
 
 #[async_trait::async_trait]
@@ -203,8 +222,10 @@ impl Fleet {
                             .build(),
                         lash_protocol_rlm::CellDialect::typescript(),
                     );
+                    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(Tools::new(meter)?);
                     lash::LashCore::rlm_builder(backend, factory)
-                        .tools(Arc::new(Tools::new(meter)?))
+                        .tools(Arc::clone(&tools))
+                        .process_component(Arc::new(workload_component(tools)?), WORKLOAD_TOOLS)
                 }
                 Flavor::Chat => lash::LashCore::standard_builder(backend)
                     .serve_test_llm_profile(facade::provider(meter, false), facade::metadata()?),
@@ -289,23 +310,21 @@ pub(super) fn unique(name: &str) -> String {
     format!("{name}-{run}")
 }
 
-/// The environment a workload's processes run under and are admitted against.
-fn environment() -> ProcessExecutionEnvSpec {
-    ProcessExecutionEnvSpec::new(
-        lash::plugins::AdmittedPluginConfig::default(),
-        lash::runtime::SessionPolicy::new(
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1_000_000),
-            lash::NoProgressBudget::bounded(12),
-        ),
-        lash::plugins::SessionToolAccess::ambient(),
+/// The environment a workload's processes run under and are admitted
+/// against: the workload tool, from the component that provides it.
+fn environment() -> Result<ProcessEnv> {
+    let tools = lash::plugins::SessionToolAccess::restricted([mark_definition()?])?;
+    Ok(
+        ProcessEnv::builder(tools, lash::MaxToolCalls::new(1_000_000))
+            .component(WORKLOAD_TOOLS, &())
+            .build()?,
     )
 }
 
 /// A workflow lash admitted from a kernel document and holds under a pin.
 pub(super) struct Published {
     definition: ProcessDefinition,
-    env_ref: ProcessExecutionEnvRef,
+    launch: EngineLaunch,
 }
 
 /// Admit `document`, written in kernel text, as a definition of its entry
@@ -316,7 +335,7 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
     use lash::workflow::edit::Draft;
     let mut document =
         parse_document(document).map_err(|error| anyhow::anyhow!("workflow document: {error}"))?;
-    let environment = environment();
+    let environment = environment()?;
     let artifacts = core.host_artifacts();
     // The document performs each effect under the signature this host
     // offers it under.
@@ -344,9 +363,13 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
         other => anyhow::bail!("workflow was not admitted: {other:?}"),
     };
     let env_ref = artifacts.publish_process_env(&pin, &environment).await?;
+    // Every run states this build's kernel settings, chosen once here.
+    let settings = core
+        .processes()
+        .engine_defaults(lash::process::LASH_VM_ENGINE_KIND, &serde_json::Value::Null)?;
     Ok(Published {
         definition: publication.definition,
-        env_ref,
+        launch: EngineLaunch::new(env_ref, settings),
     })
 }
 
@@ -355,17 +378,15 @@ pub(super) async fn start(
     published: &Published,
     key: &str,
 ) -> Result<lash::ProcessId> {
-    let request = ProcessStartRequest::new(
-        ProcessStartTarget::Definition {
-            definition_id: published.definition.id.clone(),
-            signature_claim: Some(published.definition.signature.clone()),
-            args: Default::default(),
-        },
+    let request = ProcessStartRequest::definition(
+        published.definition.id.clone(),
+        Some(published.definition.signature.clone()),
+        Default::default(),
+        published.launch.clone(),
         ProcessOriginator::host(),
         Lifetime::Detached,
     )
-    .with_host_start_key(unique(key))
-    .with_env_ref(published.env_ref.clone());
+    .with_host_start_key(unique(key));
     Ok(within(
         "process start",
         Box::pin(core.processes().start(request, core.effect_host())),

@@ -242,11 +242,10 @@ impl crate::tools::StaticToolExecute for SwitchFrame {
 
 /// FIG-4099: a model change is a config patch, and the patched model reaches
 /// every runtime consumer: the session's policy, the model request, the
-/// persisted state, the frame a later switch opens and a process's
-/// execution environment. A frame recorded before the patch keeps its model.
+/// persisted state and the frame a later switch opens. A frame recorded
+/// before the patch keeps its model.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_native_model_patch_reaches_all_runtime_consumers() {
-    use lash_core::facade_support::RuntimeSessionStateFacadeOps as _;
     let historical_model = llm_profile_spec("historical-model", None, 11_111);
     let builder_model = llm_profile_spec("builder-model", None, 77_777);
     let requests = Arc::new(StdMutex::new(Vec::new()));
@@ -411,12 +410,6 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() {
         current.assignment.policy.model,
         Some(recorded_llm_profile(builder_model.clone())),
         "consumer 4: the frame a later switch opens"
-    );
-    let execution_env = state.process_execution_env_spec(&policy);
-    assert_eq!(
-        execution_env.policy.model,
-        Some(recorded_llm_profile(builder_model)),
-        "consumer 5: a process's execution environment"
     );
     core.shutdown().await.expect("shutdown");
 }

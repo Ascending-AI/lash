@@ -21,16 +21,16 @@ use crate::store::{ArtifactCleanupLedger, DeliveryError, ObligationKey, Obligati
 use crate::{
     ArtifactCarry, ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactStoreError,
     ArtifactStoreId, ModuleArtifactStore, PluginError, ProcessDefinitionDraft, ProcessDefinitionId,
-    ProcessDefinitionStore, ProcessEngineRegistry, ProcessExecutionEnvRef,
-    ProcessExecutionEnvStore, ProcessId, ProcessInput, ProcessRegistry, ReferrerClaim,
-    ReferrerGuard, ResolvedArtifactCleanup, RuntimeErrorCode, StartKey, artifact_referrer_ended,
+    ProcessDefinitionStore, ProcessEngineRegistry, ProcessEnvRef, ProcessEnvStore, ProcessId,
+    ProcessInput, ProcessRegistry, ReferrerClaim, ReferrerGuard, ResolvedArtifactCleanup,
+    RuntimeErrorCode, StartKey, artifact_referrer_ended,
 };
 
 /// The record a start key registered, as a start's guard carries onto it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RetainedStart {
     pub process_id: ProcessId,
-    pub env_ref: Option<ProcessExecutionEnvRef>,
+    pub env_ref: Option<ProcessEnvRef>,
     pub input: Arc<ProcessInput>,
     /// The definition a start by id admitted the record from: its record
     /// holds the descriptor and its manifest too (ADR 0113 §3.6).
@@ -115,8 +115,8 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
             .await
             .map_err(|error| error.to_string())?
             .map(|record| RetainedStart {
+                env_ref: record.env_ref().cloned(),
                 process_id: record.id,
-                env_ref: record.env_ref,
                 input: record.input,
                 definition_id: record.identity.definition_id,
             }))
@@ -129,7 +129,7 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
 pub struct ArtifactCleanupPorts {
     pub ledger: Arc<dyn ArtifactCleanupLedger>,
     pub authorities: Arc<dyn ArtifactCleanupAuthorities>,
-    pub process_env: Arc<dyn ProcessExecutionEnvStore>,
+    pub process_env: Arc<dyn ProcessEnvStore>,
     pub modules: Arc<dyn ModuleArtifactStore>,
     pub definitions: Arc<dyn ProcessDefinitionStore>,
     /// Turns' recorded preludes, held by their turn journals.
@@ -404,10 +404,7 @@ impl ArtifactCleanupRelay {
                 ArtifactStoreId::ProcessEnv => self
                     .ports
                     .process_env
-                    .acquire_process_execution_env(
-                        &claim,
-                        &ProcessExecutionEnvRef::new(name.artifact_ref.clone()),
-                    )
+                    .acquire_process_env(&claim, &ProcessEnvRef::new(name.artifact_ref.clone()))
                     .await
                     .map_err(PluginError::from),
                 store if *store == ArtifactStoreId::module() => self
@@ -549,7 +546,7 @@ impl ArtifactCleanupRelay {
                 artifact_ref: env_ref.as_str().to_owned(),
             });
         }
-        if let ProcessInput::Engine { kind, payload } = retained.input.as_ref() {
+        if let ProcessInput::Engine { kind, payload, .. } = retained.input.as_ref() {
             let engine = self.ports.engines.require(kind).map_err(|error| {
                 DeliveryFailure::Refused(
                     plugin_delivery_error(error)

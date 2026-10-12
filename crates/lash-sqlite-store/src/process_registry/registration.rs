@@ -161,7 +161,7 @@ impl SqliteProcessRegistry {
                 &hold.key,
             ));
         }
-        if let Some(env) = registration.env_ref.as_ref() {
+        if let Some(env) = registration.input.launch().map(|launch| &launch.env) {
             crate::artifact_store::acquire_process_env_tx(tx, env, &process_id)?;
         }
         if let Some(hold) = consumer_hold.as_ref() {
@@ -170,6 +170,7 @@ impl SqliteProcessRegistry {
         // Minted only once the start is admitted, so no refusal
         // names an id that was never registered.
         let change_seq = Self::next_change_seq_conn(tx)?;
+        let requires = registration.requires.clone();
         let record = ProcessRecord::from_prepared_registration(registration, process_id, now);
         let originator_id = record.originator_id();
         crate::conn::cached_execute(
@@ -205,6 +206,7 @@ impl SqliteProcessRegistry {
             tx,
             &record.id,
             record.input.unstarted_formats().as_str(),
+            &requires,
             lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
         )
         .map_err(process_sqlite_error)?

@@ -513,15 +513,10 @@ async fn facade_final_value_execution_inner(
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
         );
-    if let Some(tools) = tools {
-        builder = builder.tools(tools);
-    }
     if process_surface == ProcessSurface::Installed {
-        builder = builder.plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::session_or_starter,
-            ),
-        ));
+        builder = with_contract_processes(builder, tools, None);
+    } else if let Some(tools) = tools {
+        builder = builder.tools(tools);
     }
     let core = builder
         .build(crate::sim_process_owner())
@@ -862,9 +857,6 @@ async fn agent_process_contract_core_with_options(
         // Without it every fixed process contract's first cell dies on
         // "unknown module `processes`" -- the mirrored facade agent scenarios
         // install `SessionProcessAdminPluginFactory` for exactly this reason.
-        .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
-        ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).tool_source_policy(lash_core::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
@@ -872,16 +864,63 @@ async fn agent_process_contract_core_with_options(
                 .context_window_tokens(200_000)
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?);
-    if let Some(tools) = tools {
-        builder = builder.tools(tools);
-    }
-    if install_delegation {
-        builder = builder.plugin(agent_contract_delegation_plugin(provider_kind));
-    }
+    let delegation = install_delegation.then(|| agent_contract_delegation_plugin(provider_kind));
+    builder = with_contract_processes(builder, tools, delegation);
     let core = builder
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     Ok((core, graph_store, engine))
+}
+
+/// The component that serves a contract's tools to its processes.
+const CONTRACT_TOOLS: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("contract-tools", lash_core::FormatVersion::ONE);
+
+/// `builder` with the session process controls, `tools` and `delegation`,
+/// each also a process component: a process a contract starts runs under
+/// its turn's run with them all, the controls included, and a process it
+/// starts inherits that environment (FIG-6034).
+fn with_contract_processes(
+    builder: lash::LashCoreBuilder,
+    tools: Option<Arc<dyn lash_core::ToolProvider>>,
+    delegation: Option<delegation::DelegationPluginFactory>,
+) -> lash::LashCoreBuilder {
+    let mut components = vec![lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG];
+    components.extend(tools.is_some().then_some(CONTRACT_TOOLS));
+    components.extend(
+        delegation
+            .is_some()
+            .then_some(delegation::DELEGATION_CONFIG),
+    );
+    let policy = || lash_core::testing::run_policy_naming(&components);
+    let mut builder = builder
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+                policy(),
+            ),
+        ))
+        .process_component(
+            Arc::new(lash_plugin_process_controls::ProcessControlsComponent::new(
+                lash_core::lifetime::session_or_starter,
+                policy(),
+            )),
+            lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG,
+        );
+    if let Some(tools) = tools {
+        builder = builder
+            .process_component(
+                lash_core::testing::tool_component(CONTRACT_TOOLS, Arc::clone(&tools)),
+                CONTRACT_TOOLS,
+            )
+            .tools(tools);
+    }
+    if let Some(delegation) = delegation {
+        builder = builder
+            .process_component(delegation.component(), delegation::DELEGATION_CONFIG)
+            .plugin(Arc::new(delegation));
+    }
+    builder
 }
 
 /// The host's delegation tool (`examples/delegation`): each child runs the
@@ -889,8 +928,8 @@ async fn agent_process_contract_core_with_options(
 /// lives until the turn that spawned it ends.
 fn agent_contract_delegation_plugin(
     provider_kind: &'static str,
-) -> Arc<dyn lash_core::facade_support::PluginFactory> {
-    Arc::new(
+) -> delegation::DelegationPluginFactory {
+    {
         delegation::DelegationPluginFactory::new(
             lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
@@ -901,8 +940,8 @@ fn agent_contract_delegation_plugin(
             .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
             lash_core::lifetime::starter,
         )
-        .with_rlm_children(),
-    )
+        .with_rlm_children()
+    }
 }
 
 async fn wait_for_contract_durable_input_key(

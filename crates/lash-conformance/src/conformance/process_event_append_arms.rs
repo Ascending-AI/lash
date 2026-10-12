@@ -245,11 +245,14 @@ async fn durable_effect_outcome_event_crash_windows(
                 ProcessInput::Engine {
                     kind: "conformance-effect-engine".to_string(),
                     payload: serde_json::Value::Null,
+                    launch: crate::EngineLaunch::new(
+                        lash_core::testing::process_execution_env_fixture_ref(),
+                        None,
+                    ),
                 },
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
             .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
                 ProcessIdentity::for_definition(
                     crate::ProcessDefinitionRef::unclaimed(

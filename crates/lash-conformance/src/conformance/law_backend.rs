@@ -172,8 +172,8 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("tool material store")
     }
 
-    fn process_env_store(&self) -> Arc<dyn crate::ProcessExecutionEnvStore> {
-        Arc::new(crate::testing::UnavailableProcessExecutionEnvStore)
+    fn process_env_store(&self) -> Arc<dyn crate::ProcessEnvStore> {
+        Arc::new(crate::testing::UnavailableProcessEnvStore)
     }
 
     fn turn_prelude_store(&self) -> Arc<dyn crate::TurnPreludeStore> {

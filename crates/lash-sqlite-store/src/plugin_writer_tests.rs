@@ -18,7 +18,7 @@ use lash_core_execution::testing::store_fixtures::{
 };
 use lash_core_execution::{
     FleetFormat, FormatNamespace, FormatVersion, PluginNamespaceState, PluginState,
-    ProcessExecutionEnvStore as _, RuntimeSessionState, RuntimeStore, SessionId, StoreError,
+    ProcessEnvStore as _, RuntimeSessionState, RuntimeStore, SessionId, StoreError,
 };
 use rusqlite::Connection;
 
@@ -165,24 +165,53 @@ fn outside(error: &StoreError, namespace: FormatNamespace, writer: u32, permitte
 }
 
 fn env_bytes(format: u32) -> Vec<u8> {
-    let mut config = lash_core_execution::PluginConfig::default();
-    config.insert_versioned(PLUGIN, version(format), serde_json::json!({"count": 1}));
-    lash_core_execution::ProcessExecutionEnvSpec::new(
-        lash_core_execution::AdmittedPluginConfig::new(config, 0),
-        lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core_execution::SessionToolAccess::ambient(),
+    lash_core_execution::ProcessEnv::builder(
+        lash_core_execution::SessionToolAccess::restricted(std::iter::empty())
+            .expect("an empty tool restriction"),
+        lash_core_execution::MaxToolCalls::new(1024),
     )
+    .component(
+        lash_core_execution::ProcessConfigKey::<serde_json::Value>::new(PLUGIN, version(format)),
+        &serde_json::json!({"count": 1}),
+    )
+    .build()
+    .expect("the environment builds")
     .to_store_bytes()
     .expect("encode the environment")
 }
 
+/// The writer a process environment's `PLUGIN` component stamps: a
+/// component's config is its own writer (FIG-6034 §3.3).
+fn component_writer() -> String {
+    format!("component:{PLUGIN}")
+}
+
+fn outside_for(
+    error: &StoreError,
+    writer_key: &str,
+    namespace: FormatNamespace,
+    writer: u32,
+    permitted: VersionRange,
+) {
+    assert!(
+        matches!(
+            error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::PluginWriterOutsideRange {
+                    plugin,
+                    namespace: found,
+                    writer: stamped,
+                    permitted: range,
+                }
+            } if plugin == writer_key && *found == namespace && *stamped == writer && *range == permitted
+        ),
+        "expected {writer_key} {namespace:?} format {writer} refused outside {permitted}: {error:?}"
+    );
+}
+
 async fn publish_env(set: &SqliteStoreSet, format: u32) -> Result<(), StoreError> {
     let bytes = env_bytes(format);
-    let env_ref = lash_core_execution::process_execution_env_ref_for_bytes(&bytes);
+    let env_ref = lash_core_execution::process_env_ref_for_bytes(&bytes);
     let claim =
         lash_core_execution::ReferrerClaim::unguarded(
             lash_core_execution::ArtifactReferrer::HostPin(
@@ -191,7 +220,7 @@ async fn publish_env(set: &SqliteStoreSet, format: u32) -> Result<(), StoreError
         )
         .expect("host pin claim");
     set.process_env_store()
-        .publish_process_execution_env(&claim, &env_ref, &bytes)
+        .publish_process_env(&claim, &env_ref, &bytes)
         .await
         .map_err(|error| match error {
             lash_core_execution::ArtifactStoreError::Incompatible { refusal } => {
@@ -303,15 +332,23 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
     outside(&error, FormatNamespace::Config, 2, permitted);
     assert_eq!(published(&location), before);
 
-    // A process execution environment.
-    let error = publish_env(&set, 2)
-        .await
-        .expect_err("an environment refuses plugin config outside the range");
-    outside(&error, FormatNamespace::Config, 2, permitted);
-    assert_eq!(published(&location), before);
+    // A process environment. Its component's config is its own writer: the
+    // first format provisions `[1, 1]`, and a later format is refused.
     publish_env(&set, 1)
         .await
-        .expect("an environment inside the range is published");
+        .expect("an environment's first component format is published");
+    let before = published(&location);
+    let error = publish_env(&set, 2)
+        .await
+        .expect_err("an environment refuses component config outside the range");
+    outside_for(
+        &error,
+        &component_writer(),
+        FormatNamespace::Config,
+        2,
+        permitted,
+    );
+    assert_eq!(published(&location), before);
 
     assert_eq!(recorded_range(&location), Some((1, 1)));
     // The permitted format still commits after every refusal.
@@ -479,11 +516,20 @@ async fn a_deleted_writer_entry_refuses_writes_and_publishes_nothing() {
     unprovisioned(&error);
     assert_eq!(published(&location), admitted);
 
-    // A process execution environment at the same stamp.
+    // A process environment at the same stamp: its component, unprovisioned
+    // as well, publishes only its first format.
     let error = publish_env(&set, 2)
         .await
-        .expect_err("an environment at the deleted range's stamp must refuse");
-    unprovisioned(&error);
+        .expect_err("an unprovisioned component's later format must refuse");
+    assert!(
+        matches!(
+            &error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::PluginWriterUnprovisioned { plugin }
+            } if *plugin == component_writer()
+        ),
+        "{error:?}"
+    );
     assert_eq!(published(&location), admitted);
     assert_eq!(recorded_range(&location), None);
 
@@ -495,16 +541,4 @@ async fn a_deleted_writer_entry_refuses_writes_and_publishes_nothing() {
         .await
         .expect("the first format still bootstraps");
     assert_eq!(recorded_range(&location), Some((1, 1)));
-    let error = publish_env(&set, 2)
-        .await
-        .expect_err("the deleted headroom stays refused");
-    assert!(
-        matches!(
-            error,
-            StoreError::Incompatible {
-                refusal: CompatRefusal::PluginWriterOutsideRange { .. }
-            }
-        ),
-        "{error:?}"
-    );
 }

@@ -63,21 +63,7 @@ pub use outcome::{
 mod captured_environment_row_tests {
     #[test]
     fn an_environment_load_journal_row_stays_under_the_intent_budget() {
-        let policy = crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            crate::NoProgressBudget::bounded(12),
-        );
-        let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
-        plugin_config.insert(
-            "protocol",
-            serde_json::json!({ "prompt": { "instructions": ["x".repeat(128 * 1024)] } }),
-        );
-        let spec = crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::new(plugin_config, 0),
-            policy,
-            crate::SessionToolAccess::ambient(),
-        );
+        let spec = crate::testing::process_env_of_size(128 * 1024);
         let outcome = crate::RuntimeEffectOutcome::LoadExecutionEnv {
             env: spec.stable_ref().expect("environment digest"),
         };

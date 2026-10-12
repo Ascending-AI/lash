@@ -328,11 +328,6 @@ pub(super) fn admit_batch(
                 recorded: intent.owner().clone(),
             });
         }
-        if let crate::ToolIntent::StartProcess(start) = intent
-            && let Some(refusal) = start.admission_refusal()
-        {
-            return Some(refusal);
-        }
     }
     None
 }
@@ -690,34 +685,18 @@ mod tests {
     /// A start carrying `payload` as its declared input under an execution
     /// env captured from a session whose recorded protocol prompt is `prompt`.
     fn start_under_prompt(payload: serde_json::Value, prompt: String) -> crate::ToolIntent {
-        let policy = crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            crate::NoProgressBudget::bounded(12),
-        );
-        let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
-        plugin_config.insert(
-            "protocol",
-            serde_json::json!({ "prompt": { "instructions": [prompt] } }),
-        );
+        let env = crate::testing::process_env_of_size(prompt.len());
         crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
             owner: session("session"),
-            declaration: crate::ProcessStartDeclaration::new(
-                crate::ProcessInput::Engine {
-                    kind: lash_sansio::LASH_VM_ENGINE_KIND.to_string(),
-                    payload,
-                },
+            declaration: crate::ProcessStartDeclaration::engine(
+                lash_sansio::LASH_VM_ENGINE_KIND,
+                payload,
+                crate::DeclaredLaunch::held(crate::EngineLaunch::new(
+                    env.stable_ref().expect("environment digest"),
+                    None,
+                )),
                 crate::ProcessOriginator::host(),
                 crate::Lifetime::Detached,
-            )
-            .with_env_ref(
-                crate::ProcessExecutionEnvSpec::new(
-                    crate::AdmittedPluginConfig::new(plugin_config, 0),
-                    policy,
-                    crate::SessionToolAccess::ambient(),
-                )
-                .stable_ref()
-                .expect("environment digest"),
             ),
         }))
     }

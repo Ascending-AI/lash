@@ -118,10 +118,24 @@ impl crate::ProcessEngine for ModuleDefinitionEngine {
         None
     }
 
-    fn creation_config(
+    fn check_settings(
         &self,
-        _env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        _payload: &serde_json::Value,
+        settings: Option<&crate::EngineSettings>,
+    ) -> std::result::Result<(), crate::PluginError> {
+        match settings {
+            None => Ok(()),
+            Some(_) => Err(crate::PluginError::Registration(format!(
+                "process engine `{}` takes no settings",
+                self.kind()
+            ))),
+        }
+    }
+
+    fn default_settings(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
         Ok(None)
     }
 
@@ -180,8 +194,8 @@ impl ArtifactCleanupAuthorities for LawAuthorities {
             .await
             .map_err(|error| error.to_string())?
             .map(|record| RetainedStart {
+                env_ref: record.env_ref().cloned(),
                 process_id: record.id,
-                env_ref: record.env_ref,
                 input: record.input,
                 definition_id: record.identity.definition_id,
             }))
@@ -352,28 +366,24 @@ impl World {
         id: &crate::ProcessDefinitionId,
         starter: &crate::EffectJournalIdentity,
     ) -> Result<crate::RegisteredProcessStart, crate::RuntimeEffectControllerError> {
-        let registration = crate::ProcessStartRegistration::of_target(
-            crate::ProcessStartTarget::Definition {
-                signature_claim: None,
-                definition_id: id.clone(),
-                args: serde_json::Map::from_iter([("n".to_owned(), serde_json::json!(1))]),
-            },
-            crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        )
-        .with_start_key(Some(key.clone()));
-        let env_ref = crate::publish_process_execution_env(
+        let env_ref = lash_core::testing::publish_process_env_for_testing(
             self.ports.env().as_ref(),
             &crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(starter.clone())),
             &env_spec(),
         )
         .await?;
-        crate::register_process_start(
-            &self.stores(starter),
-            registration.with_execution_env_ref(Some(env_ref)),
-            &[],
+        let registration = crate::ProcessStartRegistration::of_target(
+            crate::ProcessStartTarget::Definition {
+                signature_claim: None,
+                definition_id: id.clone(),
+                args: serde_json::Map::from_iter([("n".to_owned(), serde_json::json!(1))]),
+                launch: crate::EngineLaunch::new(env_ref, None),
+            },
+            crate::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
         )
-        .await
+        .with_start_key(Some(key.clone()));
+        crate::register_process_start(&self.stores(starter), registration, &[]).await
     }
 
     async fn processes_under(&self, key: &crate::StartKey) -> Option<crate::ProcessId> {
@@ -408,16 +418,8 @@ impl World {
     }
 }
 
-fn env_spec() -> crate::ProcessExecutionEnvSpec {
-    crate::ProcessExecutionEnvSpec::new(
-        crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        crate::SessionToolAccess::ambient(),
-    )
+fn env_spec() -> crate::ProcessEnv {
+    lash_core::testing::process_env_with_limit(1024)
 }
 
 #[expect(clippy::expect_used, reason = "fixture builds valid claims")]

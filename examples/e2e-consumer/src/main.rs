@@ -582,6 +582,7 @@ mod commit_cut_laws {
         let spec = NodeSpec {
             node: NodeId::new("node-a"),
             decodes: vec![formats],
+            serves: Vec::new(),
             ttl_millis: 15_000,
         };
         let a = store.register_node(&spec).await.unwrap();

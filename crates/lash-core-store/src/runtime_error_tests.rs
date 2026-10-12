@@ -660,7 +660,7 @@ mod typed_refusal_causes {
     }
 
     #[test]
-    fn a_refused_creation_config_is_a_typed_terminal_cause() {
+    fn a_refused_creation_request_is_a_typed_terminal_cause() {
         let refusal = ConfigRefusal {
             at: RefusalSite::Creation,
             ..owner_refusal()

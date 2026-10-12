@@ -286,7 +286,7 @@ impl ProcessFeedSource {
         process: &lash_core::facade_support::ObservedProcess,
     ) -> Result<lash_core::ProcessDocumentIdentity> {
         use lash_core::ProcessDocumentIdentity;
-        let lash_core::ProcessInput::Engine { kind, payload } = &process.input else {
+        let lash_core::ProcessInput::Engine { kind, payload, .. } = &process.input else {
             return Ok(ProcessDocumentIdentity::Unsupported);
         };
         let Some(provider) = self.engines.document_provider(kind) else {

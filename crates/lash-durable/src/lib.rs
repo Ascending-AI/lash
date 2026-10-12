@@ -64,7 +64,8 @@ pub use ids::{
 pub use node_wakes::{BootLiveness, NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
 pub use port::{
     ActorCommit, ActorSnapshot, ActorState, ClaimCause, ClaimPurpose, Claimed, DurableStore,
-    HeartbeatOutcome, MailCommit, NodeLease, NodeSpec, Owner, Reaped, Woken,
+    HeartbeatOutcome, MailCommit, NodeLease, NodeSpec, Owner, Reaped, Woken, encode_requires,
+    parse_requires,
 };
 pub use probe::{DurableProbe, NoProbe};
 pub use tx::{ActorTx, Mail, MailTx, MailWrite, OpenedActor, Release};

@@ -36,28 +36,24 @@ fn uploads(core: &LashCore) -> lash_core::facade_support::RuntimeAttachmentStore
 
 /// A detached `SessionTurn` start whose child turn reads `input`.
 fn request(input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
-    lash_core::ProcessStartRequest::new(
-        lash_core::ProcessInput::SessionTurn {
-            definition_key: "uploaded-start-input".into(),
-            create_request: Box::new(lash_core::SessionCreateRequest::child(
-                crate::plugins::SessionToolAccess::ambient(),
-                SESSION,
-                lash_core::SessionStartPoint::Empty,
-                lash_core::SessionPolicy {
-                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-                    ..lash_core::SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                        crate::MaxToolCalls::new(1024),
-                        crate::NoProgressBudget::bounded(12),
-                    )
-                },
-                lash_core::PluginOptions::default(),
-            )),
-            turn_input: Box::new(
-                crate::TurnInput::text("read the host upload").with_attachment(input),
-            ),
-            result: lash_core::SessionTurnOutcome::Turn,
-        },
+    lash_core::ProcessStartRequest::session_turn(
+        "uploaded-start-input",
+        lash_core::SessionCreateRequest::child(
+            crate::plugins::SessionToolAccess::ambient(),
+            SESSION,
+            lash_core::SessionStartPoint::Empty,
+            lash_core::SessionPolicy {
+                model: Some(recorded_llm_profile(mock_llm_profile_spec())),
+                ..lash_core::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
+                )
+            },
+            lash_core::PluginOptions::default(),
+        ),
+        crate::TurnInput::text("read the host upload").with_attachment(input),
+        lash_core::SessionTurnOutcome::Turn,
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,
     )

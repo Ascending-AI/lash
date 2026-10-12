@@ -1,7 +1,7 @@
 //! Shared conformance for durable backends that fuse both artifact-store traits
 //! ADR-0013's engine rebuild path depends on:
 //! [`lash_core::ModuleArtifactStore`] (module artifacts)
-//! and [`lash_core::ProcessExecutionEnvStore`] (process-execution-env blobs).
+//! and [`lash_core::ProcessEnvStore`] (process-execution-env blobs).
 //!
 //! Both ports live in the execution kernel and the per-port laws live in this
 //! crate, so the cross-namespace isolation case — which requires a single store viewed
@@ -10,16 +10,16 @@
 
 use std::sync::Arc;
 
-use crate::ReopenableProcessExecutionEnvStore;
+use crate::ReopenableProcessEnvStore;
 use crate::module_artifact_store::{ReopenableModuleArtifactStore, SampleArtifact};
-use lash_core::ProcessExecutionEnvStore;
+use lash_core::ProcessEnvStore;
 use pretty_assertions::assert_eq;
 
 /// A durable store accessed through both artifact-store traits over the same
 /// backing storage.
 pub struct ArtifactStoreHandles {
     pub artifacts: Arc<dyn lash_core::ModuleArtifactStore>,
-    pub process_env: Arc<dyn ProcessExecutionEnvStore>,
+    pub process_env: Arc<dyn ProcessEnvStore>,
     pub turn_preludes: Arc<dyn lash_core::TurnPreludeStore>,
 }
 
@@ -153,12 +153,10 @@ where
 {
     let handles = make();
     let reopen = Arc::clone(&handles.reopen);
-    crate::registration_macro_support::process_env_survives_reopen(
-        ReopenableProcessExecutionEnvStore {
-            open: handles.open.process_env,
-            reopen: Arc::new(move || (reopen)().process_env),
-        },
-    )
+    crate::registration_macro_support::process_env_survives_reopen(ReopenableProcessEnvStore {
+        open: handles.open.process_env,
+        reopen: Arc::new(move || (reopen)().process_env),
+    })
     .await;
 }
 
@@ -197,15 +195,7 @@ where
     let handles = make().open;
     let artifacts = handles.artifacts;
     let artifact = sample_module_artifact("delta");
-    let env_spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    );
+    let env_spec = lash_core::testing::process_env_with_limit(1024);
     let env_ref = env_spec.stable_ref().expect("stable env ref");
     let env_bytes = env_spec.to_store_bytes().expect("encode env");
     let referrer = lash_core::ArtifactReferrer::HostPin(lash_core::HostArtifactPin::mint());
@@ -221,7 +211,7 @@ where
         .expect("publish module artifact");
     handles
         .process_env
-        .publish_process_execution_env(&claim, &env_ref, &env_bytes)
+        .publish_process_env(&claim, &env_ref, &env_bytes)
         .await
         .expect("publish process environment");
 
@@ -234,7 +224,7 @@ where
     assert_eq!(
         handles
             .process_env
-            .get_process_execution_env(&env_ref)
+            .get_process_env(&env_ref)
             .await
             .expect("environment bytes isolated"),
         Some(env_bytes),

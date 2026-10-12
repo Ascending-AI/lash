@@ -175,7 +175,7 @@ impl lash_core_execution::StoreSet for HoldingStoreSet {
         lash_core_execution::StoreSet::process_registry(self.inner.as_ref())
     }
 
-    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessExecutionEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessEnvStore> {
         lash_core_execution::StoreSet::process_env_store(self.inner.as_ref())
     }
 

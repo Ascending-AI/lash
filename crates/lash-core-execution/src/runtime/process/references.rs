@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 use super::ProcessDefinitionId;
-use super::model::{ProcessExecutionEnvRef, ProcessRecord};
+use super::model::{ProcessEnvRef, ProcessRecord};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessLiveReferenceView {
     pub definition_id: Option<ProcessDefinitionId>,
-    pub env_ref: Option<ProcessExecutionEnvRef>,
+    pub env_ref: Option<ProcessEnvRef>,
     pub process_count: usize,
 }
 
@@ -23,13 +23,13 @@ impl ProcessLiveReferenceView {
             }
             if let Some(summary) = summaries.iter_mut().find(|summary| {
                 summary.definition_id == record.identity.definition_id
-                    && summary.env_ref == record.env_ref
+                    && summary.env_ref.as_ref() == record.env_ref()
             }) {
                 summary.process_count += 1;
             } else {
                 summaries.push(Self {
                     definition_id: record.identity.definition_id.clone(),
-                    env_ref: record.env_ref.clone(),
+                    env_ref: record.env_ref().cloned(),
                     process_count: 1,
                 });
             }

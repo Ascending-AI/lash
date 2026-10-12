@@ -400,7 +400,7 @@ pub struct WeakRuntimeHandle {
     runtime: std::sync::Weak<Mutex<LashRuntime>>,
     observation: std::sync::Weak<ArcSwap<RuntimeObservation>>,
     live_replay_store: std::sync::Weak<dyn LiveReplayStore>,
-    process_env_store: std::sync::Weak<dyn crate::ProcessExecutionEnvStore>,
+    process_env_store: std::sync::Weak<dyn crate::ProcessEnvStore>,
     process_engines: crate::WeakProcessEngineRegistry,
 }
 
@@ -435,7 +435,7 @@ pub struct RuntimeHandle {
     pub runtime: Arc<Mutex<LashRuntime>>,
     pub observation: Arc<ArcSwap<RuntimeObservation>>,
     pub live_replay_store: Arc<dyn LiveReplayStore>,
-    pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    pub process_env_store: Arc<dyn crate::ProcessEnvStore>,
     pub process_engines: crate::ProcessEngineRegistry,
 }
 

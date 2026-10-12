@@ -20,9 +20,9 @@ use axum::{Json, Router};
 use futures_util::StreamExt as _;
 use lash::LashCore;
 use lash::process::{
-    HostArtifactPin, Lifetime, ProcessAwaitOutput, ProcessDefinition, ProcessDefinitionId,
-    ProcessExecutionEnvSpec, ProcessLifecycleFact, ProcessObservationStreamItem, ProcessOriginator,
-    ProcessStartRequest, ProcessStartTarget, ProcessStatus,
+    EngineLaunch, HostArtifactPin, Lifetime, ProcessAwaitOutput, ProcessComponentEntry,
+    ProcessConfigKey, ProcessDefinition, ProcessDefinitionId, ProcessEnv, ProcessLifecycleFact,
+    ProcessObservationStreamItem, ProcessOriginator, ProcessStartRequest, ProcessStatus,
 };
 use lash::sync::MutexExt as _;
 use lash::workflow::document::{Document, Name};
@@ -43,18 +43,27 @@ fn api_error(error: impl std::fmt::Display) -> (axum::http::StatusCode, String) 
     )
 }
 
+/// The process component that contributes the host's tools to a workflow
+/// process: its config is `()`.
+const HOST_TOOLS: ProcessConfigKey<()> =
+    ProcessConfigKey::new("workflow-host-tools", lash::plugins::FormatVersion::ONE);
+
 /// The environment a process of a published workflow runs under, which is
-/// the environment lash admits the workflow against.
-fn environment() -> ProcessExecutionEnvSpec {
-    ProcessExecutionEnvSpec::new(
-        lash::plugins::AdmittedPluginConfig::default(),
-        lash::runtime::SessionPolicy::new(
-            lash::TurnBudget::bounded(32),
-            lash::MaxToolCalls::new(1024),
-            lash::NoProgressBudget::bounded(12),
-        ),
-        lash::plugins::SessionToolAccess::ambient(),
-    )
+/// the environment lash admits the workflow against: the host's tools, from
+/// the one component that provides them, and `processes.start` and
+/// `processes.await` from the process controls, for the processes a workflow
+/// defines inline.
+fn environment() -> Result<ProcessEnv> {
+    use lash::process_controls::{ProcessControlTool, process_tool_definition};
+    let mut tools = tool_definitions();
+    tools.extend(
+        [ProcessControlTool::Start, ProcessControlTool::Await].map(process_tool_definition),
+    );
+    let tools = lash::plugins::SessionToolAccess::restricted(tools)?;
+    Ok(ProcessEnv::builder(tools, lash::MaxToolCalls::new(1024))
+        .component(HOST_TOOLS, &())
+        .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &())
+        .build()?)
 }
 
 /// The host's two tools. `review.request` defers: its process parks until
@@ -169,21 +178,45 @@ fn builder_over(backend: lash::Backend, bodies: &std::path::Path) -> Result<lash
         memory: 64 * 1024 * 1024,
         ..workers.config().run_bounds
     };
+    let tools: Arc<dyn lash::tools::ToolProvider> = Arc::new(lash::tools::StaticToolProvider::new(
+        tool_definitions(),
+        Tools {
+            ledger: Arc::new(Mutex::new(ledger)),
+        },
+    ));
+    let host_tools = lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(HOST_TOOLS.component()),
+        lash::plugins::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
+    )
+    .as_component(HOST_TOOLS.format())?;
+    // A process a turn starts runs the turn's recorded model and tools,
+    // with the host's tool component and nothing else; a process a workflow
+    // starts inline runs under its starter's environment.
+    let environment = lash::process::env::policy::from_run(|_| {
+        Ok(vec![ProcessComponentEntry::new(HOST_TOOLS, &(), [])?])
+    });
+    let nested = lash::process::env::policy::inherit_or(lash::process::env::policy::refuse(
+        "the process controls start inside a process only",
+    ));
     Ok(LashCore::standard_builder(backend)
         .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
             workers,
             lash::vm::TYPESCRIPT_DIALECT,
             bounds,
         )))
-        .tools(Arc::new(lash::tools::StaticToolProvider::new(
-            tool_definitions(),
-            Tools {
-                ledger: Arc::new(Mutex::new(ledger)),
-            },
-        )))
+        .tools(tools)
+        .process_component(Arc::new(host_tools), HOST_TOOLS)
+        .process_component(
+            Arc::new(lash::process_controls::ProcessControlsComponent::new(
+                lash::process::lifetime::session_or_starter,
+                nested,
+            )),
+            lash::process_controls::PROCESS_CONTROLS_CONFIG,
+        )
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash::process::lifetime::session_or_starter,
+                environment,
             ),
         )))
 }
@@ -286,7 +319,7 @@ async fn read_environment(State(host): State<Host>) -> ApiResult {
     let environment = host
         .core
         .host_artifacts()
-        .workflow_environment(&environment())
+        .workflow_environment(&environment().map_err(api_error)?)
         .await
         .map_err(api_error)?
         .context("this core reads no workflow documents")
@@ -313,7 +346,7 @@ async fn read_requirements(
     let environment = host
         .core
         .host_artifacts()
-        .workflow_environment(&environment())
+        .workflow_environment(&environment().map_err(api_error)?)
         .await
         .map_err(api_error)?
         .context("this core reads no workflow documents")
@@ -381,7 +414,7 @@ async fn edit_draft(State(host): State<Host>, Json(request): Json<EditDraft>) ->
     let environment = host
         .core
         .host_artifacts()
-        .workflow_environment(&environment())
+        .workflow_environment(&environment().map_err(api_error)?)
         .await
         .map_err(api_error)?
         .context("this core reads no workflow documents")
@@ -439,7 +472,12 @@ async fn publish_draft(State(host): State<Host>, Json(request): Json<PublishDraf
     let publish = host
         .core
         .host_artifacts()
-        .publish_workflow(&host.pin, &draft, &request.entry, &environment())
+        .publish_workflow(
+            &host.pin,
+            &draft,
+            &request.entry,
+            &environment().map_err(api_error)?,
+        )
         .await
         .map_err(api_error)?;
     Ok(Json(match publish {
@@ -519,29 +557,29 @@ async fn start_run(State(host): State<Host>, Json(request): Json<StartRun>) -> A
         .map_err(api_error)?
         .with_context(|| format!("no definition {}", request.definition))
         .map_err(api_error)?;
-    let environment = host
-        .core
-        .resolve_process_environment(environment())
-        .map_err(api_error)?;
     let env_ref = artifacts
-        .publish_process_env(&host.pin, &environment)
+        .publish_process_env(&host.pin, &environment().map_err(api_error)?)
         .await
+        .map_err(api_error)?;
+    // The run states its kernel settings: this build's dialect and bounds.
+    let settings = host
+        .core
+        .processes()
+        .engine_defaults(lash::process::LASH_VM_ENGINE_KIND, &Value::Null)
         .map_err(api_error)?;
     let receipt = host
         .core
         .processes()
         .start(
-            ProcessStartRequest::new(
-                ProcessStartTarget::Definition {
-                    definition_id: definition.id.clone(),
-                    signature_claim: Some(definition.signature.clone()),
-                    args: request.args,
-                },
+            ProcessStartRequest::definition(
+                definition.id.clone(),
+                Some(definition.signature.clone()),
+                request.args,
+                EngineLaunch::new(env_ref, settings),
                 ProcessOriginator::host(),
                 Lifetime::Detached,
             )
-            .with_host_start_key(request.key)
-            .with_env_ref(env_ref),
+            .with_host_start_key(request.key),
             host.core.effect_host(),
         )
         .await

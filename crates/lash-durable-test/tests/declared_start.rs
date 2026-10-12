@@ -484,11 +484,11 @@ impl DeclaringProbe {
         } else {
             lash_core::lifetime::starter(&start_cx)
         };
-        let declaration = lash_core::ProcessStartDeclaration::new(
-            lash_core_execution::testing::held_engine_input(serde_json::json!({
+        let declaration = lash_core_execution::testing::held_engine_declaration(
+            serde_json::json!({
                 PROBE_MARKER: session_id.as_str(),
                 "attempt": context.attempt_number(),
-            })),
+            }),
             lash_core::ProcessOriginator::Session {
                 session_id: session_id.clone(),
                 agent_frame_id: Some(agent_frame_id),
@@ -498,13 +498,7 @@ impl DeclaringProbe {
         .with_declared_identity(lash_core::DeclaredProcessIdentity::labelled(
             "probe",
             None::<String>,
-        ))
-        // The child runs under the attempt's captured environment.
-        .with_env_ref(
-            context
-                .process_execution_env_ref()
-                .map_err(|error| error.to_string())?,
-        );
+        ));
         Ok(lash_core::StartProcessIntent {
             owner: lash_core::RuntimeOwner::Session(session_id),
             declaration,
@@ -1098,16 +1092,15 @@ async fn a_session_lifetime_subagent_survives_its_waiting_turn(tier: Tier) {
     world.shutdown().await;
 }
 
-/// The process that runs a spawned child runs under the environment its
-/// start captured (FIG-4396), and the child session records only what its
-/// creator stated (ADR 0134).
+/// The process that runs a spawned child has no environment and builds no
+/// plugin runtime of its own (FIG-6034 D5), and the child session records
+/// only what its creator stated (ADR 0134).
 ///
 /// The parent's creator states [`PARENT_FACTS`]; the core installs the
 /// owner under [`NODE_FACTS_DEFAULT`]. The child's `SessionTurn` process
-/// captures the parent's recorded environment at its start, and the node
-/// builds the process's own plugin runtime from it. The child session the
-/// process creates states no facts, so it records, and runs under, the
-/// owner's default: nothing of its parent's config reaches it.
+/// records no environment. The child session the process creates states no
+/// facts, so it records, and runs under, the owner's default: nothing of
+/// its parent's config reaches it.
 async fn declared_start_child_records_only_its_creators_facts(tier: Tier) {
     let Some(world) = World::new(
         tier,
@@ -1124,35 +1117,20 @@ async fn declared_start_child_records_only_its_creators_facts(tier: Tier) {
     let output = world.run().await;
     served::assert_answered("the parent", &output);
     assert_answered_the_child(&world, 0);
-    let recorded = Some(recorded_facts(PARENT_FACTS));
     let default = Some(recorded_facts(NODE_FACTS_DEFAULT));
 
     let child = world.only_child().await;
-    let env_ref = child
-        .env_ref
-        .clone()
-        .expect("the child's SessionTurn process captured its parent's environment");
-    let stores = world.backend().stores();
-    let bytes = stores
-        .process_env_store()
-        .get_process_execution_env(&env_ref)
-        .await
-        .expect("read the child's captured environment")
-        .expect("the child's environment is stored");
-    let environment = lash_core::ProcessExecutionEnvSpec::from_store_bytes(&bytes)
-        .expect("decode the child's captured environment");
-    assert_eq!(
-        environment.plugin_config.config.get(FACTS),
-        recorded.as_ref(),
-        "the captured environment is the parent's recorded config"
+    assert!(
+        child.env_ref().is_none(),
+        "a SessionTurn process records no environment"
     );
+    let stores = world.backend().stores();
     let process_builds = world
         .facts
         .built_for(&lash_core::RuntimeOwner::Process(child.id.clone()).to_string());
     assert!(
-        !process_builds.is_empty() && process_builds.iter().all(|seen| *seen == recorded),
-        "the node built the child process's runtime under the recorded facts, not its own \
-         default: {process_builds:?}"
+        process_builds.is_empty(),
+        "the node built no plugin runtime for the session-turn process: {process_builds:?}"
     );
 
     let child_session = process_child_session_id(&child.id);
@@ -1652,3 +1630,6 @@ tiered_laws!(
     declared_start_rejects_foreign_or_reused_serialized_identity_before_launch,
     batch_of_spawns_overlaps,
 );
+
+#[path = "declared_start/process_own_env.rs"]
+mod process_own_env;

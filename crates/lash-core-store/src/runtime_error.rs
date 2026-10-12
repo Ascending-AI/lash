@@ -448,6 +448,10 @@ runtime_error_codes! {
         /// Effect-host implementor diagnostic for a child registration refused
         /// because its declared parent scope has already ended.
         ProcessParentEnded = "process_parent_ended" => Terminal,
+        // the process environment is refused.
+        /// A process environment was refused at admission, or a start named
+        /// one that is not published (FIG-6034).
+        ProcessEnvRefused = "process_env_refused" => Terminal,
         // a different cancellation is durably recorded.
         /// Effect-host implementor diagnostic for a conflicting cancellation request.
         ProcessCancelConflict = "process_cancel_conflict" => Terminal,
@@ -679,7 +683,7 @@ runtime_error_codes! {
         // the attempt index is inconsistent.
         RuntimeEffectToolAttemptIndex = "runtime_effect_tool_attempt_index" => Terminal,
         // the recorded presentation or execution environment cannot be reconstructed.
-        ProcessExecutionEnvRefused = "process_execution_env_refused" => Terminal,
+        ProcessEnvUnresolved = "process_execution_env_refused" => Terminal,
         // the effect produced an outcome of the wrong kind for its command.
         RuntimeEffectWrongOutcome = "runtime_effect_wrong_outcome" => Terminal,
         // the process-local controller task closed; a restart repairs it.
@@ -1097,6 +1101,7 @@ impl RuntimeError {
             | RuntimeErrorCause::PluginOperation { .. }
             | RuntimeErrorCause::PluginHooks { .. }
             | RuntimeErrorCause::ProcessParentEnded { .. }
+            | RuntimeErrorCause::ProcessEnvRefused { .. }
             | RuntimeErrorCause::ProcessStartKeyConflict { .. }
             | RuntimeErrorCause::SchemaRefused { .. }
             | RuntimeErrorCause::ToolSchemaRefused { .. }

@@ -23,6 +23,8 @@ use tokio::task::JoinHandle;
 pub struct SimNodesConfig {
     pub lease: LeaseConfig,
     pub decodes: Vec<FormatSet>,
+    /// The claim requirements every node serves (FIG-6034 D3).
+    pub serves: Vec<String>,
     pub max_active: usize,
 }
 
@@ -157,6 +159,7 @@ impl SimNodes {
             RunnerConfig {
                 node: NodeId::new(node),
                 decodes,
+                serves: self.config.serves.clone(),
                 lease: self.config.lease,
                 max_active: self.config.max_active,
                 claim_batch: self.config.max_active,
@@ -541,6 +544,7 @@ mod tests {
             SimNodesConfig {
                 lease,
                 decodes: vec![FormatSet::new(FORMATS)],
+                serves: Vec::new(),
                 max_active: 4,
             },
             Arc::clone(hold) as Arc<dyn Activation>,
@@ -591,6 +595,7 @@ mod tests {
             SimNodesConfig {
                 lease: LeaseConfig::default(),
                 decodes: vec![FormatSet::new(FORMATS)],
+                serves: Vec::new(),
                 max_active: 4,
             },
             Arc::clone(&abandon) as Arc<dyn Activation>,
@@ -770,6 +775,7 @@ mod tests {
             SimNodesConfig {
                 lease: LeaseConfig::default(),
                 decodes: vec![FormatSet::new(FORMATS)],
+                serves: Vec::new(),
                 max_active: 4,
             },
             Arc::new(Hold::default()) as Arc<dyn Activation>,
