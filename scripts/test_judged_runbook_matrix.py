@@ -252,7 +252,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             if policy["emits"]
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 37)
+        self.assertEqual(expected, 38)
 
     def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
         # The tier word is what a reader trusts; the slug is what the bill is

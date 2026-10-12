@@ -45,6 +45,7 @@ deterministic_only = { emits = false, referent = "runbook" }
 # Python rows run on a worker whose host names Python (FIG-5990).
 # Declaration order is shard order; each scenario's dialect order is retained.
 [scenarios]
+workbench-python-session = { tier = "frontier", model = "openai/gpt-6.1-sol", dialects = ["python"] }
 workbench-crash-resume = { tier = "deterministic", model = "scripted-provider", stores = ["sqlite", "postgres"] }
 provider-runtime-feedback = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "runtime_feedback_ workspace nextest companion; live outgoing retry request remains judged" }
 rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash", dialects = ["typescript", "python"] }
@@ -101,6 +102,7 @@ lash-postgres-workers = { runner = "kiln test //crates/lash-postgres-workers:fai
 
 # Hermetic procedures with no provider call and no judged-browser row.
 [deterministic_only]
+latency-gate = { tier = "deterministic", model = "scripted-provider" }
 kernel-migration-sweep = { tier = "deterministic", model = "scripted-provider" }
 saved-functions = { tier = "deterministic", model = "scripted-provider" }
 context-overflow-recovery = { tier = "deterministic", model = "scripted-provider" }
