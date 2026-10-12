@@ -22,6 +22,10 @@
 //!   `mail_seq > acked_seq`, so a wake cannot be lost between a read and an
 //!   acknowledgement.
 //! - A release leaves an actor ready when it still has mail, unless it ends.
+//! - A claim counts one more failed activation when no commit advanced the
+//!   actor since the previous claim. The owner fence bumps the revision on
+//!   every commit, so a `ready` release that writes nothing else keeps the
+//!   claim's mark ([`ActorStatements::unadvanced`]).
 
 pub mod graph;
 pub mod processes;
@@ -149,6 +153,13 @@ crate::statements! {
                  epoch = epoch + 1, owner_node = NULL, owner_boot = NULL
              WHERE actor_key = ?1
              RETURNING state";
+
+        /// Keep actor `?1`'s claim mark across a commit that advanced
+        /// nothing, when no commit advanced it since its claim either: the
+        /// fence bumped the revision, so the mark moves with it and the next
+        /// claim counts one more failed activation.
+        unadvanced = "UPDATE actors SET claimed_revision = state_revision
+             WHERE actor_key = ?1 AND claimed_revision = state_revision - 1";
 
         /// End actor `?1`: terminal, its mailbox acknowledged, its epoch
         /// bumped.

@@ -187,9 +187,9 @@ lash_store_sql::statements! {
         /// has not reached its tombstone (FIG-6072); to boot `?3` of node
         /// `?2`, oldest first, bumping each epoch; returns each with the
         /// state that made it claimable, its format set and its
-        /// requirements. A claim that finds no commit since the previous
-        /// claim counts one more failed activation; any commit since resets
-        /// the count.
+        /// requirements. A claim that finds no commit advanced the actor
+        /// since the previous claim counts one more failed activation; any
+        /// such commit resets the count.
         claim = "WITH c AS (
                  SELECT p.actor_key, p.state, p.formats, p.requires FROM actors p
                  WHERE ((p.state = 'ready' AND p.ready_at_ms <= ?1)

@@ -53,4 +53,5 @@ law!(
     a_process_awaiting_a_child_reads_waiting_on_that_process,
     a_process_with_two_parked_calls_lists_both_without_their_keys,
     a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_its_lifecycle,
+    a_panicking_activation_parks_at_its_budget_and_progress_resets_the_count,
 );

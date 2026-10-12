@@ -40,7 +40,9 @@
 //! this boot may still own its actor (a read it gave up on, a panic) is
 //! [`Exit::Abandoned`]: the runner releases the actor `ready` in one owner
 //! transaction fenced by the epoch it was claimed under, so a claim runs it
-//! again and no actor is left owned with no activation.
+//! again and no actor is left owned with no activation. The hand-back
+//! advances nothing: an activation that never committed counts as a failed
+//! one at the next claim, as a crashed one does.
 //!
 //! With [`NodeWakes`] (PostgreSQL, or a SQLite database file), the runner
 //! also listens: it opens its listener before its first claim, so no hint

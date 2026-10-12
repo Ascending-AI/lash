@@ -38,7 +38,10 @@ pub struct Mail {
 pub enum Release {
     /// Claimable at once by any node that decodes it: a draining node's
     /// release at a committed phase, or the runner's hand-back of an
-    /// abandoned activation's actor (`drain.release`).
+    /// abandoned activation's actor (`drain.release`). A commit that writes
+    /// nothing else ([`ActorTx::advances`] is false) advances nothing: when
+    /// no commit advanced the actor since its claim, the next claim counts
+    /// one more failed activation, as after a crash.
     Ready,
     /// Nothing to do until mail arrives.
     Idle,
@@ -316,6 +319,17 @@ impl ActorTx {
     #[must_use]
     pub fn ack(&self) -> Option<MailSeq> {
         self.ack
+    }
+
+    /// Whether committing this transaction advances the actor: whether it
+    /// writes anything beside its release.
+    #[must_use]
+    pub fn advances(&self) -> bool {
+        !self.domain.is_empty()
+            || !self.graph.is_empty()
+            || self.ack.is_some()
+            || self.formats.is_some()
+            || self.requires.is_some()
     }
 
     /// How this transaction releases the actor, if it does.

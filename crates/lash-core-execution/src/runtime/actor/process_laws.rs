@@ -50,6 +50,7 @@ macro_rules! ensure {
 mod blockers;
 mod contended_cancel;
 mod engine_keys;
+mod panicking;
 mod parked_calls;
 
 pub use blockers::{
@@ -65,6 +66,7 @@ pub use engine_keys::{
     a_pinned_engine_key_is_listed_from_its_wait_after_a_restart_and_a_handover,
     an_awaited_engine_key_records_a_waiting_fact,
 };
+pub use panicking::a_panicking_activation_parks_at_its_budget_and_progress_resets_the_count;
 pub use parked_calls::a_parked_call_is_reopened_from_its_completion_wait_after_a_restart_and_a_handover;
 
 /// The kind every law process runs.
@@ -164,18 +166,45 @@ fn advances(tag: &str) -> Vec<String> {
 }
 
 fn note(tag: &str, event: &EngineEvent) {
-    let event = match event {
+    ADVANCES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push((tag.to_owned(), event_name(event)));
+}
+
+/// How many times `tag`'s process was handed an event like `event`, this
+/// one included: every call, where [`advances`] folds repeats.
+fn noted(tag: &str, event: &EngineEvent) -> u32 {
+    let name = event_name(event);
+    let count = ADVANCES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .filter(|(seen, noted)| seen == tag && *noted == name)
+        .count();
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+/// How many times `tag`'s process was advanced, every call counted.
+fn noted_calls(tag: &str) -> u32 {
+    let count = ADVANCES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .filter(|(seen, _)| seen == tag)
+        .count();
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+fn event_name(event: &EngineEvent) -> String {
+    match event {
         EngineEvent::Started { .. } => "started".to_owned(),
         EngineEvent::StepSettled { .. } => "step_settled".to_owned(),
         EngineEvent::Cancelled { origin, .. } => format!("cancelled:{}", origin_name(*origin)),
         EngineEvent::ProcessEnded { .. } => "process_ended".to_owned(),
         EngineEvent::ProcessWaitTimedOut { .. } => "process_wait_timed_out".to_owned(),
         other => format!("{other:?}"),
-    };
-    ADVANCES
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .push((tag.to_owned(), event));
+    }
 }
 
 fn origin_name(origin: CancelOrigin) -> String {
@@ -205,7 +234,11 @@ fn origin_name(origin: CancelOrigin) -> String {
 ///   and hands its key out, and ends with how the step settled;
 /// - `park_two`: runs two `law_park` steps at once, each for its own node,
 ///   and holds;
-/// - `sleep`: sleeps at a node until the instant its payload names.
+/// - `sleep`: sleeps at a node until the instant its payload names;
+/// - `panic`: panics on every advance, before any of it commits;
+/// - `flap`: panics on its first `LOOP_BUDGET - 1` advances with each
+///   event, then sleeps until the instant its payload names once started,
+///   and ends once woken.
 pub struct LawEngine {
     version: u32,
 }
@@ -348,8 +381,12 @@ impl ProcessEngine for LawEngine {
             EngineEvent::Started { payload } => payload.clone(),
             _ => serde_json::from_slice(&state.bytes).map_err(infra)?,
         };
-        note(script["tag"].as_str().unwrap_or_default(), &event);
+        let tag = script["tag"].as_str().unwrap_or_default().to_owned();
+        note(&tag, &event);
         let act = script["act"].as_str().unwrap_or("hold").to_owned();
+        if act == "panic" || (act == "flap" && noted(&tag, &event) < LOOP_BUDGET) {
+            panic!("the law engine panics advancing {tag}");
+        }
         let action = match event {
             EngineEvent::Started { .. } => match act.as_str() {
                 "stuck" => EngineAction::Steps {
@@ -381,7 +418,7 @@ impl ProcessEngine for LawEngine {
                         .collect(),
                     wake: None,
                 },
-                "sleep" => EngineAction::Sleep {
+                "sleep" | "flap" => EngineAction::Sleep {
                     until: lash_durable::DurableInstant(
                         script["until_ms"]
                             .as_i64()
@@ -425,6 +462,7 @@ impl ProcessEngine for LawEngine {
             EngineEvent::ProcessEnded { process, .. } => {
                 ended(json!({ "ended": process.as_str() }))
             }
+            EngineEvent::Woke if act == "flap" => ended(json!({ "woke": true })),
             _ => EngineAction::Idle,
         };
         let bytes = serde_json::to_vec(&script).map_err(infra)?;

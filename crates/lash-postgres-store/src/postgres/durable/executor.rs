@@ -518,6 +518,9 @@ impl Call {
             Some(Release::Parked) => (Some("parked"), None),
             Some(Release::Terminal) => (Some("terminal"), None),
             Some(Release::Waiting { next_due }) => (Some("waiting"), next_due.map(|due| due.0)),
+            // A ready release that writes nothing else keeps the claim's
+            // mark that nothing advanced the actor.
+            Some(Release::Ready) if !tx.advances() => (Some("ready_unadvanced"), None),
             Some(Release::Ready) => (Some("ready"), None),
             Some(_) => (Some("idle"), None),
         };

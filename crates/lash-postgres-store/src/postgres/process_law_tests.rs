@@ -1,6 +1,6 @@
-//! The C1, batched-cascade and step-lifecycle laws of process actors
-//! (`lash_core_execution::runtime::actor::process_laws`; L6, FIG-5175) over
-//! PostgreSQL, each on its own isolated database.
+//! The C1, batched-cascade, step-lifecycle and activation-loop laws of
+//! process actors (`lash_core_execution::runtime::actor::process_laws`; L6,
+//! FIG-5175) over PostgreSQL, each on its own isolated database.
 
 // This file is test code; ambient env access is sanctioned here (the
 // workspace clippy ban targets production library code).
@@ -56,6 +56,7 @@ law!(
     a_process_awaiting_a_child_reads_waiting_on_that_process,
     a_process_with_two_parked_calls_lists_both_without_their_keys,
     a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_its_lifecycle,
+    a_panicking_activation_parks_at_its_budget_and_progress_resets_the_count,
 );
 
 /// FIG-5235: a deterministic 40P01 inside the terminal is retried, not refused.

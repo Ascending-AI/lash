@@ -9,7 +9,10 @@ use crate::runtime::process::{ObservedProcess, ProcessWorkObserver};
 use crate::{ProcessParkReason, ProcessStatus, WaitKind, WaitState};
 
 /// `process` as a host observes it through `backend`.
-async fn observed(backend: &Backend, process: &ProcessId) -> Result<ObservedProcess, LawBroken> {
+pub(super) async fn observed(
+    backend: &Backend,
+    process: &ProcessId,
+) -> Result<ObservedProcess, LawBroken> {
     ProcessWorkObserver::new(backend.process_registry())
         .with_actor_parks(Arc::clone(backend.durable()))
         .process(process)

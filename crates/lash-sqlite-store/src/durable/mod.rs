@@ -277,8 +277,9 @@ lash_store_sql::statements! {
              LIMIT ?3";
 
         /// Give actor `?1` to boot `?3` of node `?2`, bumping its epoch. A
-        /// claim that finds no commit since the previous claim counts one
-        /// more failed activation; any commit since resets the count.
+        /// claim that finds no commit advanced the actor since the previous
+        /// claim counts one more failed activation; any such commit resets
+        /// the count.
         claim = "UPDATE actors
              SET state = 'owned', epoch = epoch + 1, owner_node = ?2, owner_boot = ?3,
                  ready_at_ms = NULL, next_due_ms = NULL,
@@ -802,6 +803,9 @@ fn apply_owner(
                 .query_row(rusqlite::params![actor, state, due, now.0], |row| {
                     row.get(0)
                 })?;
+            if rest == Release::Ready && !write.advances() {
+                cached_execute(tx, SQL.actor.unadvanced.sql(), [&actor])?;
+            }
             match actor_state(&stored) {
                 Ok(state) => state,
                 Err(error) => return refuse(error),

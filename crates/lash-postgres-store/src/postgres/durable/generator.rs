@@ -10,7 +10,8 @@
 //! skipped by what an earlier step captured, and may capture its own first
 //! row. After a step, the ancestry it retired is walked and the actors it
 //! woke are woken. Then the commit's retired roots are peeled, and the
-//! formats stamp, the acknowledgement and the release end it.
+//! formats stamp, the acknowledgement and the release end it; a `ready`
+//! release that writes nothing else keeps the claim's no-progress mark.
 
 use lash_durable::domain::CANCEL_MAIL;
 
@@ -332,6 +333,11 @@ pub(crate) fn function_ddl() -> String {
         SQL.actor.release.sql(),
         &["p_actor", "p_release", "p_due", "v_now"],
     );
+    let release_unadvanced = inline(
+        SQL.actor.release.sql(),
+        &["p_actor", "'ready'", "p_due", "v_now"],
+    );
+    let unadvanced = inline(SQL.actor.unadvanced.sql(), &["p_actor"]);
     let latch_record = inline(
         executor.latch_record.sql(),
         &[
@@ -559,6 +565,10 @@ BEGIN
     WHEN 'idle', 'waiting', 'ready' THEN
         {release}
         INTO v_state;
+    WHEN 'ready_unadvanced' THEN
+        {release_unadvanced}
+        INTO v_state;
+        {unadvanced};
     ELSE
         NULL;
     END CASE;

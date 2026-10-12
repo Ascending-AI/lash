@@ -2522,6 +2522,20 @@ BEGIN
              WHERE actor_key = (p_actor)
              RETURNING state
         INTO v_state;
+    WHEN 'ready_unadvanced' THEN
+        UPDATE lash_actors
+             SET state = CASE WHEN mail_seq > acked_seq OR CAST(('ready') AS TEXT) = 'ready'
+                              THEN 'ready' ELSE CAST(('ready') AS TEXT) END,
+                 ready_at_ms = CASE WHEN mail_seq > acked_seq OR CAST(('ready') AS TEXT) = 'ready'
+                                    THEN CAST((v_now) AS BIGINT) ELSE NULL END,
+                 next_due_ms = CASE WHEN mail_seq > acked_seq OR CAST(('ready') AS TEXT) = 'ready'
+                                    THEN NULL ELSE CAST((p_due) AS BIGINT) END,
+                 epoch = epoch + 1, owner_node = NULL, owner_boot = NULL
+             WHERE actor_key = (p_actor)
+             RETURNING state
+        INTO v_state;
+        UPDATE lash_actors SET claimed_revision = state_revision
+             WHERE actor_key = (p_actor) AND claimed_revision = state_revision - 1;
     ELSE
         NULL;
     END CASE;

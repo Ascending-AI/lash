@@ -381,6 +381,13 @@ pub(super) async fn apply_owner(
                 .fetch_one(crate::observed_sql::executor(&mut ***tx))
                 .await
                 .map_err(sqlx_failure)?;
+            if rest == Release::Ready && !write.advances() {
+                crate::observed_sql::query(SQL.actor.unadvanced.sql())
+                    .bind(actor)
+                    .execute(crate::observed_sql::executor(&mut ***tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+            }
             actor_state(&stored)?
         }
     };
