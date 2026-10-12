@@ -236,12 +236,19 @@ pub(super) fn holding(lease: LeaseSettings, max_active: usize) -> DurableSetting
     }
 }
 
+/// The node-wake suite's hang guard, never an assertion about latency.
+const WATCHDOG: Duration = Duration::from_secs(60);
+
 /// Put fallback polls effectively out of reach of a test action. Both the
 /// floor and ceiling must be disabled: a successful claim resets the floor.
+/// Startup gets the hang guard's bound: a registration that misses its bound
+/// retries after `claim_backoff`, which these laws never reach. The laws
+/// assert no startup latency.
 pub(super) fn quiet() -> LeaseSettings {
     LeaseSettings {
         claim_poll: Duration::from_secs(100 * 365 * 24 * 60 * 60),
         claim_backoff: Duration::from_secs(100 * 365 * 24 * 60 * 60),
+        startup: WATCHDOG,
         ..LeaseSettings::default()
     }
 }
