@@ -240,9 +240,20 @@ fn environment() -> lash_core::ProcessExecutionEnvSpec {
 }
 
 /// Publishes the worker document under a host pin, and answers the start
-/// payload of its `worker` entry.
+/// payload of its `worker` entry. Its `use` lines name only what its own
+/// code calls; its manifest lists every function that code reaches,
+/// through helper bodies too (`K-DOC-002`): a parked call or closure in a
+/// helper's body resumes only in a body its document lists.
 async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
-    let document = lash::workflow::document::parse_document(text).expect("the document parses");
+    let mut document = lash::workflow::document::parse_document(text).expect("the document parses");
+    let functions = lash::vm::standard_functions().expect("the shipped library assembles");
+    document.manifest.functions =
+        lash::workflow::graph::requirements(&document, functions.as_ref()).functions;
+    lash::workflow::graph::admit(
+        &document,
+        &lash::workflow::graph::Environment::new(functions.as_ref()),
+    )
+    .expect("the document is admitted");
     let identity = lash_vm_runtime::KernelDocuments::new(backend.module_artifacts())
         .publish(
             &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
