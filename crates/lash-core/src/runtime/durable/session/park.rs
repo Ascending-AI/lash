@@ -22,6 +22,14 @@ pub enum SessionParkReason {
         /// The last pass's failure.
         error: SessionPassFailure,
     },
+    /// Its activations ended `failed_activations` claims in a row with
+    /// nothing committed (a panic, or a read the activation gave up on): the
+    /// activation-loop budget, which the store counts across claims, as a
+    /// process's (FIG-6096).
+    ActivationLoop {
+        /// The claims in a row that committed nothing.
+        failed_activations: u32,
+    },
     /// Its unfinished turn resumes from a state this build does not decode:
     /// another build wrote it. The turn's restore refused it before any of
     /// the turn's work was re-delivered (no cell ran again, no model call
@@ -156,6 +164,7 @@ impl SessionParkReason {
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::PassLoop { .. } => "pass_loop",
+            Self::ActivationLoop { .. } => "activation_loop",
             Self::UndecodableState { .. } => "undecodable_state",
         }
     }
@@ -166,7 +175,7 @@ impl SessionParkReason {
     pub fn profile_key(&self) -> Option<&crate::LlmProfileKey> {
         match self {
             Self::PassLoop { error, .. } => error.profile_key(),
-            Self::UndecodableState { .. } => None,
+            Self::ActivationLoop { .. } | Self::UndecodableState { .. } => None,
         }
     }
 
@@ -182,11 +191,12 @@ impl SessionParkReason {
 }
 
 /// Park the session with `reason`: its current reason and its release as
-/// `parked`, one commit. Its unread mail stays for the claim that follows a
-/// redrive.
+/// `parked`, one commit, counted as parked work on `tracing`'s metrics. Its
+/// unread mail stays for the claim that follows a redrive.
 pub(super) async fn park(
     cx: &ActorContext,
     reason: &SessionParkReason,
+    tracing: Option<&crate::trace::TraceRuntime>,
 ) -> Result<(), DurableError> {
     tracing::warn!(actor = %cx.actor(), reason = %reason.encode(), "session parked");
     let mut tx = cx.begin().await?;
@@ -194,7 +204,16 @@ pub(super) async fn park(
         reason_json: Some(reason.encode()),
     });
     tx.give_up(Release::Parked);
-    cx.commit(tx, CommitLabel::SESSION_RELEASE).await.map(drop)
+    cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
+    if let Some(tracing) = tracing {
+        crate::operational_metrics::record_work_parked(
+            tracing.metrics(),
+            Some(&lash_trace::EmissionPermit::new_transition()),
+            "session",
+            reason.kind(),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -213,6 +232,9 @@ mod tests {
                     cause: None,
                     message: "the pass failed".into(),
                 },
+            },
+            SessionParkReason::ActivationLoop {
+                failed_activations: 3,
             },
             SessionParkReason::UndecodableState {
                 state: ParkedTurnState::Checkpoint,

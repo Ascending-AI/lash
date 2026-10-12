@@ -9,6 +9,12 @@
 //! next pass to complete the turn once. A fault that outlasts the budget
 //! parks the session with its typed `PassLoop` park, naming the fault, and
 //! the turn's model is never called.
+//!
+//! PANICKING-SESSION-ACTIVATION-PARKS-AT-BUDGET (FIG-6096): a contributor
+//! that panics instead hands every claim's activation back with nothing
+//! committed. The session parks with its typed `ActivationLoop` park once
+//! the store counts the budget's claims in a row, and a cancel of the parked
+//! turn still ends it.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -16,7 +22,7 @@
 mod served;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use lash_core::llm::types::LlmRequest;
 
@@ -25,10 +31,12 @@ use served::{Tier, World};
 const PLUGIN: &str = "live-fault-catalog";
 const FAULT: &str = "park-fault: the contributor's store did not answer";
 
-/// The contributor's faults: how many of its next runs answer [`FAULT`].
+/// The contributor's faults: how many of its next runs answer [`FAULT`],
+/// and whether every run panics instead.
 #[derive(Default)]
 struct Faults {
     left: AtomicUsize,
+    panics: AtomicBool,
     runs: AtomicUsize,
 }
 
@@ -39,6 +47,10 @@ impl Faults {
 
     fn run(&self) -> Result<(), lash::plugins::PluginError> {
         self.runs.fetch_add(1, Ordering::SeqCst);
+        assert!(
+            !self.panics.load(Ordering::SeqCst),
+            "park-fault: the contributor panics"
+        );
         match self
             .left
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
@@ -199,6 +211,73 @@ async fn a_live_surface_install_fault_parks_typed_at_the_budget_and_one_that_cle
     world.shutdown().await;
 }
 
+/// PANICKING-SESSION-ACTIVATION-PARKS-AT-BUDGET (FIG-6096): a session whose
+/// activation panics at its surface install on every claim, before any
+/// commit of the turn's, parks with `ActivationLoop` at the budget: the claim
+/// that admitted the turn, then exactly the budget's claims that committed
+/// nothing. Its model is never called, and an `Immediate` cancel of the
+/// parked turn still ends it, with no surface installed for the cancel.
+async fn a_session_whose_activation_panics_parks_at_its_budget_and_a_cancel_still_ends_its_turn(
+    tier: Tier,
+) {
+    let Some((world, faults, calls)) = world(tier).await else {
+        return;
+    };
+    let budget = world.backend.config().settings().activation_loop_budget;
+    let session = world.session("panic-parks", served::spec(16)).await;
+    faults.panics.store(true, Ordering::SeqCst);
+    let runs = faults.runs.load(Ordering::SeqCst);
+    let turn = session
+        .send(lash::TurnInput::text("panic-parks"))
+        .await
+        .expect("the turn's input is accepted");
+    let park = parked(&world, "panic-parks").await;
+    assert_eq!(
+        serde_json::from_str::<lash::SessionParkReason>(&park).expect("a session park"),
+        lash::SessionParkReason::ActivationLoop {
+            failed_activations: budget
+        },
+        "the panicking session parks at its activation-loop budget"
+    );
+    assert_eq!(
+        faults.runs.load(Ordering::SeqCst) - runs,
+        usize::try_from(budget).expect("a small budget") + 1,
+        "the claim that admitted the turn and the budget's claims that \
+         committed nothing each panicked once"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "no model was called");
+
+    let runs = faults.runs.load(Ordering::SeqCst);
+    let cancelled = turn
+        .cancel()
+        .request_id("cancel-the-parked-turn")
+        .mode(lash::TurnCancelMode::Immediate)
+        .await
+        .expect("the cancel is requested");
+    assert!(
+        matches!(cancelled, lash::CancelReceipt::Cancelled { .. }),
+        "the cancel addressed the parked turn: {cancelled:?}"
+    );
+    let output = tokio::time::timeout(served::WATCHDOG, turn.output())
+        .await
+        .expect("the parked turn's cancel ends it")
+        .expect("the cancelled turn answers its output");
+    let evidence = output
+        .result
+        .cancellation()
+        .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.result.outcome));
+    assert_eq!(evidence.request_id, "cancel-the-parked-turn");
+    assert_eq!(
+        faults.runs.load(Ordering::SeqCst),
+        runs,
+        "the cancel installed no surface"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "no model was called");
+    faults.panics.store(false, Ordering::SeqCst);
+    world.shutdown().await;
+}
+
 tiered_laws!(
-    a_live_surface_install_fault_parks_typed_at_the_budget_and_one_that_clears_completes_once
+    a_live_surface_install_fault_parks_typed_at_the_budget_and_one_that_clears_completes_once,
+    a_session_whose_activation_panics_parks_at_its_budget_and_a_cancel_still_ends_its_turn
 );

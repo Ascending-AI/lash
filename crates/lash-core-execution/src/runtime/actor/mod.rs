@@ -6,6 +6,7 @@
 //! context's core ([`ActorContext::begin`], [`ActorContext::commit`], the
 //! clock, the cancel token, the replay probe and the due times) is real.
 
+pub mod activation_loop;
 mod core;
 pub mod ingress;
 pub mod journal;

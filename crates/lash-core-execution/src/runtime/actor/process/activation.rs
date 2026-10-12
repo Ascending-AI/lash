@@ -62,6 +62,7 @@ use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};
 use super::session_turn::SessionTurns;
 use super::terminal::{ProcessParkReason, cancelled, record_park, record_terminal};
 use super::{CascadeProgress, end_scope};
+use crate::runtime::actor::activation_loop;
 use crate::runtime::actor::round::lifecycle::{Act, Idle, Lifecycle};
 use crate::runtime::actor::round::{
     self, AdmittedExecution, ExecutionDraft, Material, MemberBodies, MemberBody, PolicyView,
@@ -225,19 +226,9 @@ impl Activation for ProcessActivation {
 
 impl ProcessActivation {
     async fn run(&self, owned: &Owned, process: &ProcessId) -> Exit {
-        // A failed read leaves the claim as it was: read again at the
-        // activation's retry pace while this node holds the actor. A
-        // draining node hands it back instead.
-        let (park, failed_activations) = loop {
-            match owned.store().actor(owned.actor()).await {
-                Ok(Some(snapshot)) => break (snapshot.park, snapshot.failed_activations),
-                Ok(None) => return Exit::Released,
-                Err(_) if owned.draining() => return Exit::Abandoned,
-                Err(error) => {
-                    tracing::debug!(%error, process_id = %process, "process actor read failed; reading again");
-                    owned.wait_for_mail().await;
-                }
-            }
+        let (park, failed_activations) = match activation_loop::claimed_row(owned).await {
+            Ok(snapshot) => (snapshot.park, snapshot.failed_activations),
+            Err(exit) => return exit,
         };
         let steps_cx = self.steps_context(owned, process);
         let bodies = Arc::new(StepBodies {
@@ -470,7 +461,10 @@ impl ProcessActivation {
             return Ok(Pass::Released);
         }
         if live.first_pass
-            && live.failed_activations >= self.backend.config().settings().activation_loop_budget
+            && activation_loop::reached(
+                live.failed_activations,
+                self.backend.config().settings().activation_loop_budget,
+            )
         {
             let reason = ProcessParkReason::ActivationLoop {
                 failed_activations: live.failed_activations,

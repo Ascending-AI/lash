@@ -114,7 +114,9 @@ pub(super) async fn unless_cancelled<F: Future>(
 /// `owned` carries claimed it for ([`ClaimPurpose::CancelOnly`]), then let
 /// it go (FIG-6072). The claim took it for its close or an `Immediate`
 /// cancel of its open turn, and both end with registry writes alone: no
-/// provider, composition or turn drive is built, and none is called.
+/// provider, composition or turn drive is built, and none is called. A
+/// session claimed at its activation-loop budget with such a stop requested
+/// ends it here too, before it parks (FIG-6096).
 ///
 /// - A close runs as on any claim ([`close_pass`]).
 /// - An `Immediate` cancel ends the turn from its rows ([`finalize`] with no

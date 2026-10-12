@@ -255,7 +255,8 @@ pub struct MailCommit {
 }
 
 /// An actor's row, read without a fence. For operators and test laws; an
-/// owner never decides anything from it.
+/// owner reads only its park and failed activations from it, once, as its
+/// claim starts (the activation-loop budget).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorSnapshot {
     /// The actor.

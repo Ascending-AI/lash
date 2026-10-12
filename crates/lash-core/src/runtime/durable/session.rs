@@ -34,6 +34,7 @@
 
 use std::sync::Arc;
 
+use lash_core_execution::runtime::actor::activation_loop;
 use lash_durable::domain::{MailAnswer, MailDomainWrite, TurnWrite};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
@@ -892,6 +893,32 @@ impl Activation for SessionActivation {
             return turn_cancel::end_unserved(&owned, &cx, self.services.as_ref(), &session).await;
         }
         witness_claim(owned.claimed_on());
+        // A session whose activations ended the activation-loop budget's
+        // claims in a row with nothing committed (a panic, a read given up)
+        // parks as a process does (FIG-6096). An `Immediate` cancel or a
+        // close requested before the claim ends first, engine-free, so the
+        // park never holds the session's one way out.
+        let budget = self.backend.config().settings().activation_loop_budget;
+        let failed_activations = match activation_loop::claimed_row(&owned).await {
+            Ok(snapshot) => snapshot.failed_activations,
+            Err(exit) => return exit,
+        };
+        if activation_loop::reached(failed_activations, budget) {
+            return match turn_cancel::immediate(&cx).await {
+                Ok(true) => {
+                    turn_cancel::end_unserved(&owned, &cx, self.services.as_ref(), &session).await
+                }
+                Ok(false) => {
+                    let reason = SessionParkReason::ActivationLoop { failed_activations };
+                    match park(&cx, &reason, self.services.tracing()).await {
+                        Ok(()) | Err(DurableError::OwnershipLost(_)) => Exit::Released,
+                        Err(_) => Exit::Abandoned,
+                    }
+                }
+                Err(TurnError::Durable(DurableError::OwnershipLost(_))) => Exit::Released,
+                Err(_) => Exit::Abandoned,
+            };
+        }
         // An owner with nothing to do keeps the actor hot for `idle_evict`,
         // reading its mailbox at every hint or poll, then releases it.
         let idle_evict = self.backend.config().settings().idle_evict;
@@ -952,18 +979,8 @@ impl Activation for SessionActivation {
                         }),
                     };
                     if let Some(reason) = reason {
-                        match park(&cx, &reason).await {
-                            Ok(()) => {
-                                if let Some(tracing) = self.services.tracing() {
-                                    crate::operational_metrics::record_work_parked(
-                                        tracing.metrics(),
-                                        Some(&lash_trace::EmissionPermit::new_transition()),
-                                        "session",
-                                        reason.kind(),
-                                    );
-                                }
-                                return Exit::Released;
-                            }
+                        match park(&cx, &reason, self.services.tracing()).await {
+                            Ok(()) => return Exit::Released,
                             Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                             Err(park_error) => tracing::warn!(
                                 session_id = %session,
