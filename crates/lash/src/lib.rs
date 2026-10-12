@@ -827,16 +827,14 @@ pub mod plugins {
     pub use lash_core_store::tool_run::StateCommandLimits;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::ConfigRegistry;
-    /// The neutral composition and state sink shared by execution owners.
-    pub use lash_core::plugin::{
-        AdmissionGate, ContributionKind, ExecutionComposition, ExecutionState, Proposal,
-    };
     pub use lash_core::plugin::{
         AssistantProseProjectorPlugin, AssistantStreamFinishedHook, DecidedContextPressure,
         PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture, ResolvedToolSurface,
         ToolCatalogContributor, ToolPresentationArtifacts, ToolPresentationFacts,
         ToolPresentationInput, ToolPresentationStep, TranscriptDecoderPlugin,
     };
+    /// The neutral composition and state sink shared by execution owners.
+    pub use lash_core::plugin::{ContributionKind, ExecutionComposition, ExecutionState, Proposal};
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{
         AttemptStream, AttemptStreamChannel, AttemptStreamEvent, AttemptStreamTruncation,
@@ -952,14 +950,6 @@ pub mod plugins {
         AttachmentOmissionContext, AttachmentOmissionPolicy, HistoryPartId,
         OMITTED_ATTACHMENT_PLACEHOLDER,
     };
-    /// What a plugin factory declares about itself: its behaviour revision
-    /// and the formats it reads and writes. The build generation is computed
-    /// from every registered factory's declaration, in hook order.
-    pub use lash_core::plugin::{
-        BehaviorRevision, FormatVersion, PluginCallbackIdentity, PluginComposition,
-        PluginDeclaration, PluginDeclarationError, PluginDefinition, PluginExecutionRefusal,
-        PluginId, PluginMetadata, PluginRevision,
-    };
     /// The registration groups [`PluginRegistrar`]'s accessors return
     /// (`reg.tools()`, `reg.session()`, ...), nameable so a helper can take
     /// one as a parameter.
@@ -984,6 +974,12 @@ pub mod plugins {
         PluginStateView, PublicationOrdinal, ResolvedStateChange, SessionReadyContext,
         StateCommand, StateCommandOrigin, StateCommandRefusal, StateCommands, StateFork,
         StateFrontier, StateReducer, StateReduction, StateResolution, StateResolutionOutcome,
+    };
+    /// Plugin identities, namespace formats and readable stream-state formats.
+    pub use lash_core::plugin::{
+        FormatVersion, PluginCallbackIdentity, PluginComposition, PluginDeclaration,
+        PluginDeclarationError, PluginDefinition, PluginId, PluginMetadata,
+        RecordedCallbackUnavailable, StreamStateFormatRefusal,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus

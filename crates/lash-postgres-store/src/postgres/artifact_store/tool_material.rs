@@ -4,7 +4,6 @@
 //! same referrer-then-artifact lock order as the other artifact writers.
 
 use lash_core_execution::store::ToolMaterialStore;
-use lash_core_execution::store::plugin_writers::PluginRevision;
 use lash_core_execution::tool_run::{
     MaterialBundle, MaterialHolder, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef,
     MaterialRefusal, MaterialRetentionError, RetainedBundle,
@@ -189,7 +188,6 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
         holder: &MaterialHolder,
         reference: &MaterialRef,
         owner: &MaterialOwner,
-        available: &[PluginRevision],
     ) -> Result<MaterialPayload, MaterialRetentionError> {
         let MaterialLocation::RetainedArtifact { artifact } = &reference.location else {
             return Err(missing(reference));
@@ -229,6 +227,6 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
         crate::observed_sql::control("COMMIT", tx.commit())
             .await
             .map_err(store_sqlx_error)?;
-        Ok(MaterialBundle::read(&bytes, reference, owner, available)?)
+        Ok(MaterialBundle::read(&bytes, reference, owner)?)
     }
 }

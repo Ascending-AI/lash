@@ -22,12 +22,9 @@
 //!   over one private candidate, into a recorded
 //!   [`ConfigResolution`], which one fenced commit publishes with one config
 //!   revision step ([`ConfigRegistry::resolve`]).
-//! - An owner's reducers are its plugin's behaviour (FIG-4791): a change to
-//!   them is a bump of the plugin's declared
-//!   [`behavior_revision`](super::PluginDeclaration::behavior_revision),
-//!   which the build generation hashes. They have no identity of their own
-//!   and a transaction records none: the build whose lane admits its command
-//!   run resolves it, and a redrive of that run stays on that lane.
+//! - An owner's reducers run on the build executing the command. A committed
+//!   resolution replays without running the reducer; an unfinished resolution
+//!   uses the current implementation under the owner's registered key.
 //!
 //! The [`ConfigRegistry`] holds every registration: the one list the
 //! resolver, the ingress check and the [catalog](ConfigRegistry::catalog)

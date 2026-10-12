@@ -6,6 +6,7 @@ use super::ProcessRecord;
 /// Durable execution-attempt fact. The fold retains the latest attempt, so a
 /// successor execution the engine resumes takes exactly the next attempt.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessStarted {
     pub owner: crate::LeaseOwnerIdentity,
     #[serde(default = "first_process_attempt")]
@@ -20,13 +21,6 @@ pub struct ProcessStarted {
     /// `None` for an engine whose runs carry no generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<crate::ExecutableGeneration>,
-    /// The plugin composition the process started under and the writer
-    /// format chosen for each plugin (FIG-4747), recorded once at the first
-    /// claim and never derived on recovery: every attempt of the first
-    /// segment writes plugin namespaces in these formats. `None` for a start
-    /// recorded by an execution that carries no plugins.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugins: Option<crate::store::plugin_writers::PluginAdmission>,
 }
 
 const fn first_process_attempt() -> u32 {
@@ -111,7 +105,6 @@ impl ProcessExecutionWriteAuthority {
             attempt: self.attempt()?,
             started_at_ms: 0,
             generation: None,
-            plugins: None,
         })
     }
 
@@ -294,11 +287,6 @@ pub struct ProcessExecutionContext {
     /// serialized.
     #[serde(skip)]
     pub execution_write_authority: Option<ProcessExecutionWriteAuthority>,
-    /// The plugin admission the running segment's start recorded
-    /// (FIG-4747). The substrate reads it off the start it journaled, so it
-    /// is deliberately not serialized.
-    #[serde(skip)]
-    pub plugin_admission: Option<crate::store::plugin_writers::PluginAdmission>,
 }
 
 impl ProcessExecutionContext {
@@ -316,16 +304,6 @@ impl ProcessExecutionContext {
         authority: ProcessExecutionWriteAuthority,
     ) -> Self {
         self.execution_write_authority = Some(authority);
-        self
-    }
-
-    /// Sets the plugin admission the running segment's start recorded: the
-    /// formats the segment writes plugin namespaces in.
-    pub fn with_plugin_admission(
-        mut self,
-        admission: Option<crate::store::plugin_writers::PluginAdmission>,
-    ) -> Self {
-        self.plugin_admission = admission;
         self
     }
 

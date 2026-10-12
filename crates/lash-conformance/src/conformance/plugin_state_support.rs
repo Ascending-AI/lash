@@ -80,7 +80,6 @@ pub(super) async fn transition(
                     let declaration = factory.plugin_declaration();
                     crate::store::plugin_writers::AdmittedPlugin {
                         plugin: factory.id().into(),
-                        behavior_revision: declaration.behavior_revision,
                         writer: declaration.format_version,
                     }
                 })

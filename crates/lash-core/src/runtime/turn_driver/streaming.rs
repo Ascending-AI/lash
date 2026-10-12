@@ -159,7 +159,11 @@ impl RuntimeTurnDriver<'_> {
             .await
             .map_err(|err| match err {
                 crate::PluginError::Runtime(error)
-                    if error.code == crate::RuntimeErrorCode::PluginRevisionUnavailable =>
+                    if matches!(
+                        error.code,
+                        crate::RuntimeErrorCode::RecordedCallbackUnavailable
+                            | crate::RuntimeErrorCode::StreamStateFormatUnreadable
+                    ) =>
                 {
                     RuntimeEffectControllerError::from(error)
                 }

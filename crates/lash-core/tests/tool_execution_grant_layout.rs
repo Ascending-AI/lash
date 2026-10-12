@@ -3,7 +3,7 @@ use lash_core::{ToolDefinition, ToolExecutionGrant};
 #[test]
 fn tool_execution_grant_json_layout_is_stable() {
     let grant = ToolExecutionGrant::from_definition(
-        lash_core::plugin::PluginRevision::new("mock", lash_core::plugin::BehaviorRevision::ONE),
+        String::from("mock"),
         ToolDefinition::raw(
             "tool:layout_probe",
             "layout_probe",
@@ -30,7 +30,7 @@ fn tool_execution_grant_json_layout_is_stable() {
     );
     assert_eq!(
         serialized,
-        r#"{"owner":{"plugin":"mock","behavior_revision":1},"manifest":{"id":"tool:layout_probe","name":"layout_probe","description":"Pinned grant layout","compact_contract":{"name":"layout_probe","signature":"layout_probe({ query: str })","returns":"str","parameters":[{"name":"query","required":true,"signature":"query: str","type":"str"}],"description":"Pinned grant layout"},"execution":{"secs":120,"nanos":0}},"contract":{"input_schema":{"canonical":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"output_schema":{"canonical":{"type":"string"}}},"source_id":"registry:layout","execution_binding":{"route":"pinned"}}"#
+        r#"{"owner":"mock","manifest":{"id":"tool:layout_probe","name":"layout_probe","description":"Pinned grant layout","compact_contract":{"name":"layout_probe","signature":"layout_probe({ query: str })","returns":"str","parameters":[{"name":"query","required":true,"signature":"query: str","type":"str"}],"description":"Pinned grant layout"},"execution":{"secs":120,"nanos":0}},"contract":{"input_schema":{"canonical":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"output_schema":{"canonical":{"type":"string"}}},"source_id":"registry:layout","execution_binding":{"route":"pinned"}}"#
     );
     let round_tripped: ToolExecutionGrant =
         serde_json::from_str(&serialized).expect("grant must deserialize");

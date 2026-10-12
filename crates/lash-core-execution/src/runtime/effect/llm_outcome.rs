@@ -43,7 +43,7 @@ impl LlmStreamRecord {
 /// The ordered response callbacks selected before one paid LLM call.
 ///
 /// Phase 1 journals this plan with its raw completion. An unfinished
-/// derivation resolves these exact keys and owning revisions before invoking
+/// derivation resolves these exact keys and owning plugin ids before invoking
 /// any callback, then executes in recorded order. An empty plan serves the
 /// raw completion. Completed derivations replay without resolving callbacks.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,10 +56,11 @@ pub struct AssistantResponsePlan {
 ///
 /// A response registration names its stream-finished callback by key within
 /// the same plugin. Phase 1 records the receiving callback's full
-/// identity, so multiple callbacks and different revisions cannot share state.
+/// identity and format, so callbacks cannot share state or read an undeclared format.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssistantStreamHookState {
     pub callback: crate::plugin::PluginCallbackIdentity,
+    pub format: crate::plugin::FormatVersion,
     pub state: serde_json::Value,
 }

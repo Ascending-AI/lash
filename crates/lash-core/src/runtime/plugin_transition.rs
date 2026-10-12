@@ -13,7 +13,6 @@ pub(super) fn native_plugin_admission(
             .iter()
             .map(|declaration| crate::store::plugin_writers::AdmittedPlugin {
                 plugin: declaration.id.as_str().into(),
-                behavior_revision: declaration.behavior_revision,
                 writer: declaration.format_version,
             })
             .collect(),

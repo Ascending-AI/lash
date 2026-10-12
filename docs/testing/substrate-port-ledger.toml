@@ -1,7 +1,7 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1731 rows over 869 files, 4066 laws.
+# 1731 rows over 869 files, 4067 laws.
 # By class: mechanical 195, semantic 140, delete 955, replace 441.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 121, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
 # By status: todo 0, ported 189, deleted 1542.
@@ -9870,11 +9870,12 @@ lane = "L9c"
 laws = [
   "recorded_callback_order_survives_reordered_installation",
   "an_unavailable_recorded_callback_refuses_before_any_callback",
-  "a_recorded_callback_revision_never_runs_a_substitute",
+  "same_key_redeploy_finishes_derivation",
+  "stream_state_format_refuses_and_readable_older_state_runs",
   "stream_state_pairs_multiple_callbacks_of_one_plugin_on_cold_replay",
   "owed_presentation_keeps_recorded_callback_order",
   "owed_presentation_missing_callback_parks_before_any_callback",
-  "owed_presentation_changed_revision_parks_before_any_callback",
+  "a_recorded_presenter_resolves_by_key_and_refuses_a_missing_key",
   "owed_presentation_empty_plan_ignores_new_steps",
   "on_the_double",
   "response_phase_replay_laws! generates: owed_unavailable_callback_parks_sqlite_memory, owed_unavailable_callback_parks_sqlite_file, completed_callback_state_survives_cold_replay_sqlite_memory, completed_callback_state_survives_cold_replay_sqlite_file, completed_callback_state_survives_cold_replay_postgres, removed_hook_sqlite_memory, removed_hook_sqlite_file, removed_hook_postgres, added_hook_sqlite_memory, added_hook_sqlite_file, added_hook_postgres, removed_hook_sqlite_memory_always_replay, removed_hook_sqlite_file_always_replay, removed_hook_postgres_always_replay, added_hook_sqlite_memory_always_replay, added_hook_sqlite_file_always_replay, added_hook_postgres_always_replay",
@@ -9919,7 +9920,7 @@ needs = ["turn"]
 class = "semantic"
 lane = "L9c"
 laws = [
-  "owed_presentation_changed_revision_parks_before_any_callback",
+  "a_recorded_presenter_resolves_by_key_and_refuses_a_missing_key",
 ]
 disposition = "subject-deleted"
 status = "deleted"

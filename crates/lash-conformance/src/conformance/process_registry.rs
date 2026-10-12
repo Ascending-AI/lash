@@ -981,7 +981,6 @@ async fn refolded_process_record_matches_stored_projection(
                 attempt: 1,
                 started_at_ms: base.created_at_ms,
                 generation: None,
-                plugins: None,
             },
             &authority,
         )

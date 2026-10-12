@@ -61,13 +61,6 @@ impl ProductionToolHandlers<'_> {
             .composition
             .tool_run_binding(&invocation.tool_id, source)
             .map_err(crate::RuntimeEffectControllerError::from)?;
-        if let Some(grant) = &invocation.execution_grant {
-            self.context
-                .dispatch()
-                .composition
-                .validate_tool_owner(&grant.owner)
-                .map_err(crate::RuntimeEffectControllerError::from)?;
-        }
         let mut attribution = attribution.clone();
         if invocation.issuing_language_node_id.is_some() {
             attribution.issuing_node_id = invocation.issuing_language_node_id.clone();
@@ -91,7 +84,6 @@ impl ProductionToolHandlers<'_> {
             tool_name: definition.manifest.name,
             arguments: invocation.args.clone(),
             binding,
-            available: self.context.dispatch().composition.tool_run_revisions(),
             cancel: ExternalCancelPolicy::CancelExternalWork,
         })
     }

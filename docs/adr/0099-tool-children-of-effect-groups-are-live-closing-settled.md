@@ -70,11 +70,12 @@ live-ended nor closed: only the durable closing fact of §7 classifies an opener
 
 **Whole-round admission fixes every call before execution.** It records the
 owner, stable call ids, operand positions and aliases, the prepared request,
-executable/preparation/presentation callback revisions, runtime retry/cancel
+executable/preparation/presentation callback identities, runtime retry/cancel
 policy and capacity. One invalid member starts none. The author-facing
 declaration is exactly `may_defer`, `intents` and `isolated`. Bindings are
-recorded automatically; an unavailable admitted revision refuses with its typed
-cause before a body, route or new identity is selected.
+recorded automatically by plugin id and key. Recorded presentation plans
+resolve keys before callbacks run; a missing key parks typed, and the current
+implementation of the same key finishes an uncommitted derivation.
 
 Resume loads the admitted request. It compares identity and request content
 before fresh execution and never substitutes the live catalog or repeats

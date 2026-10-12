@@ -25,58 +25,65 @@ use crate::plugin_state::{FormatNamespace, FormatVersion, PluginStateMap};
 
 use super::StoreError;
 
-/// The declared executable owner of a callback or tool admission.
+/// A callback slot within one plugin, selected by its stable key.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-pub struct PluginRevision {
-    pub plugin: String,
-    #[schemars(with = "std::num::NonZeroU32")]
-    pub behavior_revision: lash_core_ids::BehaviorRevision,
-}
-
-impl PluginRevision {
-    pub fn new(
-        plugin: impl Into<String>,
-        behavior_revision: lash_core_ids::BehaviorRevision,
-    ) -> Self {
-        Self {
-            plugin: plugin.into(),
-            behavior_revision,
-        }
-    }
-}
-
-/// A callback slot within one declared plugin revision. Keys are derived from
-/// the capability kind and its registration ordinal within that plugin.
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[serde(deny_unknown_fields)]
 pub struct PluginCallbackIdentity {
-    pub owner: PluginRevision,
+    pub owner: String,
     pub key: String,
 }
 
-/// Recorded executable requirements this build cannot fulfill.
+/// A recorded callback key the running build no longer registers.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-pub struct PluginExecutionRefusal {
-    pub recorded: Vec<PluginRevision>,
-    pub available: Vec<PluginRevision>,
-    pub callback: Option<PluginCallbackIdentity>,
+#[serde(deny_unknown_fields)]
+pub struct RecordedCallbackUnavailable {
+    pub recorded: PluginCallbackIdentity,
+    pub available: Vec<PluginCallbackIdentity>,
 }
 
-impl PluginExecutionRefusal {
+impl RecordedCallbackUnavailable {
     pub fn into_runtime_error(self) -> crate::RuntimeError {
         let mut error = crate::RuntimeError::new(
-            crate::RuntimeErrorCode::PluginRevisionUnavailable,
+            crate::RuntimeErrorCode::RecordedCallbackUnavailable,
             format!(
-                "recorded plugin execution {:?} is unavailable in composition {:?}",
-                self.recorded, self.available
+                "recorded callback {}:{} is unavailable",
+                self.recorded.owner, self.recorded.key
             ),
         );
-        error.cause = Some(crate::RuntimeErrorCause::PluginExecution {
+        error.cause = Some(crate::RuntimeErrorCause::RecordedCallbackUnavailable {
+            refusal: Box::new(self),
+        });
+        error
+    }
+}
+
+/// Opaque stream-hook state whose format the receiving plugin cannot read.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct StreamStateFormatRefusal {
+    pub callback: PluginCallbackIdentity,
+    #[schemars(with = "std::num::NonZeroU32")]
+    pub stored: FormatVersion,
+    #[schemars(with = "Vec<std::num::NonZeroU32>")]
+    pub readable: Vec<FormatVersion>,
+}
+
+impl StreamStateFormatRefusal {
+    pub fn into_runtime_error(self) -> crate::RuntimeError {
+        let mut error = crate::RuntimeError::new(
+            crate::RuntimeErrorCode::StreamStateFormatUnreadable,
+            format!(
+                "stream state for {}:{} has unreadable format {}",
+                self.callback.owner, self.callback.key, self.stored
+            ),
+        );
+        error.cause = Some(crate::RuntimeErrorCause::StreamStateFormatUnreadable {
             refusal: Box::new(self),
         });
         error
@@ -358,11 +365,11 @@ impl PluginWriterRanges {
 }
 
 /// One plugin of an admission's composition: its place in hook order, the
-/// behaviour revision it ran as and the format its namespaces are written in.
+/// format its namespaces are written in.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdmittedPlugin {
     pub plugin: String,
-    pub behavior_revision: lash_core_ids::BehaviorRevision,
     /// The format the admission chose for this plugin's state and config
     /// namespaces: the highest one the plugin writes that the fleet record
     /// permitted when the admission was recorded.
@@ -372,11 +379,9 @@ pub struct AdmittedPlugin {
 /// What a segment admission records about its plugins (FIG-4747): the
 /// ordered composition it runs and the writer format chosen for each plugin.
 ///
-/// A Run's admission, a process's start and every later process segment's
-/// start record one. The choice is made once, from the fleet record's ranges
-/// at the admission, and every retry, replay and redrive of the admitted
-/// work encodes with the recorded choice: a finalize that widens a range
-/// changes what the next admission chooses, never what a recorded one writes.
+/// A plugin transition records this choice from the fleet record's ranges.
+/// A replay encodes with that recorded choice: widening a range changes a
+/// later admission's writer, never an already-recorded publication's format.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct PluginAdmission {
@@ -387,19 +392,14 @@ impl PluginAdmission {
     /// Choose each plugin's writer from `ranges`: the highest format in both
     /// its writable set and the range the fleet record permits it.
     /// `composition` is the admitting build's plugins in hook order, each
-    /// with its behaviour revision. A plugin that writes no permitted format
+    /// with its namespace formats. A plugin that writes no permitted format
     /// is refused typed, and so is one the record does not name.
     pub fn choose<'a>(
-        composition: impl IntoIterator<
-            Item = (
-                &'a PluginWriterRegistration,
-                lash_core_ids::BehaviorRevision,
-            ),
-        >,
+        composition: impl IntoIterator<Item = &'a PluginWriterRegistration>,
         ranges: &PluginWriterRanges,
     ) -> Result<Self, CompatRefusal> {
         let mut plugins = Vec::new();
-        for (registration, behavior_revision) in composition {
+        for registration in composition {
             let permitted = ranges.permitted_writer(&registration.plugin)?;
             let writer = registration
                 .writable
@@ -418,7 +418,6 @@ impl PluginAdmission {
                 })?;
             plugins.push(AdmittedPlugin {
                 plugin: registration.plugin.clone(),
-                behavior_revision,
                 writer,
             });
         }
@@ -559,24 +558,16 @@ mod tests {
     fn an_admission_chooses_the_highest_permitted_writable_format() {
         let probe = registration("probe", 3, &[1, 2, 3]);
         let other = registration("other", 1, &[1]);
-        let revision = lash_core_ids::BehaviorRevision::new(7).expect("a revision");
-        let composition = [
-            (&probe, revision),
-            (&other, lash_core_ids::BehaviorRevision::ONE),
-        ];
+        let composition = [&probe, &other];
         let window = ranges(&[("probe", 1, 2), ("other", 1, 1)]);
         let admitted = PluginAdmission::choose(composition, &window).expect("admitted");
         assert_eq!(
             admitted
                 .plugins()
                 .iter()
-                .map(|plugin| (
-                    plugin.plugin.as_str(),
-                    plugin.behavior_revision.get(),
-                    plugin.writer.get()
-                ))
+                .map(|plugin| (plugin.plugin.as_str(), plugin.writer.get()))
                 .collect::<Vec<_>>(),
-            vec![("probe", 7, 2), ("other", 1, 1)]
+            vec![("probe", 2), ("other", 1)]
         );
         assert_eq!(admitted.writer("probe"), Some(version(2)));
         assert_eq!(admitted.writer("absent"), None);
@@ -593,7 +584,7 @@ mod tests {
     #[test]
     fn an_admission_refuses_a_plugin_with_no_permitted_writer() {
         let probe = registration("probe", 3, &[3]);
-        let composition = [(&probe, lash_core_ids::BehaviorRevision::ONE)];
+        let composition = [&probe];
         assert_eq!(
             PluginAdmission::choose(composition, &ranges(&[("probe", 1, 2)])),
             Err(CompatRefusal::PluginWriterUnwritable {

@@ -19,10 +19,8 @@
 //!    drain scope, resolves the transaction over the boundary's config: a
 //!    stale base, an owner's typed refusal, or every touched owner's
 //!    complete replacement with each command's output. Its first execution
-//!    runs this build's reducers: an owner's reducers are its plugin's
-//!    behaviour, which the build generation hashes (FIG-4791), so the lane
-//!    that admitted the command run is the one whose reducers decide it,
-//!    and a redrive of the run stays on that lane. A replay reads the
+//!    runs this build's reducers. An unfinished resolution uses the running
+//!    implementation; a replay reads the
 //!    resolution back and never runs a reducer again.
 //! 2. One fenced commit publishes the recorded resolution, advances
 //!    `config_revision` exactly once when it applied, and settles the

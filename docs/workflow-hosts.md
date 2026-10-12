@@ -384,7 +384,7 @@ the separate component registry. It fills no session or deployment defaults.
 | Trigger delivery | The host publishes the trigger's stated environment under its pin and starts the definition with its explicit launch. |
 | Host or tool session-turn start | No process environment. The create request supplies the child session's configuration; its stated session id or the process-derived child id names it. |
 | Restart, crash resume, redrive or takeover | The recorded environment ref and engine settings are loaded. No policy or default runs again. |
-| Adoption by another build | The build must serve the recorded components, config formats and unsettled executable revisions. It builds only the named components; nothing is re-selected. |
+| Adoption by another build | The build must serve the recorded components and config formats. It builds only the named components; nothing is re-selected. |
 
 A committed model-start decision never re-runs its policy. An attempt abandoned
 before commit may choose again. A policy refusal becomes a tool error; a policy

@@ -42,7 +42,7 @@ fn grant_bound_tool_definition() -> lash_core::ToolDefinition {
 #[tokio::test]
 async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
     let grant = lash_core::ToolExecutionGrant::from_definition(
-        lash_core::plugin::PluginRevision::new("mock", lash_core::plugin::BehaviorRevision::ONE),
+        String::from("mock"),
         grant_bound_tool_definition(),
     )
     .with_source_id("grant-source")

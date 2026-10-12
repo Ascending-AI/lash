@@ -15,7 +15,6 @@ use crate::ProcessId;
 use crate::artifact_referrer::ArtifactName;
 use crate::await_event_identity::AwaitEventKey;
 use crate::effect_opener::EffectOpener;
-use crate::store::plugin_writers::PluginRevision;
 
 /// version_surface = "coexist"
 /// version_guard(items(MATERIAL_DOMAIN, reference), roots(MaterialPayload))
@@ -216,14 +215,6 @@ pub enum MaterialRefusal {
         reference: Box<MaterialRef>,
         expected: Box<MaterialOwner>,
     },
-    /// The material's codec belongs to a plugin revision this build cannot
-    /// read.
-    #[error("recorded material {} needs an unavailable plugin revision", reference.digest)]
-    RevisionMismatch {
-        reference: Box<MaterialRef>,
-        recorded: PluginRevision,
-        available: Vec<PluginRevision>,
-    },
     #[error("recorded material {} has role {found:?}, expected {expected:?}", reference.digest)]
     RoleMismatch {
         reference: Box<MaterialRef>,
@@ -246,7 +237,6 @@ impl MaterialRefusal {
             Self::Retired { .. } => "material_retired",
             Self::Corrupt { .. } => "material_corrupt",
             Self::WrongOwner { .. } => "material_wrong_owner",
-            Self::RevisionMismatch { .. } => "material_revision_mismatch",
             Self::RoleMismatch { .. } => "material_role_mismatch",
             Self::FormatMismatch { .. } => "material_format_mismatch",
         }
@@ -277,8 +267,6 @@ pub struct MaterialPayload {
     pub owner: MaterialOwner,
     pub role: MaterialRole,
     pub format: u16,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub revision: Option<PluginRevision>,
     pub text: String,
 }
 
@@ -297,23 +285,17 @@ pub enum MaterialEntry {
 }
 
 impl MaterialPayload {
-    pub fn new(
-        owner: MaterialOwner,
-        role: MaterialRole,
-        revision: Option<PluginRevision>,
-        text: String,
-    ) -> Self {
+    pub fn new(owner: MaterialOwner, role: MaterialRole, text: String) -> Self {
         Self {
             owner,
             role,
             format: OUTCOME_MATERIAL_FORMAT_VERSION,
-            revision,
             text,
         }
     }
 
     /// Mint the reference to these canonical bytes, including owner, role,
-    /// format and revision in its integrity preimage.
+    /// format in its integrity preimage.
     pub fn reference(
         &self,
         location: MaterialLocation,
@@ -341,7 +323,6 @@ impl MaterialPayload {
         &self,
         reference: &MaterialRef,
         owner: &MaterialOwner,
-        available: &[PluginRevision],
     ) -> Result<(), crate::runtime_error::RuntimeEffectControllerError> {
         reference.verify(owner, &reference.digest)?;
         if &self.owner != owner {
@@ -368,16 +349,6 @@ impl MaterialPayload {
         }
         let found = self.reference(reference.location.clone())?;
         reference.verify(owner, &found.digest)?;
-        if let Some(recorded) = &self.revision
-            && !available.contains(recorded)
-        {
-            return Err(MaterialRefusal::RevisionMismatch {
-                reference: Box::new(reference.clone()),
-                recorded: recorded.clone(),
-                available: available.to_vec(),
-            }
-            .into());
-        }
         Ok(())
     }
 }

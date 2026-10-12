@@ -228,23 +228,16 @@ impl ProcessSteps for WorkerSteps {
     }
 
     /// What an engine process carries while it holds `steps` (§6.2): its
-    /// environment's components and the revisions its tool steps bind. A
+    /// environment's components at their config formats. A
     /// session-turn process keeps none.
     async fn requirements(
         &self,
         process: &ProcessRecord,
-        steps: &[StepRequest],
+        _steps: &[StepRequest],
     ) -> Result<Option<Vec<String>>, lash_core::durable_port::DurableError> {
         if process.env_ref().is_none() {
             return Ok(None);
         }
-        let tools: Vec<crate::ToolId> = steps
-            .iter()
-            .filter_map(|step| match step {
-                StepRequest::Tool { tool, .. } => Some(tool.clone()),
-                StepRequest::Engine { .. } => None,
-            })
-            .collect();
         let unavailable = |error: crate::PluginError| {
             lash_core::durable_port::DurableError::Store(lash_core::durable_port::StoreFailure {
                 kind: lash_core::durable_port::StoreFailureKind::Unavailable,
@@ -253,7 +246,7 @@ impl ProcessSteps for WorkerSteps {
         };
         let runtime = self.0.engine_runtime(process).await.map_err(unavailable)?;
         runtime
-            .step_requirements(&tools)
+            .component_requirements()
             .map(Some)
             .map_err(unavailable)
     }

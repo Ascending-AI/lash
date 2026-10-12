@@ -235,12 +235,6 @@ impl<'a> AdmittedToolCall<'a> {
         call.declaration
             .validate()
             .map_err(|cause| AdmissionRefusal::Declaration { member: 0, cause })?;
-        call.binding
-            .require_available(&call.available)
-            .map_err(|cause| AdmissionRefusal::BindingUnavailable {
-                member: 0,
-                cause: Box::new(cause),
-            })?;
         let isolation = if call.declaration.isolated {
             Some(isolated_binding(handlers.as_ref(), &call)?)
         } else {
@@ -248,7 +242,7 @@ impl<'a> AdmittedToolCall<'a> {
         };
         let state_snapshot = handlers
             .execution_state()
-            .map(|state| Arc::new(state.owner_state(&call.binding.executable.owner.plugin)));
+            .map(|state| Arc::new(state.owner_state(&call.binding.executable.owner)));
         let prepared = handlers.prepare(&call).await.map_err(fault)?;
         let request = SingletonPreparedRequest {
             arguments: call.arguments.clone(),

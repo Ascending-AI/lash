@@ -17,17 +17,17 @@ pub(crate) type RegisteredExclusiveHook<T> = RegisteredHook<T>;
 /// ordinal: providers dispatch by tool authority, not by callback order.
 fn push_ordinal_hook<T>(
     hooks: &mut Vec<RegisteredHook<T>>,
-    owner: &PluginRevision,
+    owner: &str,
     slot: CallbackSlot,
     hook: T,
 ) {
     let ordinal = hooks
         .iter()
-        .filter(|registered| registered.identity.owner.plugin == owner.plugin)
+        .filter(|registered| registered.identity.owner == owner)
         .count();
     hooks.push(RegisteredHook {
         identity: PluginCallbackIdentity {
-            owner: owner.clone(),
+            owner: owner.to_owned(),
             key: format!("{}:{ordinal}", slot.key_prefix()),
         },
         hook,
@@ -35,13 +35,9 @@ fn push_ordinal_hook<T>(
 }
 
 /// The identity of `owner`'s callback named `key` in `slot`.
-fn keyed_identity(
-    owner: &PluginRevision,
-    slot: CallbackSlot,
-    key: HookKey,
-) -> PluginCallbackIdentity {
+fn keyed_identity(owner: &str, slot: CallbackSlot, key: HookKey) -> PluginCallbackIdentity {
     PluginCallbackIdentity {
-        owner: owner.clone(),
+        owner: owner.to_owned(),
         key: format!("{}:{key}", slot.key_prefix()),
     }
 }
@@ -53,7 +49,7 @@ fn refuse_duplicate_key<'a>(
     if existing.any(|registered| registered == identity) {
         return Err(PluginError::Registration(format!(
             "duplicate hook key `{}` for plugin `{}`",
-            identity.key, identity.owner.plugin
+            identity.key, identity.owner
         )));
     }
     Ok(())
@@ -61,7 +57,7 @@ fn refuse_duplicate_key<'a>(
 
 fn push_keyed_hook<T>(
     hooks: &mut Vec<RegisteredHook<T>>,
-    owner: &PluginRevision,
+    owner: &str,
     slot: CallbackSlot,
     key: HookKey,
     hook: T,
@@ -79,7 +75,7 @@ fn push_keyed_hook<T>(
 /// `id()` declares.
 fn push_prioritized_keyed_hook<T>(
     hooks: &mut Vec<(i32, RegisteredHook<T>)>,
-    owner: &PluginRevision,
+    owner: &str,
     slot: CallbackSlot,
     id: &'static str,
     priority: i32,
@@ -96,7 +92,7 @@ fn push_prioritized_keyed_hook<T>(
 
 fn register_singleton_hook<H>(
     slot: &mut Option<RegisteredExclusiveHook<H>>,
-    owner: &PluginRevision,
+    owner: &str,
     hook_kind: &str,
     callback_slot: CallbackSlot,
     hook: H,
@@ -105,13 +101,13 @@ fn register_singleton_hook<H>(
         return Err(PluginError::Registration(format!(
             "duplicate {hook_kind} for `{}`: `{}` conflicts with `{}`",
             callback_slot.key_prefix(),
-            owner.plugin,
-            existing.identity.owner.plugin,
+            owner,
+            existing.identity.owner,
         )));
     }
     *slot = Some(RegisteredHook {
         identity: PluginCallbackIdentity {
-            owner: owner.clone(),
+            owner: owner.to_owned(),
             key: callback_slot.key_prefix().into(),
         },
         hook,
@@ -164,7 +160,7 @@ pub(crate) struct PluginContributions {
 pub struct PluginRegistrar {
     pub(super) state: Option<super::PluginStateView>,
     pub(crate) contributions: PluginContributions,
-    pub(crate) owner: PluginRevision,
+    pub(crate) owner: String,
     pub(super) tool_names: BTreeSet<String>,
 }
 
@@ -727,19 +723,19 @@ impl PluginRegistrar {
         let reducers = self
             .contributions
             .state_reducers
-            .entry(self.owner.plugin.clone())
+            .entry(self.owner.clone())
             .or_default();
         if reducers.contains_key(&name) {
             return Err(PluginError::Registration(format!(
                 "duplicate state reducer `{name}` for plugin `{}`",
-                self.owner.plugin
+                self.owner
             )));
         }
         reducers.insert(name, reducer);
         Ok(())
     }
 
-    pub(crate) fn new(owner: PluginRevision) -> Self {
+    pub(crate) fn new(owner: String) -> Self {
         Self {
             state: None,
             contributions: PluginContributions::default(),
@@ -929,7 +925,7 @@ impl PluginRegistrar {
             if !registered {
                 return Err(PluginError::Registration(format!(
                     "response callback `{}` of plugin `{}` reads stream state from `{}`, which the plugin does not register",
-                    response.key, response.owner.plugin, finished.key
+                    response.key, response.owner, finished.key
                 )));
             }
         }

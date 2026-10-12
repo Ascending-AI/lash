@@ -70,7 +70,7 @@ fn a_prompt_snapshot_decodes_only_at_version_one() {
             purpose: PromptPurpose::Turn,
             sections: vec![ResolvedPromptSection {
                 section: section.clone(),
-                owner: PluginRevision::new("lash.standard", lash_core_ids::BehaviorRevision::ONE),
+                owner: String::from("lash.standard"),
                 placement: PromptPlacement::InitialInstructions,
                 placement_source: PlacementSource::PluginDefault,
                 wraps: Vec::new(),

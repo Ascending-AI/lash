@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::runtime::effect::{AttemptStream, AttemptStreamRecorder};
 use crate::runtime::process::{DeclaredStartObligation, DeclaredStartObligationRefusal};
-use crate::store::plugin_writers::PluginRevision;
 use crate::tool_run::{
     AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict,
     CallDecision, DeclarationRefusal, ExternalCancelPolicy, HookCause, ToolDeclaration,
@@ -31,11 +30,8 @@ pub struct SingletonToolCall {
     /// The declaration of the manifest the call is admitted under.
     pub declaration: ToolDeclaration,
     /// The executable, preparation and presentation callbacks the admission
-    /// binds, each with its plugin revision.
+    /// binds, each with its owning plugin id.
     pub binding: AdmittedBinding,
-    /// The plugin revisions this build executes. An admission bound to any
-    /// other refuses, typed, before its body.
-    pub available: Vec<PluginRevision>,
     /// What a cancellation of the Run after a declared start launched does
     /// to the process it launched.
     pub cancel: ExternalCancelPolicy,
@@ -448,7 +444,7 @@ pub enum SingletonRunError {
     #[error("isolated start refused: {0}")]
     Isolation(#[from] super::IsolatedStartRefusal),
     /// Admission refused the call, or its admission no longer binds an
-    /// available plugin revision.
+    /// registered callback key.
     #[error("admission refused call: {0}")]
     Admission(#[from] AdmissionRefusal),
     /// The engine or a handler faulted.

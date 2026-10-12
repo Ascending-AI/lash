@@ -46,9 +46,6 @@ pub(crate) async fn record_tool_presentation_plan(
         .vm_effect(
             envelope,
             super::RuntimeEffectLocalExecutor::language_runtime_value_with(move |_| async move {
-                plugins
-                    .validate_admission()
-                    .map_err(RuntimeEffectControllerError::from)?;
                 let value =
                     serde_json::to_value(plugins.tool_presentation_plan()).map_err(|error| {
                         RuntimeEffectControllerError::new(

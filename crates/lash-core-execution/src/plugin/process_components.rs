@@ -23,14 +23,10 @@ use super::*;
 use crate::prompt_sections::PromptPurpose;
 use crate::{ProcessId, SessionId, ToolProvider};
 
-/// What a component declares about itself: its id, the revision of what it
-/// does and the config formats it reads and writes.
+/// What a component declares about itself: its id and config formats.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessComponentDeclaration {
     pub id: ProcessComponentId,
-    /// The executable revision: moves with any change in what the
-    /// component does (§2.6).
-    pub behavior_revision: BehaviorRevision,
     /// The config format the component writes natively.
     pub config_format: FormatVersion,
     /// Every config format it reads. Contains `config_format`.
@@ -40,8 +36,7 @@ pub struct ProcessComponentDeclaration {
 }
 
 impl ProcessComponentDeclaration {
-    /// The declaration of a component at its first behaviour revision that
-    /// reads and writes only `config_format`.
+    /// The declaration of a component that reads and writes only `config_format`.
     ///
     /// # Errors
     ///
@@ -50,7 +45,6 @@ impl ProcessComponentDeclaration {
         Ok(Self {
             id: ProcessComponentId::new(id)
                 .map_err(|error| PluginError::Registration(error.to_string()))?,
-            behavior_revision: BehaviorRevision::ONE,
             config_format,
             readable_config_formats: vec![config_format],
             writable_config_formats: vec![config_format],
@@ -72,12 +66,6 @@ impl ProcessComponentDeclaration {
             .map(|entry| Self::config_token(entry.id(), entry.config().format_version()))
             .collect();
         tokens.into_iter().collect()
-    }
-
-    /// The claim requirement an unsettled step bound to this component's
-    /// `revision` carries.
-    pub fn revision_token(id: &str, revision: BehaviorRevision) -> String {
-        format!("component-rev:{id}@{revision}")
     }
 }
 
@@ -341,7 +329,7 @@ impl ProcessComponentRegistry {
     }
 
     /// The claim requirements this registry serves (§6.2): each component's
-    /// readable config formats and its behaviour revision.
+    /// readable config formats.
     pub fn serves(&self) -> Vec<String> {
         let mut serves = BTreeSet::new();
         for declaration in self.declarations() {
@@ -351,10 +339,6 @@ impl ProcessComponentRegistry {
                     *format,
                 ));
             }
-            serves.insert(ProcessComponentDeclaration::revision_token(
-                declaration.id.as_str(),
-                declaration.behavior_revision,
-            ));
         }
         serves.into_iter().collect()
     }
@@ -431,7 +415,7 @@ impl ProcessComponentRegistry {
 
     /// Build every component `env` names, in env order, and register their
     /// contributions through the same registrar a session plugin's go
-    /// through, each owned by the component's revision.
+    /// through, each owned by the component's id.
     fn contributions(
         &self,
         env: &ProcessEnv,
@@ -498,7 +482,7 @@ impl ProcessComponentRegistry {
                     ),
                 });
             }
-            let owner = PluginRevision::new(id.clone(), registered.declaration.behavior_revision);
+            let owner = id.clone();
             let mut reg = PluginRegistrar::new(owner.clone());
             reg.contributions = contributions;
             reg.tool_names = tool_names;
@@ -515,10 +499,7 @@ impl ProcessComponentRegistry {
         let registry =
             super::runtime_impl::build_tool_registry(&contributions, None).map_err(|error| {
                 ProcessEnvRefusal::ComponentBuildFailed {
-                    id: owners
-                        .last()
-                        .map(|owner| owner.plugin.clone())
-                        .unwrap_or_default(),
+                    id: owners.last().cloned().unwrap_or_default(),
                     reason: error.to_string(),
                 }
             })?;
@@ -551,7 +532,6 @@ impl ProcessComponentRegistry {
             owners.clone(),
             &mut contributions,
             Arc::clone(&registry),
-            Arc::new(ComposedAdmission),
         ));
         Ok(ProcessComposition {
             composition,
@@ -564,19 +544,9 @@ impl ProcessComponentRegistry {
 }
 
 struct BuiltComponents {
-    owners: Vec<PluginRevision>,
+    owners: Vec<String>,
     contributions: PluginContributions,
     registry: Arc<crate::ToolRegistry>,
-}
-
-/// A process composition answers to no session admission: the claim filter
-/// admitted the build that serves its components (§6.2).
-struct ComposedAdmission;
-
-impl AdmissionGate for ComposedAdmission {
-    fn validate(&self) -> Result<(), PluginError> {
-        Ok(())
-    }
 }
 
 fn register_spec(reg: &mut PluginRegistrar, spec: ProcessComponentSpec) -> Result<(), PluginError> {
@@ -631,35 +601,13 @@ fn register_spec(reg: &mut PluginRegistrar, spec: ProcessComponentSpec) -> Resul
 pub struct ProcessComposition {
     pub composition: Arc<ExecutionComposition>,
     pub registry: Arc<crate::ToolRegistry>,
-    pub owners: Vec<PluginRevision>,
+    pub owners: Vec<String>,
     pub(crate) reducers: BTreeMap<String, BTreeMap<String, StateReducer>>,
     /// The step state the components' views read (FIG-5268).
     pub(in crate::plugin) state: Arc<std::sync::Mutex<state::PluginStateRegistry>>,
 }
 
 impl ProcessComposition {
-    /// The revision tokens of the components the executable, preparation
-    /// and presentation callbacks of `tools` are bound to (§6.2). A tool no
-    /// component owns binds nothing; its step is refused at admission.
-    pub fn step_requirements(&self, tools: &[crate::ToolId]) -> Vec<String> {
-        let tokens: BTreeSet<String> = tools
-            .iter()
-            .filter_map(|tool| self.composition.tool_run_binding(tool, None).ok())
-            .flat_map(|binding| {
-                binding
-                    .callbacks()
-                    .map(|callback| {
-                        ProcessComponentDeclaration::revision_token(
-                            &callback.owner.plugin,
-                            callback.owner.behavior_revision,
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        tokens.into_iter().collect()
-    }
-
     /// The catalog a process's calls resolve against: the components'
     /// tools that `tools` admits, through the components' catalog
     /// contributions (D7: `env.tools ∩ component tools`).
@@ -775,9 +723,8 @@ impl StaticPluginFactory {
             )));
         }
         let declaration = self.plugin_declaration();
-        let mut component =
+        let component =
             ProcessComponentDeclaration::initial(declaration.id.as_str(), config_format)?;
-        component.behavior_revision = declaration.behavior_revision;
         Ok(StaticProcessComponent {
             declaration: component,
             spec: ProcessComponentSpec {

@@ -3,13 +3,13 @@
 //!
 //! The process has no plugin session: its namespaces are keyed by component
 //! id, reduced by the components' own reducers and admitted against their
-//! declared revisions. They live only in committed step outcomes: an
+//! declared formats. They live only in committed step outcomes: an
 //! activation builds an empty state and its lifecycle republishes every
 //! committed step outcome's resolutions into it before any step runs.
 
 use super::publication::{StateAuthority, StateDesk};
 use super::*;
-use crate::plugin::{BehaviorRevision, FormatVersion, ProcessComposition};
+use crate::plugin::{FormatVersion, ProcessComposition};
 use lash_durable::domain::TurnNamespaceWrite;
 
 /// The state sink of one process activation's step tools.
@@ -17,7 +17,7 @@ pub struct ComponentState {
     state: Arc<Mutex<PluginStateRegistry>>,
     owner: crate::RuntimeOwner,
     reducers: BTreeMap<String, BTreeMap<String, StateReducer>>,
-    revisions: BTreeMap<String, BehaviorRevision>,
+    owners: std::collections::BTreeSet<String>,
     trace_limits: lash_trace::TraceLimits,
     data_limits: crate::runtime::RuntimeDataLimits,
 }
@@ -38,11 +38,7 @@ impl ComponentState {
             state: Arc::clone(&composition.state),
             owner: crate::RuntimeOwner::Process(process),
             reducers: composition.reducers.clone(),
-            revisions: composition
-                .owners
-                .iter()
-                .map(|owner| (owner.plugin.clone(), owner.behavior_revision))
-                .collect(),
+            owners: composition.owners.iter().cloned().collect(),
             trace_limits,
             data_limits,
         }
@@ -61,10 +57,8 @@ impl ComponentState {
 impl StateAuthority for ComponentState {
     /// A component's step state is at the first format: it is never stored
     /// outside the step outcomes that carry it.
-    fn declared(&self, plugin: &str) -> Option<(BehaviorRevision, FormatVersion)> {
-        self.revisions
-            .get(plugin)
-            .map(|revision| (*revision, FormatVersion::ONE))
+    fn declared(&self, plugin: &str) -> Option<FormatVersion> {
+        self.owners.contains(plugin).then_some(FormatVersion::ONE)
     }
 
     fn reducer(&self, plugin: &str, name: &str) -> Option<StateReducer> {

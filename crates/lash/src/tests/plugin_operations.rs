@@ -549,12 +549,8 @@ async fn plugin_operation_failure_reaches_the_facade_as_a_typed_settlement() -> 
         );
         let origin = failure.origin.as_ref().unwrap();
         assert_eq!(
-            (
-                &*origin.plugin_id,
-                &*origin.operation,
-                origin.behavior_revision.get()
-            ),
-            ("accept", FailureProbe::NAME, 1)
+            (&*origin.plugin_id, &*origin.operation),
+            ("accept", FailureProbe::NAME)
         );
         assert_eq!(
             FailureProbe::decode_error((*failure).clone()).unwrap(),

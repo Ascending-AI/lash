@@ -528,22 +528,22 @@ impl SessionReadyContext {
     }
 }
 
-pub use lash_core_ids::{BehaviorRevision, FormatVersion, PluginId};
+pub use lash_core_ids::{FormatVersion, PluginId};
 
 /// What a plugin declares about itself before any session is built
-/// (FIG-4732): its id, the revision of what it does, the format it reads
-/// natively and the formats it can write. Lash trusts the declaration; it
-/// hashes no plugin content.
+/// (FIG-4732): its id, namespace formats, and readable stream-state formats.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PluginDeclaration {
     /// The id the plugin registers under.
     pub id: PluginId,
-    /// Moves with any change in what the plugin does.
-    pub behavior_revision: BehaviorRevision,
     /// The format of stored state and config the plugin reads natively.
     pub format_version: FormatVersion,
     /// Every format the plugin can write. It contains `format_version`.
     pub writable_formats: Vec<FormatVersion>,
+    /// The format written by this plugin's stream-finished callbacks.
+    pub stream_state_format: FormatVersion,
+    /// The stream-state formats its response callbacks can read, including native.
+    pub readable_stream_state_formats: Vec<FormatVersion>,
     /// What a fork of a session does with the plugin's namespace: copy it
     /// as of the fork point, or reset it to the plugin's initial state.
     /// Recorded with the namespace, so a later fork follows it.
@@ -551,14 +551,14 @@ pub struct PluginDeclaration {
 }
 
 impl PluginDeclaration {
-    /// The declaration of a plugin at its first behaviour revision that
-    /// reads and writes only its first format.
+    /// The declaration of a plugin that reads and writes only its first formats.
     pub fn initial(id: &'static str) -> Self {
         Self {
             id: PluginId::new(id),
-            behavior_revision: BehaviorRevision::ONE,
             format_version: FormatVersion::ONE,
             writable_formats: vec![FormatVersion::ONE],
+            stream_state_format: FormatVersion::ONE,
+            readable_stream_state_formats: vec![FormatVersion::ONE],
             state_fork: crate::plugin::StateFork::Copy,
         }
     }
@@ -581,6 +581,13 @@ pub enum PluginDeclarationError {
     /// The declaration names another plugin than the factory that gave it.
     #[error("plugin factory `{factory}` declares itself as `{declared}`")]
     IdMismatch { factory: String, declared: String },
+    /// The plugin cannot read the stream state its callbacks write.
+    #[error("plugin `{plugin}` does not read its native stream-state format {format_version}")]
+    NativeStreamStateNotReadable {
+        plugin: String,
+        #[schemars(with = "std::num::NonZeroU32")]
+        format_version: FormatVersion,
+    },
     /// The plugin cannot write the format it reads natively.
     #[error(
         "plugin `{plugin}` reads format {format_version} natively and does not declare it writable"
@@ -593,9 +600,7 @@ pub enum PluginDeclarationError {
 }
 
 /// The plugins of one core in hook order: the order their factories are
-/// registered in, which is the order their hooks run in. The build
-/// generation folds it in (FIG-4744), so two cores whose plugins differ in
-/// any behaviour revision, or only in order, never share a lane.
+/// registered in, which is the order fresh callback plans select hooks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PluginComposition {
     declarations: Vec<PluginDeclaration>,
@@ -608,6 +613,15 @@ impl PluginComposition {
     ) -> Result<Self, PluginDeclarationError> {
         let declarations: Vec<_> = declarations.into_iter().collect();
         for declaration in &declarations {
+            if !declaration
+                .readable_stream_state_formats
+                .contains(&declaration.stream_state_format)
+            {
+                return Err(PluginDeclarationError::NativeStreamStateNotReadable {
+                    plugin: declaration.id.as_str().to_owned(),
+                    format_version: declaration.stream_state_format,
+                });
+            }
             if !declaration
                 .writable_formats
                 .contains(&declaration.format_version)
@@ -661,7 +675,7 @@ impl PluginComposition {
     }
 
     /// The admission of this composition under `ranges` (FIG-4747): every
-    /// plugin in hook order with its behaviour revision and the highest
+    /// plugin in hook order with the highest
     /// format it writes that the fleet record permits.
     ///
     /// # Errors
@@ -672,14 +686,7 @@ impl PluginComposition {
         ranges: &crate::store::plugin_writers::PluginWriterRanges,
     ) -> Result<crate::store::plugin_writers::PluginAdmission, crate::compat::CompatRefusal> {
         let registrations = self.writer_registrations();
-        crate::store::plugin_writers::PluginAdmission::choose(
-            registrations.iter().zip(
-                self.declarations
-                    .iter()
-                    .map(|declaration| declaration.behavior_revision),
-            ),
-            ranges,
-        )
+        crate::store::plugin_writers::PluginAdmission::choose(registrations.iter(), ranges)
     }
 }
 
@@ -703,11 +710,11 @@ pub trait SessionPlugin: Send + Sync {
     }
 }
 
-/// A plugin's identity, behavior revision and formats, independent of its
+/// A plugin's identity and formats, independent of its
 /// runtime dependencies. Production factory types implement this once; hosts
 /// can call it before opening stores, pools or connections. It must be pure,
-/// cheap and perform no I/O. Move the behavior revision whenever behavior
-/// changes; the declared native format must also be writable.
+/// cheap and perform no I/O. Its native namespace format must be writable,
+/// and its native stream-state format must be readable.
 pub trait PluginDefinition {
     fn declaration() -> PluginDeclaration;
 }

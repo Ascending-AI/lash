@@ -21,7 +21,6 @@ use std::num::NonZeroU32;
 use serde::{Deserialize, Serialize};
 
 use crate::store::BlobRef;
-use crate::store::plugin_writers::PluginRevision;
 
 /// The longest local section or wrapper key, in bytes.
 pub const PROMPT_KEY_MAX_BYTES: usize = 64;
@@ -375,7 +374,7 @@ pub enum PlacementSource {
 #[serde(deny_unknown_fields)]
 pub struct ResolvedPromptWrap {
     pub wrap: PromptWrapId,
-    pub owner: PluginRevision,
+    pub owner: String,
     pub target: PromptSectionId,
     /// The wrapper's place in plugin registration order, then declaration
     /// order, across every installed plugin.
@@ -387,7 +386,7 @@ pub struct ResolvedPromptWrap {
 #[serde(deny_unknown_fields)]
 pub struct ResolvedPromptSection {
     pub section: PromptSectionId,
-    pub owner: PluginRevision,
+    pub owner: String,
     pub placement: PromptPlacement,
     pub placement_source: PlacementSource,
     /// The chain, first applied first.

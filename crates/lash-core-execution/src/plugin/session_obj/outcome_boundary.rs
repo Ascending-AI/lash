@@ -24,15 +24,15 @@ impl PluginSession {
         hooks
             .checkpoint_hooks
             .iter()
-            .all(|hook| hook.identity.owner.plugin == protocol)
+            .all(|hook| hook.identity.owner == protocol)
             && hooks
                 .assistant_stream_hooks
                 .iter()
-                .all(|hook| hook.identity.owner.plugin == protocol)
+                .all(|hook| hook.identity.owner == protocol)
             && hooks
                 .assistant_stream_finished_hooks
                 .iter()
-                .all(|hook| hook.identity.owner.plugin == protocol)
+                .all(|hook| hook.identity.owner == protocol)
             && self.only_the_protocol_prepares()
     }
 
@@ -48,19 +48,16 @@ impl PluginSession {
             && composition
                 .tool_catalog_contributors()
                 .iter()
-                .all(|hook| hook.identity.owner.plugin == protocol)
+                .all(|hook| hook.identity.owner == protocol)
             && catalog
                 .sections()
                 .iter()
-                .all(|section| section.owner.plugin == protocol)
+                .all(|section| section.owner == protocol)
             && catalog
                 .families()
                 .iter()
-                .all(|family| family.owner.plugin == protocol)
-            && catalog
-                .wraps()
-                .iter()
-                .all(|wrap| wrap.owner.plugin == protocol)
+                .all(|family| family.owner == protocol)
+            && catalog.wraps().iter().all(|wrap| wrap.owner == protocol)
     }
 
     pub fn has_runtime_event_hooks(&self) -> bool {

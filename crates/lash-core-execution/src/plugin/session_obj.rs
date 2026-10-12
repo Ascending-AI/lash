@@ -49,7 +49,7 @@ where
 {
     let mut out = Vec::new();
     for registered in hooks {
-        let phase_name = plugin_hook_phase_name(hook_kind, &registered.identity.owner.plugin);
+        let phase_name = plugin_hook_phase_name(hook_kind, &registered.identity.owner);
         if let Some(probe) = phase_probe {
             probe.begin_named(&phase_name);
         }
@@ -67,7 +67,7 @@ where
             value.take_state(),
         )?;
         out.push(PluginOwned {
-            plugin_id: registered.identity.owner.plugin.clone(),
+            plugin_id: registered.identity.owner.clone(),
             value,
         });
     }
@@ -198,7 +198,7 @@ where
     let mut out = Vec::new();
     for registered in hooks {
         out.push(PluginOwned {
-            plugin_id: registered.identity.owner.plugin.clone(),
+            plugin_id: registered.identity.owner.clone(),
             value: invoke(&registered.hook, ctx.clone())?,
         });
     }
@@ -311,7 +311,6 @@ impl PluginDispatchContext<'_> {
         &self,
         ctx: TurnHookContext,
     ) -> Result<Vec<PluginOwned<TurnContributions>>, PluginError> {
-        self.session.validate_recorded_admission()?;
         collect_owned_async(
             self.session,
             &self.session.capabilities().contributions.before_turn_hooks,
@@ -327,7 +326,6 @@ impl PluginDispatchContext<'_> {
         &self,
         ctx: TurnResultHookContext,
     ) -> Result<Vec<PluginOwned<AfterTurnContributions>>, PluginError> {
-        self.session.validate_recorded_admission()?;
         collect_owned_async(
             self.session,
             &self.session.capabilities().contributions.after_turn_hooks,
@@ -343,7 +341,6 @@ impl PluginDispatchContext<'_> {
     /// registration order. Every observer runs; their failures aggregate as
     /// typed causes in that order.
     pub async fn emit_runtime_event(&self, event: PluginLifecycleEvent) -> Result<(), PluginError> {
-        self.session.validate_recorded_admission()?;
         let hook_kind = lifecycle_event_hook_kind(&event);
         let mut causes = Vec::new();
         for registered in &self
@@ -352,8 +349,7 @@ impl PluginDispatchContext<'_> {
             .contributions
             .runtime_event_hooks
         {
-            let phase_name =
-                plugin_hook_phase_name(hook_kind, registered.identity.owner.plugin.as_str());
+            let phase_name = plugin_hook_phase_name(hook_kind, registered.identity.owner.as_str());
             if let Some(probe) = self.phase_probe {
                 probe.begin_named(&phase_name);
             }
@@ -364,8 +360,7 @@ impl PluginDispatchContext<'_> {
             if let Err(error) = result {
                 let identity = registered.identity.clone();
                 let origin = PluginFailureOrigin {
-                    plugin_id: identity.owner.plugin,
-                    behavior_revision: identity.owner.behavior_revision.into(),
+                    plugin_id: identity.owner,
                     operation: identity.key,
                 };
                 let mut failure = PluginOperationFailure::from(error);
@@ -401,13 +396,6 @@ impl PluginSession {
     /// fleet record permits by then.
     pub fn adopt_plugin_admission(&self, admission: crate::store::plugin_writers::PluginAdmission) {
         *self.admission.lock_recover() = Some(admission);
-    }
-
-    pub fn validate_recorded_admission(&self) -> Result<(), PluginError> {
-        if let Some(admission) = self.plugin_admission() {
-            self.host.validate_plugin_admission(&admission)?;
-        }
-        Ok(())
     }
 
     /// The plugin admission this session writes under, if it adopted one.
@@ -573,7 +561,6 @@ impl PluginSession {
             .expect("plugin session must have a protocol session")
             .identity
             .owner
-            .plugin
     }
 
     #[expect(
@@ -649,10 +636,15 @@ impl PluginSession {
 
     fn unavailable_callback(&self, callback: &PluginCallbackIdentity) -> PluginError {
         PluginError::Runtime(
-            PluginExecutionRefusal {
-                recorded: vec![callback.owner.clone()],
-                available: self.host.plugin_revisions(),
-                callback: Some(callback.clone()),
+            RecordedCallbackUnavailable {
+                recorded: callback.clone(),
+                available: self
+                    .capabilities()
+                    .contributions
+                    .assistant_response_hooks
+                    .iter()
+                    .map(|hook| hook.identity.clone())
+                    .collect(),
             }
             .into_runtime_error(),
         )
@@ -667,13 +659,10 @@ impl PluginSession {
         ctx: &ContextPressureContext<'_>,
         phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     ) -> Result<Vec<DecidedContextPressure>, ContextError> {
-        self.validate_recorded_admission()?;
         let mut decided = Vec::new();
         for (_, registered) in &self.capabilities().contributions.context_pressure_hooks {
-            let phase_name = plugin_hook_phase_name(
-                "context_pressure",
-                registered.identity.owner.plugin.as_str(),
-            );
+            let phase_name =
+                plugin_hook_phase_name("context_pressure", registered.identity.owner.as_str());
             if let Some(probe) = phase_probe.as_ref() {
                 probe.begin_named(&phase_name);
             }
@@ -685,7 +674,7 @@ impl PluginSession {
             let opens_frame = matches!(decision, ContextPressureDecision::OpenFrame { .. });
             if !matches!(decision, ContextPressureDecision::Continue) {
                 decided.push(DecidedContextPressure {
-                    plugin_id: registered.identity.owner.plugin.clone(),
+                    plugin_id: registered.identity.owner.clone(),
                     hook_id: registered.hook.id().to_owned(),
                     decision,
                 });
@@ -702,7 +691,6 @@ impl PluginSession {
         &self,
         ctx: &CompactionContext<'_>,
     ) -> Result<Option<ContextCompaction>, ContextError> {
-        self.validate_recorded_admission()?;
         for (_, registered) in &self.capabilities().contributions.context_compactors {
             if let Some(compaction) = registered.hook.compact(ctx).await?
                 && !compaction.is_empty()
@@ -717,7 +705,6 @@ impl PluginSession {
         &self,
         ctx: CheckpointHookContext,
     ) -> Result<Vec<PluginOwned<TurnContributions>>, PluginError> {
-        self.validate_recorded_admission()?;
         collect_owned_async(
             self,
             &self.capabilities().contributions.checkpoint_hooks,
@@ -734,7 +721,6 @@ impl PluginSession {
         session_id: &SessionId,
         chunk: String,
     ) -> Result<Vec<PluginOwned<AssistantStreamTransform>>, PluginError> {
-        self.validate_recorded_admission()?;
         let mut current = chunk;
         let mut transforms = Vec::new();
         for registered in &self.capabilities().contributions.assistant_stream_hooks {
@@ -746,19 +732,49 @@ impl PluginSession {
             .await?;
             current = transform.chunk.clone();
             transforms.push(PluginOwned {
-                plugin_id: registered.identity.owner.plugin.clone(),
+                plugin_id: registered.identity.owner.clone(),
                 value: transform,
             });
         }
         Ok(transforms)
     }
 
-    /// Check every recorded key and revision without invoking a callback.
+    /// Check every recorded key and stream-state format without invoking a callback.
     pub fn validate_assistant_response_plan(
         &self,
         plan: &crate::runtime::AssistantResponsePlan,
+        stream_hook_states: &[crate::runtime::AssistantStreamHookState],
     ) -> Result<(), PluginError> {
-        self.resolve_assistant_response_plan(plan).map(drop)
+        let callbacks = self.resolve_assistant_response_plan(plan)?;
+        // Validate all recorded state before the first callback can run.
+        for registered in &callbacks {
+            if let Some(recorded) = stream_hook_states
+                .iter()
+                .find(|state| state.callback == registered.identity)
+            {
+                let declaration = self
+                    .host
+                    .factories()
+                    .iter()
+                    .find(|factory| factory.id() == registered.identity.owner)
+                    .ok_or_else(|| self.unavailable_callback(&registered.identity))?
+                    .plugin_declaration();
+                if !declaration
+                    .readable_stream_state_formats
+                    .contains(&recorded.format)
+                {
+                    return Err(PluginError::Runtime(
+                        StreamStateFormatRefusal {
+                            callback: recorded.callback.clone(),
+                            stored: recorded.format,
+                            readable: declaration.readable_stream_state_formats,
+                        }
+                        .into_runtime_error(),
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn resolve_assistant_response_plan(
@@ -785,25 +801,25 @@ impl PluginSession {
         plan: &crate::runtime::AssistantResponsePlan,
         stream_hook_states: &[crate::runtime::AssistantStreamHookState],
     ) -> Result<Vec<PluginOwned<AssistantResponseTransform>>, PluginError> {
+        self.validate_assistant_response_plan(plan, stream_hook_states)?;
         let callbacks = self.resolve_assistant_response_plan(plan)?;
-        self.validate_recorded_admission()?;
         let mut current = response;
         let mut transforms = Vec::new();
         for registered in callbacks {
             let stream_state = stream_hook_states
                 .iter()
-                .find(|recorded| recorded.callback == registered.identity)
-                .map(|recorded| recorded.state.clone());
+                .find(|recorded| recorded.callback == registered.identity);
             let transform = (registered.hook)(AssistantResponseHookContext {
                 session_id: session_id.clone(),
                 plugin_config: self.admitted_plugin_config(),
                 response: current.clone(),
-                stream_state,
+                stream_state: stream_state.map(|recorded| recorded.state.clone()),
+                stream_state_format: stream_state.map(|recorded| recorded.format),
             })
             .await?;
             current = transform.response.clone();
             transforms.push(PluginOwned {
-                plugin_id: registered.identity.owner.plugin.clone(),
+                plugin_id: registered.identity.owner.clone(),
                 value: transform,
             });
         }
@@ -817,7 +833,6 @@ impl PluginSession {
         session_id: &SessionId,
         reason: AssistantStreamFinishReason,
     ) -> Result<Vec<crate::runtime::AssistantStreamHookState>, PluginError> {
-        self.validate_recorded_admission()?;
         let mut states = Vec::new();
         for registered in &self
             .capabilities()
@@ -842,6 +857,14 @@ impl PluginSession {
             {
                 states.push(crate::runtime::AssistantStreamHookState {
                     callback: response.clone(),
+                    format: self
+                        .host
+                        .factories()
+                        .iter()
+                        .find(|factory| factory.id() == response.owner)
+                        .ok_or_else(|| self.unavailable_callback(response))?
+                        .plugin_declaration()
+                        .stream_state_format,
                     state: state.clone(),
                 });
             }
@@ -1037,11 +1060,6 @@ impl PluginSession {
         sessions: Arc<dyn SessionReadService>,
         processes: Arc<dyn ProcessReadService>,
     ) -> Result<(String, serde_json::Value), PluginOperationInvokeError> {
-        self.validate_recorded_admission().map_err(|error| {
-            PluginOperationInvokeError::AdmissionRefused(Box::new(
-                error.into_turn_failure(crate::RuntimeErrorCode::Plugin),
-            ))
-        })?;
         let (plugin_id, outcome) = self
             .invoke_plugin_operation(
                 name,
@@ -1073,11 +1091,6 @@ impl PluginSession {
         processes: Arc<dyn crate::ProcessService>,
     ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
     {
-        self.validate_recorded_admission().map_err(|error| {
-            PluginOperationInvokeError::AdmissionRefused(Box::new(
-                error.into_turn_failure(crate::RuntimeErrorCode::Plugin),
-            ))
-        })?;
         let (plugin_id, outcome) = self
             .invoke_plugin_operation(
                 name,
@@ -1120,11 +1133,6 @@ impl PluginSession {
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
     {
-        self.validate_recorded_admission().map_err(|error| {
-            PluginOperationInvokeError::AdmissionRefused(Box::new(
-                error.into_turn_failure(crate::RuntimeErrorCode::Plugin),
-            ))
-        })?;
         let (plugin_id, outcome) = self
             .invoke_plugin_operation(
                 name,
@@ -1273,10 +1281,11 @@ mod attachment_notice_order_tests {
 #[cfg(test)]
 mod presentation_plan_tests {
     use super::*;
+    use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct PresenterFactory {
-        revision: u32,
+        text: &'static str,
         calls: Arc<AtomicUsize>,
     }
 
@@ -1286,43 +1295,52 @@ mod presentation_plan_tests {
         }
 
         fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-            Ok(Arc::new(Presenter(Arc::clone(&self.calls))))
+            Ok(Arc::new(Presenter {
+                calls: Arc::clone(&self.calls),
+                text: self.text,
+            }))
         }
     }
 
     impl crate::plugin::PluginMetadata for PresenterFactory {
         fn plugin_declaration(&self) -> PluginDeclaration {
-            let mut declaration = PluginDeclaration::initial("plan-presenter");
-            declaration.behavior_revision = BehaviorRevision::new(self.revision).unwrap();
-            declaration
+            PluginDeclaration::initial("plan-presenter")
         }
     }
 
-    struct Presenter(Arc<AtomicUsize>);
+    struct Presenter {
+        calls: Arc<AtomicUsize>,
+        text: &'static str,
+    }
     impl SessionPlugin for Presenter {
         fn id(&self) -> &'static str {
             "plan-presenter"
         }
         fn register(&self, registrar: &mut PluginRegistrar) -> Result<(), PluginError> {
-            let calls = Arc::clone(&self.0);
+            let calls = Arc::clone(&self.calls);
+            let text = self.text;
             registrar.tool_results().presenter(Arc::new(move |input| {
                 calls.fetch_add(1, Ordering::SeqCst);
-                Box::pin(async move { Ok(input.previous) })
+                Box::pin(async move {
+                    Ok(crate::ModelToolReturn::text(
+                        input.context.tool_name.clone(),
+                        text,
+                    ))
+                })
             }))
         }
     }
 
-    fn session(revision: Option<u32>, calls: &Arc<AtomicUsize>) -> Arc<PluginSession> {
+    fn session(text: Option<&'static str>, calls: &Arc<AtomicUsize>) -> Arc<PluginSession> {
         crate::testing::test_plugin_host(
-            revision
-                .map(|revision| {
-                    Arc::new(PresenterFactory {
-                        revision,
-                        calls: Arc::clone(calls),
-                    }) as Arc<dyn PluginFactory>
-                })
-                .into_iter()
-                .collect(),
+            text.map(|text| {
+                Arc::new(PresenterFactory {
+                    text,
+                    calls: Arc::clone(calls),
+                }) as Arc<dyn PluginFactory>
+            })
+            .into_iter()
+            .collect(),
         )
         .build_session(PluginSessionRequest::creation(
             "presentation-plan",
@@ -1361,70 +1379,42 @@ mod presentation_plan_tests {
     }
 
     #[tokio::test]
-    async fn a_recorded_presenter_never_runs_a_missing_or_revised_substitute() {
+    async fn a_recorded_presenter_resolves_by_key_and_refuses_a_missing_key() {
         let calls = Arc::new(AtomicUsize::new(0));
-        let plan = session(Some(1), &calls)
+        let plan = session(Some("old"), &calls)
             .composition()
             .tool_presentation_plan();
-        let plan: crate::runtime::PresentationBinding =
-            serde_json::from_value(serde_json::to_value(plan).unwrap()).unwrap();
-        for revision in [None, Some(2)] {
-            let error = present(&session(revision, &calls), &plan)
-                .await
-                .unwrap_err()
-                .into_runtime_error();
-            assert_eq!(
-                error.code,
-                crate::RuntimeErrorCode::PluginRevisionUnavailable
-            );
-            let Some(crate::RuntimeErrorCause::PluginExecution { refusal }) = error.cause else {
-                panic!("the presenter refusal remains typed");
-            };
-            assert_eq!(refusal.callback, plan.presenter);
-        }
+        let error = present(&session(None, &calls), &plan)
+            .await
+            .unwrap_err()
+            .into_runtime_error();
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::RecordedCallbackUnavailable
+        );
+        let Some(crate::RuntimeErrorCause::RecordedCallbackUnavailable { refusal }) = error.cause
+        else {
+            panic!("the presenter refusal remains typed");
+        };
+        assert_eq!(Some(refusal.recorded), plan.presenter);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let result = present(&session(Some("new"), &calls), &plan).await.unwrap();
+        assert_eq!(
+            result.model_return.parts[0],
+            crate::ModelToolReturnPart::text("new".to_owned())
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
     async fn an_explicitly_empty_plan_ignores_an_installed_presenter() {
         let calls = Arc::new(AtomicUsize::new(0));
         present(
-            &session(Some(1), &calls),
+            &session(Some("old"), &calls),
             &crate::runtime::PresentationBinding::default(),
         )
         .await
         .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 0);
-    }
-}
-
-// Shares the recorded admission without retaining the session's capabilities:
-// the composition may outlive the session and must not form an ownership cycle.
-struct SessionExecutionAdmission {
-    host: PluginHost,
-    admission: Arc<std::sync::Mutex<Option<crate::store::plugin_writers::PluginAdmission>>>,
-}
-
-impl AdmissionGate for SessionExecutionAdmission {
-    fn validate(&self) -> Result<(), PluginError> {
-        if let Some(admission) = self.admission.lock_recover().clone() {
-            self.host.validate_plugin_admission(&admission)?;
-        }
-        Ok(())
-    }
-}
-
-impl AdmissionGate for PluginSession {
-    fn validate(&self) -> Result<(), PluginError> {
-        self.validate_recorded_admission()
-    }
-}
-
-impl PluginSession {
-    pub(super) fn execution_admission(&self) -> Arc<dyn AdmissionGate> {
-        Arc::new(SessionExecutionAdmission {
-            host: self.host.clone(),
-            admission: Arc::clone(&self.admission),
-        })
     }
 }

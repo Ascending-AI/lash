@@ -1,6 +1,5 @@
 //! Codec, refusal and transition witnesses of the tool-run contract.
 
-use lash_core_ids::BehaviorRevision;
 use lash_sansio::{ToolCallId, ToolIntentKind};
 use serde_json::json;
 
@@ -8,7 +7,7 @@ use super::*;
 use crate::artifact_referrer::{ArtifactName, ArtifactStoreId};
 use crate::await_event_identity::{AwaitEventKey, AwaitEventWaitIdentity};
 use crate::effect_opener::EffectOpener;
-use crate::store::plugin_writers::{PluginCallbackIdentity, PluginRevision};
+use crate::store::plugin_writers::PluginCallbackIdentity;
 use crate::{ExecutionScope, ProcessId};
 
 const DIGEST_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -18,8 +17,8 @@ fn opener() -> EffectOpener {
     EffectOpener::turn("session-1", "turn-1")
 }
 
-fn revision(plugin: &str) -> PluginRevision {
-    PluginRevision::new(plugin, BehaviorRevision::ONE)
+fn revision(plugin: &str) -> String {
+    String::from(plugin)
 }
 
 fn callback(plugin: &str, key: &str) -> PluginCallbackIdentity {
@@ -51,10 +50,6 @@ fn binding() -> AdmittedBinding {
             steps: vec![callback("render", "presentation_step:0")],
         },
     }
-}
-
-fn available() -> Vec<PluginRevision> {
-    vec![revision("tools"), revision("standard"), revision("render")]
 }
 
 fn call(label: &str) -> AdmittedCall {
@@ -180,12 +175,12 @@ fn declarations_refuse_typed() {
 #[test]
 fn one_invalid_member_admits_no_member() {
     let ok = round(vec![call("a"), call("b")]);
-    ok.clone().admit(&available(), |_| false).unwrap();
+    ok.clone().admit(|_| false).unwrap();
 
     let mut duplicate = round(vec![call("a"), call("a")]);
     duplicate.operands = vec![0, 1];
     assert_eq!(
-        duplicate.admit(&available(), |_| false),
+        duplicate.admit(|_| false),
         Err(AdmissionRefusal::DuplicateCall {
             call_id: ToolCallId::fixture("a")
         })
@@ -194,14 +189,14 @@ fn one_invalid_member_admits_no_member() {
     let mut unreferenced = round(vec![call("a"), call("b")]);
     unreferenced.operands = vec![0];
     assert_eq!(
-        unreferenced.admit(&available(), |_| false),
+        unreferenced.admit(|_| false),
         Err(AdmissionRefusal::UnreferencedMember { member: 1 })
     );
 
     let mut out_of_range = round(vec![call("a")]);
     out_of_range.operands = vec![0, 3];
     assert_eq!(
-        out_of_range.admit(&available(), |_| false),
+        out_of_range.admit(|_| false),
         Err(AdmissionRefusal::OperandOutOfRange { slot: 1, member: 3 })
     );
 
@@ -210,19 +205,19 @@ fn one_invalid_member_admits_no_member() {
         opener: EffectOpener::turn("session-2", "turn-1"),
     };
     assert_eq!(
-        round(vec![call("a"), foreign]).admit(&available(), |_| false),
+        round(vec![call("a"), foreign]).admit(|_| false),
         Err(AdmissionRefusal::RequestNotOwned { member: 1 })
     );
 
     let mut isolated = call("b");
     isolated.declaration.isolated = true;
     assert_eq!(
-        round(vec![call("a"), isolated.clone()]).admit(&available(), |_| false),
+        round(vec![call("a"), isolated.clone()]).admit(|_| false),
         Err(AdmissionRefusal::UnsupportedIsolation { member: 1 })
     );
     assert!(
         round(vec![call("a"), isolated])
-            .admit(&available(), |tool| tool == "read_file")
+            .admit(|tool| tool == "read_file")
             .is_ok()
     );
 
@@ -234,32 +229,8 @@ fn one_invalid_member_admits_no_member() {
         },
     }]);
     assert_eq!(
-        round(vec![call("a"), cached]).admit(&available(), |_| false),
+        round(vec![call("a"), cached]).admit(|_| false),
         Err(AdmissionRefusal::CachedNotOwned { member: 1 })
-    );
-}
-
-#[test]
-fn an_unavailable_bound_revision_refuses_with_the_fig_4854_refusal() {
-    let newer = vec![
-        revision("tools"),
-        PluginRevision::new("standard", BehaviorRevision::new(2).unwrap()),
-        revision("render"),
-    ];
-    let refusal = round(vec![call("a")]).admit(&newer, |_| false).unwrap_err();
-    let AdmissionRefusal::BindingUnavailable { member, cause } = refusal else {
-        panic!("expected a binding refusal, got {refusal:?}");
-    };
-    assert_eq!(member, 0);
-    assert_eq!(cause.recorded, vec![revision("standard")]);
-    assert_eq!(cause.available, newer);
-    assert_eq!(
-        cause.callback,
-        Some(callback("standard", "presentation_presenter"))
-    );
-    assert_eq!(
-        cause.into_runtime_error().code,
-        crate::RuntimeErrorCode::PluginRevisionUnavailable
     );
 }
 
@@ -315,12 +286,7 @@ fn checks_reduce_by_strength_then_plugin_then_key_in_every_order() {
     let order: Vec<_> = expected
         .replies()
         .iter()
-        .map(|reply| {
-            (
-                reply.callback.owner.plugin.as_str(),
-                reply.callback.key.as_str(),
-            )
-        })
+        .map(|reply| (reply.callback.owner.as_str(), reply.callback.key.as_str()))
         .collect();
     assert_eq!(
         order,
@@ -355,7 +321,7 @@ fn checks_reduce_by_strength_then_plugin_then_key_in_every_order() {
     let mut disordered = call("a");
     disordered.checks = unreduced;
     assert_eq!(
-        round(vec![disordered]).admit(&available(), |_| false),
+        round(vec![disordered]).admit(|_| false),
         Err(AdmissionRefusal::UnreducedChecks { member: 0 })
     );
 }
@@ -462,14 +428,6 @@ fn material_references_refuse_typed_and_retention_keeps_identity() {
             },
             "material_retired",
         ),
-        (
-            MaterialRefusal::RevisionMismatch {
-                reference: Box::new(local.clone()),
-                recorded: revision("tools"),
-                available: Vec::new(),
-            },
-            "material_revision_mismatch",
-        ),
     ] {
         assert_eq!(refusal.code(), code);
     }
@@ -496,7 +454,6 @@ fn bundles_retain_only_crossing_material_and_refuse_corrupt_bytes() {
     let payload = MaterialPayload::new(
         owner.clone(),
         MaterialRole::AttemptOutput,
-        None,
         "output".repeat(256),
     );
     let bundle = MaterialBundle::of([payload.clone(), payload.clone()])
@@ -510,13 +467,13 @@ fn bundles_retain_only_crossing_material_and_refuse_corrupt_bytes() {
     assert!(retained.is_retained());
     assert_eq!(retained.copy_bytes, bundle.bytes().len() as u64);
     assert_eq!(
-        MaterialBundle::read(bundle.bytes(), reference, &owner, &[]).unwrap(),
+        MaterialBundle::read(bundle.bytes(), reference, &owner).unwrap(),
         payload
     );
     let tampered = String::from_utf8(bundle.bytes().to_vec())
         .unwrap()
         .replace("outputoutput", "tamperedoutp");
-    let error = MaterialBundle::read(tampered.as_bytes(), reference, &owner, &[]).unwrap_err();
+    let error = MaterialBundle::read(tampered.as_bytes(), reference, &owner).unwrap_err();
     assert!(matches!(
         error.cause,
         Some(crate::RuntimeErrorCause::MaterialRefused { ref refusal })

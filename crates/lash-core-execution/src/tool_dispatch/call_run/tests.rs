@@ -2,8 +2,6 @@
 
 use std::sync::Arc;
 
-use lash_core_ids::BehaviorRevision;
-
 use super::super::singleton_run::{
     BeforeCheckReply, SingletonAttempt, SingletonBodyOutcome, SingletonCapture,
     SingletonPreparedRequest, SingletonPresentationError, SingletonToolCall, SingletonToolHandlers,
@@ -11,7 +9,7 @@ use super::super::singleton_run::{
 };
 use super::{AdmittedToolCall, AttemptEnd, CallEnd};
 use crate::ToolCallId;
-use crate::store::plugin_writers::{PluginCallbackIdentity, PluginRevision};
+use crate::store::plugin_writers::PluginCallbackIdentity;
 use crate::tool_run::{
     AdmittedBinding, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict, ExternalCancelPolicy,
     PresentationBinding, ToolDeclaration,
@@ -19,7 +17,7 @@ use crate::tool_run::{
 
 fn callback(key: &str) -> PluginCallbackIdentity {
     PluginCallbackIdentity {
-        owner: PluginRevision::new("tools", BehaviorRevision::ONE),
+        owner: String::from("tools"),
         key: key.into(),
     }
 }
@@ -40,7 +38,6 @@ fn ordinary_call(label: &str) -> SingletonToolCall {
                 steps: Vec::new(),
             },
         },
-        available: vec![PluginRevision::new("tools", BehaviorRevision::ONE)],
         cancel: ExternalCancelPolicy::CancelExternalWork,
     }
 }

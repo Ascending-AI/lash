@@ -29,7 +29,7 @@
 //! other's uncommitted state, and each committed record is one step of the
 //! namespace's frontier.
 use super::*;
-use crate::plugin::{BehaviorRevision, FormatVersion};
+use crate::plugin::FormatVersion;
 use crate::{RuntimeEffectControllerError, RuntimeEffectKind, RuntimeEffectOutcome};
 use lash_core_store::store::plugin_writers::PluginCallbackIdentity;
 use lash_core_store::tool_run::{
@@ -62,7 +62,7 @@ pub struct StateReduction<'a> {
 /// A plugin's pure read-modify-write for [`StateCommand::Apply`]: the key's
 /// next value (`None` removes it) or a typed refusal, which rejects the
 /// whole batch. It sees nothing but its [`StateReduction`]; it is a
-/// behaviour of the plugin's revision, and a recorded resolution never runs
+/// behaviour of the registered plugin, and a recorded resolution never runs
 /// it again.
 pub type StateReducer =
     Arc<dyn Fn(StateReduction<'_>) -> Result<Option<Value>, HookCause> + Send + Sync>;
@@ -94,7 +94,7 @@ impl Proposal {
 
     /// A tool body's commands against its owning plugin's namespace.
     pub(crate) fn for_tool(
-        owner: lash_core_store::store::plugin_writers::PluginRevision,
+        owner: String,
         origin: StateCommandOrigin,
         commands: StateCommands,
     ) -> Self {
@@ -128,7 +128,7 @@ pub(crate) fn propose(
     plugins: &dyn super::super::ExecutionState,
     proposal: Proposal,
 ) -> Result<(), PluginStateError> {
-    let plugin = proposal.batch.plugin.plugin.clone();
+    let plugin = proposal.batch.plugin.clone();
     let mut pending = Some(proposal);
     let _ = SINK.try_with(|sink| {
         let mut sink = sink.lock_recover();
@@ -347,8 +347,8 @@ const REDUCER_PANIC: &str = "lash.state_reducer_panicked";
 /// What admits and reduces a state owner's batches: the plugins a session
 /// installed, or the components a process's environment names.
 pub(in crate::plugin) trait StateAuthority: Send + Sync {
-    /// The behaviour revision and state format `plugin` declares here.
-    fn declared(&self, plugin: &str) -> Option<(BehaviorRevision, FormatVersion)>;
+    /// The state format `plugin` declares here.
+    fn declared(&self, plugin: &str) -> Option<FormatVersion>;
     /// `plugin`'s reducer `name`.
     fn reducer(&self, plugin: &str, name: &str) -> Option<StateReducer>;
 }
@@ -468,13 +468,13 @@ impl crate::PluginSession {
 }
 
 impl StateAuthority for crate::PluginSession {
-    fn declared(&self, plugin: &str) -> Option<(BehaviorRevision, FormatVersion)> {
+    fn declared(&self, plugin: &str) -> Option<FormatVersion> {
         self.host
             .factories()
             .iter()
             .map(|factory| factory.plugin_declaration())
             .find(|declaration| declaration.id.as_str() == plugin)
-            .map(|declaration| (declaration.behavior_revision, declaration.format_version))
+            .map(|declaration| declaration.format_version)
     }
 
     fn reducer(&self, plugin: &str, name: &str) -> Option<StateReducer> {
@@ -503,7 +503,7 @@ impl StateDesk<'_> {
     ) -> Result<Vec<StateResolution>, PluginStateError> {
         let namespaces: BTreeSet<String> = proposals
             .iter()
-            .map(|proposal| proposal.batch.plugin.plugin.clone())
+            .map(|proposal| proposal.batch.plugin.clone())
             .collect();
         let settled = Arc::clone(&self.state.lock_recover().settled);
         loop {
@@ -551,7 +551,7 @@ impl StateDesk<'_> {
         proposals
             .into_iter()
             .map(|Proposal { batch, proposer }| {
-                let plugin = batch.plugin.plugin.clone();
+                let plugin = batch.plugin.clone();
                 let namespace = candidates.entry(plugin.clone()).or_insert_with(|| {
                     registry
                         .data
@@ -619,7 +619,7 @@ impl StateDesk<'_> {
     }
 
     /// Whether `batch` may reduce at all: its proposer's authority, its
-    /// plugin revision, its namespace's format and its bounds.
+    /// plugin id, its namespace's format and its bounds.
     fn admit_batch(
         &self,
         batch: &StateCommandBatch,
@@ -630,15 +630,14 @@ impl StateDesk<'_> {
             Some(proposer) => batch.check(proposer, self.limits)?,
             None => batch.check_bounds(self.limits)?,
         }
-        let (_, format_version) = self
+        let format_version = self
             .authority
-            .declared(&batch.plugin.plugin)
-            .filter(|(revision, _)| *revision == batch.plugin.behavior_revision)
+            .declared(&batch.plugin)
             .ok_or(StateCommandRefusal::WrongOwner)?;
         if namespace.format_version != format_version {
             return Err(StateCommandRefusal::IncompatibleWriter(
                 crate::FormatRefusal {
-                    plugin: batch.plugin.plugin.clone(),
+                    plugin: batch.plugin.clone(),
                     namespace: crate::FormatNamespace::State,
                     stored: namespace.format_version,
                     readable: format_version,
@@ -742,18 +741,18 @@ impl StateDesk<'_> {
             .try_for_each(|resolution| {
                 let namespace = candidate
                     .plugins
-                    .entry(resolution.plugin.plugin.clone())
+                    .entry(resolution.plugin.clone())
                     .or_default();
                 match publish_one(namespace, segment, resolution)? {
                     Published::Applied | Published::AlreadyApplied => Ok(()),
                     Published::Ahead => {
-                        let queue = owed.entry(resolution.plugin.plugin.clone()).or_default();
+                        let queue = owed.entry(resolution.plugin.clone()).or_default();
                         if queue
                             .get(&resolution.ordinal.0)
                             .is_some_and(|pending| pending != resolution)
                         {
                             return Err(PluginStateError::Frontier {
-                                plugin: resolution.plugin.plugin.clone(),
+                                plugin: resolution.plugin.clone(),
                                 refusal: FrontierRefusal::ReceiptMismatch {
                                     found: resolution.ordinal.0,
                                 },
@@ -795,17 +794,14 @@ impl StateDesk<'_> {
         let registry = self.state.lock_recover();
         let mut data = registry.data.clone();
         for resolution in staged {
-            let namespace = data
-                .plugins
-                .entry(resolution.plugin.plugin.clone())
-                .or_default();
+            let namespace = data.plugins.entry(resolution.plugin.clone()).or_default();
             match publish_one(namespace, registry.segment, resolution)? {
                 Published::Applied | Published::AlreadyApplied => {}
                 // A staged resolution was reduced against the published
                 // namespace, so it follows it at once.
                 Published::Ahead => {
                     return Err(PluginStateError::Frontier {
-                        plugin: resolution.plugin.plugin.clone(),
+                        plugin: resolution.plugin.clone(),
                         refusal: FrontierRefusal::OutOfOrder {
                             found: resolution.ordinal.0,
                         },
@@ -889,7 +885,7 @@ fn publish_one(
                 StateResolutionOutcome::Refused { refusal } => {
                     tracing::warn!(
                         event = "plugin_state.batch_refused",
-                        plugin_id = %resolution.plugin.plugin,
+                        plugin_id = %resolution.plugin,
                         ordinal = resolution.ordinal.0,
                         %refusal,
                         "a plugin's state command batch was refused and published nothing"
@@ -906,7 +902,7 @@ fn publish_one(
             Ok(Published::Ahead)
         }
         Err(refusal) => Err(PluginStateError::Frontier {
-            plugin: resolution.plugin.plugin.clone(),
+            plugin: resolution.plugin.clone(),
             refusal,
         }),
     }

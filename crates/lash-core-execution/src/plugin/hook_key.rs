@@ -5,13 +5,13 @@ const MAX_HOOK_KEY_BYTES: usize = 64;
 
 /// A hook registration's stable local name within its plugin and seam.
 ///
-/// The runtime records a callback as `{seam}:{key}` under its plugin
-/// revision ([`super::PluginCallbackIdentity`]), so a key names the callback
+/// The runtime records a callback as `{seam}:{key}` under its plugin id
+/// ([`super::PluginCallbackIdentity`]), so a key names the callback
 /// across processes and replays: reordering registrations never renames a
 /// callback, and two registrations in one plugin and seam with the same key
 /// are a registration error. A key is 1 to 64 bytes of ASCII letters,
-/// digits, `_`, `-` and `.`. Changing what a keyed callback does requires
-/// the plugin's behavior revision, not a new key.
+/// digits, `_`, `-` and `.`. An unfinished recorded derivation runs the
+/// current implementation of its key, after checking its stream-state format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HookKey(&'static str);
 

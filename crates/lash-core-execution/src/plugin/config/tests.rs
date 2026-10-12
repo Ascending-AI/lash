@@ -964,7 +964,6 @@ fn formatted_admission(writer: u32) -> crate::store::plugin_writers::PluginAdmis
     crate::store::plugin_writers::PluginAdmission::from_plugins(vec![
         crate::store::plugin_writers::AdmittedPlugin {
             plugin: FormattedCounter::ID.to_string(),
-            behavior_revision: crate::plugin::BehaviorRevision::ONE,
             writer: crate::FormatVersion::new(writer).expect("a format version"),
         },
     ])

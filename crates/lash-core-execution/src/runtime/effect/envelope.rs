@@ -364,11 +364,11 @@ pub enum RuntimeEffectCommand {
     /// outcome, so this command is reconstructed identically on redrive.
     AssistantResponseHooks {
         response: Box<LlmResponse>,
-        /// The exact ordered callback keys and revisions phase 1 recorded.
+        /// The exact ordered callback keys and plugin ids phase 1 recorded.
         plan: AssistantResponsePlan,
         /// The stream-hook end states phase 1 recorded. The response hooks
         /// read these, never state a stream hook left in plugin memory, so
-        /// phase 2 derives the same response on any worker.
+        /// phase 2 checks their formats before invoking the recorded keys.
         stream_hook_states: Vec<AssistantStreamHookState>,
     },
     Direct {

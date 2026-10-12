@@ -158,9 +158,9 @@ impl PluginFailureClass {
 
 /// The declared code that produced a failure. Lash stamps this at dispatch.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PluginFailureOrigin {
     pub plugin_id: String,
-    pub behavior_revision: std::num::NonZeroU32,
     pub operation: String,
 }
 

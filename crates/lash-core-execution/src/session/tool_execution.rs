@@ -170,7 +170,7 @@ impl RuntimeExecutionContext<'_> {
         &self,
         tool: &crate::ToolId,
         source: Option<&str>,
-    ) -> Result<crate::plugin::PluginRevision, crate::PluginError> {
+    ) -> Result<String, crate::PluginError> {
         self.dispatch.composition.tool_execution_owner(tool, source)
     }
 

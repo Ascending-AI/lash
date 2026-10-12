@@ -10,10 +10,7 @@ type Register = Box<dyn Fn(&mut PluginRegistrar) -> Result<(), PluginError>>;
 fn catalog(plugins: Vec<(&'static str, Register)>) -> Result<PromptCatalog, PluginError> {
     let mut contributions = PluginContributions::default();
     for (id, register) in plugins {
-        let mut reg = PluginRegistrar::new(PluginRevision::new(
-            id,
-            crate::plugin::BehaviorRevision::ONE,
-        ));
+        let mut reg = PluginRegistrar::new(String::from(id));
         reg.contributions = contributions;
         register(&mut reg)?;
         contributions = reg.contributions;
@@ -169,10 +166,7 @@ fn a_section_key_registers_once_per_plugin_and_any_plugin_wraps_any_section() {
         protocol.value,
         SectionText::text("replaced by a trusted wrapper")
     );
-    assert_eq!(
-        composition.record().sections[0].wraps[0].owner.plugin,
-        "wrapper"
-    );
+    assert_eq!(composition.record().sections[0].wraps[0].owner, "wrapper");
     let other = composition
         .compose_section(1, &cut(BTreeMap::new()))
         .expect("other section composes");

@@ -34,9 +34,7 @@ use serde::{Deserialize, Serialize};
 use super::material::{MaterialOwner, MaterialRef, MaterialRole};
 use super::tool_hooks::{BeforeCheckVerdict, BeforeSelection, CheckRecord};
 use crate::effect_opener::EffectOpener;
-use crate::store::plugin_writers::{
-    PluginCallbackIdentity, PluginExecutionRefusal, PluginRevision,
-};
+use crate::store::plugin_writers::PluginCallbackIdentity;
 
 /// The presentation callbacks a call is bound to: the singleton presenter,
 /// then the ordered optional steps.
@@ -56,9 +54,7 @@ impl PresentationBinding {
     }
 }
 
-/// The callbacks admission binds automatically, each with its plugin's
-/// behavior revision. A resumed call whose bound revision is unavailable
-/// refuses typed, before executing anything.
+/// The callbacks admission binds automatically by owning plugin and key.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdmittedBinding {
@@ -75,30 +71,6 @@ impl AdmittedBinding {
         [&self.executable, &self.preparation]
             .into_iter()
             .chain(self.presentation.callbacks())
-    }
-
-    /// Refuse when `available` lacks the exact plugin revision of any bound
-    /// callback.
-    ///
-    /// # Errors
-    ///
-    /// FIG-4854's [`PluginExecutionRefusal`], naming the first unavailable
-    /// callback.
-    pub fn require_available(
-        &self,
-        available: &[PluginRevision],
-    ) -> Result<(), PluginExecutionRefusal> {
-        match self
-            .callbacks()
-            .find(|callback| !available.contains(&callback.owner))
-        {
-            None => Ok(()),
-            Some(callback) => Err(PluginExecutionRefusal {
-                recorded: vec![callback.owner.clone()],
-                available: available.to_vec(),
-                callback: Some(callback.clone()),
-            }),
-        }
     }
 }
 
@@ -201,11 +173,6 @@ pub enum AdmissionRefusal {
     UnreducedChecks { member: u32 },
     #[error("member {member} has a cached result that is not the admitting Run's output")]
     CachedNotOwned { member: u32 },
-    #[error("member {member} is bound to an unavailable plugin revision")]
-    BindingUnavailable {
-        member: u32,
-        cause: Box<PluginExecutionRefusal>,
-    },
 }
 
 /// A round that passed admission: the only way to obtain one.
@@ -213,19 +180,14 @@ pub enum AdmissionRefusal {
 pub struct AdmittedRound(RoundAdmission);
 
 impl RoundAdmission {
-    /// Admit the round against the plugin revisions `available` and the
-    /// tools `supports_isolation` names, all members or none.
-    ///
-    /// The same check guards a recorded round on replay: a recorded round
-    /// whose bound revision is now unavailable refuses typed before any
-    /// body, route or identity is chosen.
+    /// Admit the round against the tools `supports_isolation` names,
+    /// all members or none.
     ///
     /// # Errors
     ///
     /// The first [`AdmissionRefusal`] in member order.
     pub fn admit(
         self,
-        available: &[PluginRevision],
         supports_isolation: impl Fn(&str) -> bool,
     ) -> Result<AdmittedRound, AdmissionRefusal> {
         let mut seen = BTreeSet::new();
@@ -279,12 +241,6 @@ impl RoundAdmission {
             if cached_foreign {
                 return Err(AdmissionRefusal::CachedNotOwned { member });
             }
-            call.binding.require_available(available).map_err(|cause| {
-                AdmissionRefusal::BindingUnavailable {
-                    member,
-                    cause: Box::new(cause),
-                }
-            })?;
         }
         Ok(AdmittedRound(self))
     }

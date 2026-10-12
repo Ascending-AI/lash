@@ -32,7 +32,6 @@ pub use crate::prompt_sections::{
     RecordedSectionText, RenderedPromptSection, ResolvedPromptPlan, ResolvedPromptSection,
     ResolvedPromptWrap,
 };
-use crate::store::plugin_writers::PluginRevision;
 
 use super::{PluginError, PluginRegistrar, PluginStateError};
 
@@ -107,11 +106,11 @@ impl From<PluginStateError> for PromptRenderError {
 pub enum PromptRenderSite {
     Base {
         section: PromptSectionId,
-        owner: PluginRevision,
+        owner: String,
     },
     Wrap {
         wrap: PromptWrapId,
-        owner: PluginRevision,
+        owner: String,
         target: PromptSectionId,
         ordinal: u32,
     },
@@ -605,31 +604,31 @@ impl PromptInput<'_> {
 #[derive(Clone)]
 struct RegisteredPromptSection {
     identity: super::PluginCallbackIdentity,
-    owner: PluginRevision,
+    owner: String,
     spec: PromptSectionSpec,
     renderer: Arc<dyn PromptSection>,
 }
 
 impl RegisteredPromptSection {
     fn id(&self) -> PromptSectionId {
-        PromptSectionId::new(self.owner.plugin.clone(), self.spec.key.clone())
+        PromptSectionId::new(self.owner.clone(), self.spec.key.clone())
     }
 }
 
 #[derive(Clone)]
 struct RegisteredPromptFamily {
-    owner: PluginRevision,
+    owner: String,
     spec: PromptSectionFamilySpec,
     source: Arc<dyn PromptSectionSource>,
 }
 
 impl RegisteredPromptFamily {
     fn id(&self) -> PromptSectionId {
-        PromptSectionId::new(self.owner.plugin.clone(), self.spec.prefix.clone())
+        PromptSectionId::new(self.owner.clone(), self.spec.prefix.clone())
     }
 
     fn holds(&self, section: &PromptSectionId) -> bool {
-        self.owner.plugin == section.owner && self.spec.holds(&section.key)
+        self.owner == section.owner && self.spec.holds(&section.key)
     }
 }
 
@@ -642,7 +641,7 @@ enum RegisteredPromptEntry {
 
 #[derive(Clone)]
 struct RegisteredPromptWrap {
-    owner: PluginRevision,
+    owner: String,
     spec: PromptWrapSpec,
     wrapper: Arc<dyn PromptSectionWrap>,
 }
@@ -650,7 +649,7 @@ struct RegisteredPromptWrap {
 impl RegisteredPromptWrap {
     fn id(&self) -> PromptWrapId {
         PromptWrapId {
-            owner: self.owner.plugin.clone(),
+            owner: self.owner.clone(),
             key: self.spec.key.clone(),
         }
     }
@@ -665,7 +664,7 @@ pub struct PromptRegistry {
 }
 
 impl PromptRegistry {
-    pub fn owners(&self) -> impl Iterator<Item = (PluginRevision, PromptSectionId)> {
+    pub fn owners(&self) -> impl Iterator<Item = (String, PromptSectionId)> {
         self.sections()
             .map(|section| (section.owner.clone(), section.id()))
     }
@@ -716,7 +715,7 @@ impl PromptRegistrations<'_> {
     ) -> Result<(), PluginError> {
         let owner = self.reg.owner.clone();
         let registry = &mut self.reg.contributions.prompt;
-        let id = PromptSectionId::new(owner.plugin.clone(), spec.key.clone());
+        let id = PromptSectionId::new(owner.clone(), spec.key.clone());
         if registry.knows(&id) {
             return Err(PluginError::Registration(format!(
                 "duplicate prompt section `{id}`"
@@ -753,10 +752,10 @@ impl PromptRegistrations<'_> {
         let registry = &mut self.reg.contributions.prompt;
         let overlaps = registry.entries.iter().any(|entry| match entry {
             RegisteredPromptEntry::Section(section) => {
-                section.owner.plugin == owner.plugin && spec.holds(&section.spec.key)
+                section.owner == owner && spec.holds(&section.spec.key)
             }
             RegisteredPromptEntry::Family(family) => {
-                family.owner.plugin == owner.plugin
+                family.owner == owner
                     && (family.spec.prefix == spec.prefix
                         || family.spec.holds(&spec.prefix)
                         || spec.holds(&family.spec.prefix))
@@ -765,7 +764,7 @@ impl PromptRegistrations<'_> {
         if overlaps {
             return Err(PluginError::Registration(format!(
                 "prompt section family `{}/{}` overlaps a registered section or family",
-                owner.plugin, spec.prefix
+                owner, spec.prefix
             )));
         }
         registry
@@ -796,11 +795,11 @@ impl PromptRegistrations<'_> {
         if registry
             .wraps
             .iter()
-            .any(|wrap| wrap.owner.plugin == owner.plugin && wrap.spec.key == spec.key)
+            .any(|wrap| wrap.owner == owner && wrap.spec.key == spec.key)
         {
             return Err(PluginError::Registration(format!(
                 "duplicate prompt wrapper `{}/{}`",
-                owner.plugin, spec.key
+                owner, spec.key
             )));
         }
         registry.wraps.push(RegisteredPromptWrap {
@@ -816,7 +815,7 @@ impl PromptRegistrations<'_> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptSectionInfo {
     pub section: PromptSectionId,
-    pub owner: PluginRevision,
+    pub owner: String,
     pub default_placement: PromptPlacement,
     pub purposes: Vec<PromptPurpose>,
 }
@@ -826,7 +825,7 @@ pub struct PromptSectionInfo {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptSectionFamilyInfo {
     pub family: PromptSectionId,
-    pub owner: PluginRevision,
+    pub owner: String,
     pub default_placement: PromptPlacement,
     pub purposes: Vec<PromptPurpose>,
 }
@@ -838,7 +837,7 @@ pub struct PromptCatalog(Arc<PromptRegistry>);
 /// A section selected for one call, before placement.
 struct SelectedSection {
     id: PromptSectionId,
-    owner: PluginRevision,
+    owner: String,
     default_placement: PromptPlacement,
     renderer: Arc<dyn PromptSection>,
 }
@@ -929,7 +928,7 @@ impl PromptCatalog {
                             return Err(refused(key.to_string(), "contributed twice"));
                         }
                         selected.push(SelectedSection {
-                            id: PromptSectionId::new(family.owner.plugin.clone(), key),
+                            id: PromptSectionId::new(family.owner.clone(), key),
                             owner: family.owner.clone(),
                             default_placement: family.spec.default_placement,
                             renderer: member.renderer,
@@ -1203,9 +1202,7 @@ impl ResolvedPromptComposition {
             })
         };
         let base = run_site(&base_site, || {
-            renderers
-                .base
-                .render(&cut.input_for(&resolved.owner.plugin))
+            renderers.base.render(&cut.input_for(&resolved.owner))
         })?;
         within(&base_site, &base)?;
         let target = PromptWrapTarget {
@@ -1225,7 +1222,7 @@ impl ResolvedPromptComposition {
             };
             let previous = value;
             value = run_site(&site, move || {
-                wrapper.wrap(&cut.input_for(&wrap.owner.plugin), target, previous)
+                wrapper.wrap(&cut.input_for(&wrap.owner), target, previous)
             })?;
             within(&site, &value)?;
             wraps.push((wrap.wrap.clone(), value.clone()));
@@ -1245,10 +1242,7 @@ impl PromptCatalog {
     pub fn of_plugins(plugins: &[Arc<dyn super::SessionPlugin>]) -> Result<Self, PluginError> {
         let mut contributions = super::PluginContributions::default();
         for plugin in plugins {
-            let mut reg = PluginRegistrar::new(PluginRevision::new(
-                plugin.id(),
-                super::BehaviorRevision::ONE,
-            ));
+            let mut reg = PluginRegistrar::new(String::from(plugin.id()));
             reg.contributions = contributions;
             plugin.register(&mut reg)?;
             contributions = reg.contributions;

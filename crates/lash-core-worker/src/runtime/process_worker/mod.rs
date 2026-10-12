@@ -180,9 +180,6 @@ impl DurableProcessWorker {
     ) -> Result<SessionTurnRuntime, PluginError> {
         let runtime = SessionTurnRuntime::for_record(self.runtime_ports(process), process)?;
         let plugins = self.admit_plugins().await?;
-        self.config
-            .plugin_host
-            .validate_plugin_admission(&plugins)?;
         runtime.adopt_plugin_admission(plugins);
         Ok(runtime)
     }

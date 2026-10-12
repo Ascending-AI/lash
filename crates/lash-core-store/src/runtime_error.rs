@@ -531,9 +531,11 @@ runtime_error_codes! {
         /// (FIG-3587). The binding is served only from recorded results: a call
         /// that would reach the live tool refuses, before anything is claimed.
         LashVmCellBindingDrift = "lash_vm_cell_binding_drift" => Parked,
-        // the turn was admitted under another executable generation; only a build of it serves it.
-        /// Unfinished work requires a declared plugin revision this build cannot execute.
-        PluginRevisionUnavailable = "plugin_revision_unavailable" => Parked,
+        // the running registry no longer registers the recorded callback.
+        /// Unfinished work names a callback key this build no longer registers.
+        RecordedCallbackUnavailable = "recorded_callback_unavailable" => Parked,
+        /// Recorded stream-hook state has a format the receiving plugin cannot read.
+        StreamStateFormatUnreadable = "stream_state_format_unreadable" => Parked,
         // the redrive diverged from the engine's journal; only the build that wrote it serves it.
         /// A redriven effect's reconstructed envelope differs from the one its
         /// engine journal recorded. The
@@ -783,7 +785,8 @@ impl RuntimeErrorCode {
             |Self::EngineProcessJournalIdentityDrift| Self::EffectReplayDivergence
                 | Self::LashVmCellReplayDivergence
                 | Self::RetiredGeneration
-                | Self::PluginRevisionUnavailable
+                | Self::RecordedCallbackUnavailable
+                | Self::StreamStateFormatUnreadable
                 | Self::LashVmCellBindingDrift
         )
     }
@@ -1096,7 +1099,8 @@ impl RuntimeError {
             | RuntimeErrorCause::PluginStateFrontier { .. }
             | RuntimeErrorCause::PluginStatePublicationFenced { .. }
             | RuntimeErrorCause::PluginState { .. }
-            | RuntimeErrorCause::PluginExecution { .. }
+            | RuntimeErrorCause::RecordedCallbackUnavailable { .. }
+            | RuntimeErrorCause::StreamStateFormatUnreadable { .. }
             | RuntimeErrorCause::PluginFormat { .. }
             | RuntimeErrorCause::PluginOperation { .. }
             | RuntimeErrorCause::PluginHooks { .. }

@@ -206,13 +206,14 @@ so hooks are repeat-safe (ADR 0132 §4).
 
 The phases a model call issues are recorded with it. The model call's
 committed phase holds the raw completion together with its ordered response
-callback plan. Each entry names its callback key and owning plugin revision,
+callback plan. Each entry names its callback key and owning plugin id,
 selected before the paid call. An empty plan serves the raw completion. Resume
 follows the recorded order, and a completed derivation loads its committed
 result without callbacks. An unfinished derivation resolves every recorded
-callback before invoking any and parks if a key or revision is unavailable.
-Stream end state pairs with one response callback identity, including its
-revision.
+callback before invoking any and parks if a key is unavailable. The current
+implementation of a key finishes an uncommitted derivation. Stream end state
+pairs with one response callback identity and carries its format. An unreadable
+format parks typed before any callback; a readable older format runs.
 
 Evidence: `crates/lash-sansio/src/sansio/turn_protocol.rs`,
 `crates/lash-core/src/runtime/turn_loop/context_pressure.rs`,

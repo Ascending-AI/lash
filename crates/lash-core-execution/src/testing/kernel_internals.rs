@@ -62,14 +62,14 @@ pub async fn publish_plugin_state(
 ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
     let owner = plugins
         .host()
-        .plugin_revisions()
-        .into_iter()
-        .find(|revision| revision.plugin == plugin_id)
+        .factories()
+        .iter()
+        .find(|factory| factory.id() == plugin_id)
         .ok_or_else(|| {
             crate::PluginError::Registration(format!("plugin `{plugin_id}` is not installed"))
         })?;
     let proposal = crate::plugin::Proposal::for_tool(
-        owner,
+        owner.id().to_owned(),
         crate::plugin::StateCommandOrigin::ToolAttempt {
             call_id: crate::ToolCallId::fixture(&address.replay_key),
             attempt: lash_core_store::tool_run::AttemptOrdinal::FIRST,
@@ -270,11 +270,7 @@ pub fn prompt_catalog(
 ) -> Result<crate::plugin::prompt::PromptCatalog, PluginError> {
     let mut contributions = crate::plugin::PluginContributions::default();
     for (id, register) in plugins {
-        let mut reg =
-            crate::plugin::PluginRegistrar::new(crate::store::plugin_writers::PluginRevision::new(
-                id,
-                crate::plugin::BehaviorRevision::ONE,
-            ));
+        let mut reg = crate::plugin::PluginRegistrar::new(String::from(id));
         reg.contributions = contributions;
         register(&mut reg)?;
         contributions = reg.contributions;

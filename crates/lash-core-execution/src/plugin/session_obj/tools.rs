@@ -82,7 +82,6 @@ impl PluginSession {
         &self,
         ctx: ToolCatalogContext,
     ) -> Result<crate::ToolCatalog, PluginError> {
-        self.validate_recorded_admission()?;
         let mut contributions = collect_owned_sync(
             self.composition().tool_catalog_contributors(),
             ToolCatalogContext {

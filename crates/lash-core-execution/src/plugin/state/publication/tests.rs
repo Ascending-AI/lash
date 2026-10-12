@@ -85,11 +85,8 @@ fn address(step: &str) -> crate::EffectAddress {
     crate::EffectAddress::new(crate::ExecutionScope::turn("state-owner", "run"), step).unwrap()
 }
 
-fn revision(plugin: &str) -> lash_core_store::store::plugin_writers::PluginRevision {
-    lash_core_store::store::plugin_writers::PluginRevision::new(
-        plugin,
-        crate::plugin::BehaviorRevision::ONE,
-    )
+fn revision(plugin: &str) -> String {
+    String::from(plugin)
 }
 
 /// A tool body's commands for `plugin`, from call `call`'s first attempt.
@@ -620,21 +617,6 @@ async fn one_refused_command_publishes_none_of_its_batch() {
                 StateCommands::new().apply("total", "panics", serde_json::json!(1)),
             ),
             |refusal| matches!(refusal, StateCommandRefusal::Reducer { index: 0, cause } if cause.error_type == "lash.state_reducer_panicked"),
-        ),
-        (
-            "wrong-owner",
-            Proposal::for_tool(
-                lash_core_store::store::plugin_writers::PluginRevision::new(
-                    LEDGER,
-                    crate::plugin::BehaviorRevision::new(2).unwrap(),
-                ),
-                StateCommandOrigin::ToolAttempt {
-                    call_id: crate::ToolCallId::fixture("wrong-owner"),
-                    attempt: lash_core_store::tool_run::AttemptOrdinal::FIRST,
-                },
-                StateCommands::new().set("kept", serde_json::json!(1)),
-            ),
-            |refusal| matches!(refusal, StateCommandRefusal::WrongOwner),
         ),
         (
             "decision-only",

@@ -270,7 +270,6 @@ fn samples() -> Vec<PluginError> {
             causes: vec![super::PluginHookFailure {
                 origin: super::PluginFailureOrigin {
                     plugin_id: "sample".into(),
-                    behavior_revision: std::num::NonZeroU32::MIN,
                     operation: "hook".into(),
                 },
                 failure,

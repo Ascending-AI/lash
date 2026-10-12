@@ -408,7 +408,6 @@ fn a_persisted_record_accepts_every_runtime_lifecycle_fact() {
                 attempt: 1,
                 started_at_ms: 2,
                 generation: None,
-                plugins: None,
             },
         ),
         ProcessEventAppendRequest::wait_entered(&record.id, &wait),

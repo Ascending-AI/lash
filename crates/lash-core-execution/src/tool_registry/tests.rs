@@ -903,7 +903,7 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
     );
 
     let grant = crate::ToolExecutionGrant::from_definition(
-        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
+        String::from("mock"),
         test_tool("host_only", "host-only"),
     )
     .with_source_id("exact")
@@ -985,7 +985,7 @@ async fn run_tool_granted_honors_the_granted_source_binding() {
         .expect("resident catalog with live grant sources");
 
     let grant = crate::ToolExecutionGrant::from_definition(
-        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
+        String::from("mock"),
         test_tool("host_only", "host-only"),
     )
     .with_source_id("exact")
@@ -1018,7 +1018,7 @@ async fn execution_grant_without_source_does_not_infer_registry_route() {
         .expect("source registered");
 
     let grant = crate::ToolExecutionGrant::from_definition(
-        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
+        String::from("mock"),
         test_tool("host_only", "host-only"),
     );
     let context = crate::testing::mock_attempt_context_from(
@@ -1098,7 +1098,7 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
         .pin_session_surface()
         .expect("resident snapshot keeps hidden providers out of its admitted source");
     let grant = crate::ToolExecutionGrant::from_definition(
-        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
+        String::from("mock"),
         ToolDefinition::raw(
             "tool:hidden_zeta",
             "shared_hidden_name",

@@ -22,7 +22,6 @@ impl PluginSession {
         ctx: &AttachmentOmissionContext,
         history: &[crate::Message],
     ) -> Result<BTreeSet<HistoryPartId>, ContextError> {
-        self.validate_recorded_admission()?;
         let mut omissions = BTreeSet::new();
         for (_, registered) in &self
             .capabilities()

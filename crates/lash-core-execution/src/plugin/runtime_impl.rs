@@ -388,40 +388,6 @@ impl PluginHost {
         Ok(runtime_host)
     }
 
-    /// The registered executable composition, in declaration order.
-    pub fn plugin_revisions(&self) -> Vec<PluginRevision> {
-        self.factories()
-            .iter()
-            .map(|factory| {
-                PluginRevision::new(factory.id(), factory.plugin_declaration().behavior_revision)
-            })
-            .collect()
-    }
-
-    /// A recorded segment never adopts this build's different code.
-    pub fn validate_plugin_admission(
-        &self,
-        admission: &crate::store::plugin_writers::PluginAdmission,
-    ) -> Result<(), PluginError> {
-        let recorded: Vec<_> = admission
-            .plugins()
-            .iter()
-            .map(|plugin| PluginRevision::new(&plugin.plugin, plugin.behavior_revision))
-            .collect();
-        let available = self.plugin_revisions();
-        if recorded != available {
-            return Err(PluginError::Runtime(
-                PluginExecutionRefusal {
-                    recorded,
-                    available,
-                    callback: None,
-                }
-                .into_runtime_error(),
-            ));
-        }
-        Ok(())
-    }
-
     /// Retain raw state and recorded config without constructing capabilities.
     pub fn defer_session(
         &self,
@@ -499,7 +465,6 @@ impl PluginHost {
         session: &Arc<PluginSession>,
     ) -> Result<(), PluginError> {
         let _materialization = session.materialization_lock.lock_recover();
-        session.validate_recorded_admission()?;
         if session.is_materialized() {
             return Ok(());
         }
@@ -530,7 +495,6 @@ impl PluginHost {
 
     pub(super) fn prepare_session(&self, session: &Arc<PluginSession>) -> Result<(), PluginError> {
         let _materialization = session.materialization_lock.lock_recover();
-        session.validate_recorded_admission()?;
         self.prepare_session_capabilities(session)
     }
 
@@ -572,10 +536,9 @@ impl PluginHost {
                 std::sync::atomic::Ordering::SeqCst,
             );
             let composition = Arc::new(super::ExecutionComposition::new(
-                self.plugin_revisions(),
+                self.factories().iter().map(|f| f.id().to_owned()).collect(),
                 &mut contributions,
                 Arc::clone(&registry),
-                session.execution_admission(),
             ));
             let _ = session
                 .capabilities
@@ -676,10 +639,7 @@ impl PluginHost {
                     plugin.id()
                 )));
             }
-            let mut reg = PluginRegistrar::new(PluginRevision::new(
-                factory.id(),
-                factory.plugin_declaration().behavior_revision,
-            ));
+            let mut reg = PluginRegistrar::new(String::from(factory.id()));
             reg.contributions = contributions;
             reg.tool_names = tool_names;
             reg.state = Some(PluginStateView::bind(
@@ -788,7 +748,7 @@ pub(crate) fn build_tool_registry(
     let mut providers_by_source = BTreeMap::<String, Vec<Arc<dyn crate::ToolProvider>>>::new();
     for registered in &contributions.tool_providers {
         providers_by_source
-            .entry(registered.identity.owner.plugin.clone())
+            .entry(registered.identity.owner.clone())
             .or_default()
             .push(Arc::clone(&registered.hook));
     }

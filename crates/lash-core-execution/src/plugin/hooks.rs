@@ -166,11 +166,11 @@ pub type AssistantStreamHook =
 ///
 /// Phase 1 records an ordered
 /// [`AssistantResponsePlan`](crate::runtime::AssistantResponsePlan) of callback
-/// keys and owning revisions selected before the paid call. Replay and redrive
+/// keys and owning plugin ids selected before the paid call. Replay and redrive
 /// follow that plan. An empty plan serves the raw completion even if hooks
 /// were installed later. A completed derivation serves its recorded outcome
 /// without invoking hooks. An unfinished derivation resolves every recorded
-/// callback before invoking any, and parks if a key or revision is unavailable.
+/// callback before invoking any, and parks if a key is unavailable or its stream-state format is unreadable.
 pub type AssistantResponseHook = Arc<
     dyn Fn(AssistantResponseHookContext) -> PluginFuture<AssistantResponseTransform> + Send + Sync,
 >;
@@ -180,7 +180,7 @@ pub type AssistantResponseHook = Arc<
 /// [`AssistantStreamFinishReason::Aborted`]) is recorded with the raw completion
 /// for each response callback of its plugin that names this callback's key
 /// as its `stream_state_from`. The receiving callback's key and owning
-/// revision identify that state in [`AssistantResponseHookContext::stream_state`].
+/// plugin id identify that state in [`AssistantResponseHookContext::stream_state`].
 /// Return `None` when phase 2 needs nothing from the stream. The hook should
 /// leave no per-stream state behind: the next stream starts from nothing.
 pub type AssistantStreamFinishedHook = Arc<
@@ -340,9 +340,12 @@ pub struct AssistantResponseHookContext {
     pub response: crate::LlmResponse,
     /// The state the paired [`AssistantStreamFinishedHook`] returned when
     /// the completion's stream finished. Phase 1 records it under this exact
-    /// response callback identity and revision. `None` when the paired hook
+    /// response callback identity and format. `None` when the paired hook
     /// returned nothing or the completion did not stream.
     pub stream_state: Option<serde_json::Value>,
+    /// The recorded format of `stream_state`, so a reader can interpret an
+    /// older readable payload. `None` exactly when no stream state was recorded.
+    pub stream_state_format: Option<super::FormatVersion>,
 }
 
 #[derive(Clone, Debug)]

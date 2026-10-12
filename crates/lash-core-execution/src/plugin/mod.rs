@@ -11,7 +11,7 @@ use crate::runtime::AssembledTurn;
 use crate::{SessionPolicy, ToolManifest, ToolProvider};
 
 pub use lash_core_store::store::plugin_writers::{
-    PluginCallbackIdentity, PluginExecutionRefusal, PluginRevision,
+    PluginCallbackIdentity, RecordedCallbackUnavailable, StreamStateFormatRefusal,
 };
 
 pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginConfigNamespace};
@@ -28,7 +28,7 @@ pub use process_components::{
     ProcessComposition, ProcessSessionReads, StaticProcessComponent,
 };
 mod execution_views;
-pub use composition::{AdmissionGate, ContributionKind, ExecutionComposition};
+pub use composition::{ContributionKind, ExecutionComposition};
 pub use execution_state::ExecutionState;
 pub(crate) use execution_state::proposal_failure_message;
 pub use execution_views::{ExecutionFacts, OwnerConfigView, RecordedCallFacts};
@@ -121,11 +121,11 @@ pub use registrar::{
 };
 pub(crate) use registrar::{PluginContributions, RegisteredHook};
 pub use registry::{
-    BehaviorRevision, FormatVersion, PluginComposition, PluginDeclaration, PluginDeclarationError,
-    PluginDefinition, PluginExecutionTrace, PluginExtensionContribution, PluginExtensions,
-    PluginFactory, PluginId, PluginMetadata, PluginSessionContext, PluginSessionMaterialization,
-    PluginSpec, PluginSpecBuilder, PluginSpecFactory, ProcessEngineContributionContext,
-    SessionPlugin, SessionReadyContext, StaticPluginFactory,
+    FormatVersion, PluginComposition, PluginDeclaration, PluginDeclarationError, PluginDefinition,
+    PluginExecutionTrace, PluginExtensionContribution, PluginExtensions, PluginFactory, PluginId,
+    PluginMetadata, PluginSessionContext, PluginSessionMaterialization, PluginSpec,
+    PluginSpecBuilder, PluginSpecFactory, ProcessEngineContributionContext, SessionPlugin,
+    SessionReadyContext, StaticPluginFactory,
 };
 pub use runtime_host::{
     AppendSessionNodesOutcome, AppendSessionNodesRequest, DirectCompletion, DirectLlmCompletion,
@@ -248,7 +248,6 @@ mod tests {
                                     let mut failure = PluginOperationFailure::from(error);
                                     failure.origin = Some(PluginFailureOrigin {
                                         plugin_id: "original-owner".into(),
-                                        behavior_revision: std::num::NonZeroU32::new(7).unwrap(),
                                         operation: "original-operation".into(),
                                     });
                                     Err(PluginError::Operation(Box::new(failure)))
@@ -320,7 +319,6 @@ mod tests {
             if owner == "first" {
                 let origin = original.failure.origin.unwrap();
                 assert_eq!(origin.plugin_id, "original-owner");
-                assert_eq!(origin.behavior_revision.get(), 7);
                 assert_eq!(origin.operation, "original-operation");
             }
         }
@@ -333,7 +331,6 @@ mod tests {
         assert_eq!(causes.len(), 2);
         for (cause, owner) in causes.iter().zip(["first", "second"]) {
             assert_eq!(cause.origin.plugin_id, owner);
-            assert_eq!(cause.origin.behavior_revision.get(), 1);
             assert_eq!(cause.origin.operation, "runtime_event:fail");
             assert_eq!(cause.failure.class, PluginFailureClass::Terminal);
             let original: PluginError =

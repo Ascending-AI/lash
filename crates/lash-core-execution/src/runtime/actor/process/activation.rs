@@ -702,8 +702,8 @@ impl ProcessActivation {
         }));
         self.record_published(&mut tx, process, &row);
         // The commit that changes the steps the process holds rewrites its
-        // claim requirements with them: a node that lacks a revision an
-        // unsettled step is bound to never claims the process (D3).
+        // component config requirements: a node that reads the environment
+        // can finish unsettled steps under its current code (D3).
         let requires = self
             .steps
             .requirements(&record, &step_requests(&driver))
@@ -944,7 +944,6 @@ fn step_request_material(
             process_id: process.clone(),
         },
         MaterialRole::PreparedRequest,
-        None,
         step.request.input().to_string(),
     )
     .reference(MaterialLocation::JournalLocal)

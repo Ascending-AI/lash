@@ -307,7 +307,7 @@ pub(crate) fn failed_check(
         },
         format!(
             "tool check `{}` of plugin `{}` failed: {error}",
-            callback.key, callback.owner.plugin
+            callback.key, callback.owner
         ),
     );
     failure.source = crate::ToolFailureSource::Plugin;
@@ -329,7 +329,7 @@ pub(crate) fn failed_transform(
         },
         format!(
             "tool transform `{}` of plugin `{}` failed: {error}",
-            callback.key, callback.owner.plugin
+            callback.key, callback.owner
         ),
     );
     failure.source = crate::ToolFailureSource::Plugin;
@@ -380,7 +380,7 @@ pub(crate) fn before_selection(record: &CheckRecord<BeforeToolDecision>) -> Befo
     let Some(AttributedVerdict { callback, verdict }) = record.winner() else {
         return BeforeSelection::Execute;
     };
-    let plugin_id = callback.owner.plugin.as_str();
+    let plugin_id = callback.owner.as_str();
     match verdict {
         BeforeToolDecision::Allow => BeforeSelection::Execute,
         BeforeToolDecision::Cached(cached) => {
@@ -410,7 +410,7 @@ pub(crate) fn after_resolution(
     let Some(AttributedVerdict { callback, verdict }) = record.winner() else {
         return candidate.into_output(control);
     };
-    let plugin_id = callback.owner.plugin.as_str();
+    let plugin_id = callback.owner.as_str();
     match verdict {
         AfterToolDecision::Allow => candidate.into_output(control),
         AfterToolDecision::Deny(failure) => {

@@ -80,8 +80,11 @@ pub enum RuntimeErrorCause {
     CellSnapshotUndecodable {
         refusal: Box<lash_vm_protocol::RunRefusal>,
     },
-    PluginExecution {
-        refusal: Box<crate::store::plugin_writers::PluginExecutionRefusal>,
+    RecordedCallbackUnavailable {
+        refusal: Box<crate::store::plugin_writers::RecordedCallbackUnavailable>,
+    },
+    StreamStateFormatUnreadable {
+        refusal: Box<crate::store::plugin_writers::StreamStateFormatRefusal>,
     },
     PluginFormat {
         refusal: Box<crate::plugin_state::FormatRefusal>,

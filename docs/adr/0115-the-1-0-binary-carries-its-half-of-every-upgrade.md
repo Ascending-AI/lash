@@ -258,34 +258,30 @@ no finalize command; this is the required input to a future release operation,
 not a runnable CLI recipe. Retained plugins absent from the successor must
 keep their recorded ranges.
 
-#### 2.6 Admissions record the plugin composition and writers
+#### 2.6 Plugin transitions record namespace writers
 
-Every run admission and process start is a plugin adoption point and records
-its choice
-(`PluginAdmission`, in `crates/lash-core-store/src/store/plugin_writers.rs`):
-the admitting build's plugins in hook order, each with its behaviour revision
-and the writer format chosen for it. The writer is the highest format in both
-the plugin's writable set and the range the fleet record permits when the
-admission is made. A plugin that writes no permitted format refuses
-`PluginWriterUnwritable` and nothing is admitted. This is the one place the
-fleet record is read to choose a writer.
+A plugin transition records `PluginAdmission`: the running build's plugins
+in hook order and the writer format chosen for each namespace. The writer
+is the highest format in the plugin's writable set that the fleet record
+permits. A plugin that writes no permitted format refuses
+`PluginWriterUnwritable` before publication.
 
-Two records carry it. A Run's admission records it on the run
-(`RunAdmission.plugins`): the store keeps the first admission's choice and
-answers it to every later admission of the run. A process's start records it
-on `ProcessStarted.plugins`, and the process keeps that record for its life,
-whichever node claims it. A process child therefore adopts the plugins of the
-build that admits it and the ranges of the fleet at that moment.
+The transition request and plugin-admission checkpoint carry this choice.
+A run re-admits the build that executes it; it does not retain executable
+code from the build that wrote the head. A session creation or config
+transaction chooses writers in its own recorded step. Replay reads the
+recorded writer choice, so widening a fleet range changes a later choice,
+never the formats an already-recorded publication writes.
 
-Work admitted under a record writes plugin namespaces in the recorded
-formats. A plugin session adopts the record, and a commit captures plugin
-state, the session's sticky config and the running view's config in those
-formats; a config transaction and a session creation choose the same way in
-their own recorded step. A retry, resume or redrive reads the record back, so
-a finalize that widens a range changes what the next admission chooses and
-never what a recorded one writes. A session that has adopted no admission
-writes each plugin's native format, which the guarded transaction still
-checks against the range.
+Process starts carry their immutable environment and engine settings, with
+component config-format claim requirements. They carry no plugin admission.
+A later build serving those components and config formats can finish an
+unsettled step. Recorded response and presentation plans retain plugin ids
+and callback keys, and an unfinished derivation resolves those keys on the
+running build. Missing keys park typed. Stream-hook state carries its own
+format; a plugin declares its native and readable stream-state formats,
+without fleet writer ranges, and unreadable state parks typed. Failures and
+prompt plans attribute plugin ids and keys or operations without a build stamp.
 
 ### 3. Nodes of two builds share the store
 

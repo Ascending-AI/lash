@@ -259,7 +259,7 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     ))
     .await;
     let grant = crate::ToolExecutionGrant::from_definition(
-        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
+        String::from("mock"),
         named_beta_tool("host_only"),
     )
     .with_source_id("test_tools")

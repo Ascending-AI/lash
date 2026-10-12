@@ -420,14 +420,10 @@ mod tests {
         let owner = MaterialOwner::Run {
             opener: lash_core_store::effect_opener::EffectOpener::turn("s", "r"),
         };
-        let reference = MaterialPayload::new(
-            owner,
-            MaterialRole::AttemptOutput,
-            None,
-            "recorded output".into(),
-        )
-        .reference(MaterialLocation::JournalLocal)
-        .unwrap();
+        let reference =
+            MaterialPayload::new(owner, MaterialRole::AttemptOutput, "recorded output".into())
+                .reference(MaterialLocation::JournalLocal)
+                .unwrap();
         for refusal in [
             MaterialRefusal::Missing {
                 reference: Box::new(reference.clone()),

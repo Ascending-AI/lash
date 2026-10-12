@@ -9,7 +9,6 @@
 //! fences the holder, severs its leases and retires every bundle no lease
 //! holds any more, in one transaction.
 
-use crate::store::plugin_writers::PluginRevision;
 use crate::tool_run::{
     MaterialBundle, MaterialHolder, MaterialOwner, MaterialPayload, MaterialRef,
     MaterialRetentionError, RetainedBundle,
@@ -56,8 +55,7 @@ pub trait ToolMaterialStore: Send + Sync {
     -> Result<(), MaterialRetentionError>;
 
     /// Read the payload `reference` names under `holder`'s lease, verified
-    /// against the reader's `owner`, its integrity, its format and the
-    /// `available` codec revisions.
+    /// against the reader's `owner`, its integrity and its format.
     ///
     /// # Errors
     ///
@@ -69,6 +67,5 @@ pub trait ToolMaterialStore: Send + Sync {
         holder: &MaterialHolder,
         reference: &MaterialRef,
         owner: &MaterialOwner,
-        available: &[PluginRevision],
     ) -> Result<MaterialPayload, MaterialRetentionError>;
 }

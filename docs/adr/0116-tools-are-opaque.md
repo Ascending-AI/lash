@@ -45,9 +45,10 @@ external completion. Hosts keep progress metadata in their own records under ADR
 
 The author-facing `ToolDeclaration` contains exactly `may_defer`, `intents` and
 `isolated`. Whole-round K1 admission records it with the prepared input,
-read-only plugin snapshot, callback revisions, runtime retry/cancel policy and
-capacity. An unavailable admitted revision or changed request refuses typed
-before a body, route or identity. No live declaration hook overrides admission.
+read-only plugin snapshot, callback identities, runtime retry/cancel policy and
+capacity. A changed request refuses typed before a body, route or identity.
+Recorded presentation plans resolve by key and park typed when a key is missing.
+No live declaration hook overrides admission.
 
 #### 1.4 State commands and hooks
 

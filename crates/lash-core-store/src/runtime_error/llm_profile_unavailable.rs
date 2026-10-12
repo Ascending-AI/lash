@@ -20,7 +20,8 @@ impl RuntimeErrorCause {
             }
             Self::LlmProfileUnavailable { .. }
             | Self::CellSnapshotUndecodable { .. }
-            | Self::PluginExecution { .. }
+            | Self::RecordedCallbackUnavailable { .. }
+            | Self::StreamStateFormatUnreadable { .. }
             | Self::PluginStatePublicationFenced { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
             Self::ToolRunCutRefused { .. }

@@ -2,7 +2,7 @@
 //! FIG-4878 implements it).
 //!
 //! No callback holds a writable state handle. A permitted callback returns
-//! a bounded, ordered batch of commands owned by its plugin revision. One
+//! a bounded, ordered batch of commands owned by its plugin id. One
 //! owner-level coordinator reduces the batch privately against the last
 //! published state, records the resolution with its predecessor, and
 //! exposes it only after durable acceptance. Replay installs recorded
@@ -29,7 +29,7 @@ use crate::plugin_state::{
     FormatRefusal, KeyRejection, PLUGIN_STATE_NAMESPACE_LIMIT, PLUGIN_STATE_VALUE_LIMIT,
     validate_state_key_with_limit,
 };
-use crate::store::plugin_writers::{PluginCallbackIdentity, PluginRevision};
+use crate::store::plugin_writers::PluginCallbackIdentity;
 
 /// Generates [`CallbackSlot`] from one table, so a slot cannot exist
 /// without its key prefix and its state authority.
@@ -210,8 +210,8 @@ impl Default for StateCommandLimits {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StateCommandBatch {
-    /// The admitted plugin revision whose namespace the batch addresses.
-    pub plugin: PluginRevision,
+    /// The admitted plugin id whose namespace the batch addresses.
+    pub plugin: String,
     pub origin: StateCommandOrigin,
     pub commands: Vec<StateCommand>,
 }
@@ -462,7 +462,7 @@ pub enum StateResolutionOutcome {
 pub struct StateResolution {
     /// The recorded effect address binds the logical Run and callback phase.
     pub publisher: crate::EffectAddress,
-    pub plugin: PluginRevision,
+    pub plugin: String,
     pub origin: StateCommandOrigin,
     /// The segment that published it.
     pub segment: SegmentOrdinal,

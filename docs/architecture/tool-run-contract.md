@@ -62,8 +62,7 @@ A call has one durable home: the admitted execution that runs it.
 
 ## One call
 
-`AdmittedToolCall::admit` validates the declaration, checks the binding
-against the plugin revisions this build executes, binds an isolated call to
+`AdmittedToolCall::admit` validates the declaration, binds an isolated call to
 its process, prepares the request once and asks every before-check of that
 one prepared request. `attempt` runs the body once and captures it under the
 admitted declaration, then decides it: the Run's cancel, then every
@@ -115,9 +114,15 @@ capability. Retry and cancel policy are recorded runtime policy; a stored
 never upgraded. `ToolCallId` is the external idempotency key.
 
 **Binding.** Admission binds the executable, preparation and presentation
-callbacks as `PluginCallbackIdentity { owner: PluginRevision, key }`. A call
-whose bound plugin revision is unavailable refuses with
-`PluginExecutionRefusal` (`plugin_revision_unavailable`) before any body.
+callbacks as `PluginCallbackIdentity { owner: String, key }`, with the plugin
+id as owner. Recorded response and presentation plans resolve these keys
+before invoking any callback. A missing key parks with
+`RecordedCallbackUnavailable` (`recorded_callback_unavailable`); a new
+implementation under the same key completes an unfinished derivation.
+Stream-hook state records its format, and the owning plugin declares its
+native and readable stream-state formats. An unreadable one parks with
+`StreamStateFormatUnreadable`; a readable older format runs. Deferred grant
+bindings have no readability check until the `ExecutionBinding` cutover.
 Presentation binds an optional singleton presenter followed by ordered steps;
 an empty plan is explicit and adopts no callback installed later.
 

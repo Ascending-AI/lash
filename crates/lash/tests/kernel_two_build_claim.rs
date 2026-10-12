@@ -1618,16 +1618,14 @@ impl lash::tools::StaticToolExecute for HoldBody {
     }
 }
 
-/// The hold component at behaviour `revision`.
+/// The hold component of this build.
 struct HoldComponent {
-    revision: lash::plugins::BehaviorRevision,
     body: Arc<dyn lash::tools::ToolProvider>,
 }
 
 impl lash::process::ProcessComponentFactory for HoldComponent {
     fn declaration(&self) -> lash::process::ProcessComponentDeclaration {
         lash::process::ProcessComponentDeclaration {
-            behavior_revision: self.revision,
             ..lash::process::ProcessComponentDeclaration::initial(HOLD.component(), HOLD.format())
                 .expect("the component id")
         }
@@ -1660,11 +1658,10 @@ impl lash::process::ProcessComponentFactory for HoldComponent {
     }
 }
 
-/// The hold component at `revision`, its body holding when `holds`.
-fn hold_component(revision: u32, holds: bool, seen: &Arc<Holds>) -> Component {
+/// The hold component, its body holding when `holds`.
+fn hold_component(holds: bool, seen: &Arc<Holds>) -> Component {
     (
         Arc::new(HoldComponent {
-            revision: lash::plugins::BehaviorRevision::new(revision).expect("a revision"),
             body: Arc::new(lash::tools::StaticToolProvider::new(
                 vec![hold_definition()],
                 HoldBody {
@@ -1771,23 +1768,13 @@ async fn unowned(
     panic!("the process stayed owned for half a minute")
 }
 
-/// What the later build lacks of the component the processes' steps are
-/// bound to.
-#[derive(Clone, Copy, Debug)]
-enum Lacks {
-    /// It does not install the component.
-    Component,
-    /// It installs the component at another behaviour revision.
-    Revision,
-}
-
 /// Build N starts two processes whose environment names the hold component
-/// at revision 1; each parks its hold step unsettled and build N stops. A
-/// later build that `lacks` what the steps are bound to serves for a
+/// with its config format; each holds its step unsettled and build N stops. A
+/// later build without that component serves for a
 /// bounded window and claims neither to run it. A cancel sent meanwhile
 /// ends one engine-free; a build that has the component claims the other,
 /// whose step completes.
-async fn a_later_build_without_the_component_never_claims_its_process(lacks: Lacks) {
+async fn a_later_build_without_the_component_never_claims_its_process() {
     let stores: Arc<dyn StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -1796,8 +1783,7 @@ async fn a_later_build_without_the_component_never_claims_its_process(lacks: Lac
     let seen = Arc::new(Holds::default());
     let env = hold_environment();
 
-    let (backend, first) =
-        with_components(&stores, "claim-n", vec![hold_component(1, true, &seen)]);
+    let (backend, first) = with_components(&stores, "claim-n", vec![hold_component(true, &seen)]);
     let payload = payload_under(&first, &backend, &env, HOLDING_WORKER).await;
     let cancelled = start_under(&first, &env, payload.clone()).await;
     let completed = start_under(&first, &env, payload).await;
@@ -1814,10 +1800,7 @@ async fn a_later_build_without_the_component_never_claims_its_process(lacks: Lac
     ];
     let delivered = seen.deliveries.load(std::sync::atomic::Ordering::SeqCst);
 
-    let later = match lacks {
-        Lacks::Component => Vec::new(),
-        Lacks::Revision => vec![hold_component(2, false, &seen)],
-    };
+    let later = Vec::new();
     let (later_backend, later) = with_components(&stores, "claim-n-plus-1", later);
     assert!(
         tokio::time::timeout(
@@ -1826,13 +1809,13 @@ async fn a_later_build_without_the_component_never_claims_its_process(lacks: Lac
         )
         .await
         .is_err(),
-        "{lacks:?}: the process does not end on a build without its component"
+        "the process does not end on a build without its component"
     );
     for (process, before) in [&cancelled, &completed].into_iter().zip(&before) {
         let row = unowned(&later_backend, process).await;
         assert_eq!(
             row.epoch, before.epoch,
-            "{lacks:?}: the build never claimed the process"
+            "the build never claimed the process"
         );
         assert!(
             later_backend
@@ -1844,13 +1827,13 @@ async fn a_later_build_without_the_component_never_claims_its_process(lacks: Lac
                     record.lifecycle,
                     lash_core::ProcessLifecycleState::Terminal { .. }
                 )),
-            "{lacks:?}: the admitted step stays unsettled"
+            "the admitted step stays unsettled"
         );
     }
     assert_eq!(
         seen.deliveries.load(std::sync::atomic::Ordering::SeqCst),
         delivered,
-        "{lacks:?}: no body ran on the later build"
+        "no body ran on the later build"
     );
 
     later
@@ -1868,16 +1851,13 @@ async fn a_later_build_without_the_component_never_claims_its_process(lacks: Lac
     assert!(
         matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
             if matches!(output.outcome, lash_core::ToolCallOutcome::Cancelled(_))),
-        "{lacks:?}: the cancel ends the process engine-free: {output:?}"
+        "the cancel ends the process engine-free: {output:?}"
     );
     later.shutdown().await.expect("the later build stops");
     drop(later);
 
-    let (_, capable) = with_components(
-        &stores,
-        "claim-capable",
-        vec![hold_component(1, false, &seen)],
-    );
+    let (_, capable) =
+        with_components(&stores, "claim-capable", vec![hold_component(false, &seen)]);
     let output = tokio::time::timeout(
         Duration::from_secs(60),
         capable.processes().await_output(&completed),
@@ -1886,19 +1866,66 @@ async fn a_later_build_without_the_component_never_claims_its_process(lacks: Lac
     .expect("the capable build ends the process within a minute")
     .expect("its end is read");
     let lash_core::ProcessAwaitOutput::Settled { output } = output else {
-        panic!("{lacks:?}: the process ended without an answer: {output:?}");
+        panic!("the process ended without an answer: {output:?}");
     };
-    assert!(output.is_success(), "{lacks:?}: {output:?}");
+    assert!(output.is_success(), "{output:?}");
     assert_eq!(output.value_for_projection(), serde_json::json!("released"));
     capable.shutdown().await.expect("the capable build stops");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_build_lacking_the_component_never_claims_a_process_that_names_it() {
-    a_later_build_without_the_component_never_claims_its_process(Lacks::Component).await;
+    a_later_build_without_the_component_never_claims_its_process().await;
 }
 
+/// PROCESS-STEP-CROSSES-DEPLOY: an unsettled step has only its
+/// component's config requirements, so new code of that component finishes it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_build_serving_another_revision_never_claims_a_step_bound_to_the_first() {
-    a_later_build_without_the_component_never_claims_its_process(Lacks::Revision).await;
+async fn process_step_crosses_deploy() {
+    let stores: Arc<dyn StoreSet> =
+        Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let seen = Arc::new(Holds::default());
+    let env = hold_environment();
+    let (backend, first) = with_components(
+        &stores,
+        "step-before-deploy",
+        vec![hold_component(true, &seen)],
+    );
+    let payload = payload_under(&first, &backend, &env, HOLDING_WORKER).await;
+    let process = start_under(&first, &env, payload).await;
+    tokio::time::timeout(Duration::from_secs(60), seen.entered.notified())
+        .await
+        .unwrap();
+    first.shutdown().await.unwrap();
+    drop(first);
+    let before = unowned(&backend, &process).await;
+    let (_, next) = with_components(
+        &stores,
+        "step-after-deploy",
+        vec![hold_component(false, &seen)],
+    );
+    let output = tokio::time::timeout(
+        Duration::from_secs(60),
+        next.processes().await_output(&process),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("the process must settle");
+    };
+    assert!(output.is_success(), "{output:?}");
+    assert_eq!(output.value_for_projection(), serde_json::json!("released"));
+    assert_eq!(seen.deliveries.load(std::sync::atomic::Ordering::SeqCst), 2);
+    let after = backend
+        .durable()
+        .actor(&ActorKey::process(process.as_str()).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        after.epoch > before.epoch,
+        "the later build claimed the held process"
+    );
+    next.shutdown().await.unwrap();
 }

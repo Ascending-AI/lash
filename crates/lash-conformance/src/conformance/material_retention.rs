@@ -38,7 +38,7 @@ fn run_owner(opener: &lash_core::EffectOpener) -> MaterialOwner {
 }
 
 fn payload(owner: &MaterialOwner, role: MaterialRole, text: &str) -> MaterialPayload {
-    MaterialPayload::new(owner.clone(), role, None, text.repeat(512))
+    MaterialPayload::new(owner.clone(), role, text.repeat(512))
 }
 
 #[expect(clippy::expect_used, reason = "law fixture encodes canonical payloads")]
@@ -54,7 +54,7 @@ async fn read(
     reference: &MaterialRef,
 ) -> Result<String, MaterialRetentionError> {
     store
-        .read_material(holder, reference, &reference.owner, &[])
+        .read_material(holder, reference, &reference.owner)
         .await
         .map(|payload| payload.text)
 }
@@ -69,7 +69,7 @@ fn refusal_code(result: Result<impl std::fmt::Debug, MaterialRetentionError>) ->
 
 /// L12 and K4: a Deferred source retains its result under its own lease
 /// before its seal publishes it; the consumer reads it as the source's
-/// owner and nobody else's; the read checks the codec revision; and a
+/// owner and nobody else's; the read checks the material format; and a
 /// reference to material that was never retained refuses typed.
 #[expect(
     clippy::expect_used,
@@ -100,12 +100,9 @@ where
     let holder = MaterialHolder::Source {
         source: source.clone(),
     };
-    let codec =
-        crate::plugin::PluginRevision::new("material-codec", crate::plugin::BehaviorRevision::ONE);
     let result = MaterialPayload::new(
         source_owner.clone(),
         MaterialRole::AttemptOutput,
-        Some(codec.clone()),
         "deferred-result ".repeat(512),
     );
     let retained = fixture
@@ -117,25 +114,14 @@ where
     let store = (fixture.reopen)();
     assert_eq!(
         store
-            .read_material(
-                &holder,
-                reference,
-                &source_owner,
-                std::slice::from_ref(&codec)
-            )
+            .read_material(&holder, reference, &source_owner)
             .await
             .expect("the consumer reads the sealed result")
             .text,
         result.text
     );
-    let wrong_owner = store
-        .read_material(&holder, reference, &consumer, std::slice::from_ref(&codec))
-        .await;
+    let wrong_owner = store.read_material(&holder, reference, &consumer).await;
     assert_eq!(refusal_code(wrong_owner), "material_wrong_owner");
-    let unavailable = store
-        .read_material(&holder, reference, &source_owner, &[])
-        .await;
-    assert_eq!(refusal_code(unavailable), "material_revision_mismatch");
     let unretained = bundle(vec![payload(
         &consumer,
         MaterialRole::AttemptOutput,
@@ -152,12 +138,7 @@ where
     assert_eq!(
         refusal_code(
             (fixture.reopen)()
-                .read_material(
-                    &holder,
-                    reference,
-                    &source_owner,
-                    std::slice::from_ref(&codec)
-                )
+                .read_material(&holder, reference, &source_owner)
                 .await
         ),
         "material_retired"

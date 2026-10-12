@@ -144,7 +144,7 @@ fn mint(
         clippy::expect_used,
         reason = "a material payload is plain data whose encoding cannot fail"
     )]
-    MaterialPayload::new(owner, role, None, payload.to_owned())
+    MaterialPayload::new(owner, role, payload.to_owned())
         .reference(location)
         .expect("a material payload encodes")
 }

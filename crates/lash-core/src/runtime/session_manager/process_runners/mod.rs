@@ -26,16 +26,13 @@ impl RuntimeSessionServices {
     }
 
     /// The claim requirements an engine process carries while it holds tool
-    /// steps on `tools` (§6.2): its environment's components' config tokens
-    /// and the revision tokens of the components those steps bind.
-    pub(in crate::runtime) fn process_step_requirements(
+    /// steps (§6.2): its environment's components' config tokens.
+    pub(in crate::runtime) fn process_component_requirements(
         &self,
-        tools: &[crate::ToolId],
     ) -> Result<Vec<String>, crate::PluginError> {
         let (_, engine) = self.current.engine_process()?;
         let mut requires =
             crate::plugin::ProcessComponentDeclaration::env_requirements(&engine.env);
-        requires.extend(engine.composition.step_requirements(tools));
         requires.sort();
         requires.dedup();
         Ok(requires)

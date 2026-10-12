@@ -6,7 +6,7 @@ A Runtime Process is a standalone durable record with a minted id, input, identi
 
 A session-turn process has no `ProcessEnv` (D5). It starts and runs its child session under the child's own configuration. The child's id is the create request's stated id, or the stable id derived from the process id.
 
-Engine settings are stated with the start (D4). Restart, redrive and adoption load the recorded environment ref and settings; they never run the start policy, select components anew or consult deployment defaults. A build that cannot serve the named components, config formats or unsettled executable revisions does not claim the process to run it. Engine-free cancellation remains available.
+Engine settings are stated with the start (D4). Restart, redrive and adoption load the recorded environment ref and settings; they never run the start policy, select components anew or consult deployment defaults. A build that cannot serve the named components or config formats does not claim the process to run it. Engine-free cancellation remains available.
 
 Definition starts refer to immutable definitions under ADR 0095. Realization resolves that definition and registers its engine input; the retained record's identity names the definition id. Registry names do not re-resolve an admitted definition. Captured cell locals must be immutable and durably representable.
 

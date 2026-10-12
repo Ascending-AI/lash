@@ -492,13 +492,12 @@ impl RegisteredPluginOperation {
     }
 
     pub(crate) fn plugin_id(&self) -> &str {
-        &self.identity.owner.plugin
+        &self.identity.owner
     }
 
     pub(crate) fn failure_origin(&self) -> PluginFailureOrigin {
         PluginFailureOrigin {
-            plugin_id: self.identity.owner.plugin.clone(),
-            behavior_revision: self.identity.owner.behavior_revision.into(),
+            plugin_id: self.identity.owner.clone(),
             operation: self.def().name.clone(),
         }
     }

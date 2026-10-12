@@ -155,7 +155,7 @@ fn carry_result_check_state(
     let Some(first) = proposals.first() else {
         return Ok(());
     };
-    let plugin = first.batch.plugin.plugin.clone();
+    let plugin = first.batch.plugin.clone();
     context.state.propose_all(proposals).map_err(|error| {
         let mut failure = crate::ToolFailure::runtime(
             crate::ToolFailureClass::Internal,
@@ -200,7 +200,7 @@ fn attributed_reply<V>(
     kind: fn(&V) -> crate::ToolCheckVerdictKind,
 ) -> crate::ToolCheckReply {
     crate::ToolCheckReply {
-        plugin_id: reply.callback.owner.plugin.to_string(),
+        plugin_id: reply.callback.owner.to_string(),
         callback: reply.callback.key.to_string(),
         verdict: kind(&reply.verdict),
     }
@@ -228,7 +228,7 @@ async fn publish_check_evidence<V: RankedVerdict>(
             .map(|reply| attributed_reply(reply, kind))
             .collect(),
     };
-    let plugin_id = winner.callback.owner.plugin.as_str();
+    let plugin_id = winner.callback.owner.as_str();
     if let Err(error) = context
         .session_graph
         .emit_trace_event(

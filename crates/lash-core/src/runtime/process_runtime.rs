@@ -99,16 +99,13 @@ impl EngineProcessRuntime {
     }
 
     /// The claim requirements this runtime's process carries while it holds
-    /// tool steps on `tools` (§6.2).
+    /// tool steps (§6.2).
     ///
     /// # Errors
     ///
     /// This runtime has no composition.
-    pub fn step_requirements(
-        &self,
-        tools: &[crate::ToolId],
-    ) -> Result<Vec<String>, crate::PluginError> {
-        self.services.process_step_requirements(tools)
+    pub fn component_requirements(&self) -> Result<Vec<String>, crate::PluginError> {
+        self.services.process_component_requirements()
     }
 
     /// The tools `process`'s steps run under `cx`, the process actor's

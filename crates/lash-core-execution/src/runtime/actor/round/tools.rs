@@ -272,7 +272,6 @@ pub fn request_material(
             opener: owner.clone(),
         },
         MaterialRole::PreparedRequest,
-        None,
         text,
     )
     .reference(MaterialLocation::JournalLocal)

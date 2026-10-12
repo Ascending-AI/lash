@@ -129,7 +129,7 @@ pub(super) fn terminal_output(
             failure.source = crate::ToolFailureSource::Plugin;
             Ok(
                 ToolCallOutput::failure(failure).with_control(crate::ToolControl::AbortRun {
-                    code: abort.failure_code(&callback.owner.plugin),
+                    code: abort.failure_code(&callback.owner),
                     message: abort.message,
                 }),
             )

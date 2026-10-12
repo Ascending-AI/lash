@@ -4,7 +4,6 @@
 //! `referrer_fences` like every other referrer.
 
 use lash_core_execution::store::ToolMaterialStore;
-use lash_core_execution::store::plugin_writers::PluginRevision;
 use lash_core_execution::tool_run::{
     MaterialBundle, MaterialHolder, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef,
     MaterialRefusal, MaterialRetentionError, RetainedBundle,
@@ -184,7 +183,6 @@ impl ToolMaterialStore for SqliteStore {
         holder: &MaterialHolder,
         reference: &MaterialRef,
         owner: &MaterialOwner,
-        available: &[PluginRevision],
     ) -> Result<MaterialPayload, MaterialRetentionError> {
         let MaterialLocation::RetainedArtifact { artifact } = &reference.location else {
             return Err(MaterialRefusal::Missing {
@@ -237,7 +235,7 @@ impl ToolMaterialStore for SqliteStore {
             .await
             .map_err(sqlite_error)?;
         let bytes = read.map_err(|refusal| refusal.read_refusal(reference))?;
-        Ok(MaterialBundle::read(&bytes, reference, owner, available)?)
+        Ok(MaterialBundle::read(&bytes, reference, owner)?)
     }
 }
 

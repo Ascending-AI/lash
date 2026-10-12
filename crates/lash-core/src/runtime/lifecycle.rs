@@ -263,10 +263,8 @@ impl LashRuntime {
                     .unwrap_or_else(crate::FleetFormat::current),
             ) {
                 Ok(()) => {
-                    admitted_capabilities = services.plugins.validate_recorded_admission().is_ok();
-                    if admitted_capabilities {
-                        services.plugins.materialize()?;
-                    }
+                    services.plugins.materialize()?;
+                    admitted_capabilities = true;
                 }
                 Err(crate::PluginError::Format(_)) => {}
                 Err(error) => return Err(error.into()),

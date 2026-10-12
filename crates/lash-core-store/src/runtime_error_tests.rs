@@ -190,7 +190,8 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
         [
             RuntimeErrorCode::LashVmCellReplayDivergence,
             RuntimeErrorCode::RetiredGeneration,
-            RuntimeErrorCode::PluginRevisionUnavailable,
+            RuntimeErrorCode::RecordedCallbackUnavailable,
+            RuntimeErrorCode::StreamStateFormatUnreadable,
             RuntimeErrorCode::LashVmCellBindingDrift,
             RuntimeErrorCode::EffectReplayDivergence,
             RuntimeErrorCode::VmWorkerUnavailable,

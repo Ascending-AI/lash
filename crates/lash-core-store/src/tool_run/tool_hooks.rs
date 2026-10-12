@@ -198,9 +198,8 @@ fn reduction_order<V: RankedVerdict>(
         .then_with(|| {
             left.callback
                 .owner
-                .plugin
                 .as_bytes()
-                .cmp(right.callback.owner.plugin.as_bytes())
+                .cmp(right.callback.owner.as_bytes())
         })
         .then_with(|| {
             left.callback

@@ -540,7 +540,6 @@ impl ProcessStartOptions {
             segment_ordinal: 0,
             causal_invocation: scope.parent_invocation.clone(),
             execution_write_authority: None,
-            plugin_admission: None,
         }
     }
 }

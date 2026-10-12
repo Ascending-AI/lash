@@ -18,7 +18,6 @@ use super::material::{
 use crate::artifact_referrer::{ArtifactName, ArtifactReferrer, ArtifactStoreId};
 use crate::await_event_identity::AwaitEventKey;
 use crate::runtime_error::RuntimeEffectControllerError;
-use crate::store::plugin_writers::PluginRevision;
 
 /// version_surface = "coexist"
 /// version_guard(items(BUNDLE_DOMAIN, of), roots(BundleWire))
@@ -144,8 +143,7 @@ impl MaterialBundle {
     }
 
     /// Serve `reference` out of stored bundle `bytes`, read under a lease,
-    /// verified against `owner`, its integrity, format and `available`
-    /// codec revisions.
+    /// verified against `owner`, its integrity and format.
     ///
     /// # Errors
     ///
@@ -157,7 +155,6 @@ impl MaterialBundle {
         bytes: &[u8],
         reference: &MaterialRef,
         owner: &MaterialOwner,
-        available: &[PluginRevision],
     ) -> Result<MaterialPayload, RuntimeEffectControllerError> {
         let mut wire: BundleWire = serde_json::from_slice(bytes).map_err(|error| {
             RuntimeEffectControllerError::new(
@@ -171,7 +168,7 @@ impl MaterialBundle {
                 .ok_or_else(|| MaterialRefusal::Missing {
                     reference: Box::new(reference.clone()),
                 })?;
-        payload.verify(reference, owner, available)?;
+        payload.verify(reference, owner)?;
         Ok(payload)
     }
 }

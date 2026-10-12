@@ -4,10 +4,6 @@ use super::*;
 use lash_core_store::tool_run::{AttributedVerdict, CheckRecord};
 use std::sync::Arc;
 
-pub trait AdmissionGate: Send + Sync {
-    fn validate(&self) -> Result<(), PluginError>;
-}
-
 /// Every executable slot, with registration identities scoped by its owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ContributionKind {
@@ -24,7 +20,7 @@ pub enum ContributionKind {
 
 /// Built once per materialization, in owner and registration order.
 pub struct ExecutionComposition {
-    owners: Vec<PluginRevision>,
+    owners: Vec<String>,
     tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
     tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
     tool_args_transforms: Vec<RegisteredHook<ToolArgsTransformHook>>,
@@ -35,15 +31,13 @@ pub struct ExecutionComposition {
     presentation_steps: Vec<RegisteredHook<ToolPresentationStep>>,
     prompt: PromptRegistry,
     tool_registry: Arc<crate::ToolRegistry>,
-    admission: Arc<dyn AdmissionGate>,
 }
 
 impl ExecutionComposition {
     pub(super) fn new(
-        owners: Vec<PluginRevision>,
+        owners: Vec<String>,
         contributions: &mut PluginContributions,
         tool_registry: Arc<crate::ToolRegistry>,
-        admission: Arc<dyn AdmissionGate>,
     ) -> Self {
         Self {
             owners,
@@ -57,12 +51,7 @@ impl ExecutionComposition {
             presentation_steps: std::mem::take(&mut contributions.presentation_steps),
             prompt: std::mem::take(&mut contributions.prompt),
             tool_registry,
-            admission,
         }
-    }
-
-    pub(crate) fn validate_admission(&self) -> Result<(), PluginError> {
-        self.admission.validate()
     }
 
     pub fn prompt_catalog(&self) -> PromptCatalog {
@@ -120,26 +109,15 @@ impl ExecutionComposition {
 
     fn unavailable_callback(&self, callback: &PluginCallbackIdentity) -> PluginError {
         PluginError::Runtime(
-            PluginExecutionRefusal {
-                recorded: vec![callback.owner.clone()],
-                available: self.owners.clone(),
-                callback: Some(callback.clone()),
+            RecordedCallbackUnavailable {
+                recorded: callback.clone(),
+                available: self
+                    .contributions()
+                    .map(|(_, identity)| identity.clone())
+                    .collect(),
             }
             .into_runtime_error(),
         )
-    }
-    /// Check a tool's recorded owner without invoking a provider or hook.
-    pub fn validate_tool_owner(&self, owner: &PluginRevision) -> Result<(), crate::RuntimeError> {
-        let available = self.owners.clone();
-        if !available.contains(owner) {
-            return Err(PluginExecutionRefusal {
-                recorded: vec![owner.clone()],
-                available,
-                callback: None,
-            }
-            .into_runtime_error());
-        }
-        Ok(())
     }
 
     /// Resolve ownership from the registered tool source, before admission.
@@ -147,21 +125,17 @@ impl ExecutionComposition {
         &self,
         tool: &crate::ToolId,
         source: Option<&str>,
-    ) -> Result<PluginRevision, PluginError> {
+    ) -> Result<String, PluginError> {
         let source = source
             .map(str::to_owned)
             .or_else(|| self.tool_registry.execution_source_id(tool));
         self.owners
             .clone()
             .into_iter()
-            .find(|owner| source.as_deref() == Some(owner.plugin.as_str()))
+            .find(|owner| source.as_deref() == Some(owner.as_str()))
             .ok_or_else(|| {
                 PluginError::Registration(format!("tool `{tool}` has no registered plugin owner"))
             })
-    }
-
-    pub(crate) fn tool_run_revisions(&self) -> Vec<crate::plugin::PluginRevision> {
-        self.owners.clone()
     }
 
     pub(crate) fn tool_run_binding(
@@ -205,7 +179,7 @@ impl ExecutionComposition {
                     .ok_or_else(|| {
                         PluginError::Session(format!(
                             "recorded context tool binding {}:{} is unavailable",
-                            binding.owner.plugin, binding.key,
+                            binding.owner, binding.key,
                         ))
                     })
             })
@@ -220,9 +194,6 @@ impl ExecutionComposition {
         context: &ToolHookContext,
         args: serde_json::Value,
     ) -> Result<serde_json::Value, Box<crate::ToolFailure>> {
-        self.admission
-            .validate()
-            .map_err(|error| Box::new(failed_admission(&error)))?;
         let original = Arc::new(args);
         let mut current = (*original).clone();
         for registered in &self.tool_args_transforms {
@@ -251,9 +222,6 @@ impl ExecutionComposition {
         original_args: &Arc<serde_json::Value>,
         prepared: &PreparedCallReadView,
     ) -> Result<CheckRecord<BeforeToolDecision>, Box<crate::ToolFailure>> {
-        self.admission
-            .validate()
-            .map_err(|error| Box::new(failed_admission(&error)))?;
         let mut replies = Vec::with_capacity(self.tool_args_checks.len());
         for registered in &self.tool_args_checks {
             let verdict = (registered.hook)(ToolArgsCheckInput {
@@ -286,9 +254,6 @@ impl ExecutionComposition {
         prepared: &PreparedCallReadView,
         original: &Arc<ToolResultCandidate>,
     ) -> Result<ToolResultCandidate, Box<crate::ToolFailure>> {
-        self.admission
-            .validate()
-            .map_err(|error| Box::new(failed_admission(&error)))?;
         let mut current = (**original).clone();
         for registered in &self.tool_result_transforms {
             current = (registered.hook)(ToolResultTransformInput {
@@ -320,9 +285,6 @@ impl ExecutionComposition {
         original: &Arc<ToolResultCandidate>,
         final_result: &Arc<ToolResultCandidate>,
     ) -> Result<ResultChecks, Box<crate::ToolFailure>> {
-        self.admission
-            .validate()
-            .map_err(|error| Box::new(failed_admission(&error)))?;
         let mut replies = Vec::with_capacity(self.tool_result_checks.len());
         let mut contributions = Vec::new();
         let mut proposals = Vec::new();
@@ -357,7 +319,7 @@ impl ExecutionComposition {
                     }
                     if !events.is_empty() {
                         contributions.push(AttributedContributions {
-                            plugin_id: registered.identity.owner.plugin.clone(),
+                            plugin_id: registered.identity.owner.clone(),
                             events,
                         });
                     }
@@ -413,7 +375,6 @@ impl ExecutionComposition {
         &self,
         plan: &crate::runtime::PresentationBinding,
     ) -> Result<(), PluginError> {
-        self.admission.validate()?;
         self.resolve_tool_presentation_plan(plan).map(drop)
     }
 
@@ -479,9 +440,6 @@ impl ExecutionComposition {
     > {
         use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
 
-        self.admission
-            .validate()
-            .map_err(crate::RuntimeEffectControllerError::from)?;
         let callbacks = self
             .resolve_tool_presentation_plan(plan)
             .map_err(crate::RuntimeEffectControllerError::from)?;
@@ -536,14 +494,6 @@ impl ExecutionComposition {
     }
 }
 
-fn failed_admission(error: &PluginError) -> crate::ToolFailure {
-    crate::ToolFailure::runtime(
-        crate::ToolFailureClass::Unavailable,
-        "plugin_admission_refused",
-        error.to_string(),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,9 +505,7 @@ mod tests {
 
     impl PluginDefinition for EveryContribution {
         fn declaration() -> PluginDeclaration {
-            let mut declaration = PluginDeclaration::initial("composition-identities");
-            declaration.behavior_revision = BehaviorRevision::new(3).expect("nonzero revision");
-            declaration
+            PluginDeclaration::initial("composition-identities")
         }
     }
 
@@ -620,7 +568,7 @@ mod tests {
     }
 
     /// COMPOSITION-IDENTITIES (D3): every executable contribution exposes
-    /// its registering owner's declared revision and its unique callback key.
+    /// its registering owner and its unique callback key.
     #[test]
     fn composition_identities() {
         let session = crate::testing::test_plugin_host(vec![Arc::new(EveryContribution)])
@@ -632,7 +580,7 @@ mod tests {
         let composition = session.composition();
         let contributions = composition
             .contributions()
-            .filter(|(_, identity)| identity.owner.plugin == "composition-identities")
+            .filter(|(_, identity)| identity.owner == "composition-identities")
             .collect::<Vec<_>>();
         let expected = BTreeSet::from([
             ContributionKind::ToolProvider,
@@ -655,8 +603,7 @@ mod tests {
         );
         let mut keys = BTreeSet::new();
         for (_, identity) in contributions {
-            assert_eq!(identity.owner.plugin, "composition-identities");
-            assert_eq!(identity.owner.behavior_revision.get(), 3);
+            assert_eq!(identity.owner, "composition-identities");
             assert!(
                 keys.insert(identity.key.clone()),
                 "duplicate contribution key"
@@ -665,10 +612,9 @@ mod tests {
         let owners = composition
             .prompt
             .owners()
-            .filter(|(owner, _)| owner.plugin == "composition-identities")
+            .filter(|(owner, _)| owner == "composition-identities")
             .collect::<Vec<_>>();
         assert_eq!(owners.len(), 1);
-        assert_eq!(owners[0].0.behavior_revision.get(), 3);
         assert_eq!(owners[0].1.key.as_str(), "direct");
         assert!(Arc::ptr_eq(&composition, &session.composition()));
     }

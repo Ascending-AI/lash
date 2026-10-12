@@ -1117,7 +1117,7 @@ impl PreparedToolBatch {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolExecutionGrant {
     /// The plugin whose declared code executes this grant.
-    pub owner: crate::plugin::PluginRevision,
+    pub owner: String,
     /// Tool identity and model-facing metadata authorized by the grant.
     pub(crate) manifest: ToolManifest,
     /// Contract used to validate granted call arguments without consulting the
@@ -1132,10 +1132,7 @@ pub struct ToolExecutionGrant {
 }
 
 impl ToolExecutionGrant {
-    pub fn from_definition(
-        owner: crate::plugin::PluginRevision,
-        definition: ToolDefinition,
-    ) -> Self {
+    pub fn from_definition(owner: String, definition: ToolDefinition) -> Self {
         Self {
             owner,
             manifest: definition.manifest(),
