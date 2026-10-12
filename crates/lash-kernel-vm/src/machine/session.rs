@@ -19,12 +19,7 @@ pub(super) fn start(
     limits: lash_kernel_doc::KernelDataLimits,
 ) -> Result<KernelMachine, StartError> {
     let library = program.library.in_layout(layout);
-    lash_kernel_doc::validate_document_with_limits(
-        &program.document,
-        library.registry().as_ref(),
-        limits,
-    )?;
-    let admitted = library.admit(&program.document)?;
+    let admitted = library.admit(&program.document, limits)?;
     let exe = admitted
         .executable(&program.document, &library)
         .map_err(|missing| StartError::MissingFunction {
@@ -444,6 +439,36 @@ mod tests {
             "resume must reuse the admitted code after its original run is dropped"
         );
     }
+    /// KERNEL-DATA-POLICY, K-DOC-006: cached admission cannot bypass a
+    /// narrower document-depth policy at either start or resume.
+    #[test]
+    fn a_narrower_document_policy_requires_fresh_admission() {
+        let program = Program {
+            document: Arc::new(
+                parse_document("kernel 1\nnumbers float\nmain { do yield return 1 }").unwrap(),
+            ),
+            library: PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+        };
+        let mut first = KernelMachine::start(program.clone(), BOUNDS, main()).unwrap();
+        let parked = first.export().unwrap();
+        let limits = lash_kernel_doc::KernelDataLimits::new(0, 352, 512, 512, 128).unwrap();
+        assert!(matches!(
+            KernelMachine::import_with_data_limits(program.clone(), BOUNDS, parked.clone(), limits),
+            Err(crate::ImportError::NotAdmitted(invalid))
+                if *invalid.reason == lash_kernel_doc::InvalidReason::TooDeep { limit: 0 }
+        ));
+        assert!(matches!(
+            KernelMachine::start_with_data_limits(program.clone(), BOUNDS, main(), limits),
+            Err(StartError::NotAdmitted(invalid))
+                if *invalid.reason == lash_kernel_doc::InvalidReason::TooDeep { limit: 0 }
+        ));
+        let resumed = KernelMachine::import(program, BOUNDS, parked).unwrap();
+        assert!(std::ptr::eq(
+            first.exe.code(first.exe.main),
+            resumed.exe.code(resumed.exe.main)
+        ));
+    }
+
     /// Admission belongs to an immutable document and registry, never just
     /// the document's address or its former contents (K-DOC-001, K-MACH-008).
     #[test]

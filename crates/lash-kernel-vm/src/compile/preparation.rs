@@ -7,13 +7,16 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock, Weak};
 
-use lash_kernel_doc::{Document, DocumentId, EncodeError, FunctionId, Invalid, validate_document};
+use lash_kernel_doc::{
+    Document, DocumentId, EncodeError, FunctionId, Invalid, KernelDataLimits,
+    validate_document_with_limits,
+};
 
 use super::{DocumentCode, Executable, Missing, PreparedLibrary, compile_document};
 use crate::{ImportError, StartError};
 
 #[derive(Default)]
-pub(super) struct Documents(BTreeMap<usize, Arc<Admission>>);
+pub(super) struct Documents(BTreeMap<(usize, usize), Arc<Admission>>);
 
 pub(crate) struct Admission {
     document: Weak<Document>,
@@ -47,13 +50,19 @@ impl From<Refused> for ImportError {
 impl PreparedLibrary {
     /// Admission precedes compilation, preserving import's refusal order:
     /// document identity and pins are checked before missing body callees.
-    pub(crate) fn admit(&self, document: &Arc<Document>) -> Result<Arc<Admission>, Refused> {
+    pub(crate) fn admit(
+        &self,
+        document: &Arc<Document>,
+        limits: KernelDataLimits,
+    ) -> Result<Arc<Admission>, Refused> {
         let mut documents = self
             .0
             .documents
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let key = Arc::as_ptr(document) as usize;
+        // Only document depth affects structural validation. Runtime value
+        // and inline limits are applied by each run's heap, not admission.
+        let key = (Arc::as_ptr(document) as usize, limits.document_depth());
         if let Some(admitted) = documents.0.get(&key) {
             return Ok(Arc::clone(admitted));
         }
@@ -68,7 +77,8 @@ impl PreparedLibrary {
                 return Err(Refused::Missing(*function));
             }
         }
-        validate_document(document, self.registry().as_ref()).map_err(Refused::Invalid)?;
+        validate_document_with_limits(document, self.registry().as_ref(), limits)
+            .map_err(Refused::Invalid)?;
         let admitted = Arc::new(Admission {
             document: Arc::downgrade(document),
             code: OnceLock::new(),

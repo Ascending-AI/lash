@@ -480,7 +480,7 @@ pub(in crate::machine) fn import(
     let costs = crate::costs::Costs::of_document(&program.document);
     let manifest = &program.document.manifest.functions;
     let library = program.library.in_layout(layout);
-    let admitted = library.admit(&program.document)?;
+    let admitted = library.admit(&program.document, limits)?;
     let document = admitted
         .identity(&program.document)
         .map_err(|error| malformed(error.to_string()))?;

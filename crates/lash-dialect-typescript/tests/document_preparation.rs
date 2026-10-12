@@ -70,6 +70,7 @@ fn an_admitted_baseline_cell_starts_with_at_most_one_thousand_allocations() {
     let counts = stats_alloc::Region::new(ALLOCATOR);
     let machine = KernelMachine::start(program, bounds, start()).unwrap();
     let counts = counts.change();
+    eprintln!("baseline start: {counts:?}");
     assert!(counts.allocations <= 1_000, "baseline start: {counts:?}");
     assert_eq!(machine.meters().charged, 0);
 }

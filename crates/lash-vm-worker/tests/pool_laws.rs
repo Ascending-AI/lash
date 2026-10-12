@@ -966,6 +966,7 @@ fn the_address_space_ceiling_bounds_a_runs_allocation() {
     config.confinement.address_space_bytes = GIB;
     // Room for the parser stack of the largest admitted source.
     config.protocol.max_source_bytes = 1024;
+    config.tuning.typescript_source_bytes = 1024;
     config.run_bounds.memory = 8 * GIB;
     config.run_bounds.charge = u64::MAX;
     let pool = WorkerPool::new(config).expect("pool");
