@@ -1,15 +1,30 @@
 //! A start's environment policy runs once per committed declaration
-//! (FIG-6034): START-POLICY-ONCE (D9) and DECLARED-SETTINGS-REALIZE (D4).
+//! (FIG-6034): START-POLICY-ONCE (D9).
 //!
 //! A model start declares its child inside its call's attempt, and the
 //! declaration commits with the call's outcome (`round.outcome`, a code
-//! cell's call too) in the transaction that registers the child: the
-//! declaration and its registration are one write. Realization is the
-//! child's first pass, which builds its runtime from the registered launch.
-//! Each law runs node A until its one cut kills it, then recovers on node B,
-//! which runs the deployment's later build.
+//! cell's call too) in the transaction that registers the child: on every
+//! path a policy runs on, the declaration and its registration are one
+//! write. Realization is the child's first pass, which builds its runtime
+//! from the registered launch. Each law runs node A until its one cut kills
+//! it, then recovers on node B, which runs the deployment's later build.
+//! DECLARED-SETTINGS-REALIZE (D4) needs a declaration that commits before
+//! its registration, so it is pinned on host ingress
+//! (`lash` `tests::tool_intent_ingress`).
 
 use super::*;
+
+/// The kernel instruction charge the counting policy states for a code mode
+/// closure: neither build's default, and enough for [`CLOSURE_CELL`]'s loop.
+const STATED_CHARGE: u64 = 5_000_000;
+
+/// The node's `defaults` with [`STATED_CHARGE`]: what the counting policy
+/// states for an engine that takes settings.
+fn stated_settings(defaults: lash_core::EngineSettings) -> lash_core::EngineSettings {
+    let mut value = defaults.into_value();
+    value["charge"] = serde_json::json!(STATED_CHARGE);
+    lash_core::EngineSettings::new(value)
+}
 
 /// What the counting policy states.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,7 +103,7 @@ impl lash_core::ProcessEnvPolicy for CountingPolicy {
         };
         Ok(lash_core::ProcessStartChoice {
             env: lash_core::ProcessEnvChoice::New(limited(limit)),
-            engine_settings: cx.engine_defaults()?,
+            engine_settings: cx.engine_defaults()?.map(stated_settings),
         })
     }
 }
@@ -189,8 +204,8 @@ fn core_over(
 impl Deployment {
     /// A standard deployment whose model calls `start_process` on a held
     /// definition, under `policy`; or, with `bounds`, a code mode one whose
-    /// cell starts a closure under the run's environment, the first build's
-    /// kernel bounds `bounds.first` and the later's `bounds.later`.
+    /// cell starts a closure under `policy`, the first build's kernel bounds
+    /// `bounds.first` and the later's `bounds.later`.
     async fn new(
         clock: &Arc<SimClock>,
         policy: &Arc<Counting>,
@@ -207,34 +222,24 @@ impl Deployment {
         let scripts = Arc::new(served::Scripts::default());
         let counted =
             || Arc::new(CountingPolicy(Arc::clone(policy))) as Arc<dyn lash_core::ProcessEnvPolicy>;
-        let (first, later) = match bounds {
-            Some(bounds) => {
-                let defaults =
-                    || lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new()));
-                (
-                    core_over(
-                        &backend,
-                        &scripts,
-                        clock,
-                        defaults(),
-                        Some(bounds.first),
-                        "first",
-                    ),
-                    core_over(
-                        &backend,
-                        &scripts,
-                        clock,
-                        defaults(),
-                        Some(bounds.later),
-                        "later",
-                    ),
-                )
-            }
-            None => (
-                core_over(&backend, &scripts, clock, counted(), None, "first"),
-                core_over(&backend, &scripts, clock, counted(), None, "later"),
+        let (first, later) = (
+            core_over(
+                &backend,
+                &scripts,
+                clock,
+                counted(),
+                bounds.map(|bounds| bounds.first),
+                "first",
             ),
-        };
+            core_over(
+                &backend,
+                &scripts,
+                clock,
+                counted(),
+                bounds.map(|bounds| bounds.later),
+                "later",
+            ),
+        );
         let pin = lash_core::HostArtifactPin::mint();
         if bounds.is_none() {
             let draft = lash_core::ProcessDefinitionDraft::new(
@@ -382,15 +387,25 @@ impl Deployment {
 const START_OUTCOME: CommitLabel = CommitLabel::ROUND_OUTCOME;
 
 /// START-POLICY-ONCE (D9), through the production round path.
+///
+/// Row (a): a code mode cell declares a closure start whose policy states
+/// settings that are not the registering node's defaults, and A dies once
+/// the declaring outcome commits; B recovers under a changed policy and
+/// other defaults. The row keeps what the policy stated, and the policy ran
+/// once.
 #[tokio::test(flavor = "current_thread")]
 async fn a_start_policy_runs_once_per_committed_declaration() {
     let committed = limited(5).stable_ref().unwrap();
 
     // A committed declaration, then a crash before the child's first pass
     // and a changed policy: recovery realizes what was declared.
+    let bounds = Bounds {
+        first: 10_000_000,
+        later: 20_000,
+    };
     let clock = SimClock::new();
     let policy = Counting::new(Stated::First);
-    let (deployment, database) = Deployment::new(&clock, &policy, None).await;
+    let (deployment, database) = Deployment::new(&clock, &policy, Some(bounds)).await;
     let script = Script::new();
     script.cut_on("a", START_OUTCOME, 1, Fault::CommitThenAbort);
     let children = deployment
@@ -401,13 +416,41 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
     let [child] = children.as_slice() else {
         panic!("one child: {children:#?}");
     };
+    let lash_core::ProcessInput::Engine { kind, payload, .. } = child.input.as_ref() else {
+        panic!("a code mode closure is an engine start: {child:#?}");
+    };
+    let defaults = |core: &lash::LashCore| {
+        core.processes()
+            .engine_defaults(kind, payload)
+            .expect("the build's defaults")
+            .expect("a kernel start has defaults")
+    };
+    let declared = stated_settings(defaults(&deployment.first));
+    assert_ne!(declared, defaults(&deployment.first), "A's defaults differ");
+    assert_ne!(declared, defaults(&deployment.later), "B's defaults differ");
     assert_eq!(
         child.env_ref(),
         Some(&committed),
         "the declared environment"
     );
-    assert_eq!(child.engine_settings(), None, "the declared settings");
+    assert_eq!(
+        child.engine_settings(),
+        Some(&declared),
+        "the declared settings, not the registering node's defaults"
+    );
     assert_eq!(policy.calls(), 1, "recovery never re-runs the policy");
+    let output = deployment
+        .stores
+        .process_registry()
+        .get_process(&child.id)
+        .await
+        .expect("the child is read")
+        .expect("the child is registered");
+    assert_eq!(
+        output.status(),
+        ProcessStatus::Completed,
+        "the child ran under the declared bounds, which its loop fits: {output:#?}"
+    );
 
     // A crash after the policy returned, before the outcome committed: the
     // abandoned attempt registers nothing.
@@ -474,54 +517,3 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
 /// The closure a code mode cell starts: it spends more instructions than
 /// the later build's kernel bounds allow, and answers its sum.
 const CLOSURE_CELL: &str = "const handle = await processes.start({ definition: async () => { let s = 0; for (let i = 0; i < 20000; i++) { s = s + i; } return s; } });\nawait control.finish(await handle);";
-
-/// DECLARED-SETTINGS-REALIZE (D4).
-#[tokio::test(flavor = "current_thread")]
-async fn a_declared_start_realizes_the_settings_its_policy_stated() {
-    let bounds = Bounds {
-        first: 10_000_000,
-        later: 20_000,
-    };
-    let clock = SimClock::new();
-    let policy = Counting::new(Stated::First);
-    let (deployment, database) = Deployment::new(&clock, &policy, Some(bounds)).await;
-    let script = Script::new();
-    script.cut_on("a", START_OUTCOME, 1, Fault::CommitThenAbort);
-    let children = deployment
-        .run(Arc::clone(&clock), database, Some(script), || {})
-        .await;
-    let [child] = children.as_slice() else {
-        panic!("one child: {children:#?}");
-    };
-    let lash_core::ProcessInput::Engine { kind, payload, .. } = child.input.as_ref() else {
-        panic!("a code mode closure is an engine start: {child:#?}");
-    };
-    let declared = deployment
-        .first
-        .processes()
-        .engine_defaults(kind, payload)
-        .expect("the first build's defaults");
-    let restarted = deployment
-        .later
-        .processes()
-        .engine_defaults(kind, payload)
-        .expect("the later build's defaults");
-    assert_ne!(declared, restarted, "the restart changed the kernel bounds");
-    assert_eq!(
-        child.engine_settings(),
-        declared.as_ref(),
-        "the realized row keeps the declared settings"
-    );
-    let output = deployment
-        .stores
-        .process_registry()
-        .get_process(&child.id)
-        .await
-        .expect("the child is read")
-        .expect("the child is registered");
-    assert_eq!(
-        output.status(),
-        ProcessStatus::Completed,
-        "the child ran under the declared bounds, which its loop fits: {output:#?}"
-    );
-}

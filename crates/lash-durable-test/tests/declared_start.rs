@@ -357,12 +357,15 @@ enum Forge {
     /// Declare a start that lives until the scope a [`Forge::KeepScope`]
     /// call of an earlier, ended turn kept.
     EndedScope,
+    /// Decode a declaration whose launch names the published fixture
+    /// environment, which the attempt never held.
+    Unheld,
 }
 
 impl Forge {
     /// Every forge, in declaration order: a call's argument names one by
     /// its position.
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::None,
         Self::ForeignSession,
         Self::NonzeroIndex,
@@ -370,6 +373,7 @@ impl Forge {
         Self::Reuse,
         Self::KeepScope,
         Self::EndedScope,
+        Self::Unheld,
     ];
 }
 
@@ -427,6 +431,7 @@ impl DeclaringProbe {
         let mut bytes = serde_json::to_value(&declared).map_err(|error| error.to_string())?;
         match forge {
             Forge::None | Forge::EndedScope | Forge::KeepScope => return Ok(Some(declared)),
+            Forge::Unheld => {}
             Forge::ForeignSession => {
                 let mut identity = context.intent_identity(0);
                 let foreign = lash_core::RuntimeOwner::Session(SessionId::from(FOREIGN_SESSION));
@@ -458,7 +463,7 @@ impl DeclaringProbe {
             .map_err(|error| format!("a serialized declaration decodes: {error}"))
     }
 
-    fn start(
+    async fn start(
         &self,
         context: &lash_core::AttemptContext<'_>,
         probe: Probe,
@@ -484,11 +489,23 @@ impl DeclaringProbe {
         } else {
             lash_core::lifetime::starter(&start_cx)
         };
-        let declaration = lash_core_execution::testing::held_engine_declaration(
-            serde_json::json!({
-                PROBE_MARKER: session_id.as_str(),
-                "attempt": context.attempt_number(),
-            }),
+        let payload = serde_json::json!({
+            PROBE_MARKER: session_id.as_str(),
+            "attempt": context.attempt_number(),
+        });
+        let launch = if probe.forge == Forge::Unheld {
+            lash_core::testing::declared_launch_for_testing(
+                lash_core::testing::fixture_engine_launch(),
+            )
+        } else {
+            lash_core_execution::testing::held_engine_launch(context, &payload)
+                .await
+                .map_err(|error| error.to_string())?
+        };
+        let declaration = lash_core::ProcessStartDeclaration::engine(
+            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+            payload,
+            launch,
             lash_core::ProcessOriginator::Session {
                 session_id: session_id.clone(),
                 agent_frame_id: Some(agent_frame_id),
@@ -527,7 +544,7 @@ impl lash_core::ToolProvider for DeclaringProbe {
                 Err(error) => lash_core::ToolOutcome::err_fmt(error).into(),
             };
         }
-        let start = match self.start(call.context, probe) {
+        let start = match self.start(call.context, probe).await {
             Ok(start) => start,
             Err(error) => return lash_core::ToolOutcome::err_fmt(error).into(),
         };
@@ -1478,38 +1495,73 @@ async fn declared_start_rejects_foreign_or_reused_serialized_identity_before_lau
         let Some(world) = World::new(tier, &format!("unbound-{name}"), shape).await else {
             return;
         };
-        world.run().await;
-        let view = world
-            .session
-            .read()
-            .await
-            .expect("committed read")
-            .expect("head");
-        let called = served::calls(&view);
-        let record = called
-            .iter()
-            .find(|called| called.provider_call_id == call)
-            .unwrap_or_else(|| panic!("{name}: the forged call is in the transcript: {called:#?}"));
-        let call_id = record.call_id.clone().expect("the forged call has an id");
-        let answered = served::results(&view)
-            .into_iter()
-            .find(|answered| answered.call_id.as_ref() == Some(&call_id))
-            .unwrap_or_else(|| panic!("{name}: the forged call has a result"));
         let code = match name {
             "foreign-session" => "owner_mismatch",
             _ => "declared_start_identity_mismatch",
         };
-        assert!(
-            answered.content.contains("[Tool execution failed]") && answered.content.contains(code),
-            "{name}: the call settles as the start's typed refusal `{code}`: {answered:?}"
-        );
-        let registered = world.probes().await;
-        assert!(
-            registered.is_empty(),
-            "{name}: the refused declaration registered nothing: {registered:#?}"
-        );
+        world.run().await;
+        assert_refused_before_launch(&world, name, call, code).await;
         world.shutdown().await;
     }
+}
+
+/// The forged call `call` of `world`'s parent settled as the typed refusal
+/// `code` shows, and nothing registered.
+async fn assert_refused_before_launch(world: &World, name: &str, call: &str, code: &str) {
+    let view = world
+        .session
+        .read()
+        .await
+        .expect("committed read")
+        .expect("head");
+    let called = served::calls(&view);
+    let record = called
+        .iter()
+        .find(|called| called.provider_call_id == call)
+        .unwrap_or_else(|| panic!("{name}: the forged call is in the transcript: {called:#?}"));
+    let call_id = record.call_id.clone().expect("the forged call has an id");
+    let answered = served::results(&view)
+        .into_iter()
+        .find(|answered| answered.call_id.as_ref() == Some(&call_id))
+        .unwrap_or_else(|| panic!("{name}: the forged call has a result"));
+    assert!(
+        answered.content.contains("[Tool execution failed]") && answered.content.contains(code),
+        "{name}: the call settles as the start's typed refusal `{code}`: {answered:?}"
+    );
+    let registered = world.probes().await;
+    assert!(
+        registered.is_empty(),
+        "{name}: the refused declaration registered nothing: {registered:#?}"
+    );
+}
+
+/// A start a tool body decodes rather than declares through its attempt
+/// names an environment the attempt never held (FIG-6061, D10): the
+/// published fixture environment. Before its outcome is recorded the call
+/// settles as the typed `process_launch_not_held` failure, and nothing
+/// registers.
+async fn declared_start_refuses_a_launch_its_attempt_did_not_hold(tier: Tier) {
+    let Some(world) = World::new(
+        tier,
+        "unheld-launch",
+        Shape::probe(Probe {
+            forge: Forge::Unheld,
+            ..Probe::default()
+        }),
+    )
+    .await
+    else {
+        return;
+    };
+    world.run().await;
+    assert_refused_before_launch(
+        &world,
+        "unheld-launch",
+        "declared-start-probe-0",
+        "which this attempt did not hold",
+    )
+    .await;
+    world.shutdown().await;
 }
 
 /// Children spawned in one parent step run at once: each child's first
@@ -1628,6 +1680,7 @@ tiered_laws!(
     declared_start_discarded_retry_launches_nothing,
     declared_start_refusal_settles_the_call,
     declared_start_rejects_foreign_or_reused_serialized_identity_before_launch,
+    declared_start_refuses_a_launch_its_attempt_did_not_hold,
     batch_of_spawns_overlaps,
 );
 

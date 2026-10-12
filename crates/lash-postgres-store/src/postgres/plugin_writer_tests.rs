@@ -424,3 +424,75 @@ async fn provisioning_records_a_registered_plugin_once() {
         ranges
     );
 }
+
+/// Hold an environment naming `component` at config format 2 through the one
+/// hold path, on `storage`, with `component` installed writing formats 1 and
+/// 2, natively 2.
+async fn hold_native_two(
+    storage: &PostgresStorage,
+    component: &'static str,
+) -> Result<lash_core_execution::ProcessEnvRef, lash_core_execution::HoldEnvError> {
+    let registry = lash_core_execution::testing::native_format_two_component(component);
+    let env = lash_core_execution::testing::component_env(component, version(2));
+    let claim =
+        lash_core_execution::ReferrerClaim::unguarded(
+            lash_core_execution::ArtifactReferrer::HostPin(
+                lash_core_execution::HostArtifactPin::mint(),
+            ),
+        )
+        .expect("host pin claim");
+    let env_store = storage.process_env_store();
+    let fleet = storage.store();
+    lash_core_execution::hold_process_env(
+        &lash_core_execution::ProcessEnvPorts::admitting(&env_store, &registry, &fleet),
+        &claim,
+        &lash_core_execution::ProcessEnvSelection::New(env),
+    )
+    .await
+}
+
+/// A process component is provisioned from its declaration as a session
+/// plugin is (FIG-6061): on a finalized fleet, an environment naming a
+/// component that writes config format 2 natively publishes at format 2;
+/// inside a rollback window the component is permitted only its oldest
+/// writable format, and the same environment is refused naming format 2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_component_publishes_its_native_config_format_only_on_a_finalized_fleet() {
+    let Some(database) = isolated().await else {
+        return;
+    };
+    let (n, next) = fleet(&database).await;
+    // N's own epoch is `F`: the fleet is finalized for N.
+    hold_native_two(&n, "finalized-two")
+        .await
+        .expect("the native format publishes on a finalized fleet");
+    assert_eq!(
+        store(&n)
+            .plugin_writers()
+            .await
+            .expect("read the ranges")
+            .permitted_writer("component:finalized-two"),
+        Ok(VersionRange::between(1, 2))
+    );
+    // N+1 runs inside the window: `F` is 1, below its own epoch.
+    let refused = hold_native_two(&next, "window-two")
+        .await
+        .expect_err("a rollback window refuses the native format");
+    assert!(
+        matches!(
+            &refused,
+            lash_core_execution::HoldEnvError::Refused(
+                lash_core_execution::ProcessEnvRefusal::ConfigWriterOutsideFleetRange { id, format: 2 }
+            ) if id == "window-two"
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(
+        store(&next)
+            .plugin_writers()
+            .await
+            .expect("read the ranges")
+            .permitted_writer("component:window-two"),
+        Ok(VersionRange::exactly(1))
+    );
+}

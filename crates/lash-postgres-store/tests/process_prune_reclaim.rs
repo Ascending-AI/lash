@@ -55,6 +55,7 @@ lash_conformance::process_start_staging_tests!({
         Arc::new(storage.store()) as Arc<dyn lash_core_execution::AttachmentReferrers>,
         storage.artifact_cleanup(),
         Arc::new(lash_core_execution::facade_support::SystemClock),
+        Arc::new(storage.store()),
     );
     (database, registry, ports)
 });
@@ -94,6 +95,7 @@ lash_conformance::process_definition_tests!({
         Arc::new(storage.store()) as Arc<dyn lash_core_execution::AttachmentReferrers>,
         storage.artifact_cleanup(),
         Arc::new(lash_core_execution::facade_support::SystemClock),
+        Arc::new(storage.store()),
     );
     (database, registry, ports)
 });

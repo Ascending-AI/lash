@@ -18,13 +18,6 @@ pub enum ToolFailureCause {
         step: String,
         step_kind: String,
     },
-    /// An engine step could not reconstruct its process's catalog. The
-    /// plugin error is retained as a typed command failure in the raw value.
-    EngineStepCatalogUnreadable {
-        engine: String,
-        step: String,
-        step_kind: String,
-    },
     /// A body for an engine step was requested for a non-engine process.
     EngineStepWithoutEngine {
         step: String,
@@ -53,6 +46,12 @@ pub enum ToolFailureCause {
     /// the outcome declared was realized.
     Declaration {
         refusal: crate::DeclarationRefusal,
+    },
+    /// A start the body declared names an environment its attempt did not
+    /// hold through `AttemptContext::declare_launch` (D10). Nothing the
+    /// outcome declared was realized.
+    LaunchNotHeld {
+        env_ref: String,
     },
     /// A control call made from a task the cell spawned. Only the cell's
     /// main task ends the turn; the body did not run.

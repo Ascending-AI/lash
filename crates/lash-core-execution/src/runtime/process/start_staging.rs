@@ -52,6 +52,9 @@ pub struct ArtifactReferrerPorts {
     attachments: Arc<dyn crate::AttachmentReferrers>,
     cleanup: Arc<dyn ArtifactCleanupLedger>,
     clock: Arc<dyn Clock>,
+    /// The fleet record a new environment's component writer ranges are
+    /// provisioned in.
+    fleet: Arc<dyn crate::store::FleetFormatStore>,
 }
 
 /// Whether an acquisition added the claim's edges or met its fence.
@@ -72,6 +75,7 @@ impl ArtifactReferrerPorts {
         attachments: Arc<dyn crate::AttachmentReferrers>,
         cleanup: Arc<dyn ArtifactCleanupLedger>,
         clock: Arc<dyn Clock>,
+        fleet: Arc<dyn crate::store::FleetFormatStore>,
     ) -> Self {
         Self {
             modules,
@@ -80,6 +84,7 @@ impl ArtifactReferrerPorts {
             attachments,
             cleanup,
             clock,
+            fleet,
         }
     }
 
@@ -92,6 +97,7 @@ impl ArtifactReferrerPorts {
             backend.attachment_referrers(),
             backend.artifact_cleanup(),
             backend.clock(),
+            backend.session_store_factory(),
         )
     }
 
@@ -113,6 +119,10 @@ impl ArtifactReferrerPorts {
 
     pub fn cleanup(&self) -> &Arc<dyn ArtifactCleanupLedger> {
         &self.cleanup
+    }
+
+    pub fn fleet(&self) -> &Arc<dyn crate::store::FleetFormatStore> {
+        &self.fleet
     }
 
     /// Add the claim's edge to every name, each in the store that holds it.

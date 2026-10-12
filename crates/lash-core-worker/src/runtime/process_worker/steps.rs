@@ -5,13 +5,13 @@
 //! - **Tool steps** resolve against the process's own catalog, which its
 //!   runtime builds from only the components its environment names and the
 //!   tools that environment admits (FIG-6034). The activation builds that
-//!   composition before any step is admitted or resumed
+//!   composition and its step tools before any step is admitted or resumed
 //!   ([`ProcessSteps::prepare`]); one this node cannot build parks the
-//!   process, so no admitted step is ever answered `Interrupted` for it. The tool's
-//!   declaration pins the step's policy and its limit within the tool
-//!   ceiling, and its body runs through the round tools a turn's round runs
-//!   on, owned by the process. The activation's first tool step builds
-//!   those tools ([`StepRuntime::tools`]) and its later steps share them, so
+//!   process, and a fault building them retries the pass, so no admitted
+//!   step is ever settled for it. The tool's declaration pins the step's
+//!   policy and its limit within the tool ceiling, and its body runs through
+//!   the round tools a turn's round runs on, owned by the process. Every
+//!   step of the activation shares those tools ([`StepRuntime::tools`]), so
 //!   each reduces against the process's committed plugin state. A
 //!   store-local effect commits with the step's outcome. The step's payload
 //!   retains the call's `ToolCallRecord`; incorporation projects its output
@@ -34,8 +34,8 @@ use lash_core_execution::runtime::process::steps::{
 };
 use lash_core_execution::tool_run::CompletionSource;
 use lash_core_execution::{
-    ActorContext, EngineStepRun, ExecutionLimit, MaxToolCalls, ProcessInput, ProcessRecord,
-    StepRequest, ToolCatalog,
+    EngineStepRun, ExecutionLimit, MaxToolCalls, ProcessInput, ProcessRecord, StepRequest,
+    ToolCatalog,
 };
 
 use super::DurableProcessWorker;
@@ -70,24 +70,16 @@ impl DurableProcessWorker {
         let StepRequest::Tool { tool, input, .. } = step else {
             return SettledOutput::Interrupted.into();
         };
-        let step = match self.built_step_tools(&runtime, &process).await {
-            Ok(step) => step,
-            // A composition this node cannot build parked the process before
-            // any step was admitted (`prepare`, FIG-6034 §7 item 11). What
-            // fails here is the activation's own build of tools whose
-            // composition did build: the tool never ran, so the step is
-            // answered as that known failure, never as one that may have
-            // taken effect.
-            Err(error) => {
-                tracing::warn!(process_id = %process.id, %error, "a process tool step could not reach its tools");
-                return step_failure(
-                    &process,
-                    "process_step_tools_unavailable",
-                    error.to_string(),
-                    None,
-                    None,
-                );
-            }
+        // `prepare` built the activation's tools before any step was
+        // admitted or resumed, classifying every failure to build them: a
+        // retryable fault retried the pass and a refusal parked the process,
+        // so no step settles for one. An activation that ran a step without
+        // them broke that order; its admission stands, so the step is
+        // answered as one that may have taken effect, never run again under
+        // `Once`.
+        let Some(step) = runtime.built_tools() else {
+            tracing::warn!(process_id = %process.id, "a process tool step ran before its activation built its tools");
+            return SettledOutput::Interrupted.into();
         };
         let name = step
             .catalog
@@ -149,7 +141,7 @@ impl DurableProcessWorker {
         });
     }
 
-    /// The activation's step tools, built on its first step that needs them.
+    /// The activation's step tools, built once, by its `prepare`.
     async fn built_step_tools(
         &self,
         runtime: &Arc<StepRuntime>,
@@ -191,29 +183,43 @@ impl ProcessSteps for WorkerSteps {
             .stop_grace()
     }
 
-    /// An engine process's composition builds here, or it parks: a
-    /// missing component, an unreadable config or a refused build is the
-    /// typed park reason, and a store fault is retried.
-    async fn prepare(&self, process: &ProcessRecord) -> Result<(), StepRefusal> {
+    /// An engine process's composition and the activation's step tools
+    /// build here, once per activation, or it parks: a missing component,
+    /// an unreadable config or a refused build is the typed park reason,
+    /// and a store or attempt fault retries the pass. No step body builds
+    /// them, so none settles for a build that failed.
+    async fn prepare(
+        &self,
+        runtime: &Arc<StepRuntime>,
+        process: &ProcessRecord,
+    ) -> Result<(), StepRefusal> {
+        use lash_core_execution::runtime::process::StepToolsError;
         if engine_kind(process).is_none() {
             return Ok(());
         }
-        match self.0.step_catalog(process).await {
+        let unavailable = |reason: String| StepRefusal::Unavailable {
+            step: String::new(),
+            reason,
+        };
+        match self.0.built_step_tools(runtime, process).await {
             Ok(_) => Ok(()),
-            Err(crate::PluginError::ProcessEnvRefused { refusal }) => {
+            Err(StepToolsError::Build(crate::PluginError::ProcessEnvRefused { refusal })) => {
                 Err(StepRefusal::CompositionUnavailable {
                     component: refused_component(&refusal),
                     reason: refusal.to_string(),
                 })
             }
-            Err(error) if error.class() == crate::PluginErrorClass::Retryable => {
-                Err(StepRefusal::Unavailable {
-                    step: String::new(),
-                    reason: error.to_string(),
-                })
+            Err(StepToolsError::Build(error))
+                if error.class() != crate::PluginErrorClass::Terminal =>
+            {
+                Err(unavailable(error.to_string()))
             }
-            // A contribution of a named component refused: the same refusal
-            // on every rebuild here.
+            Err(StepToolsError::State(error)) if !error.is_terminal() => {
+                Err(unavailable(error.to_string()))
+            }
+            // A contribution of a named component refused, or the process's
+            // namespaces refuse a committed resolution: the same refusal on
+            // every rebuild here.
             Err(error) => Err(StepRefusal::CompositionUnavailable {
                 component: None,
                 reason: error.to_string(),
@@ -355,7 +361,7 @@ impl ProcessSteps for WorkerSteps {
                     }
                     StepRequest::Engine { step, kind, input } => {
                         worker
-                            .engine_step(runtime.cx().clone(), process, step, kind, input, token)
+                            .engine_step(&runtime, process, step, kind, input, token)
                             .await
                     }
                 }
@@ -398,7 +404,7 @@ impl DurableProcessWorker {
     /// registration.
     async fn engine_step(
         &self,
-        cx: ActorContext,
+        runtime: &StepRuntime,
         process: ProcessRecord,
         step: lash_core_execution::StepName,
         kind: lash_core_execution::EngineStepKind,
@@ -448,25 +454,14 @@ impl DurableProcessWorker {
                 );
             }
         };
-        let tool_catalog = match self.step_catalog(&process).await {
-            Ok(catalog) => catalog,
-            Err(error) => {
-                tracing::warn!(process_id = %process.id, %error, "an engine step could not read its catalog");
-                return step_failure(
-                    &process,
-                    "engine_step_catalog_unreadable",
-                    error.to_string(),
-                    Some(crate::ToolFailureCause::EngineStepCatalogUnreadable {
-                        engine: engine.to_owned(),
-                        step: step.0,
-                        step_kind: kind.0,
-                    }),
-                    Some(
-                        serde_json::json!({ "catalog_error": crate::ToolIntentCommandFailure::from(&error) }),
-                    ),
-                );
-            }
+        // The catalog is the one `prepare` built with the activation's step
+        // tools: the body reads no store for it (see `tool_step`).
+        let Some(tools) = runtime.built_tools() else {
+            tracing::warn!(process_id = %process.id, "an engine step ran before its activation built its tools");
+            return SettledOutput::Interrupted.into();
         };
+        let tool_catalog = Arc::clone(&tools.catalog);
+        let cx = runtime.cx();
         let backend = cx.backend().clone();
         let run = EngineStepRun {
             process: process.id.clone(),

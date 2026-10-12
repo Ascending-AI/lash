@@ -371,6 +371,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         Arc::clone(ports.attachments()),
         Arc::clone(&relay_on_end) as Arc<dyn crate::ArtifactCleanupLedger>,
         Arc::new(crate::SystemClock),
+        Arc::clone(ports.fleet()),
     );
     let (engines_a, engines_b) = (
         engines().with_artifact_ports(ports_a),

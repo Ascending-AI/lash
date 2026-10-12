@@ -228,6 +228,10 @@ pub struct AttemptContext<'run> {
     tool_catalog: Option<Arc<crate::ToolCatalog>>,
     definition_engines: crate::ProcessEngineRegistry,
     pub(crate) resolved_run: Option<Arc<crate::ResolvedRun>>,
+    /// The environments [`declare_launch`](Self::declare_launch) held under
+    /// the attempt's execution claim: the only ones a launch the attempt
+    /// declares may name (D10).
+    held_launches: Arc<Mutex<Vec<crate::ProcessEnvRef>>>,
 }
 
 impl<'run> AttemptContext<'run> {
@@ -360,6 +364,7 @@ impl<'run> AttemptContext<'run> {
                 .as_ref()
                 .and_then(crate::RuntimeExecutionContext::resolved_run)
                 .cloned(),
+            held_launches: Arc::default(),
         }
     }
 
@@ -557,16 +562,35 @@ impl<'run> AttemptContext<'run> {
         choice: &crate::ProcessStartChoice,
         target: &crate::ResolvedStartTarget,
     ) -> Result<crate::DeclaredLaunch, crate::HoldEnvError> {
+        self.declare_engine_launch(choice, &target.engine_kind, &target.payload)
+            .await
+    }
+
+    /// [`declare_launch`](Self::declare_launch) for a start of the `kind`
+    /// engine with `payload`.
+    pub(crate) async fn declare_engine_launch(
+        &self,
+        choice: &crate::ProcessStartChoice,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Result<crate::DeclaredLaunch, crate::HoldEnvError> {
         let launch = crate::runtime::process::hold_launch(
             &self.definition_engines,
             &self.execution_scope,
             self.enclosing_env.as_deref(),
             choice,
-            &target.engine_kind,
-            &target.payload,
+            kind,
+            payload,
         )
         .await?;
+        self.held_launches.lock_recover().push(launch.env.clone());
         Ok(crate::DeclaredLaunch::held(launch))
+    }
+
+    /// Whether this attempt held `env` through
+    /// [`declare_launch`](Self::declare_launch).
+    pub(crate) fn held_launch(&self, env: &crate::ProcessEnvRef) -> bool {
+        self.held_launches.lock_recover().contains(env)
     }
 
     /// Integrator class 3 decode of the sealed payload into a provider-owned type.

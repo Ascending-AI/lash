@@ -85,7 +85,7 @@ async fn execute_attempt_body(
     prepared: &PreparedToolCall,
     attempt_context: &crate::AttemptContext<'_>,
 ) -> crate::ToolAttemptOutcome {
-    std::panic::AssertUnwindSafe(async {
+    let outcome = std::panic::AssertUnwindSafe(async {
         context
             .tools
             .execute(crate::ToolCall::new(
@@ -97,7 +97,59 @@ async fn execute_attempt_body(
     })
     .catch_unwind()
     .await
-    .unwrap_or_else(|payload| tool_panicked(prepared, payload).into())
+    .unwrap_or_else(|payload| tool_panicked(prepared, payload).into());
+    match unheld_launch(&outcome, attempt_context) {
+        Some(env_ref) => launch_not_held(&env_ref).into(),
+        None => outcome,
+    }
+}
+
+/// The first environment a start `outcome` declares that `attempt` did not
+/// hold through [`AttemptContext::declare_launch`](crate::AttemptContext::declare_launch).
+///
+/// Both attempt paths run every body here, before its outcome is recorded:
+/// a declaration a body built or decoded without holding its launch is the
+/// call's failure, and nothing it declared is realized (D10).
+fn unheld_launch(
+    outcome: &crate::ToolAttemptOutcome,
+    attempt: &crate::AttemptContext<'_>,
+) -> Option<crate::ProcessEnvRef> {
+    let starts: Vec<&crate::StartProcessIntent> = match outcome {
+        crate::ToolAttemptOutcome::Done { intents, .. } => intents
+            .intents
+            .iter()
+            .filter_map(|intent| match intent {
+                crate::ToolIntent::StartProcess(start) => Some(start.as_ref()),
+                _ => None,
+            })
+            .collect(),
+        crate::ToolAttemptOutcome::Pending(completion) => match &completion.resolved_by {
+            Some(crate::PendingResolver::DeclaredStart(start)) => vec![start.start()],
+            _ => Vec::new(),
+        },
+        crate::ToolAttemptOutcome::HostFailed(_) => Vec::new(),
+    };
+    starts
+        .into_iter()
+        .filter_map(|start| start.declaration.input().launch())
+        .map(|launch| &launch.env)
+        .find(|env| !attempt.held_launch(env))
+        .cloned()
+}
+
+fn launch_not_held(env_ref: &crate::ProcessEnvRef) -> ToolOutcome {
+    ToolOutcome::failure(
+        crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Internal,
+            "process_launch_not_held",
+            format!(
+                "a declared start names process environment `{env_ref}`, which this attempt did not hold"
+            ),
+        )
+        .with_cause(crate::ToolFailureCause::LaunchNotHeld {
+            env_ref: env_ref.to_string(),
+        }),
+    )
 }
 
 async fn build_attempt_context<'run>(

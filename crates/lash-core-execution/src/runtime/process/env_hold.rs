@@ -11,6 +11,7 @@ use lash_core_store::process_env::{ProcessEnv, ProcessEnvRefusal};
 
 use super::model::{ProcessEnvRef, ProcessEnvStore, process_env_ref_for_bytes};
 use crate::plugin::ProcessComponentRegistry;
+use crate::store::FleetFormatStore;
 use crate::{ArtifactStoreError, PluginError, ReferrerClaim};
 
 /// Which environment a start holds: one stated now, admitted and published
@@ -38,12 +39,13 @@ pub enum HoldEnvError {
     Fault(PluginError),
 }
 
-/// What a hold reads and writes through: the environment store, and the
-/// installed components a new environment is admitted against.
+/// What a hold reads and writes through: the environment store, and, for a
+/// hold that admits new environments, the installed components they are
+/// admitted against and the fleet record their writers are provisioned in.
 #[derive(Clone, Copy)]
 pub struct ProcessEnvPorts<'a> {
-    pub store: &'a dyn ProcessEnvStore,
-    pub components: Option<&'a ProcessComponentRegistry>,
+    store: &'a dyn ProcessEnvStore,
+    admission: Option<(&'a ProcessComponentRegistry, &'a dyn FleetFormatStore)>,
 }
 
 impl<'a> ProcessEnvPorts<'a> {
@@ -51,18 +53,20 @@ impl<'a> ProcessEnvPorts<'a> {
     pub fn published_only(store: &'a dyn ProcessEnvStore) -> Self {
         Self {
             store,
-            components: None,
+            admission: None,
         }
     }
 
-    /// Ports that admit new environments against `registry`.
+    /// Ports that admit new environments against `registry`, provisioning
+    /// its components' writer ranges in `fleet`.
     pub fn admitting(
         store: &'a dyn ProcessEnvStore,
         registry: &'a ProcessComponentRegistry,
+        fleet: &'a dyn FleetFormatStore,
     ) -> Self {
         Self {
             store,
-            components: Some(registry),
+            admission: Some((registry, fleet)),
         }
     }
 }
@@ -71,9 +75,11 @@ impl<'a> ProcessEnvPorts<'a> {
 ///
 /// `New` runs the full admission in order (ambient tools, unique ids,
 /// installed components, readable formats, each `validate`, each
-/// `build(process: None)`, a composable set), then publishes; the store
-/// admits each component's config format against the fleet writer record
-/// under `component:<id>`. A refused environment stores nothing.
+/// `build(process: None)`, a composable set), provisions the installed
+/// components' fleet writer ranges when the record does not name one the
+/// environment names, then publishes; the store admits each component's
+/// config format against the fleet writer record under `component:<id>`. A
+/// refused environment stores nothing.
 /// `Published` acquires the stored bytes; an absent reference is
 /// [`ProcessEnvRefusal::Unpublished`].
 ///
@@ -89,12 +95,15 @@ pub async fn hold_process_env(
 ) -> Result<ProcessEnvRef, HoldEnvError> {
     match selection {
         ProcessEnvSelection::New(env) => {
-            let Some(registry) = ports.components else {
+            let Some((registry, fleet)) = ports.admission else {
                 return Err(HoldEnvError::Fault(PluginError::Session(
                     "this start path admits no new process environment".into(),
                 )));
             };
             registry.admit(env).map_err(HoldEnvError::Refused)?;
+            provision_component_writers(registry, fleet, env)
+                .await
+                .map_err(|error| HoldEnvError::Fault(error.into()))?;
             let bytes = env.to_store_bytes().map_err(|error| {
                 HoldEnvError::Fault(PluginError::Session(format!(
                     "failed to encode process environment: {error}"
@@ -105,7 +114,7 @@ pub async fn hold_process_env(
                 .store
                 .publish_process_env(claim, &env_ref, &bytes)
                 .await
-                .map_err(publish_error)?;
+                .map_err(|error| publish_error(error, env))?;
             Ok(env_ref)
         }
         ProcessEnvSelection::Published(env_ref) => {
@@ -122,27 +131,52 @@ pub async fn hold_process_env(
     }
 }
 
+/// Provision the fleet writer ranges of `registry`'s components when the
+/// record does not name one `env` names (§3.3 step 8): the components get the
+/// provisioning session plugins get from their declarations, so a component
+/// writes past format 1 once the fleet permits it, and only its oldest
+/// writable format inside a rollback window. A recorded range is never moved.
+async fn provision_component_writers(
+    registry: &ProcessComponentRegistry,
+    fleet: &dyn FleetFormatStore,
+    env: &ProcessEnv,
+) -> Result<(), crate::StoreError> {
+    let ranges = fleet.plugin_writers().await?;
+    if env
+        .components()
+        .iter()
+        .any(|entry| ranges.permitted_writer(&entry.id().writer_key()).is_err())
+    {
+        fleet
+            .provision_plugin_writers(&registry.writer_registrations())
+            .await?;
+    }
+    Ok(())
+}
+
 /// A publish the fleet writer record refused is the environment's typed
-/// refusal; every other store failure is a fault.
-fn publish_error(error: ArtifactStoreError) -> HoldEnvError {
+/// refusal, naming the config format `env` states for the component; every
+/// other store failure is a fault.
+fn publish_error(error: ArtifactStoreError, env: &ProcessEnv) -> HoldEnvError {
     use crate::compat::CompatRefusal;
-    let refused = match &error {
+    let plugin = match &error {
         ArtifactStoreError::Incompatible {
-            refusal: CompatRefusal::PluginWriterOutsideRange { plugin, writer, .. },
-        } => Some((plugin, *writer)),
-        ArtifactStoreError::Incompatible {
-            refusal: CompatRefusal::PluginWriterUnprovisioned { plugin },
-        } => Some((plugin, 0)),
+            refusal:
+                CompatRefusal::PluginWriterOutsideRange { plugin, .. }
+                | CompatRefusal::PluginWriterUnprovisioned { plugin },
+        } => Some(plugin),
         _ => None,
     };
-    match refused.and_then(|(plugin, format)| {
-        plugin
-            .strip_prefix("component:")
-            .map(|id| (id.to_owned(), format))
-    }) {
-        Some((id, format)) => {
-            HoldEnvError::Refused(ProcessEnvRefusal::ConfigWriterOutsideFleetRange { id, format })
-        }
+    let refused = plugin.and_then(|plugin| {
+        env.components()
+            .iter()
+            .find(|entry| &entry.id().writer_key() == plugin)
+    });
+    match refused {
+        Some(entry) => HoldEnvError::Refused(ProcessEnvRefusal::ConfigWriterOutsideFleetRange {
+            id: entry.id().to_string(),
+            format: entry.config().format_version().get(),
+        }),
         None => HoldEnvError::Fault(error.into()),
     }
 }

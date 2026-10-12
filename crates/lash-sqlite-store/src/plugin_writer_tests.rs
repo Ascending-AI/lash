@@ -542,3 +542,43 @@ async fn a_deleted_writer_entry_refuses_writes_and_publishes_nothing() {
         .expect("the first format still bootstraps");
     assert_eq!(recorded_range(&location), Some((1, 1)));
 }
+
+/// A process component is provisioned from its declaration as a session
+/// plugin is (FIG-6061): on a finalized fleet, an environment naming a
+/// component that writes config format 2 natively publishes at format 2, and
+/// the record permits the component everything up to its native format.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_component_publishes_its_native_config_format_on_a_finalized_fleet() {
+    const COMPONENT: &str = "native-two";
+    let set = SqliteStoreSet::memory().await.expect("open the store set");
+    let store = set.process_env_store();
+    assert_eq!(
+        lash_core_execution::FleetFormatStore::fleet_format(store.as_ref()).version(),
+        FleetFormat::writable().max(),
+        "this build's own fleet epoch: the fleet is finalized"
+    );
+    let registry = lash_core_execution::testing::native_format_two_component(COMPONENT);
+    let env = lash_core_execution::testing::component_env(COMPONENT, version(2));
+    let claim =
+        lash_core_execution::ReferrerClaim::unguarded(
+            lash_core_execution::ArtifactReferrer::HostPin(
+                lash_core_execution::HostArtifactPin::mint(),
+            ),
+        )
+        .expect("host pin claim");
+    let held = lash_core_execution::hold_process_env(
+        &lash_core_execution::ProcessEnvPorts::admitting(store.as_ref(), &registry, store.as_ref()),
+        &claim,
+        &lash_core_execution::ProcessEnvSelection::New(env.clone()),
+    )
+    .await
+    .expect("the native format publishes");
+    assert_eq!(held, env.stable_ref().expect("the environment's reference"));
+    assert_eq!(
+        lash_core_execution::FleetFormatStore::plugin_writers(store.as_ref())
+            .await
+            .expect("read the ranges")
+            .permitted_writer(&format!("component:{COMPONENT}")),
+        Ok(VersionRange::between(1, 2))
+    );
+}

@@ -70,10 +70,28 @@ impl PendingResolver {
 /// session, or an identity that is not its declaring attempt's for index 0,
 /// is refused with nothing registered.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(from = "DeclaredStartWire")]
 pub struct DeclaredStart {
     // Both boxed: a pending completion rides every recorded attempt launch.
     start: Box<crate::StartProcessIntent>,
     identity: Box<crate::ToolIntentIdentity>,
+}
+
+/// What a [`DeclaredStart`] decodes from: its start through the
+/// crate-private stored form.
+#[derive(serde::Deserialize)]
+struct DeclaredStartWire {
+    start: Box<crate::tool_intent::StartProcessIntentWire>,
+    identity: Box<crate::ToolIntentIdentity>,
+}
+
+impl From<DeclaredStartWire> for DeclaredStart {
+    fn from(wire: DeclaredStartWire) -> Self {
+        Self {
+            start: wire.start.into(),
+            identity: wire.identity,
+        }
+    }
 }
 
 impl PartialEq for DeclaredStart {

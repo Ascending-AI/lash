@@ -76,8 +76,11 @@ fn ingress_start_without_lifetime_is_refused_before_submission() {
 pub(super) const INGRESS_ENGINE_KIND: &str = "ingress-admission-engine";
 
 /// Engine registered on the ingress host, so a submitted start can be checked
-/// against a kind that exists and one that does not.
-struct IngressAdmissionEngine;
+/// against a kind that exists and one that does not. With `defaults` it
+/// takes settings and answers those as its node's own.
+struct IngressAdmissionEngine {
+    defaults: Option<serde_json::Value>,
+}
 
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for IngressAdmissionEngine {
@@ -141,9 +144,9 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
         _payload: &serde_json::Value,
         settings: Option<&lash_core::EngineSettings>,
     ) -> std::result::Result<(), lash_core::PluginError> {
-        match settings {
-            None => Ok(()),
-            Some(_) => Err(lash_core::PluginError::Registration(format!(
+        match (settings, &self.defaults) {
+            (None, _) | (Some(_), Some(_)) => Ok(()),
+            (Some(_), None) => Err(lash_core::PluginError::Registration(format!(
                 "process engine `{}` takes no settings",
                 self.kind()
             ))),
@@ -154,7 +157,7 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
         &self,
         _payload: &serde_json::Value,
     ) -> std::result::Result<Option<lash_core::EngineSettings>, lash_core::PluginError> {
-        Ok(None)
+        Ok(self.defaults.clone().map(lash_core::EngineSettings::new))
     }
 
     fn advance(
@@ -232,7 +235,9 @@ impl lash_core::plugin::SessionPlugin for IngressAdmissionEnginePlugin {
     }
 }
 
-struct IngressAdmissionEngineFactory;
+struct IngressAdmissionEngineFactory {
+    defaults: Option<serde_json::Value>,
+}
 
 impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
     fn id(&self) -> &'static str {
@@ -245,7 +250,9 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
     ) -> std::result::Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError>
     {
         Ok(vec![lash_core::ProcessEngineRegistration::new(
-            Arc::new(IngressAdmissionEngine),
+            Arc::new(IngressAdmissionEngine {
+                defaults: self.defaults.clone(),
+            }),
             lash_core::ProcessEngineAdmission::new(INGRESS_ENGINE_KIND, admit_ingress_engine),
         )?])
     }
@@ -271,18 +278,25 @@ async fn ingress_engine_core(
     ingress_engine_core_with(backend, |builder| builder).await
 }
 
+/// A core over `backend` serving the ingress engine, whose node defaults are
+/// `defaults`.
+fn ingress_node_builder(
+    backend: &lash_core::Backend,
+    defaults: Option<serde_json::Value>,
+) -> crate::core::LashCoreBuilder {
+    explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+        .plugin(Arc::new(IngressAdmissionEngineFactory { defaults }))
+}
+
 /// [`ingress_engine_core`] with the host's own additions to its builder.
 pub(super) async fn ingress_engine_core_with(
     backend: lash_core::Backend,
     configure: impl FnOnce(crate::core::LashCoreBuilder) -> crate::core::LashCoreBuilder,
 ) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
     let registry = backend.process_registry();
-    let core = configure(
-        explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-            .plugin(Arc::new(IngressAdmissionEngineFactory)),
-    )
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = configure(ingress_node_builder(&backend, None))
+        .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
@@ -527,6 +541,104 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
         ingress_identity.definition_id,
         Some(expected.id()),
         "the shared identity is the payload's admission"
+    );
+    Ok(())
+}
+
+/// DECLARED-SETTINGS-REALIZE (D4, FIG-6061): a start declared under settings
+/// S registers under S, though the node that registers it defaults to S′.
+///
+/// Node A submits a host engine start stated under A's own defaults. The
+/// submission ledger admits it, its declaration with it, and the start is
+/// refused before registration: the environment its launch names is not yet
+/// published. Node B, whose engine defaults differ, realizes the same
+/// identity once the environment is published.
+#[tokio::test]
+async fn a_journaled_host_start_registers_the_settings_it_declared() -> Result<()> {
+    let backend = sqlite_memory_store_backend().await;
+    let registry = backend.process_registry();
+    let node = |defaults: u64, boot: &str| {
+        ingress_node_builder(&backend, Some(serde_json::json!({ "budget": defaults }))).build(
+            lash_core::LeaseOwnerIdentity::opaque(
+                lash_core::LeaseOwnerId::new(format!("declared-settings-{boot}")),
+                lash_core::LeaseIncarnationId::new(format!("declared-settings-{boot}-boot")),
+            ),
+        )
+    };
+    let first = node(5, "first")?;
+    let later = node(6, "later")?;
+    let session = crate::SessionId::parse(SESSION).expect("nonblank host identity");
+    let _session = first
+        .session(session.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let payload = serde_json::json!({"program": "known"});
+    let declared = first
+        .processes()
+        .engine_defaults(INGRESS_ENGINE_KIND, &payload)?;
+    let restarted = later
+        .processes()
+        .engine_defaults(INGRESS_ENGINE_KIND, &payload)?;
+    assert_ne!(declared, restarted, "the nodes' defaults differ");
+    // An environment no node has published until A's submission refused.
+    let env = lash_core::testing::process_env_with_limit(61);
+    let env_ref = env.stable_ref().expect("the environment encodes");
+    let start = || {
+        lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
+            owner: crate::RuntimeOwner::Session(session.clone()),
+            declaration: lash_core::ProcessStartDeclaration::engine(
+                INGRESS_ENGINE_KIND,
+                payload.clone(),
+                lash_core::testing::declared_launch_for_testing(lash_core::EngineLaunch::new(
+                    env_ref.clone(),
+                    declared.clone(),
+                )),
+                lash_core::ProcessOriginator::host(),
+                lash_core::Lifetime::Detached,
+            ),
+        }))
+    };
+    let scope = || lash_core::ExecutionScope::turn(SESSION, "declared-settings");
+    let ingress = first.tool_intents(session.clone(), scope())?;
+    let refused = ingress
+        .submit(
+            ingress.key("declared-settings", 0).expect("submission key"),
+            start(),
+        )
+        .await;
+    assert!(
+        matches!(
+            &refused,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: lash_core::ToolIntentExecutionOutcome::Refused { .. },
+                ..
+            }
+        ),
+        "A's submission is admitted and refused before registration: {refused:?}"
+    );
+    assert_eq!(registered_process_count(&registry).await?, 0);
+
+    later
+        .host_artifacts()
+        .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
+        .await?;
+    let ingress = later.tool_intents(session.clone(), scope())?;
+    let admitted = ingress
+        .submit(
+            ingress.key("declared-settings", 0).expect("submission key"),
+            start(),
+        )
+        .await;
+    let row = registry
+        .get_process(&started_process_id(&admitted))
+        .await?
+        .expect("B registers the start");
+    assert_eq!(
+        row.engine_settings(),
+        declared.as_ref(),
+        "the row records the declared settings, not the registering node's"
     );
     Ok(())
 }

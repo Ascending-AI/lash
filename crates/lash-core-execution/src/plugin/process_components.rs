@@ -359,6 +359,24 @@ impl ProcessComponentRegistry {
         serves.into_iter().collect()
     }
 
+    /// What each installed component declares about the config formats it
+    /// writes, keyed `component:<id>` (§2.6): what the fleet record's writer
+    /// ranges for components are provisioned from, as a session plugin's are
+    /// from its declaration.
+    pub fn writer_registrations(
+        &self,
+    ) -> Vec<crate::store::plugin_writers::PluginWriterRegistration> {
+        self.declarations()
+            .map(
+                |declaration| crate::store::plugin_writers::PluginWriterRegistration {
+                    plugin: declaration.id.writer_key(),
+                    native: declaration.config_format,
+                    writable: declaration.writable_config_formats.clone(),
+                },
+            )
+            .collect()
+    }
+
     /// Admission steps 2–7 of a new environment (§3.3): unique ids,
     /// installed components, readable formats, each `validate`, each
     /// `build(process: None)`, and a composable set. Ambient tools are

@@ -13,8 +13,14 @@ use super::{
 /// redrive of the declaration presents the same key and starts the same
 /// process. The process id is minted by the registrar at realization and read
 /// back off the recorded result (ADR 0107).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+///
+/// It does not decode: only its constructors make one, so an engine-bearing
+/// declaration carries a [`DeclaredLaunch`] its declaring attempt held
+/// (D10). A journaled declaration decodes through the crate-private
+/// [`ProcessStartDeclarationWire`] only the runtime reads, and every launch
+/// a tool body returns is checked against what its attempt held before the
+/// outcome is recorded.
+#[derive(Clone, Debug, Serialize)]
 pub struct ProcessStartDeclaration {
     /// What the start runs: an input, or the definition one is resolved from.
     /// An engine-bearing target carries the launch its declaring attempt
@@ -29,6 +35,33 @@ pub struct ProcessStartDeclaration {
     pub identity: Option<super::DeclaredProcessIdentity>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observers: Vec<SessionId>,
+}
+
+/// The stored form of a [`ProcessStartDeclaration`], which the runtime
+/// decodes a journaled declaration from. Crate-private: a tool cannot mint a
+/// declaration by decoding one.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ProcessStartDeclarationWire {
+    input: ProcessStartTarget,
+    lifetime: LifetimeDecision,
+    originator: super::ProcessOriginator,
+    #[serde(default)]
+    identity: Option<super::DeclaredProcessIdentity>,
+    #[serde(default)]
+    observers: Vec<SessionId>,
+}
+
+impl From<ProcessStartDeclarationWire> for ProcessStartDeclaration {
+    fn from(wire: ProcessStartDeclarationWire) -> Self {
+        Self {
+            input: wire.input,
+            lifetime: wire.lifetime,
+            originator: wire.originator,
+            identity: wire.identity,
+            observers: wire.observers,
+        }
+    }
 }
 
 impl ProcessStartDeclaration {

@@ -30,6 +30,7 @@ pub mod behavior_transcript;
 #[cfg(feature = "testing")]
 pub mod trace_capture;
 
+mod component_fixtures;
 pub mod execution_context_builder;
 #[cfg(feature = "testing")]
 pub mod kernel_internals;
@@ -40,6 +41,7 @@ pub mod prompt;
 pub mod sansio_transcript;
 pub mod sql_work;
 pub mod tool_fixtures;
+pub use component_fixtures::{component_env, native_format_two_component};
 
 /// A recording or fault layer over any effect host (FIG-3580).
 pub use crate::runtime::process::{
@@ -170,9 +172,12 @@ pub async fn publish_process_env_for_testing(
     claim: &crate::ReferrerClaim,
     env: &crate::ProcessEnv,
 ) -> Result<crate::ProcessEnvRef, crate::PluginError> {
+    /// No component is installed, so no writer range is ever provisioned.
+    struct NoFleetRecord;
+    lash_core_store::impl_current_fleet_format!(NoFleetRecord);
     let components = crate::plugin::ProcessComponentRegistry::new();
     crate::hold_process_env(
-        &crate::ProcessEnvPorts::admitting(env_store, &components),
+        &crate::ProcessEnvPorts::admitting(env_store, &components, &NoFleetRecord),
         claim,
         &crate::ProcessEnvSelection::New(env.clone()),
     )
@@ -282,6 +287,30 @@ pub fn held_engine_declaration(
         originator,
         lifetime,
     )
+}
+
+/// Hold the fixture environment under `context`'s execution claim for a
+/// start of [`held_engine_input`] with `payload`, as a start policy's choice
+/// is held (D10): the launch a tool body declares the held engine under.
+///
+/// # Errors
+///
+/// The hold's refusal or fault.
+#[cfg(any(test, feature = "testing"))]
+pub async fn held_engine_launch(
+    context: &crate::AttemptContext<'_>,
+    payload: &serde_json::Value,
+) -> Result<crate::DeclaredLaunch, crate::HoldEnvError> {
+    context
+        .declare_engine_launch(
+            &crate::ProcessStartChoice {
+                env: crate::ProcessEnvChoice::Published(process_execution_env_fixture_ref()),
+                engine_settings: None,
+            },
+            HELD_PROCESS_ENGINE_KIND,
+            payload,
+        )
+        .await
 }
 
 /// A registration of [`held_engine_input`], whose launch names the fixture

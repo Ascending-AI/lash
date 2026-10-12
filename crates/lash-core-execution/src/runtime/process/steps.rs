@@ -129,9 +129,9 @@ pub enum StepToolsError {
 /// session holds the process's namespaces for as long as the activation
 /// does.
 ///
-/// The first tool step that runs builds the tools; every later step of
-/// the activation runs on the same ones, so a step reduces against what the
-/// steps before it committed, and two concurrent steps that change one
+/// The activation's [`ProcessSteps::prepare`] builds the tools before any
+/// step is admitted or resumed; every step of the activation runs on the
+/// same ones, so a step reduces against what the steps before it committed, and two concurrent steps that change one
 /// namespace compose as a round's members do. The lifecycle publishes each
 /// committed outcome's resolutions here ([`publish_state`](Self::publish_state));
 /// those committed before the tools are built publish into them before any
@@ -166,6 +166,12 @@ impl StepRuntime {
     #[must_use]
     pub fn cx(&self) -> &ActorContext {
         &self.cx
+    }
+
+    /// The activation's step tools, once [`tools`](Self::tools) built them.
+    #[must_use]
+    pub fn built_tools(&self) -> Option<Arc<ProcessStepTools>> {
+        self.tools.get().cloned()
     }
 
     /// The activation's step tools: built by `build` the first time, with
@@ -235,16 +241,21 @@ pub trait ProcessSteps: Send + Sync {
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal>;
 
-    /// Build `process`'s composition, before the activation admits or
-    /// resumes any step of it (§5.1). [`StepRefusal::CompositionUnavailable`]
-    /// parks the process and settles nothing; any other refusal is a fault
-    /// the next pass meets again.
+    /// Build `process`'s composition and the activation's step tools into
+    /// `runtime`, before the activation admits or resumes any step of it
+    /// (§5.1), so no step body builds them.
+    /// [`StepRefusal::CompositionUnavailable`] parks the process and settles
+    /// nothing; any other refusal is a fault the next pass meets again.
     ///
     /// # Errors
     ///
     /// [`StepRefusal`].
-    async fn prepare(&self, process: &ProcessRecord) -> Result<(), StepRefusal> {
-        let _ = process;
+    async fn prepare(
+        &self,
+        runtime: &Arc<StepRuntime>,
+        process: &ProcessRecord,
+    ) -> Result<(), StepRefusal> {
+        let _ = (runtime, process);
         Ok(())
     }
 

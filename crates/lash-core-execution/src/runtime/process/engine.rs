@@ -590,11 +590,16 @@ impl ProcessEngineRegistry {
 
     /// The ports a start holds its environment through: the artifact
     /// stores' environment store, admitting new environments against this
-    /// registry's components.
+    /// registry's components and provisioning their writers in the stores'
+    /// fleet record.
     pub fn env_ports(&self) -> Option<super::ProcessEnvPorts<'_>> {
-        self.artifact_ports
-            .as_deref()
-            .map(|ports| super::ProcessEnvPorts::admitting(ports.env().as_ref(), &self.components))
+        self.artifact_ports.as_deref().map(|ports| {
+            super::ProcessEnvPorts::admitting(
+                ports.env().as_ref(),
+                &self.components,
+                ports.fleet().as_ref(),
+            )
+        })
     }
 
     #[must_use]

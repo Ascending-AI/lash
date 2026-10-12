@@ -110,14 +110,20 @@ struct ActivityTools {
 
 impl ActivityTools {
     /// One detached held child of the calling session's frame.
-    fn start(
+    async fn start(
         call: &ToolCall<'_>,
         label: &str,
     ) -> Result<lash_core::StartProcessIntent, lash_core::PluginError> {
         let session_id = call.context.session_id()?.clone();
         let agent_frame_id = call.context.agent_frame_id()?.clone();
-        let declaration = lash_core_execution::testing::held_engine_declaration(
-            serde_json::json!({ "activity-law": label }),
+        let payload = serde_json::json!({ "activity-law": label });
+        let launch = lash_core_execution::testing::held_engine_launch(call.context, &payload)
+            .await
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+        let declaration = lash_core::ProcessStartDeclaration::engine(
+            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+            payload,
+            launch,
             lash_core::ProcessOriginator::Session {
                 session_id: session_id.clone(),
                 agent_frame_id: Some(agent_frame_id),
@@ -172,7 +178,7 @@ impl lash_core::ToolProvider for ActivityTools {
         if !call.args["start"].as_bool().unwrap_or_default() {
             return lash_core::ToolAttemptOutcome::done(answer, lash_core::ToolIntents::default());
         }
-        match Self::start(&call, &label) {
+        match Self::start(&call, &label).await {
             Ok(start) => lash_core::ToolAttemptOutcome::done(
                 answer,
                 lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(

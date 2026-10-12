@@ -503,7 +503,7 @@ impl ProcessActivation {
         // The composition builds before any step is admitted or resumed: one
         // this node cannot build parks the process and settles nothing, so
         // an admitted step is never answered `Interrupted` for it (D3).
-        match self.steps.prepare(&record).await {
+        match self.steps.prepare(&live.bodies.runtime, &record).await {
             Ok(()) => {}
             Err(StepRefusal::CompositionUnavailable { component, reason }) => {
                 let reason = ProcessParkReason::CompositionUnavailable {

@@ -120,6 +120,16 @@ macro_rules! tool_intent_payload {
     (PublishDefinition) => { Box<PublishDefinitionIntent> };
 }
 
+/// The stored form each [`ToolIntent`] variant decodes from: its payload,
+/// except a start's, which decodes through the crate-private
+/// [`StartProcessIntentWire`].
+macro_rules! tool_intent_wire_payload {
+    (StartProcess) => { Box<StartProcessIntentWire> };
+    (CancelProcess) => { CancelProcessIntent };
+    (GetDefinition) => { GetDefinitionIntent };
+    (PublishDefinition) => { Box<PublishDefinitionIntent> };
+}
+
 macro_rules! define_tool_intent {
     ($($variant:ident $wire:literal,)*) => {
         /// Durable follow-on work a recorded leaf attempt may request.
@@ -129,9 +139,29 @@ macro_rules! define_tool_intent {
         /// than a hand-kept mirror.
         /// **Integrator class 3: protocol and process-engine implementors.**
         #[derive(Clone, Debug, Serialize, Deserialize)]
-        #[serde(tag = "kind", content = "intent", rename_all = "snake_case")]
+        #[serde(
+            tag = "kind",
+            content = "intent",
+            rename_all = "snake_case",
+            from = "ToolIntentWire"
+        )]
         pub enum ToolIntent {
             $($variant(tool_intent_payload!($variant)),)*
+        }
+
+        /// What a [`ToolIntent`] decodes from.
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", content = "intent", rename_all = "snake_case")]
+        enum ToolIntentWire {
+            $($variant(tool_intent_wire_payload!($variant)),)*
+        }
+
+        impl From<ToolIntentWire> for ToolIntent {
+            fn from(wire: ToolIntentWire) -> Self {
+                match wire {
+                    $(ToolIntentWire::$variant(payload) => Self::$variant(payload.into()),)*
+                }
+            }
         }
 
         impl ToolIntent {
@@ -377,7 +407,7 @@ pub enum ToolIntentSubmissionAdmission {
     Reclaimed,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 /// The declaration carries no process id and no key. Realization derives the
 /// key with [`crate::StartKeyDerivation::for_tool_intent`] from this declaration's own
 /// intent identity, so every redrive presents the same key and starts the
@@ -388,6 +418,30 @@ pub struct StartProcessIntent {
     pub owner: RuntimeOwner,
     /// Durable process-start declaration, minus the derived key.
     pub declaration: crate::ProcessStartDeclaration,
+}
+
+/// The stored form of a [`StartProcessIntent`]: it decodes only inside a
+/// [`ToolIntent`] or a [`DeclaredStart`](crate::DeclaredStart), whose
+/// declaration the runtime checks before it records or realizes it.
+#[derive(Deserialize)]
+pub(crate) struct StartProcessIntentWire {
+    owner: RuntimeOwner,
+    declaration: crate::runtime::process::model::ProcessStartDeclarationWire,
+}
+
+impl From<StartProcessIntentWire> for StartProcessIntent {
+    fn from(wire: StartProcessIntentWire) -> Self {
+        Self {
+            owner: wire.owner,
+            declaration: wire.declaration.into(),
+        }
+    }
+}
+
+impl From<Box<StartProcessIntentWire>> for Box<StartProcessIntent> {
+    fn from(wire: Box<StartProcessIntentWire>) -> Self {
+        Box::new((*wire).into())
+    }
 }
 
 impl StartProcessIntent {
@@ -855,27 +909,5 @@ mod tests {
         assert!(encoded.get("kind").is_none());
         assert!(encoded.get("completed_at_ms").is_none());
         assert!(encoded["settlement"]["outcome"].get("identity").is_none());
-    }
-
-    #[test]
-    fn start_process_intent_without_a_lifetime_is_refused() {
-        let declaration = crate::testing::held_engine_declaration(
-            serde_json::Value::Null,
-            crate::ProcessOriginator::host(),
-            crate::Lifetime::Detached,
-        );
-        let mut payload = serde_json::to_value(declaration).expect("serialize start declaration");
-        assert!(
-            payload
-                .as_object_mut()
-                .expect("declaration object")
-                .remove("lifetime")
-                .is_some()
-        );
-        let error = serde_json::from_value::<StartProcessIntent>(serde_json::json!({
-            "session_id": "session", "declaration": payload,
-        }))
-        .expect_err("lifetime absence must be refused");
-        assert!(error.to_string().contains("lifetime"));
     }
 }

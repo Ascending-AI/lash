@@ -572,8 +572,156 @@ async fn a_pruned_process_leaves_no_run_fact_or_wait(tier: Tier) {
     world.shutdown().await;
 }
 
+/// A process environment store that fails, once, the first environment read
+/// a tool step's body makes: what the body would meet rebuilding the
+/// composition its activation already prepared. A read is the body's when
+/// the worker's tool step is on its stack; `activation_reads` counts the
+/// activation's own reads, so the law fails loudly where frames are not
+/// symbolized.
+struct BodyReadFault {
+    inner: Arc<dyn lash_core::ProcessEnvStore>,
+    armed: std::sync::atomic::AtomicBool,
+    activation_reads: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl BodyReadFault {
+    fn over(
+        inner: Arc<dyn lash_core::ProcessEnvStore>,
+        activation_reads: Arc<std::sync::atomic::AtomicUsize>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            inner,
+            armed: std::sync::atomic::AtomicBool::new(true),
+            activation_reads,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessEnvStore for BodyReadFault {
+    async fn publish_process_env(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        env_ref: &lash_core::ProcessEnvRef,
+        bytes: &[u8],
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        self.inner.publish_process_env(claim, env_ref, bytes).await
+    }
+
+    async fn acquire_process_env(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        env_ref: &lash_core::ProcessEnvRef,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        self.inner.acquire_process_env(claim, env_ref).await
+    }
+
+    async fn end_process_env_referrer(
+        &self,
+        cleanup: &lash_core::ResolvedArtifactCleanup,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        self.inner.end_process_env_referrer(cleanup).await
+    }
+
+    async fn get_process_env(
+        &self,
+        env_ref: &lash_core::ProcessEnvRef,
+    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
+        let stack = std::backtrace::Backtrace::force_capture().to_string();
+        if stack.contains("ProcessActivation>::pass") {
+            self.activation_reads
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        if stack.contains("DurableProcessWorker>::tool_step")
+            && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(lash_core::ArtifactStoreError::Backend(
+                "the law's connection reset".to_owned(),
+            ));
+        }
+        self.inner.get_process_env(env_ref).await
+    }
+}
+
+/// An activation's steps run on the tools its `prepare` built (FIG-6061): a
+/// retryable store fault a step body would meet rebuilding them never
+/// settles the step. The process's body issues one tool step, and the
+/// environment store fails the first read a tool step's body makes; the
+/// body reads none, so the tool runs once and the process answers its
+/// result.
+async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
+    let witness = Arc::new(Witness::default());
+    let probe_witness = Arc::clone(&witness);
+    let activation_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let store_reads = Arc::clone(&activation_reads);
+    let Some(world) = World::new(tier, move |backend| {
+        let layered = lash_core::testing::runtime_helpers::LayeredBackend::over(backend.clone())
+            .map_process_env_store(|inner| {
+                BodyReadFault::over(inner, store_reads) as Arc<dyn lash_core::ProcessEnvStore>
+            })
+            .into_backend();
+        let probe: Arc<dyn lash_core::ToolProvider> = Arc::new(Probe {
+            witness: probe_witness,
+            backend: layered.clone(),
+        });
+        lash::LashCore::rlm_builder(
+            layered.clone(),
+            served::rlm(&layered, None, sim::untimed_workers()),
+        )
+        .plugin(Arc::new(
+            lash::process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::starter,
+                lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
+            ),
+        ))
+        .process_component(
+            lash_core::testing::tool_component(PROBE_COMPONENT, Arc::clone(&probe)),
+            PROBE_COMPONENT,
+        )
+        .tools(probe)
+    })
+    .await
+    else {
+        return;
+    };
+    let output = world
+        .run(
+            "store-fault-after-prepare",
+            served::spec(64),
+            vec![process_cell(&["after-prepare"])],
+        )
+        .await;
+    served::assert_answered("the turn that awaits the process", &output);
+    let processes = lash_core::testing::process_roster_records_for_fixture(
+        world.backend.process_registry().as_ref(),
+        &lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        },
+    )
+    .await
+    .expect("the registry lists its processes");
+    let [process] = processes.as_slice() else {
+        panic!("one process: {processes:#?}");
+    };
+    let Some(lash_core::ProcessAwaitOutput::Settled { output }) = process.outcome() else {
+        panic!("the process settled: {process:#?}");
+    };
+    assert!(
+        matches!(&output.outcome, lash_core::ToolCallOutcome::Success(_)),
+        "the process answers its step's result, not a settled build fault: {output:?}"
+    );
+    witness.only("after-prepare");
+    assert!(
+        activation_reads.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "the fault tells the activation's reads from a body's"
+    );
+    world.shutdown().await;
+}
+
 tiered_laws!(
     a_pruned_process_leaves_no_run_fact_or_wait,
+    a_store_fault_after_prepare_never_settles_a_step,
     process_admission_names_each_call,
     tool_call_limit_counts_what_a_process_holds,
     process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,
