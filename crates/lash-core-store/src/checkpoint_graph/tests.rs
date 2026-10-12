@@ -1104,3 +1104,50 @@ fn node_ids_spell_their_blob_ref() {
     assert_eq!(NodeId::from_hex(&node.id.to_hex()), Some(node.id));
     assert_eq!(NodeId::from_hex(&node.id.to_hex().to_uppercase()), None);
 }
+
+/// CHECKPOINT-READ-POLICY: graph readers carry the deployment's recursive token limit.
+#[test]
+fn checkpoint_read_policy_honors_the_configured_kernel_decode_depth() {
+    let value = lash_kernel_doc::FrozenDatum(lash_kernel_doc::Datum::Tuple(vec![
+        lash_kernel_doc::Datum::Tuple(vec![lash_kernel_doc::Datum::Null]),
+    ]));
+    let mut staged = staging();
+    let body = encode_body(&value);
+    let id = staged
+        .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&body))
+        .unwrap();
+    let policy = lash_kernel_doc::KernelDataLimits::new(64, 352, 1, 512, 128).unwrap();
+    let mut decoder = GraphDecoder::new(
+        &staged,
+        DecodeLimits {
+            kernel_data: policy,
+            ..limits()
+        },
+    );
+    assert!(matches!(
+        decoder.decode::<lash_kernel_doc::FrozenDatum>(id, NodeKind::FROZEN_VALUE),
+        Err(GraphRefusal::DecodeLimit {
+            dimension: DecodeDimension::Depth,
+            limit: 1,
+            ..
+        })
+    ));
+}
+
+/// GRAPH-READ-ADMISSION: deployment read budgets are independent of what the writer admitted.
+#[test]
+fn a_deployment_graph_read_policy_refuses_its_configured_byte_budget() {
+    let mut staged = staging();
+    let value = lash_kernel_doc::FrozenDatum(lash_kernel_doc::Datum::Text("payload".into()));
+    let body = encode_body(&value);
+    let id = staged
+        .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&body))
+        .unwrap();
+    let policy =
+        GraphReadPolicy::new(1, 2, 3, 64, lash_kernel_doc::KernelDataLimits::standard()).unwrap();
+    let mut decoder = GraphDecoder::new(&staged, policy.owner());
+    assert!(matches!(
+        decoder.decode::<lash_kernel_doc::FrozenDatum>(id, NodeKind::FROZEN_VALUE),
+        Err(GraphRefusal::DecodeLimit { limit: 1, .. })
+    ));
+}

@@ -25,6 +25,11 @@ pub trait ExecutionState: Send + Sync {
 
     fn trace_limits(&self) -> lash_trace::TraceLimits;
 
+    /// Deployment payload admission limits associated with this state sink.
+    fn data_limits(&self) -> crate::runtime::RuntimeDataLimits {
+        crate::runtime::RuntimeDataLimits::standard()
+    }
+
     /// Identity of the state sink scoped to a recorded body.
     fn proposal_key(&self) -> usize;
     fn state_segment(&self) -> crate::tool_run::SegmentOrdinal;
@@ -81,6 +86,9 @@ impl ExecutionState for PluginSession {
     fn trace_limits(&self) -> lash_trace::TraceLimits {
         self.host().trace_runtime().limits()
     }
+    fn data_limits(&self) -> crate::runtime::RuntimeDataLimits {
+        PluginSession::data_limits(self)
+    }
     fn proposal_key(&self) -> usize {
         Arc::as_ptr(&self.state) as usize
     }
@@ -115,5 +123,33 @@ pub(crate) fn proposal_failure_message(error: &PluginError) -> String {
     match error {
         PluginError::State(cause) => cause.to_string(),
         error => error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExecutionState;
+    use crate::plugin::{PluginHost, PluginSessionRequest, SessionAuthorityContext};
+    use std::sync::Arc;
+
+    /// INTENT-ADMISSION-POLICY: dispatches retain the deployment's intent limits through the state sink.
+    #[test]
+    fn configured_intent_limits_follow_the_state_sink() {
+        let mut limits = crate::runtime::RuntimeDataLimits::standard();
+        limits.tool_intents = crate::ToolIntentLimits::new(2, 4_096, 1)
+            .expect("the configured count fits the intent index");
+        let session = PluginHost::empty(
+            crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
+        )
+        .with_data_limits(limits)
+        .build_session(PluginSessionRequest::creation(
+            "configured-intent-limits",
+            SessionAuthorityContext::ambient_fixture(),
+        ))
+        .expect("plugin session");
+        let state: Arc<dyn ExecutionState> = session;
+
+        assert_eq!(state.data_limits(), limits);
     }
 }

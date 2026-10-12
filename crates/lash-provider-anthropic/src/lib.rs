@@ -13,7 +13,7 @@ mod support;
 #[cfg(feature = "testing")]
 pub mod testing;
 
-pub use config::{AnthropicAuthScheme, AnthropicProvider, DEFAULT_BASE_URL};
+pub use config::{AnthropicAuthScheme, AnthropicProvider, AnthropicStreamLimits, DEFAULT_BASE_URL};
 
 #[cfg(test)]
 mod tests {

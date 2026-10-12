@@ -1103,3 +1103,29 @@ async fn inbox_authority_resolves_for_any_account_name() {
 mod session_delete_faults;
 #[path = "tests/session_delete.rs"]
 mod session_delete_tests;
+
+/// WORKBENCH-DATA-POLICY: deployment JSON overrides each independent admission cut.
+#[test]
+fn workbench_data_limits_are_selected_from_typed_deployment_config() {
+    let limits: WorkbenchDataLimits = serde_json::from_str(
+        r#"{"attachment_bytes":7,"attachment_name_chars":8,"request_body_bytes":9}"#,
+    )
+    .unwrap();
+    assert!(limits.admit_attachment_name("abcdefgh").is_ok());
+    assert!(
+        limits
+            .admit_attachment_name("abcdefghi")
+            .unwrap_err()
+            .message
+            .contains("8 characters")
+    );
+    assert!(
+        limits
+            .admit_attachment_bytes(8)
+            .unwrap_err()
+            .message
+            .contains("7 byte")
+    );
+    assert!(limits.admit_attachment_bytes(7).is_ok());
+    assert_eq!(limits.request_body_bytes, 9);
+}

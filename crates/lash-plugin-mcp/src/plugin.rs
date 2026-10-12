@@ -392,6 +392,7 @@ mod tests {
         let servers = BTreeMap::from([(
             "lifecycle".to_string(),
             McpServerConfig {
+                data_limits: Default::default(),
                 startup_timeout_ms: 5_000,
                 call_policy: crate::McpCallPolicy {
                     call_timeout_ms: 5_000,

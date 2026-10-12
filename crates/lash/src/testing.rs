@@ -301,6 +301,7 @@ impl LanguageObservationDispatcher {
                     std::sync::Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
                         lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
                     )),
+                    lash_trace::ObservationWorkLimits::standard(),
                 ),
             ),
         }

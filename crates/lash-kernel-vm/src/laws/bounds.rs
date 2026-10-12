@@ -526,3 +526,28 @@ main {
         exceeded(Bound::RequestsPerPark, 2)
     );
 }
+
+/// KERNEL-DATA-POLICY: deployment value-depth guards reach tuple construction.
+#[test]
+fn a_host_value_depth_policy_is_honored_by_a_kernel_run() {
+    let mut embedder = Embedder::new("main { return (1, (2, 3)) }");
+    let (program, _) = embedder.program(false);
+    let limits = lash_kernel_doc::KernelDataLimits::new(64, 352, 512, 512, 1).unwrap();
+    embedder.machine = KernelMachine::start_with_data_limits(
+        program,
+        ROOMY,
+        Start {
+            target: Target::Main,
+            args: Vec::new(),
+            bindings: crate::Bindings::default(),
+        },
+        limits,
+    )
+    .unwrap();
+    let mut world = World::default();
+    let step = embedder.machine.run(&mut world, 100_000).unwrap();
+    assert!(
+        format!("{step:?}").contains("configured 1-level"),
+        "{step:?}"
+    );
+}

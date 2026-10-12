@@ -421,21 +421,25 @@ pub(crate) enum LogicalOp {
     Nullish,
 }
 
-/// The largest TypeScript cell this dialect will read. Sources above it reject
+/// The standard TypeScript cell admission budget. Sources above it reject
 /// with `TS_SOURCE_TOO_LARGE`; the bound is what makes the parse stack
 /// reservation below finite. 64 KiB is roughly 1 600 lines of TypeScript.
 pub const MAX_SOURCE_BYTES: usize = 64 * 1024;
+
+mod source_limits;
+pub use source_limits::SourceLimits;
 
 mod parser_stack;
 pub use parser_stack::ParserStack;
 use parser_stack::parse_on_proportional_stack;
 
-fn guard_source_size(source: &str) -> Result<(), Diagnostic> {
-    if source.len() > MAX_SOURCE_BYTES {
+fn guard_source_size(source: &str, limits: SourceLimits) -> Result<(), Diagnostic> {
+    let max_bytes = limits.max_bytes();
+    if source.len() > max_bytes {
         return Err(Diagnostic::with_repair(
             DiagnosticCode::SourceTooLarge,
             format!(
-                "TypeScript source is {} bytes, over the {MAX_SOURCE_BYTES}-byte limit",
+                "TypeScript source is {} bytes, over the configured {max_bytes}-byte source limit",
                 source.len()
             ),
             "split the work across several cells",
@@ -448,22 +452,31 @@ fn guard_source_size(source: &str) -> Result<(), Diagnostic> {
 /// The full front-end entry: bound the source, reject nesting with a
 /// source-level diagnostic, then parse on a stack sized for the source.
 pub(crate) fn parse(source: &str) -> Result<Program, Diagnostic> {
-    guard_source_size(source)?;
-    guard_source_nesting(source)?;
-    parse_on_proportional_stack(source, false)
+    parse_with_limits(source, SourceLimits::standard())
+}
+pub(crate) fn parse_with_limits(source: &str, limits: SourceLimits) -> Result<Program, Diagnostic> {
+    guard_source_size(source, limits)?;
+    guard_source_nesting(source, limits.max_nesting())?;
+    parse_on_proportional_stack(source, false, limits)
 }
 
-fn parse_source(source: &str) -> Result<Program, Diagnostic> {
-    parse_from_goal(source, Goal::Module, false)
+fn parse_source(source: &str, limits: SourceLimits) -> Result<Program, Diagnostic> {
+    parse_from_goal(source, Goal::Module, false, limits)
 }
 
 /// Reads `source` under the first goal, from `first` on, that admits it (see
 /// [`Goal`]), converts it, and checks the early errors of its declarations.
-fn parse_from_goal(source: &str, first: Goal, workflow: bool) -> Result<Program, Diagnostic> {
+fn parse_from_goal(
+    source: &str,
+    first: Goal,
+    workflow: bool,
+    limits: SourceLimits,
+) -> Result<Program, Diagnostic> {
     let parsed = goal::parse(source, first).map_err(|error| parser_diagnostic(error, source))?;
     let adapter = Adapter {
         source: &parsed.text,
         workflow,
+        max_nesting: limits.max_nesting(),
         goal: parsed.goal,
         respelled_awaits: parsed.respelled_awaits,
         respellings: parsed.respellings,
@@ -473,7 +486,7 @@ fn parse_from_goal(source: &str, first: Goal, workflow: bool) -> Result<Program,
     let converted = adapter.convert_module_items(&parsed.items);
     if converted.is_err() && adapter.module_goal_await.get() {
         // `await` written as an identifier: the cell is a Script.
-        return parse_from_goal(source, Goal::Script, workflow);
+        return parse_from_goal(source, Goal::Script, workflow, limits);
     }
     let early_error =
         matches!(&converted, Err(diagnostic) if diagnostic.kind == DiagnosticKind::ProgramDefect);
@@ -491,6 +504,7 @@ fn parse_from_goal(source: &str, first: Goal, workflow: bool) -> Result<Program,
 
 #[derive(Default)]
 struct Adapter<'a> {
+    max_nesting: usize,
     /// The text SWC read, whose byte offsets every span indexes.
     source: &'a str,
     workflow: bool,
@@ -542,8 +556,8 @@ impl Adapter<'_> {
         convert: impl FnOnce() -> Result<T, Diagnostic>,
     ) -> Result<T, Diagnostic> {
         let next = self.nesting_depth.get() + 1;
-        if next > MAX_SOURCE_NESTING_DEPTH {
-            return Err(source_nesting_diagnostic(span));
+        if next > self.max_nesting {
+            return Err(source_nesting_diagnostic(span, self.max_nesting));
         }
         self.nesting_depth.set(next);
         let result = convert();

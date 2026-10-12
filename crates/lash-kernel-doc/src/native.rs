@@ -97,6 +97,14 @@ pub enum Element<'a> {
 /// An identity the heap does not hold, or one of another kind than the
 /// method asks for, reads as empty.
 pub trait NativeHeap {
+    /// Host-selected recursive JSON conversion budget, at most 64 levels.
+    fn data_depth_limit(&self) -> usize {
+        64
+    }
+    /// Recursive collection value/key budget, at most 128 levels.
+    fn value_depth_limit(&self) -> usize {
+        128
+    }
     /// How many elements a list, entries a map, members a set or fields a
     /// record has.
     fn len(&self, object: ObjectId) -> usize;

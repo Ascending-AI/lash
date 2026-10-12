@@ -10,7 +10,7 @@ use crate::ast::{
     Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode, Literal, MapEntry,
     Member, Place, ProjectionRead, RecordEntry, Rhs, Stmt, TryStmt,
 };
-use crate::document::{Document, MAX_NESTING_DEPTH, Manifest};
+use crate::document::{Document, Manifest};
 use crate::function::{Formula, FunctionBody, FunctionDefinition, Guard, Implementation, Operand};
 use crate::name::{FunctionId, FunctionName, Name, QualifiedName};
 use crate::number::{Float, NumberPolicy};
@@ -20,7 +20,13 @@ use crate::value::Bytes;
 
 /// Reads a document from kernel text.
 pub fn parse_document(text: &str) -> Result<Document, ParseError> {
-    let mut parser = Parser::new(text)?;
+    parse_document_with_limits(text, crate::KernelDataLimits::standard())
+}
+pub fn parse_document_with_limits(
+    text: &str,
+    limits: crate::KernelDataLimits,
+) -> Result<Document, ParseError> {
+    let mut parser = Parser::new(text, limits)?;
     let mut kernel = None;
     let mut numbers = None;
     let mut main = None;
@@ -111,7 +117,13 @@ pub fn parse_document(text: &str) -> Result<Document, ParseError> {
 
 /// Reads a library-function definition from kernel text.
 pub fn parse_definition(text: &str) -> Result<FunctionDefinition, ParseError> {
-    let mut parser = Parser::new(text)?;
+    parse_definition_with_limits(text, crate::KernelDataLimits::standard())
+}
+pub fn parse_definition_with_limits(
+    text: &str,
+    limits: crate::KernelDataLimits,
+) -> Result<FunctionDefinition, ParseError> {
+    let mut parser = Parser::new(text, limits)?;
     parser.expect_keyword("function")?;
     let name = parser.qualified_name()?;
     let signature = parser.signature()?;
@@ -194,17 +206,19 @@ struct Parser {
     /// The `use` lines read so far.
     uses: BTreeMap<FunctionId, FunctionName>,
     depth: usize,
+    limit: usize,
 }
 
 type Parsed<T> = Result<T, ParseError>;
 
 impl Parser {
-    fn new(text: &str) -> Parsed<Self> {
+    fn new(text: &str, limits: crate::KernelDataLimits) -> Parsed<Self> {
         Ok(Self {
             tokens: lex(text)?,
             position: 0,
             uses: BTreeMap::new(),
             depth: 0,
+            limit: limits.document_depth(),
         })
     }
 
@@ -421,10 +435,8 @@ impl Parser {
     }
 
     fn nested<T>(&mut self, parse: impl FnOnce(&mut Self) -> Parsed<T>) -> Parsed<T> {
-        if self.depth >= MAX_NESTING_DEPTH {
-            return Err(self.error(ParseErrorReason::TooDeep {
-                limit: MAX_NESTING_DEPTH,
-            }));
+        if self.depth >= self.limit {
+            return Err(self.error(ParseErrorReason::TooDeep { limit: self.limit }));
         }
         self.depth += 1;
         let parsed = parse(self);
@@ -797,9 +809,9 @@ impl Parser {
                 // Each link nests the tree one level without nesting the
                 // parser, so it is counted here.
                 links += 1;
-                if parser.depth + links > MAX_NESTING_DEPTH {
+                if parser.depth + links > parser.limit {
                     return Err(parser.error(ParseErrorReason::TooDeep {
-                        limit: MAX_NESTING_DEPTH,
+                        limit: parser.limit,
                     }));
                 }
                 expr = Expr::Member(Box::new(member));

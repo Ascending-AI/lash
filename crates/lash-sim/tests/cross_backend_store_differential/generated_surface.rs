@@ -551,6 +551,7 @@ async fn attachment_blob_store_differential_agrees() {
                 let (reference, bytes) = last.as_ref().unwrap();
                 let stores: [&dyn AttachmentStore; 3] = [memory.as_ref(), file.as_ref(), &s3];
                 for store in stores {
+                    assert!(store.byte_delivery_budget_applies());
                     let delivery = store
                         .deliver(reference, &bytes_only, &limits)
                         .await

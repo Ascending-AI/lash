@@ -32,6 +32,52 @@ const TRACESTATE_TENANT_LIMIT: usize = 241;
 const TRACESTATE_SYSTEM_LIMIT: usize = 14;
 const TRACESTATE_VALUE_LIMIT: usize = 256;
 
+/// Host narrowing of W3C tracestate's protocol safety ceilings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TraceStateLimits {
+    members: usize,
+    chars: usize,
+    key: usize,
+    tenant: usize,
+    system: usize,
+    value: usize,
+}
+impl TraceStateLimits {
+    pub const fn standard() -> Self {
+        Self {
+            members: TRACESTATE_MEMBER_LIMIT,
+            chars: TRACESTATE_CHAR_LIMIT,
+            key: TRACESTATE_KEY_LIMIT,
+            tenant: TRACESTATE_TENANT_LIMIT,
+            system: TRACESTATE_SYSTEM_LIMIT,
+            value: TRACESTATE_VALUE_LIMIT,
+        }
+    }
+    pub fn new(
+        members: usize,
+        chars: usize,
+        key: usize,
+        tenant: usize,
+        system: usize,
+        value: usize,
+    ) -> Option<Self> {
+        (members <= 32
+            && chars <= 512
+            && key <= 256
+            && tenant <= 241
+            && system <= 14
+            && value <= 256)
+            .then_some(Self {
+                members,
+                chars,
+                key,
+                tenant,
+                system,
+                value,
+            })
+    }
+}
+
 /// Why a W3C trace context was refused.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -46,10 +92,16 @@ pub enum InvalidTraceCarrier {
     ZeroTraceId,
     #[error("span id is all zeroes")]
     ZeroSpanId,
-    #[error("tracestate holds {members} members, over the limit of {TRACESTATE_MEMBER_LIMIT}")]
-    TracestateMembers { members: usize },
-    #[error("tracestate holds {chars} characters, over the limit of {TRACESTATE_CHAR_LIMIT}")]
-    TracestateLength { chars: usize },
+    #[error("tracestate holds {members} members, over the configured {limit}-member limit")]
+    TracestateMembers { members: usize, limit: usize },
+    #[error("tracestate holds {chars} characters, over the configured {limit}-character limit")]
+    TracestateLength { chars: usize, limit: usize },
+    #[error("tracestate {resource} is {actual} bytes, over the configured {limit}-byte limit")]
+    TracestateBudget {
+        resource: &'static str,
+        actual: usize,
+        limit: usize,
+    },
     #[error("tracestate member {index} is not a valid `key=value`")]
     TracestateMember { index: usize },
     #[error("tracestate member {index} repeats an earlier key")]
@@ -146,6 +198,13 @@ impl W3cTraceState {
     /// Parses one `tracestate` value. A transport that received several
     /// `tracestate` headers joins them with `,` in arrival order first.
     pub fn parse(header: &str) -> Result<Self, InvalidTraceCarrier> {
+        Self::parse_with_limits(header, TraceStateLimits::standard())
+    }
+    /// Parse under deployment policy without exceeding the W3C protocol maxima.
+    pub fn parse_with_limits(
+        header: &str,
+        limits: TraceStateLimits,
+    ) -> Result<Self, InvalidTraceCarrier> {
         let mut keys: Vec<&str> = Vec::new();
         let mut canonical = String::new();
         for member in header.split(',') {
@@ -154,17 +213,38 @@ impl W3cTraceState {
                 continue;
             }
             let index = keys.len();
-            if index == TRACESTATE_MEMBER_LIMIT {
+            if index == limits.members {
                 return Err(InvalidTraceCarrier::TracestateMembers {
                     members: header
                         .split(',')
                         .filter(|member| !member.trim_matches([' ', '\t']).is_empty())
                         .count(),
+                    limit: limits.members,
                 });
             }
             let Some((key, value)) = member.split_once('=') else {
                 return Err(InvalidTraceCarrier::TracestateMember { index });
             };
+            let key_parts = match key.split_once('@') {
+                Some((tenant, system)) => [
+                    ("tenant key", tenant.len(), limits.tenant),
+                    ("system key", system.len(), limits.system),
+                ],
+                None => [("key", key.len(), limits.key), ("key", 0, limits.key)],
+            };
+            for (resource, actual, limit) in
+                key_parts
+                    .into_iter()
+                    .chain(std::iter::once(("value", value.len(), limits.value)))
+            {
+                if actual > limit && limits != TraceStateLimits::standard() {
+                    return Err(InvalidTraceCarrier::TracestateBudget {
+                        resource,
+                        actual,
+                        limit,
+                    });
+                }
+            }
             if !valid_tracestate_key(key) || !valid_tracestate_value(value) {
                 return Err(InvalidTraceCarrier::TracestateMember { index });
             }
@@ -177,9 +257,10 @@ impl W3cTraceState {
             }
             canonical.push_str(member);
         }
-        if canonical.len() > TRACESTATE_CHAR_LIMIT {
+        if canonical.len() > limits.chars {
             return Err(InvalidTraceCarrier::TracestateLength {
                 chars: canonical.len(),
+                limit: limits.chars,
             });
         }
         Ok(Self(canonical))
@@ -338,14 +419,39 @@ impl schemars::JsonSchema for TraceCarrier {
 /// At most [`TRACE_LINK_LIMIT`] distinct spans are retained; the rest are
 /// counted in `omitted`. The limit bounds exported telemetry, never which
 /// business inputs are admitted.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "TraceLinksWire", into = "TraceLinksWire")]
 pub struct TraceLinks {
+    limit: usize,
     contexts: Vec<TraceCarrier>,
     omitted: u32,
 }
 
+impl PartialEq for TraceLinks {
+    fn eq(&self, other: &Self) -> bool {
+        self.contexts == other.contexts && self.omitted == other.omitted
+    }
+}
+impl Eq for TraceLinks {}
+
+impl Default for TraceLinks {
+    fn default() -> Self {
+        Self {
+            contexts: Vec::new(),
+            omitted: 0,
+            limit: TRACE_LINK_LIMIT,
+        }
+    }
+}
 impl TraceLinks {
+    /// Configure a retained-link cut up to the stored 64-link safety ceiling.
+    pub fn with_limit(limit: usize) -> Option<Self> {
+        (limit <= TRACE_LINK_LIMIT).then(|| Self {
+            limit,
+            ..Self::default()
+        })
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -356,7 +462,7 @@ impl TraceLinks {
         if self.contexts.iter().any(|kept| kept.same_span(&context)) {
             return;
         }
-        if self.contexts.len() == TRACE_LINK_LIMIT {
+        if self.contexts.len() >= self.limit {
             self.omitted = self.omitted.saturating_add(1);
             return;
         }
@@ -436,6 +542,7 @@ impl TryFrom<TraceLinksWire> for TraceLinks {
             }
         }
         Ok(Self {
+            limit: TRACE_LINK_LIMIT,
             contexts: wire.contexts,
             omitted: wire.omitted,
         })

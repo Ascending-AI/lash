@@ -346,7 +346,8 @@ async fn queued_checkpoint_input_preserves_images() {
                                 ),
                             )
                             .await
-                            .expect("put image"),
+                            .expect("put image")
+                            .reference,
                     ),
                 )
                 .await;

@@ -16,6 +16,7 @@ mod expressions;
 mod statements;
 
 pub(crate) struct Reader<'a> {
+    limits: k::KernelDataLimits,
     pub(crate) environment: &'a Environment<'a>,
     pub(crate) encoded_names: bool,
     pub(crate) effects: BTreeMap<k::EffectName, k::Signature>,
@@ -90,6 +91,7 @@ fn source_probe(source: &str) -> (bool, usize) {
 pub(crate) fn lower(
     source: &str,
     environment: &Environment<'_>,
+    limits: k::KernelDataLimits,
 ) -> Option<Result<Lowered, Diagnostic>> {
     let (kernel, depth) = source_probe(source);
     if !kernel {
@@ -98,7 +100,7 @@ pub(crate) fn lower(
     // At most four syntax delimiters per admitted kernel node, plus the
     // document/declaration envelope. Bound conversion and AST destruction
     // on the caller's stack without imposing the ordinary dialect's limits.
-    if depth > k::MAX_NESTING_DEPTH * 4 + 16 {
+    if depth > limits.document_depth() * 4 + 16 {
         return Some(Err(invalid(
             "kernel source exceeds its nesting limit",
             None,
@@ -147,7 +149,7 @@ pub(crate) fn lower(
             .join()
             .unwrap_or_else(|_| Err(invalid("kernel source parser failed", None)))
     });
-    Some(parsed.and_then(|module| read_module(module, environment)))
+    Some(parsed.and_then(|module| read_module(module, environment, limits)))
 }
 
 fn parse_module(source: &str) -> Result<s::Module, Diagnostic> {
@@ -169,9 +171,14 @@ fn parse_module(source: &str) -> Result<s::Module, Diagnostic> {
     Ok(module)
 }
 
-fn read_module(module: s::Module, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
+fn read_module(
+    module: s::Module,
+    environment: &Environment<'_>,
+    limits: k::KernelDataLimits,
+) -> Result<Lowered, Diagnostic> {
     let mut reader = Reader {
         environment,
+        limits,
         encoded_names: false,
         effects: BTreeMap::new(),
         functions: BTreeMap::new(),
@@ -191,9 +198,9 @@ fn read_module(module: s::Module, environment: &Environment<'_>) -> Result<Lower
                 None,
             ));
         };
-        document.manifest = decode(&string(manifest)?)
+        document.manifest = decode(&string(manifest)?, limits)
             .map_err(|error| invalid(error.to_string(), Some(manifest.span())))?;
-        document.entries = decode(&string(entries)?)
+        document.entries = decode(&string(entries)?, limits)
             .map_err(|error| invalid(error.to_string(), Some(entries.span())))?;
         document.private_bindings = array(private)?
             .iter()
@@ -243,7 +250,7 @@ fn read_module(module: s::Module, environment: &Environment<'_>) -> Result<Lower
         document.manifest.functions = reader.functions;
         document.manifest.effects = reader.effects;
     }
-    k::validate_document(&document, environment.library)
+    k::validate_document_with_limits(&document, environment.library, limits)
         .map_err(|error| invalid(error.to_string(), None))?;
     let identity = document
         .identity()
@@ -391,9 +398,12 @@ impl Reader<'_> {
     }
 }
 
-fn decode<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, serde_json::Error> {
+fn decode<T: serde::de::DeserializeOwned>(
+    text: &str,
+    limits: k::KernelDataLimits,
+) -> Result<T, serde_json::Error> {
     // Match the kernel document decoder's non-recursive depth preflight.
-    if source_probe(text).1 > k::MAX_NESTING_DEPTH * 5 + 32 {
+    if source_probe(text).1 > limits.document_json_depth() {
         return Err(serde::de::Error::custom(
             "kernel metadata exceeds its nesting limit",
         ));

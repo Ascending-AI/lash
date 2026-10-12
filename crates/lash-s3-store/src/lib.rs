@@ -287,6 +287,10 @@ fn amazon_s3_builder(config: &S3AttachmentStoreConfig) -> AmazonS3Builder {
 
 #[async_trait::async_trait]
 impl AttachmentStore for S3AttachmentStore {
+    fn byte_delivery_budget_applies(&self) -> bool {
+        self.signer.is_none()
+    }
+
     fn persistence(&self) -> AttachmentStorePersistence {
         AttachmentStorePersistence::Durable
     }

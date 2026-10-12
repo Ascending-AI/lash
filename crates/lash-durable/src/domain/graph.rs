@@ -286,12 +286,22 @@ pub struct RunFactRow {
 
 /// Every run fact of one owner, ordered by run and ordinal, and every node
 /// they reach, read in one protected read: what a fold decodes.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunFacts {
+    pub read_limits: DecodeLimits,
     pub rows: Vec<RunFactRow>,
     pub nodes: BTreeMap<NodeId, HydratedNode>,
 }
 
+impl Default for RunFacts {
+    fn default() -> Self {
+        Self {
+            rows: Vec::new(),
+            nodes: BTreeMap::new(),
+            read_limits: OWNER_READ_LIMITS,
+        }
+    }
+}
 impl RunFacts {
     /// The facts `writes` append, with `staged`, the nodes their commit
     /// stages, as the store holds them once the commit lands at `epoch`.
@@ -339,7 +349,11 @@ impl RunFacts {
                 })
                 .collect()
         };
-        Self { rows, nodes }
+        Self {
+            rows,
+            nodes,
+            read_limits: OWNER_READ_LIMITS,
+        }
     }
 
     /// These facts and `other`'s, rows in order.

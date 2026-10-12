@@ -25,6 +25,41 @@ pub const TOOL_INTENT_MAX_COUNT: usize = 32;
 pub const TOOL_INTENT_MAX_CANONICAL_BYTES: usize = 64 * 1024;
 pub const TOOL_INTENT_MAX_PER_KIND: usize = 16;
 
+/// Deployment admission bounds for one tool's declared intent batch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToolIntentLimits {
+    max_count: usize,
+    max_canonical_bytes: usize,
+    max_per_kind: usize,
+}
+impl ToolIntentLimits {
+    /// Count cannot exceed the u32 intent-index representation; bytes are host policy.
+    pub fn new(max_count: usize, max_canonical_bytes: usize, max_per_kind: usize) -> Option<Self> {
+        u32::try_from(max_count).ok().map(|_| Self {
+            max_count,
+            max_canonical_bytes,
+            max_per_kind,
+        })
+    }
+    pub const fn max_count(self) -> usize {
+        self.max_count
+    }
+    pub const fn max_canonical_bytes(self) -> usize {
+        self.max_canonical_bytes
+    }
+    pub const fn max_per_kind(self) -> usize {
+        self.max_per_kind
+    }
+    /// Historical defaults: 32 intents, 64 KiB canonical JSON, 16 per kind.
+    pub const fn standard() -> Self {
+        Self {
+            max_count: TOOL_INTENT_MAX_COUNT,
+            max_canonical_bytes: TOOL_INTENT_MAX_CANONICAL_BYTES,
+            max_per_kind: TOOL_INTENT_MAX_PER_KIND,
+        }
+    }
+}
+
 /// Recorded declarations returned by a leaf tool attempt.
 /// **Integrator class 3: protocol and process-engine implementors.**
 #[derive(Clone, Debug, Serialize, Deserialize)]

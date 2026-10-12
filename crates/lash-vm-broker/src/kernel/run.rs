@@ -199,6 +199,7 @@ fn held_releases(
 /// A run whose machine lives in this process and reads `host`: the kernel
 /// embedder's plain loop, for hosts that choose no isolation and for laws.
 pub struct InProcess<H> {
+    read_policy: lash_core_store::checkpoint_graph::GraphReadPolicy,
     program: Program,
     /// The dialect the run's document is written in: a new run pins that
     /// dialect's release.
@@ -211,6 +212,15 @@ pub struct InProcess<H> {
 }
 
 impl<H> InProcess<H> {
+    /// Select deployment state-read and recursive data admission before driving.
+    pub fn with_read_policy(
+        mut self,
+        policy: lash_core_store::checkpoint_graph::GraphReadPolicy,
+    ) -> Self {
+        self.read_policy = policy;
+        self
+    }
+
     /// The run of `program`, written in `dialect`, from `start`, held to
     /// `bounds`, reading `host`.
     ///
@@ -225,6 +235,7 @@ impl<H> InProcess<H> {
         host: H,
     ) -> Result<Self, KernelFailure> {
         Ok(Self {
+            read_policy: lash_core_store::checkpoint_graph::GraphReadPolicy::standard(),
             document: program.document.identity()?,
             program,
             dialect: dialect.to_owned(),
@@ -335,7 +346,12 @@ where
                 )))
             })?;
         Ok(InProcessMachine {
-            machine: KernelMachine::start(self.program.clone(), self.bounds, self.start.clone())?,
+            machine: KernelMachine::start_with_data_limits(
+                self.program.clone(),
+                self.bounds,
+                self.start.clone(),
+                self.read_policy.execution().kernel_data,
+            )?,
             release,
             host: self.host.clone(),
         })
@@ -355,7 +371,7 @@ where
             parked.admissions.clone(),
             self.releases()?,
             &registry,
-            crate::snapshot::READ_LIMITS,
+            self.read_policy.execution(),
         )
         .map_err(KernelFailure::State)?;
         Ok(InProcessMachine {

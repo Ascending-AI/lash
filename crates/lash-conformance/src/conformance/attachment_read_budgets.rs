@@ -73,6 +73,12 @@ struct DeliveryProbe {
 }
 #[async_trait::async_trait]
 impl AttachmentStore for DeliveryProbe {
+    fn byte_delivery_budget_applies(&self) -> bool {
+        !matches!(
+            self.fault,
+            Fault::Secret | Fault::Expired | Fault::Unaccepted
+        )
+    }
     fn persistence(&self) -> AttachmentStorePersistence {
         self.inner.persistence()
     }

@@ -573,10 +573,11 @@ pub fn import_whole_state(
         }
     }
     let release = whole.release;
-    KernelMachine::import_whole(
+    KernelMachine::import_whole_with_data_limits(
         program,
         bounds,
         whole,
+        limits.kernel_data,
         |child| thaw(&mut decoder, child),
         |identity| admissions.get(identity).cloned(),
     )

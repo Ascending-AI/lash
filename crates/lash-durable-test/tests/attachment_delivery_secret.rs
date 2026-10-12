@@ -47,6 +47,9 @@ struct SigningStore {
 
 #[async_trait::async_trait]
 impl AttachmentStore for SigningStore {
+    fn byte_delivery_budget_applies(&self) -> bool {
+        false
+    }
     fn persistence(&self) -> AttachmentStorePersistence {
         self.inner.persistence()
     }

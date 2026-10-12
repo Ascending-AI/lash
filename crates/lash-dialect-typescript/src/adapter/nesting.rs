@@ -428,10 +428,10 @@ fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
 // not fire when the next token continues the expression — including a backtick,
 // which makes the next line a tagged template, and `as`/`satisfies`, which make
 // it a cast — or a newline-separated chain would slip through uncharged.
-pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
-    source_nesting_depth(source, MAX_SOURCE_NESTING_DEPTH)
+pub(super) fn guard_source_nesting(source: &str, limit: usize) -> Result<(), Diagnostic> {
+    source_nesting_depth(source, limit)
         .map(|_| ())
-        .map_err(|span| source_nesting_diagnostic(Some(span)))
+        .map_err(|span| source_nesting_diagnostic(Some(span), limit))
 }
 
 /// Measures the same recursive grammar families the cell guard charges. Width,
@@ -982,10 +982,10 @@ fn recursive_operator_extra_bytes(bytes: &[u8], index: usize) -> usize {
         .map_or(0, |operator| operator.len() - 1)
 }
 
-pub(super) fn source_nesting_diagnostic(span: Option<SourceSpan>) -> Diagnostic {
+pub(super) fn source_nesting_diagnostic(span: Option<SourceSpan>, limit: usize) -> Diagnostic {
     Diagnostic::with_repair(
         DiagnosticCode::SourceNestingLimit,
-        format!("TypeScript source nesting exceeds the {MAX_SOURCE_NESTING_DEPTH}-level limit"),
+        format!("TypeScript source nesting exceeds the configured {limit}-level limit"),
         "flatten the source: name intermediate values instead of nesting expressions",
         span,
     )

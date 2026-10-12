@@ -1,5 +1,5 @@
 use super::{
-    Diagnostic, DiagnosticCode, MAX_SOURCE_BYTES, ParserStack, Program, guard_source_nesting,
+    Diagnostic, DiagnosticCode, ParserStack, Program, SourceLimits, guard_source_nesting,
     guard_source_size, parse_source,
 };
 
@@ -10,6 +10,7 @@ pub(crate) struct Parser {
     thread: Option<ParseThread>,
     pub(crate) spawns: usize,
     stack: ParserStack,
+    limits: SourceLimits,
 }
 
 struct ParseThread {
@@ -26,16 +27,21 @@ impl Parser {
         }
     }
 
+    pub(crate) fn with_limits(mut self, limits: SourceLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
     pub(crate) fn parse(&mut self, source: &str) -> Result<Program, Diagnostic> {
-        guard_source_size(source)?;
-        guard_source_nesting(source)?;
+        guard_source_size(source, self.limits)?;
+        guard_source_nesting(source, self.limits.max_nesting())?;
         if self.thread.is_none() {
             // Keep the same arithmetic no-abort guarantee as the standalone
             // parser, reserving once for the largest source instead of once
             // per cell. Untouched stack pages consume address space, not RSS.
             let stack_size = self
                 .stack
-                .size(MAX_SOURCE_BYTES)
+                .size(self.limits.max_bytes())
                 .filter(|size| *size > 0)
                 .ok_or_else(|| {
                     Diagnostic::new(
@@ -44,6 +50,7 @@ impl Parser {
                         None,
                     )
                 })?;
+            let limits = self.limits;
             let (requests, incoming) = std::sync::mpsc::sync_channel::<String>(0);
             let (outgoing, responses) = std::sync::mpsc::sync_channel(0);
             let handle = std::thread::Builder::new()
@@ -52,7 +59,7 @@ impl Parser {
                 .spawn(move || {
                     for source in incoming {
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            parse_source(&source)
+                            parse_source(&source, limits)
                         })).unwrap_or_else(|_| Err(parser_failed()));
                         drop(source);
                         if outgoing.send(result).is_err() {

@@ -1072,21 +1072,21 @@ impl PostgresDurableStore {
         owner: &lash_durable::domain::OwnerKey,
         run: Option<lash_durable::domain::RunSeq>,
     ) -> Result<lash_durable::domain::RunFacts, DurableError> {
+        let limits = self.pools.graph_reads.owner();
         self.read(|connection| {
             Box::pin(async move {
                 let mut snapshot = super::snapshot(connection).await?;
                 let rows = super::run_records::read(&mut snapshot, owner, run).await?;
                 let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
-                let nodes = walk_within(
-                    &mut snapshot,
-                    &roots,
-                    &lash_durable::domain::graph::OWNER_READ_LIMITS,
-                    None,
-                )
-                .await
-                .map_err(DurableError::Graph)?;
+                let nodes = walk_within(&mut snapshot, &roots, &limits, None)
+                    .await
+                    .map_err(DurableError::Graph)?;
                 snapshot.rollback().await.map_err(sqlx_failure)?;
-                Ok(lash_durable::domain::RunFacts { rows, nodes })
+                Ok(lash_durable::domain::RunFacts {
+                    rows,
+                    nodes,
+                    read_limits: limits,
+                })
             })
         })
         .await

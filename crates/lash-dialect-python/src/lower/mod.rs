@@ -37,10 +37,6 @@ use crate::scope::{self, Bindings, Ty};
 
 pub(crate) type Lowering<T> = Result<T, Diagnostic>;
 
-/// The deepest the lowerer follows nested expressions and statements. The
-/// kernel's own limit (`K-DOC-006`) is met long before.
-const MAX_SOURCE_NESTING: usize = 96;
-
 /// Where a kernel statement came from, and the notes of the blocks under
 /// it in the order a walk of the statement meets them.
 #[derive(Clone, Debug)]
@@ -177,6 +173,7 @@ pub(crate) struct Lowerer<'a> {
     kernel_depth: usize,
     span: Option<Span>,
     nesting: usize,
+    max_nesting: usize,
     saved: &'a BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
     saved_used: BTreeSet<Name>,
     saved_startable: BTreeSet<Name>,
@@ -219,6 +216,7 @@ pub(crate) fn lower(
     module: &ast::ModModule,
     source: &str,
     environment: &Environment<'_>,
+    max_nesting: usize,
 ) -> Lowering<Lowered> {
     let mut taken: HashSet<String> = source
         .split(|c: char| !(c.is_alphanumeric() || c == '_'))
@@ -300,6 +298,7 @@ pub(crate) fn lower(
         kernel_depth: 0,
         span: None,
         nesting: 0,
+        max_nesting,
         saved: environment.functions,
         saved_used: BTreeSet::new(),
         saved_startable,
@@ -939,10 +938,13 @@ impl Lowerer<'_> {
         range: TextRange,
         lower: impl FnOnce(&mut Self) -> Lowering<T>,
     ) -> Lowering<T> {
-        if self.nesting >= MAX_SOURCE_NESTING {
+        if self.nesting >= self.max_nesting {
             return Err(diagnostics::with_repair(
                 Code::TooDeep,
-                "the program nests deeper than the dialect lowers",
+                format!(
+                    "the program exceeds the configured {}-level source nesting limit",
+                    self.max_nesting
+                ),
                 range,
                 "split the expression or the block into named parts",
             ));

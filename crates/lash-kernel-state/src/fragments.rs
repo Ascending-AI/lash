@@ -30,11 +30,6 @@ use crate::schema::{
     Run, TaskState,
 };
 
-/// The deepest array-and-object nesting a stored part may have. A value
-/// nests 128 deep (`K-VAL-034`), two JSON levels to each of its own, under
-/// a fixed number of enclosing shapes.
-const MAX_JSON_DEPTH: usize = 512;
-
 /// The heap a save reads objects from.
 pub trait Objects {
     /// The object under `id`, as data.
@@ -357,12 +352,20 @@ fn json_depth(bytes: &[u8]) -> usize {
 }
 
 fn decode<T: DeserializeOwned>(bytes: &[u8], part: impl Fn() -> String) -> Result<T, LoadError> {
+    decode_with_limits(bytes, part, lash_kernel_doc::KernelDataLimits::standard())
+}
+fn decode_with_limits<T: DeserializeOwned>(
+    bytes: &[u8],
+    part: impl Fn() -> String,
+    limits: lash_kernel_doc::KernelDataLimits,
+) -> Result<T, LoadError> {
+    let limit = limits.state_json_depth();
     let depth = json_depth(bytes);
-    if depth > MAX_JSON_DEPTH {
+    if depth > limit {
         return Err(LoadError::TooDeep {
             part: part(),
             depth,
-            limit: MAX_JSON_DEPTH,
+            limit,
         });
     }
     let undecodable = |error: serde_json::Error| LoadError::Undecodable {
@@ -409,6 +412,12 @@ impl ParkedRun {
     /// checked before the rest is decoded, and nesting past the schema's
     /// bound is refused before any of it is.
     pub fn from_json(bytes: &[u8]) -> Result<Self, LoadError> {
+        Self::from_json_with_limits(bytes, lash_kernel_doc::KernelDataLimits::standard())
+    }
+    pub fn from_json_with_limits(
+        bytes: &[u8],
+        limits: lash_kernel_doc::KernelDataLimits,
+    ) -> Result<Self, LoadError> {
         let parked = probe_kernel(bytes)?;
         if KernelVersion::of(parked).is_none() {
             return Err(LoadError::KernelVersion {
@@ -416,7 +425,7 @@ impl ParkedRun {
                 supported: KernelVersion::NEWEST.number(),
             });
         }
-        decode(bytes, || "the run".to_string())
+        decode_with_limits(bytes, || "the run".to_string(), limits)
     }
 
     /// Writes the run whole, as [`Self::from_json`] reads it.
@@ -447,6 +456,17 @@ impl ParkedRun {
         header: &[u8],
         fragments: impl IntoIterator<Item = (&'a Root, &'a [u8])>,
     ) -> Result<(Self, Baseline), LoadError> {
+        Self::load_with_limits(
+            header,
+            fragments,
+            lash_kernel_doc::KernelDataLimits::standard(),
+        )
+    }
+    pub fn load_with_limits<'a>(
+        header: &[u8],
+        fragments: impl IntoIterator<Item = (&'a Root, &'a [u8])>,
+        limits: lash_kernel_doc::KernelDataLimits,
+    ) -> Result<(Self, Baseline), LoadError> {
         let parked = probe_kernel(header)?;
         if KernelVersion::of(parked).is_none() {
             return Err(LoadError::KernelVersion {
@@ -454,7 +474,7 @@ impl ParkedRun {
                 supported: KernelVersion::NEWEST.number(),
             });
         }
-        let decoded: Header = decode(header, || "the header".to_string())?;
+        let decoded: Header = decode_with_limits(header, || "the header".to_string(), limits)?;
         let given: BTreeMap<&Root, &[u8]> = fragments.into_iter().collect();
         if let Some(root) = given.keys().find(|root| !decoded.roots.contains(root)) {
             return Err(LoadError::Unlisted {
@@ -471,7 +491,7 @@ impl ParkedRun {
             let Some(bytes) = given.get(root) else {
                 return Err(LoadError::Missing { root: root.clone() });
             };
-            let fragment: Fragment = decode(bytes, || format!("{root:?}"))?;
+            let fragment: Fragment = decode_with_limits(bytes, || format!("{root:?}"), limits)?;
             run.place(root, fragment.root)?;
             for Owned { id, object } in fragment.objects {
                 if run.objects.insert(id, object).is_some() {

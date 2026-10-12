@@ -9,7 +9,7 @@
 //! as the shortest digits that read back as the same float. A kind JSON
 //! cannot carry is refused with a typed [`NotJson`], never approximated.
 
-use lash_kernel_doc::{Datum, MAX_NESTING_DEPTH, NumberToken};
+use lash_kernel_doc::{Datum, KernelDataLimits, NumberToken};
 
 /// A value JSON cannot carry.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -20,8 +20,8 @@ pub enum NotJson {
     Kind { kind: JsonlessKind },
     #[error("a JSON object's keys are texts, and this map has a key of another kind")]
     MapKey,
-    #[error("the value nests deeper than {MAX_NESTING_DEPTH}")]
-    TooDeep,
+    #[error("the value nests deeper than {limit}")]
+    TooDeep { limit: usize },
 }
 
 /// The kinds of datum JSON has no spelling for.
@@ -57,14 +57,20 @@ impl std::fmt::Display for JsonlessKind {
 ///
 /// [`NotJson`] for a kind JSON cannot carry, anywhere in the tree.
 pub fn datum_to_json(value: &Datum) -> Result<String, NotJson> {
+    datum_to_json_with_limits(value, KernelDataLimits::standard())
+}
+pub fn datum_to_json_with_limits(
+    value: &Datum,
+    limits: KernelDataLimits,
+) -> Result<String, NotJson> {
     let mut text = String::new();
-    write(value, 0, &mut text)?;
+    write(value, 0, &mut text, limits.document_depth())?;
     Ok(text)
 }
 
-fn write(value: &Datum, depth: usize, out: &mut String) -> Result<(), NotJson> {
-    if depth > MAX_NESTING_DEPTH {
-        return Err(NotJson::TooDeep);
+fn write(value: &Datum, depth: usize, out: &mut String, limit: usize) -> Result<(), NotJson> {
+    if depth > limit {
+        return Err(NotJson::TooDeep { limit });
     }
     let kind = |kind| Err(NotJson::Kind { kind });
     match value {
@@ -81,7 +87,7 @@ fn write(value: &Datum, depth: usize, out: &mut String) -> Result<(), NotJson> {
                 if index > 0 {
                     out.push(',');
                 }
-                write(item, depth + 1, out)?;
+                write(item, depth + 1, out, limit)?;
             }
             out.push(']');
         }
@@ -90,6 +96,7 @@ fn write(value: &Datum, depth: usize, out: &mut String) -> Result<(), NotJson> {
                 fields.iter().map(|(key, value)| (key.as_str(), value)),
                 depth,
                 out,
+                limit,
             )?;
         }
         Datum::Map(entries) => {
@@ -100,7 +107,7 @@ fn write(value: &Datum, depth: usize, out: &mut String) -> Result<(), NotJson> {
                 };
                 fields.push((key.as_str(), value));
             }
-            write_object(fields.into_iter(), depth, out)?;
+            write_object(fields.into_iter(), depth, out, limit)?;
         }
         Datum::Absent => return kind(JsonlessKind::Absent),
         Datum::Bytes(_) => return kind(JsonlessKind::Bytes),
@@ -117,6 +124,7 @@ fn write_object<'a>(
     fields: impl Iterator<Item = (&'a str, &'a Datum)>,
     depth: usize,
     out: &mut String,
+    limit: usize,
 ) -> Result<(), NotJson> {
     out.push('{');
     for (index, (key, value)) in fields.enumerate() {
@@ -125,7 +133,7 @@ fn write_object<'a>(
         }
         write_text(key, out);
         out.push(':');
-        write(value, depth + 1, out)?;
+        write(value, depth + 1, out, limit)?;
     }
     out.push('}');
     Ok(())
@@ -151,10 +159,11 @@ fn write_text(text: &str, out: &mut String) {
 
 /// A text that is not one JSON value.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("not a JSON value at byte {at}: {problem}")]
+#[error("not a JSON value at byte {at}: {problem}; depth budget {depth_limit:?}")]
 pub struct InvalidJson {
     pub at: usize,
     pub problem: &'static str,
+    pub depth_limit: Option<usize>,
 }
 
 /// Reads one JSON value (RFC 8259). An array is a list and an object a
@@ -166,10 +175,17 @@ pub struct InvalidJson {
 /// [`InvalidJson`] for text that is not exactly one JSON value, or one that
 /// nests deeper than [`MAX_NESTING_DEPTH`].
 pub fn datum_from_json(text: &str) -> Result<Datum, InvalidJson> {
+    datum_from_json_with_limits(text, KernelDataLimits::standard())
+}
+pub fn datum_from_json_with_limits(
+    text: &str,
+    limits: KernelDataLimits,
+) -> Result<Datum, InvalidJson> {
     let mut reader = Reader {
         bytes: text.as_bytes(),
         text,
         at: 0,
+        limit: limits.document_depth(),
     };
     reader.space();
     let value = reader.value(0)?;
@@ -184,6 +200,7 @@ struct Reader<'a> {
     bytes: &'a [u8],
     text: &'a str,
     at: usize,
+    limit: usize,
 }
 
 impl Reader<'_> {
@@ -191,6 +208,7 @@ impl Reader<'_> {
         InvalidJson {
             at: self.at,
             problem,
+            depth_limit: None,
         }
     }
 
@@ -214,8 +232,10 @@ impl Reader<'_> {
     }
 
     fn value(&mut self, depth: usize) -> Result<Datum, InvalidJson> {
-        if depth > MAX_NESTING_DEPTH {
-            return Err(self.invalid("the value nests too deep"));
+        if depth > self.limit {
+            let mut invalid = self.invalid("the value nests too deep");
+            invalid.depth_limit = Some(self.limit);
+            return Err(invalid);
         }
         match self.peek() {
             Some(b'n') => self.word("null", Datum::Null),
@@ -292,6 +312,7 @@ impl Reader<'_> {
                     .map(Datum::Number)
                     .map_err(|_| InvalidJson {
                         at: start,
+                        depth_limit: None,
                         problem: "not a number",
                     })
             }
@@ -323,6 +344,7 @@ impl Reader<'_> {
             .and_then(|quoted| serde_json::from_str::<String>(quoted).ok())
             .ok_or(InvalidJson {
                 at: start,
+                depth_limit: None,
                 problem: "not a string",
             })
     }

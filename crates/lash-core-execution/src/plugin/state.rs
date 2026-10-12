@@ -288,6 +288,7 @@ mod tests;
 #[derive(Debug, Default)]
 pub(super) struct PluginStateRegistry {
     pub(super) trace_limits: lash_trace::TraceLimits,
+    pub(super) limits: lash_core_store::tool_run::StateCommandLimits,
     /// Published state: every namespace's values at its applied generation.
     pub(super) data: PluginState,
     pub(super) source: Option<crate::BlobRef>,

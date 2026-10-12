@@ -103,7 +103,7 @@ fn document(body: &str) -> k::Document {
     k::parse_document(&format!("kernel 1\nnumbers by_spelling\n{body}")).unwrap()
 }
 fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, library: &NamedLibrary) {
-    let source = TypeScript.print(document, library).unwrap();
+    let source = TypeScript::default().print(document, library).unwrap();
     let bindings = BTreeSet::new();
     let environment = Environment {
         library,

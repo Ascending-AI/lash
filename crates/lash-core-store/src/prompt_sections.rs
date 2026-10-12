@@ -31,20 +31,26 @@ pub const PROMPT_KEY_MAX_BYTES: usize = 64;
 pub enum PromptKeyError {
     #[error("a prompt key is empty")]
     Empty,
-    #[error("prompt key `{key}` is longer than {PROMPT_KEY_MAX_BYTES} bytes")]
-    TooLong { key: String },
+    #[error("prompt key `{key}` is longer than the configured {limit}-byte key limit")]
+    TooLong { key: String, limit: usize },
     #[error(
         "prompt key `{key}` must start with a lowercase letter or digit and hold only lowercase letters, digits, `_`, `-` and `.`"
     )]
     InvalidCharacter { key: String },
 }
 
-fn validate_key(key: &str) -> Result<(), PromptKeyError> {
+fn validate_key(
+    key: &str,
+    limit: crate::plugin_state::NameByteLimit<64>,
+) -> Result<(), PromptKeyError> {
     let Some(first) = key.bytes().next() else {
         return Err(PromptKeyError::Empty);
     };
-    if key.len() > PROMPT_KEY_MAX_BYTES {
-        return Err(PromptKeyError::TooLong { key: key.into() });
+    if key.len() > limit.max_bytes() {
+        return Err(PromptKeyError::TooLong {
+            key: key.into(),
+            limit: limit.max_bytes(),
+        });
     }
     let allowed = |byte: u8| {
         byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
@@ -71,8 +77,12 @@ macro_rules! prompt_key {
             /// [`PromptKeyError`] when `key` is empty, too long or holds a
             /// character outside the key alphabet.
             pub fn new(key: impl Into<String>) -> Result<Self, PromptKeyError> {
+                Self::with_limit(key, crate::plugin_state::NameByteLimit::standard())
+            }
+            /// Apply a deployment key-byte limit, at most the 64-byte safety ceiling.
+            pub fn with_limit(key: impl Into<String>, limit: crate::plugin_state::NameByteLimit<64>) -> Result<Self, PromptKeyError> {
                 let key = key.into();
-                validate_key(&key)?;
+                validate_key(&key, limit)?;
                 Ok(Self(key))
             }
 

@@ -253,6 +253,7 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
 ) {
     const SESSION: &str = "retained-output-crash";
     const POLICY: OutputRetentionPolicy = OutputRetentionPolicy {
+        shape: lash_core::ValueShapeLimits::standard(),
         inline_limit_bytes: 1024,
         witness_bytes: 256,
     };

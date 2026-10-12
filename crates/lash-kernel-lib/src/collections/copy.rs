@@ -22,8 +22,14 @@ struct Copy<'a> {
 }
 impl Copy<'_> {
     fn value(&mut self, value: &Value, depth: usize) -> Result<Value, NativeError> {
-        if depth > 128 {
-            return Err(raise("too_deep", "deep copy exceeds 128 levels"));
+        if depth > self.heap.value_depth_limit().min(128) {
+            return Err(raise(
+                "too_deep",
+                &format!(
+                    "deep copy exceeds the configured {} levels",
+                    self.heap.value_depth_limit().min(128)
+                ),
+            ));
         }
         match value {
             Value::Tuple(items) => Ok(Value::Tuple(self.items(items, depth)?.into())),
@@ -114,7 +120,7 @@ pub(super) fn holds_none(
                 continue;
             }
         };
-        if depth > 128 || refused[value.kind() as usize] {
+        if depth > heap.value_depth_limit().min(128) || refused[value.kind() as usize] {
             return Ok(false);
         }
         // The members, in the order a copy reads them, are pushed in

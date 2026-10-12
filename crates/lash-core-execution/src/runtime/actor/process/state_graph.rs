@@ -108,11 +108,6 @@ pub fn write_engine_state(
     Ok(())
 }
 
-/// The limits a process's own root is read within: its engine bytes were
-/// admitted under a commit budget when they were written, so these bound
-/// only corruption.
-const READ_LIMITS: DecodeLimits = DecodeLimits::within_total(1 << 34);
-
 /// `process`'s execution root row and the engine state it holds, with the
 /// engine that wrote it, or `None` when the process has written none.
 ///
@@ -123,15 +118,16 @@ const READ_LIMITS: DecodeLimits = DecodeLimits::within_total(1 << 34);
 pub async fn read_engine_state(
     reads: &dyn DurableReads,
     process: &ProcessId,
+    limits: DecodeLimits,
 ) -> Result<Option<(ExecRootRow, String, EngineState)>, DurableError> {
     let exec = ExecKey::Process(process.clone());
     let Some(row) = reads.exec_root(&exec).await? else {
         return Ok(None);
     };
     let graph = reads
-        .hydrate(RootOwner::Exec(exec), Some(row.root), READ_LIMITS)
+        .hydrate(RootOwner::Exec(exec), Some(row.root), limits)
         .await?;
-    let mut decoder = GraphDecoder::new(&graph, READ_LIMITS);
+    let mut decoder = GraphDecoder::new(&graph, limits);
     let (engine, state) = load_engine_state(&mut decoder, row.root, process)?;
     Ok(Some((row, engine, state)))
 }

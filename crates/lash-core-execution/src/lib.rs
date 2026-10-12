@@ -286,13 +286,13 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
     pub use crate::runtime::RuntimeEffectReplayTrace;
-    pub use crate::runtime::RuntimeHostConfig;
     pub use crate::runtime::RuntimeSleepOptions;
     pub use crate::runtime::SessionCommand;
     pub use crate::runtime::SessionCommandReceipt;
     pub use crate::runtime::SessionScopeId;
     pub use crate::runtime::process::observation::observe_process_records;
     pub use crate::runtime::{ObservedProcessChange, ProcessRosterPage};
+    pub use crate::runtime::{RuntimeDataLimits, RuntimeHostConfig};
 
     pub use crate::runtime::SystemClock;
     pub use crate::runtime::TurnActivitySink;
@@ -452,6 +452,7 @@ pub use lash_sansio::{
     ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule,
     ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnControl,
     TurnControlKind, TurnControls, TurnId, TurnOutputSource, ValueMismatch, ValueShape,
+    ValueShapeLimits,
 };
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 /// The stop a tool control other than a declared turn control ends the turn
@@ -805,9 +806,9 @@ pub use tool_intent::{
     CancelProcessIntent, DeclaredModuleArtifact, GetDefinitionIntent, PublishDefinitionIntent,
     StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
     TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, ToolAttemptOutcome, ToolIntent,
-    ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome, ToolIntentSubmissionRecord,
-    ToolIntentSubmissionSettlement, ToolIntents, ToolOutcomeDone, derive_tool_intent_identity,
-    derive_tool_intent_identity_under, rederive_tool_intent_identity,
+    ToolIntentLimits, ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome,
+    ToolIntentSubmissionRecord, ToolIntentSubmissionSettlement, ToolIntents, ToolOutcomeDone,
+    derive_tool_intent_identity, derive_tool_intent_identity_under, rederive_tool_intent_identity,
 };
 /// The process wiring a process host hands the runtime for a tool call
 /// running inside a durable process.

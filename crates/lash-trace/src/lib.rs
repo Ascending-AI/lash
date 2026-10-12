@@ -81,8 +81,8 @@ pub use telemetry::{
     TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
     TraceCause, TraceDomainProjector, TraceHostOperation, TraceLinks, TraceRecordIdentity,
     TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer,
-    TraceScopeOwner, TraceToolOwner, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags,
-    W3cTraceId, W3cTraceState,
+    TraceScopeOwner, TraceStateLimits, TraceToolOwner, TraceTransitionKind, UntracedScopes,
+    W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 pub use workflow_overlay::{
     DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT, WorkflowExecutionOverlay,

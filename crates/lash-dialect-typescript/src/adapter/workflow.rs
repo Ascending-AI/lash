@@ -1,10 +1,10 @@
 //! Whole-workflow declarations read through the ordinary bounded adapter.
 use super::*;
 
-pub(crate) fn parse(source: &str) -> Result<Program, Diagnostic> {
-    guard_source_size(source)?;
-    guard_source_nesting(source)?;
-    let mut program = parse_on_proportional_stack(source, true)?;
+pub(crate) fn parse(source: &str, limits: SourceLimits) -> Result<Program, Diagnostic> {
+    guard_source_size(source, limits)?;
+    guard_source_nesting(source, limits.max_nesting())?;
+    let mut program = parse_on_proportional_stack(source, true, limits)?;
     for statement in &mut program.statements {
         declaration(statement);
     }

@@ -78,9 +78,7 @@ use super::state::{ReleaseGraph, WholeState};
 use super::value::datum_from_json;
 use crate::effects::MemberDraft;
 use crate::members::{Decide, Driven};
-use crate::snapshot::{
-    DurableSnapshotStore, HeldRoot, OperationId, QuietPointRefusal, READ_LIMITS, refused,
-};
+use crate::snapshot::{DurableSnapshotStore, HeldRoot, OperationId, QuietPointRefusal, refused};
 
 /// The error kind of an effect that reported a failure of its own; its
 /// `data` is what the effect reported.
@@ -228,6 +226,7 @@ impl ParkedState {
 /// node it reaches.
 #[derive(Clone, Debug)]
 pub struct RootRead {
+    pub read_limits: lash_core_store::checkpoint_graph::DecodeLimits,
     pub held: HeldRoot,
     pub body: ExecRoot,
     pub graph: HydratedGraph,
@@ -938,7 +937,7 @@ impl DurableSnapshotStore {
             state: &state.nodes,
             release: &releases.nodes,
         };
-        let whole: lash_kernel_state::KernelWhole = GraphDecoder::new(&source, READ_LIMITS)
+        let whole: lash_kernel_state::KernelWhole = GraphDecoder::new(&source, self.read_limits())
             .decode(state.root, NodeKind::KERNEL_WHOLE)
             .map_err(refused)?;
         let release = NodeId(whole.release.0);
@@ -964,7 +963,7 @@ impl DurableSnapshotStore {
                     release: name.clone(),
                 },
                 Some(release),
-                READ_LIMITS,
+                self.read_limits(),
             )
             .await
             .is_ok();
@@ -1011,11 +1010,11 @@ impl DurableSnapshotStore {
             .hydrate(
                 RootOwner::Exec(self.exec.clone()),
                 Some(row.root),
-                READ_LIMITS,
+                self.read_limits(),
             )
             .await
             .map_err(refused)?;
-        let mut decoder = GraphDecoder::new(&graph, READ_LIMITS);
+        let mut decoder = GraphDecoder::new(&graph, self.read_limits());
         let body: ExecRoot = decoder
             .decode(row.root, NodeKind::EXEC_ROOT)
             .map_err(refused)?;
@@ -1042,7 +1041,12 @@ impl DurableSnapshotStore {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             graph.nodes.keys().copied().collect();
-        let read = std::sync::Arc::new(RootRead { held, body, graph });
+        let read = std::sync::Arc::new(RootRead {
+            held,
+            body,
+            graph,
+            read_limits: self.read_limits(),
+        });
         *self
             .latest
             .lock()
@@ -1070,7 +1074,7 @@ impl DurableSnapshotStore {
         if read.body.executable_identity != document.to_string() {
             return Err(refused("the root holds another document's run"));
         }
-        let mut decoder = GraphDecoder::new(&read.graph, READ_LIMITS);
+        let mut decoder = GraphDecoder::new(&read.graph, self.read_limits());
         match (read.body.status, read.body.effect_membership) {
             (ExecStatus::Parked, Some(membership)) => {
                 let (membership, resolved) =
@@ -1087,7 +1091,7 @@ impl DurableSnapshotStore {
                     &read.graph,
                     read.body.state,
                     read.body.format,
-                    &READ_LIMITS,
+                    &self.read_limits(),
                 )
                 .map_err(refused)?;
                 Ok(Some(Checkpoint::Parked {
@@ -1102,7 +1106,7 @@ impl DurableSnapshotStore {
             }
             (ExecStatus::Ended, None) => {
                 let cell = CellEnd::load(&mut decoder, read.body.state).map_err(refused)?;
-                let end = super::state::read_end_in(&read.graph, cell.terminal, READ_LIMITS)
+                let end = super::state::read_end_in(&read.graph, cell.terminal, self.read_limits())
                     .map_err(refused)?;
                 Ok(Some(Checkpoint::Ended {
                     rev: read.held.rev,

@@ -149,10 +149,93 @@ impl GraphRefusal {
     }
 }
 
+/// Deployment graph-read admission, independent of write-side commit admission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "GraphReadPolicyWire")]
+pub struct GraphReadPolicy {
+    owner_bytes: u64,
+    engine_bytes: u64,
+    execution_bytes: u64,
+    depth: u64,
+    kernel_data: lash_kernel_doc::KernelDataLimits,
+}
+impl GraphReadPolicy {
+    /// Existing read presets: 4 GiB owners, 16 GiB engine and execution state,
+    /// and graph-tree depth 64. Depth's hard ceiling protects recursive graph walks.
+    pub const fn standard() -> Self {
+        Self {
+            owner_bytes: 1 << 32,
+            engine_bytes: 1 << 34,
+            execution_bytes: 1 << 34,
+            depth: 64,
+            kernel_data: lash_kernel_doc::KernelDataLimits::standard(),
+        }
+    }
+    pub fn new(
+        owner_bytes: u64,
+        engine_bytes: u64,
+        execution_bytes: u64,
+        depth: u64,
+        kernel_data: lash_kernel_doc::KernelDataLimits,
+    ) -> Option<Self> {
+        (depth <= 64).then_some(Self {
+            owner_bytes,
+            engine_bytes,
+            execution_bytes,
+            depth,
+            kernel_data,
+        })
+    }
+    const fn limits(self, bytes: u64) -> DecodeLimits {
+        DecodeLimits {
+            depth: self.depth,
+            kernel_data: self.kernel_data,
+            ..DecodeLimits::within_total(bytes)
+        }
+    }
+    pub const fn owner(self) -> DecodeLimits {
+        self.limits(self.owner_bytes)
+    }
+    pub const fn engine(self) -> DecodeLimits {
+        self.limits(self.engine_bytes)
+    }
+    pub const fn execution(self) -> DecodeLimits {
+        self.limits(self.execution_bytes)
+    }
+}
+impl Default for GraphReadPolicy {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GraphReadPolicyWire {
+    owner_bytes: u64,
+    engine_bytes: u64,
+    execution_bytes: u64,
+    depth: u64,
+    kernel_data: lash_kernel_doc::KernelDataLimits,
+}
+impl TryFrom<GraphReadPolicyWire> for GraphReadPolicy {
+    type Error = &'static str;
+    fn try_from(w: GraphReadPolicyWire) -> Result<Self, Self::Error> {
+        Self::new(
+            w.owner_bytes,
+            w.engine_bytes,
+            w.execution_bytes,
+            w.depth,
+            w.kernel_data,
+        )
+        .ok_or("graph read depth exceeds the 64-level safety ceiling")
+    }
+}
+
 /// What one decode may read. Every field is chosen by the caller: there is
 /// no default, and none may exceed the format's own bounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DecodeLimits {
+    pub kernel_data: lash_kernel_doc::KernelDataLimits,
     /// The largest envelope read, at most [`MAX_NODE_BYTES`](super::MAX_NODE_BYTES).
     pub node_bytes: u64,
     /// Envelope bytes read in total.
@@ -171,6 +254,7 @@ impl DecodeLimits {
     #[must_use]
     pub const fn within_total(total: u64) -> Self {
         Self {
+            kernel_data: lash_kernel_doc::KernelDataLimits::standard(),
             node_bytes: super::MAX_NODE_BYTES,
             total_bytes: total,
             nodes: total,

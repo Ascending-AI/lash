@@ -12,7 +12,7 @@ use tokio::sync::Notify;
 
 use lash_sansio::sync::MutexExt;
 
-use super::{ManagedChildTransport, StdioReadError, stdio_close_cause};
+use super::{MAX_STDIO_MESSAGE_BYTES, ManagedChildTransport, StdioReadError, stdio_close_cause};
 
 struct ObservedRead<R> {
     inner: R,
@@ -83,6 +83,7 @@ async fn split_response(chunks: &[&[u8]], newline: bool) {
         },
         write,
         stdio_close_cause(),
+        MAX_STDIO_MESSAGE_BYTES,
     );
     let mut server_read = BufReader::new(server_read);
     let mut total = 0;
@@ -170,7 +171,8 @@ async fn cancelled_receive_preserves_partial_response_at_eof() {
 async fn framing_preserves_sdk_compatibility_and_parse_error_recovery() {
     let (client, mut server) = tokio::io::duplex(4096);
     let (read, write) = tokio::io::split(client);
-    let mut transport = ManagedChildTransport::new(read, write, stdio_close_cause());
+    let mut transport =
+        ManagedChildTransport::new(read, write, stdio_close_cause(), MAX_STDIO_MESSAGE_BYTES);
     server.write_all(b"\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"notifications/vendor\"}\nnot json\n\xff\n\xef\xbb\xbf{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\r\n{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n")
         .await.expect("compatibility frames");
     server.shutdown().await.expect("server EOF");
@@ -213,8 +215,7 @@ async fn oversized_inbound_message_closes_with_typed_cause() {
     let (client, mut server) = tokio::io::duplex(65_536);
     let (read, write) = tokio::io::split(client);
     let close_cause = stdio_close_cause();
-    let mut transport = ManagedChildTransport::new(read, write, close_cause.clone());
-    transport.reader.max_line_bytes = CAP;
+    let mut transport = ManagedChildTransport::new(read, write, close_cause.clone(), CAP);
     // One newline-free write past the cap: the reader must stop at the limit
     // rather than keep buffering bytes it can never decode.
     server
@@ -253,8 +254,7 @@ async fn message_at_byte_cap_still_decodes() {
     const CAP: usize = 64;
     let (client, mut server) = tokio::io::duplex(65_536);
     let (read, write) = tokio::io::split(client);
-    let mut transport = ManagedChildTransport::new(read, write, stdio_close_cause());
-    transport.reader.max_line_bytes = CAP;
+    let mut transport = ManagedChildTransport::new(read, write, stdio_close_cause(), CAP);
     // The cap counts the whole line including its terminator, so a message
     // padded to fill it exactly still decodes.
     let skeleton = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"pad\":\"\"}}";

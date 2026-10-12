@@ -298,8 +298,11 @@ impl RemoteMachine {
                     lash_vm_protocol::InfrastructureOutcome::output_graph_state(refusal),
                 ))
             })?;
-        lash_vm_broker::kernel::state::read_end(&state, lash_vm_broker::snapshot::READ_LIMITS)
-            .map_err(KernelFailure::State)
+        lash_vm_broker::kernel::state::read_end(
+            &state,
+            self.service.config().graph_reads.execution(),
+        )
+        .map_err(KernelFailure::State)
     }
 
     /// One blocking exchange on the checkout, off the async runtime.

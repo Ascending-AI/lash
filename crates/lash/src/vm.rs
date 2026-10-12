@@ -59,9 +59,6 @@ pub use lash_vm_runtime::{HelperReleaseIndex, KernelProcessPluginFactory};
 /// ([`KernelProcessPluginFactory::new`]); a session or process records it
 /// at creation.
 pub use lash_vm_runtime::{PYTHON_DIALECT, TYPESCRIPT_DIALECT};
-/// The Python dialect, for a host to install in its worker embedding.
-#[cfg(all(feature = "worker", feature = "dialect-python"))]
-pub use lash_vm_worker::python as python_worker_dialect;
 /// The TypeScript dialect, for a host to install in its worker embedding.
 #[cfg(all(feature = "worker", feature = "dialect-typescript"))]
 pub use lash_vm_worker::typescript as typescript_worker_dialect;
@@ -72,6 +69,12 @@ pub use lash_vm_worker::{
     Dialect as WorkerDialect, Embed as WorkerEmbed, EmbedError as WorkerEmbedError,
     Embedder as WorkerEmbedder, Embedding as WorkerEmbedding,
     built_dialects as built_worker_dialects, worker_entry,
+};
+/// The Python dialect, for a host to install in its worker embedding.
+#[cfg(all(feature = "worker", feature = "dialect-python"))]
+pub use lash_vm_worker::{
+    PythonSourceLimits, python as python_worker_dialect,
+    python_with_limits as python_worker_dialect_with_limits,
 };
 
 /// The host boundary in the kernel type grammar, the providers that answer
@@ -96,8 +99,8 @@ pub use lash_sansio::worker_limit::WorkerFrameKind;
 #[cfg(feature = "codemode")]
 pub use lash_vm_client::StateDigest;
 pub use lash_vm_client::{
-    BootstrapFault, CodecRefusal, DecodeLimits, Detail, Exchange, ExecutionClass, ExecutionLease,
-    ExecutionReceipt, FrameEpoch, GraphStateRefusal, HeaderRefusal, HostReadKind,
+    BootstrapFault, CodecRefusal, DecodeLimits, Detail, DetailLimit, Exchange, ExecutionClass,
+    ExecutionLease, ExecutionReceipt, FrameEpoch, GraphStateRefusal, HeaderRefusal, HostReadKind,
     InfrastructureOutcome, KernelRestoreRefusal, OwnerEpoch, PayloadKind, PoolCounters, PoolError,
     PoolFault, PoolMeasurements, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds,
     RunInput, RunMeters, RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence, VmOwner,

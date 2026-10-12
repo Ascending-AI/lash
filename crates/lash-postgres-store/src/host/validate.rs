@@ -41,9 +41,6 @@ fn refuse(field: impl Into<String>, reason: impl Into<String>) -> Checked {
 /// The longest limit PostgreSQL's millisecond timeout settings carry.
 const SERVER_TIMEOUT_MAX: Duration = Duration::from_millis(i32::MAX as u64);
 
-const APPLICATION_NAME_PREFIX_MAX: usize = 32;
-const REPLAY_SCHEMA_MAX: usize = 48;
-
 /// A duration of at least one whole millisecond that fits `u64` ms.
 fn millis(field: &str, value: Duration) -> Checked {
     if value < Duration::from_millis(1) {
@@ -180,8 +177,8 @@ fn count(field: &str, value: usize, low: usize, high: usize) -> Checked {
 
 /// A replay store's schema: it is spliced into the store's statements and
 /// names its notification channel.
-fn replay_schema(field: &str, schema: &str) -> Checked {
-    let schema_ok = schema.len() <= REPLAY_SCHEMA_MAX
+fn replay_schema(field: &str, schema: &str, limit: usize) -> Checked {
+    let schema_ok = schema.len() <= limit
         && schema
             .chars()
             .next()
@@ -193,16 +190,16 @@ fn replay_schema(field: &str, schema: &str) -> Checked {
         return refuse(
             field,
             format!(
-                "must be a lowercase identifier ([a-z_][a-z0-9_]*) of at most {REPLAY_SCHEMA_MAX} characters"
+                "must be a lowercase identifier ([a-z_][a-z0-9_]*) of at most {limit} characters"
             ),
         );
     }
     Ok(())
 }
 
-fn live_replay(policy: &LiveReplayPolicy) -> Checked {
+fn live_replay(policy: &LiveReplayPolicy, limit: usize) -> Checked {
     let data = &policy.data;
-    replay_schema("live_replay.data.schema", &data.schema)?;
+    replay_schema("live_replay.data.schema", &data.schema, limit)?;
     within(
         "live_replay.data.publish_tick_ms",
         data.publish_tick,
@@ -264,9 +261,9 @@ fn live_replay(policy: &LiveReplayPolicy) -> Checked {
     reconnect("live_replay.reconnect", &policy.reconnect)
 }
 
-fn process_replay(policy: &ProcessReplayPolicy) -> Checked {
+fn process_replay(policy: &ProcessReplayPolicy, limit: usize) -> Checked {
     let data = &policy.data;
-    replay_schema("process_replay.data.schema", &data.schema)?;
+    replay_schema("process_replay.data.schema", &data.schema, limit)?;
     within(
         "process_replay.data.publish_tick_ms",
         data.publish_tick,
@@ -382,15 +379,16 @@ impl PostgresHostConfig {
     /// [`PostgresHostConfigError`] naming the field.
     pub fn validate(&self) -> Result<DurableConfig, PostgresHostConfigError> {
         let prefix = &self.connection.application_name_prefix;
+        let limit = self.name_limits.application_prefix();
         if prefix.is_empty()
-            || prefix.len() > APPLICATION_NAME_PREFIX_MAX
+            || prefix.len() > limit
             || !prefix
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
         {
             refuse(
                 "connection.application_name_prefix",
-                format!("must be 1 to {APPLICATION_NAME_PREFIX_MAX} characters of [A-Za-z0-9_-]"),
+                format!("must be 1 to {limit} characters of [A-Za-z0-9_-]"),
             )?;
         }
         let transport = &self.connection.transport;
@@ -480,10 +478,10 @@ impl PostgresHostConfig {
         reconnect("signals.reconnect", &self.signals.reconnect)?;
 
         if let Some(replay) = &self.live_replay {
-            live_replay(replay)?;
+            live_replay(replay, self.name_limits.replay_schema())?;
         }
         if let Some(replay) = &self.process_replay {
-            process_replay(replay)?;
+            process_replay(replay, self.name_limits.replay_schema())?;
         }
 
         let maintenance = &self.maintenance;

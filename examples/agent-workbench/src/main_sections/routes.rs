@@ -12,8 +12,14 @@ pub(crate) async fn healthz() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "service": "agent-workbench", "status": "ok" }))
 }
 
-pub(crate) async fn index() -> Html<&'static str> {
-    Html(ui::INDEX_HTML)
+pub(crate) async fn index(State(state): State<AppState>) -> Html<String> {
+    Html(ui::INDEX_HTML.replace(
+        "data-attachment-byte-limit=\"1048576\"",
+        &format!(
+            "data-attachment-byte-limit=\"{}\"",
+            state.data_limits.attachment_bytes
+        ),
+    ))
 }
 
 pub(crate) async fn timeline_script() -> impl IntoResponse {
@@ -98,8 +104,6 @@ async fn read_state_snapshot(
     })
 }
 
-pub(crate) const MAX_WORKBENCH_ATTACHMENT_BYTES: usize = 1024 * 1024;
-
 pub(crate) async fn upload_attachment(
     State(state): State<AppState>,
     Json(request): Json<AttachmentUploadRequest>,
@@ -108,11 +112,7 @@ pub(crate) async fn upload_attachment(
     if name.is_empty() {
         return Err(AppError::bad_request("attachment name is required"));
     }
-    if name.chars().count() > 200 {
-        return Err(AppError::bad_request(
-            "attachment name must be at most 200 characters",
-        ));
-    }
+    state.data_limits.admit_attachment_name(name)?;
     let media_type = lash::attachments::MediaType::parse(&request.mime).map_err(|_| {
         AppError::bad_request(
             "the workbench turn contract currently accepts PNG image attachments only",
@@ -129,12 +129,7 @@ pub(crate) async fn upload_attachment(
     if bytes.is_empty() {
         return Err(AppError::bad_request("attachment file is empty"));
     }
-    if bytes.len() > MAX_WORKBENCH_ATTACHMENT_BYTES {
-        return Err(AppError::bad_request(format!(
-            "attachment exceeds the {} byte workbench limit",
-            MAX_WORKBENCH_ATTACHMENT_BYTES
-        )));
-    }
+    state.data_limits.admit_attachment_bytes(bytes.len())?;
     let type_metadata = png_dimensions(&bytes).map(|(width, height)| {
         lash::attachments::AttachmentTypeMetadata::image(Some(width), Some(height))
     });
@@ -156,7 +151,7 @@ pub(crate) async fn upload_attachment(
         )
         .await
         // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
-        .map_err(AppError::internal)?;
+        .map_err(AppError::internal)?.reference;
     let retrieve_url = attachment_retrieve_url(&attachment.id.to_string());
     state.trace(
         "api.attachment.uploaded",
@@ -189,10 +184,7 @@ pub(crate) async fn retrieve_attachment(
         .map_err(|err| AppError::bad_request(err.to_string()))?;
     let stored = match state
         .attachment_store
-        .get(
-            &parsed_id,
-            lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
-        )
+        .get(&parsed_id, state.data_limits.attachment_read_bytes)
         .await
     {
         Ok(stored) => stored,

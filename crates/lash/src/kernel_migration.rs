@@ -101,7 +101,14 @@ pub async fn survey_kernel_migration(
             };
             let mut refused = Vec::new();
             if let Some(turn) = reads.turn(&session).await? {
-                for cell in stored_cells(&**reads, &session, &turn.run).await? {
+                for cell in stored_cells(
+                    &**reads,
+                    &session,
+                    &turn.run,
+                    backend.config().settings().graph_reads,
+                )
+                .await?
+                {
                     let lash_core::durable_port::domain::ExecKey::Cell(_, _, id) = &cell.exec
                     else {
                         continue;
@@ -307,18 +314,20 @@ pub(crate) async fn stored_cells(
     reads: &dyn lash_core::DurableStore,
     session: &lash_core::SessionId,
     run: &lash_core::TurnId,
+    policy: lash_core_store::checkpoint_graph::GraphReadPolicy,
 ) -> Result<Vec<lash_core::plugin::StoredCell>, lash_core::durable_port::DurableError> {
-    use lash_core::durable_port::domain::graph::{OWNER_READ_LIMITS, RootOwner};
+    use lash_core::durable_port::domain::graph::RootOwner;
     let mut cells = Vec::new();
     for row in reads.cell_roots(session, run).await? {
         let graph = reads
             .hydrate(
                 RootOwner::Exec(row.exec.clone()),
                 Some(row.root),
-                OWNER_READ_LIMITS,
+                policy.owner(),
             )
             .await?;
         cells.push(lash_core::plugin::StoredCell {
+            read_limits: policy.execution(),
             exec: row.exec.clone(),
             row,
             graph,

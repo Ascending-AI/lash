@@ -216,6 +216,9 @@ fn error_class(error: &AttachmentStoreError) -> &'static str {
 }
 #[async_trait::async_trait]
 impl AttachmentStore for ProviderFileDelivery {
+    fn byte_delivery_budget_applies(&self) -> bool {
+        self.inner.byte_delivery_budget_applies()
+    }
     fn persistence(&self) -> AttachmentStorePersistence {
         self.inner.persistence()
     }

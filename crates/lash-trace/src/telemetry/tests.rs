@@ -107,7 +107,8 @@ fn carrier_codec_preserves_valid_context_and_rejects_invalid_fields() {
     assert_eq!(
         W3cTraceState::parse(&members(TRACESTATE_MEMBER_LIMIT + 1)).unwrap_err(),
         InvalidTraceCarrier::TracestateMembers {
-            members: TRACESTATE_MEMBER_LIMIT + 1
+            members: TRACESTATE_MEMBER_LIMIT + 1,
+            limit: TRACESTATE_MEMBER_LIMIT
         }
     );
     let long = format!("a={},b={}", "x".repeat(255), "y".repeat(253));
@@ -115,7 +116,8 @@ fn carrier_codec_preserves_valid_context_and_rejects_invalid_fields() {
     assert_eq!(
         W3cTraceState::parse(&long).unwrap_err(),
         InvalidTraceCarrier::TracestateLength {
-            chars: TRACESTATE_CHAR_LIMIT + 1
+            chars: TRACESTATE_CHAR_LIMIT + 1,
+            limit: TRACESTATE_CHAR_LIMIT
         }
     );
     assert_eq!(
@@ -325,4 +327,23 @@ fn an_admitting_scope_takes_its_members_causes_in_admission_order() {
         "each producer is linked once, in the order its row was admitted"
     );
     assert!(matches!(fan_in, TraceCause::Linked(_)));
+}
+
+/// TRACE-CARRIER-POLICY: host-selected cuts stay inside the W3C and stored-link ceilings.
+#[test]
+fn host_trace_state_and_link_limits_are_honored() {
+    let limits = TraceStateLimits::new(1, 512, 256, 241, 14, 256).unwrap();
+    assert!(matches!(
+        W3cTraceState::parse_with_limits("a=1,b=2", limits),
+        Err(InvalidTraceCarrier::TracestateMembers { limit: 1, .. })
+    ));
+    let mut links = TraceLinks::with_limit(1).unwrap();
+    links.push(carrier(1));
+    links.push(carrier(2));
+    assert_eq!(links.contexts().len(), 1);
+    assert_eq!(links.omitted(), 1);
+    assert_eq!(
+        serde_json::from_value::<TraceLinks>(serde_json::to_value(&links).unwrap()).unwrap(),
+        links
+    );
 }

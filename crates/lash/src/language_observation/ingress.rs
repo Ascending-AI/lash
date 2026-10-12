@@ -5,20 +5,6 @@
 
 use std::collections::VecDeque;
 
-/// The session class's count bound: its worker publishes one draft per
-/// store call.
-pub(super) const MAX_EVENTS: usize = 256;
-pub(super) const MAX_BYTES: usize = 4 * 1024 * 1024;
-
-/// The process class's count bound, from how its store takes publications:
-/// the round its worker is publishing and the round that gathers behind it.
-/// A worker that drains everything pending into one round sustains whatever
-/// rate fills one round per store round trip, so a queue of two rounds
-/// overflows only when the VM outruns the store itself.
-pub(super) fn process_events(limits: lash_core::ProcessReplayPublishLimits) -> usize {
-    limits.round_events().saturating_mul(2)
-}
-
 pub(super) enum Work<T> {
     Invalidate,
     /// Everything pending, in admission order, each with its charge.
@@ -109,3 +95,9 @@ impl<T> Ingress<T> {
         self.bytes -= charge;
     }
 }
+
+#[cfg(test)]
+pub(super) const MAX_EVENTS: usize =
+    lash_trace::ObservationWorkLimits::standard().language_session_events;
+#[cfg(test)]
+pub(super) const MAX_BYTES: usize = lash_trace::ObservationWorkLimits::standard().language_bytes;

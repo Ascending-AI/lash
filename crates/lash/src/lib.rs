@@ -76,6 +76,8 @@ mod change_page;
 mod core;
 mod data_retention;
 pub use change_page::ChangePage;
+pub use lash_core::facade_support::RuntimeDataLimits;
+pub use lash_core_store::plugin_state::NameByteLimit;
 /// The durable substrate's backend builder (ADR 0132 §1).
 pub mod durable;
 mod durable_session;
@@ -406,6 +408,7 @@ pub mod tools {
     #[cfg(feature = "codemode")]
     pub use lash_llm_tools::LlmToolsPluginFactory;
     pub use lash_sansio::ToolPresentationConfig;
+    pub use lash_sansio::schema_contract::OutputSchemaLimits;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::{GetDefinitionIntent, PublishDefinitionIntent};
     pub use lash_sansio::{ModelTool, ToolCallStatus};
@@ -431,8 +434,8 @@ pub mod tools {
         ToolDefinition, ToolDirectCompletionClient, ToolDiscovery, ToolDraft, ToolExecutionGrant,
         ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolIntent,
         ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-        ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure, ToolIntents,
-        ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
+        ToolIntentLimits, ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure,
+        ToolIntents, ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
         ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRegistry, ToolSessionLlmProfile,
         ToolValue, ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
         facade_support::ReconfigureError, facade_support::ToolSourceHandle,
@@ -537,6 +540,10 @@ pub mod persistence {
     //! authorities here govern writes. Hosts and plugins read
     //! [`crate::process::ObservedProcess`] through `processes()` or their
     //! runtime-provided services instead.
+    pub use lash_core_store::checkpoint_graph::{
+        DecodeLimits as GraphDecodeLimits, GraphReadPolicy, KernelDataLimits,
+    };
+
     #[cfg(any(test, feature = "testing"))]
     pub use lash_core::{
         ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,
@@ -810,6 +817,7 @@ pub mod prompt {
 /// their [`TraceSink`](crate::tracing::TraceSink) and installing it through
 /// [`LashCoreBuilder::trace_sink`](crate::core::LashCoreBuilder::trace_sink).
 pub mod plugins {
+    pub use lash_core_store::tool_run::StateCommandLimits;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::ConfigRegistry;
     /// The neutral composition and state sink shared by execution owners.
@@ -1141,7 +1149,9 @@ pub mod attachments {
     /// value that is inline or retained.
     pub use lash_core::{
         OutputRetentionPolicy, OutputValue, RetainedOutput, RetainedValue, ValueShape,
+        ValueShapeLimits,
     };
+    pub use lash_core_store::attachments::{AttachmentByteDelivery, AttachmentPutReceipt};
     pub use lash_sansio::FieldShape;
     pub use lash_sansio::llm::attachment_delivery::{
         AttachmentPosition, Delivery, DeliveryContext, DeliveryFetchHorizon, DeliveryForms,

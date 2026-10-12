@@ -292,8 +292,9 @@ pub(super) fn restaged_text(
 pub(super) fn load(
     source: &dyn NodeSource,
     root: NodeId,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<(PhaseCheckpoint, PhaseStored), String> {
-    let mut decoder = GraphDecoder::new(source, lash_durable::domain::graph::OWNER_READ_LIMITS);
+    let mut decoder = GraphDecoder::new(source, limits);
     let text = |error: GraphRefusal| error.to_string();
     let body: PhaseRootBody = decoder.decode(root, NodeKind::PHASE_ROOT).map_err(text)?;
     let read: PhaseRead = serde_json::from_str(&body.checkpoint)

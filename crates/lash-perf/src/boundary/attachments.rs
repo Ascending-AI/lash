@@ -70,6 +70,9 @@ struct MeasuredStore {
 }
 #[async_trait::async_trait]
 impl AttachmentStore for MeasuredStore {
+    fn byte_delivery_budget_applies(&self) -> bool {
+        self.inner.byte_delivery_budget_applies()
+    }
     fn persistence(&self) -> AttachmentStorePersistence {
         self.inner.persistence()
     }
@@ -334,7 +337,7 @@ pub(super) async fn run(operations: usize, ledger_cap: usize) -> Result<Receipt>
             let output = tokio::time::timeout(
                 std::time::Duration::from_secs(60),
                 session
-                    .send(lash::TurnInput::text("look").with_attachment(reference))
+                    .send(lash::TurnInput::text("look").with_attachment(reference.reference))
                     .output(),
             )
             .await??;

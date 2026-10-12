@@ -29,6 +29,7 @@ use crate::{
 /// journal and so has no effect-replay options.
 #[derive(Clone, Debug)]
 pub struct SqliteStoreSetOptions {
+    pub graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
     /// Physical store observations; SQLite has no connection-pool wait to report.
     pub observer: lash_core_execution::facade_support::StoreObserver,
     /// Blob and connection policy for the database.
@@ -63,6 +64,7 @@ impl SqliteStoreSetOptions {
     /// capacities, with standard migration backups. The host states durability.
     pub fn development(synchronous: crate::SqliteSynchronous) -> Self {
         Self {
+            graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy::standard(),
             store: StoreOptions::development(synchronous),
             migration_backup: crate::SqliteMigrationBackup::development(),
             observer: lash_core_execution::facade_support::StoreObserver::default(),
@@ -82,6 +84,7 @@ impl SqliteStoreSetOptions {
     pub fn standard(synchronous: SqliteSynchronous) -> Self {
         Self {
             observer: lash_core_execution::facade_support::StoreObserver::default(),
+            graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy::standard(),
             store: StoreOptions::standard(synchronous),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
             migration_backup: crate::SqliteMigrationBackup::standard(),
@@ -284,6 +287,7 @@ impl SqliteStoreSet {
                     Arc::clone(&clock),
                     process_env_store.options.blob_profile,
                     options.observer.clone(),
+                    options.graph_reads,
                 );
                 Some(Arc::new(
                     crate::durable::SqliteNodeWakes::new(store, path).await?,
@@ -354,6 +358,7 @@ impl SqliteStoreSet {
             Arc::clone(&self.inner.clock),
             self.inner.process_env_store.options.blob_profile,
             self.inner.options.observer.clone(),
+            self.inner.options.graph_reads,
         )
     }
 

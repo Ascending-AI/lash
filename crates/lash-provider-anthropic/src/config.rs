@@ -18,9 +18,26 @@ pub enum AnthropicAuthScheme {
     Bearer,
 }
 
+/// Route-owned content-block admission, independent of transport byte guards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnthropicStreamLimits {
+    pub max_blocks: usize,
+}
+impl AnthropicStreamLimits {
+    /// Historical default: 1,024 dense content blocks; no protocol maximum.
+    pub const fn standard() -> Self {
+        Self { max_blocks: 1024 }
+    }
+}
+impl Default for AnthropicStreamLimits {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
 /// Anthropic API (Claude) provider state and transport.
 ///
-/// Streamed messages accept at most 1,024 content blocks. Starts must use
+/// Streamed messages accept 1,024 content blocks under the standard policy. Starts must use
 /// consecutive indices beginning at zero; malformed indices end the stream
 /// without retry.
 #[derive(Clone, Debug)]
@@ -31,6 +48,7 @@ pub struct AnthropicProvider {
     pub auth_scheme: AnthropicAuthScheme,
     pub base_url: Option<String>,
     pub options: ProviderOptions,
+    pub stream_limits: AnthropicStreamLimits,
     pub(crate) attachment_credential_scope: Option<String>,
     pub extra_headers: lash_llm_transport::ExtraHeaders,
     pub stream_termination: StreamTermination,
@@ -53,6 +71,7 @@ impl AnthropicProvider {
             auth_scheme: AnthropicAuthScheme::default(),
             base_url: None,
             options: ProviderOptions::standard(),
+            stream_limits: AnthropicStreamLimits::standard(),
             extra_headers: Default::default(),
             stream_termination: StreamTermination::default(),
             transport: Arc::clone(&DEFAULT_HTTP_TRANSPORT),
@@ -78,6 +97,11 @@ impl AnthropicProvider {
     /// Configure proactive renewal before this provider is used.
     pub fn with_token_policy(mut self, policy: lash_llm_transport::TokenPolicy) -> Self {
         self.tokens = Arc::new(self.tokens.configured(policy));
+        self
+    }
+
+    pub fn with_stream_limits(mut self, limits: AnthropicStreamLimits) -> Self {
+        self.stream_limits = limits;
         self
     }
 

@@ -78,17 +78,17 @@ thread_local! {
 }
 
 /// Runs one nested decode under the depth bound.
-fn nested<T>(decode: impl FnOnce() -> Result<T, TokenError>) -> Result<T, TokenError> {
+fn nested<T>(limit: u64, decode: impl FnOnce() -> Result<T, TokenError>) -> Result<T, TokenError> {
     let depth = DEPTH.with(|depth| {
         let next = depth.get() + 1;
         depth.set(next);
         next
     });
-    let result = if depth > MAX_DECODE_DEPTH {
+    let result = if depth > limit {
         Err(TokenError::Limit {
             dimension: DecodeDimension::Depth,
             actual: depth,
-            limit: MAX_DECODE_DEPTH,
+            limit,
         })
     } else {
         decode()
@@ -431,7 +431,7 @@ impl TokenCodec for TaskIdentity {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        nested(|| {
+        nested(input.decode_depth(), || {
             Ok(
                 match variant(input, |variant| match variant {
                     0 => Some(0),
@@ -609,7 +609,7 @@ impl TokenCodec for Value {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        nested(|| {
+        nested(input.decode_depth(), || {
             let number = variant(input, |variant| match variant {
                 0 | 1 => Some(0),
                 2..=18 => Some(1),
@@ -761,7 +761,7 @@ impl TokenCodec for Datum {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        nested(|| {
+        nested(input.decode_depth(), || {
             let number = variant(input, |variant| match variant {
                 0 | 1 => Some(0),
                 2..=16 => Some(1),

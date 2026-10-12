@@ -18,11 +18,13 @@ mod heap_profile;
 mod library;
 #[cfg(all(test, unix))]
 mod turn_laws;
-#[cfg(feature = "dialect-python")]
-pub use embedding::python;
 #[cfg(feature = "dialect-typescript")]
 pub use embedding::typescript;
 pub use embedding::{Dialect, EmbedError, Embedder, Embedding};
+#[cfg(feature = "dialect-python")]
+pub use embedding::{python, python_with_limits};
+#[cfg(feature = "dialect-python")]
+pub use lash_dialect_python::SourceLimits as PythonSourceLimits;
 
 #[cfg(unix)]
 mod entry;
@@ -60,7 +62,16 @@ pub fn built_dialects(tuning: &lash_vm_client::WorkerTuning) -> Result<Embedding
     #[cfg(feature = "dialect-typescript")]
     let embedder = embedder.dialect(typescript(tuning))?;
     #[cfg(feature = "dialect-python")]
-    let embedder = embedder.dialect(python())?;
+    let embedder = embedder.dialect(python_with_limits(
+        lash_dialect_python::SourceLimits::new(
+            tuning.python_source_bytes,
+            tuning.python_source_nesting,
+        )
+        .map_err(|error| EmbedError::Dialect {
+            dialect: lash_vm_releases::PYTHON.to_owned(),
+            message: error.to_string(),
+        })?,
+    ))?;
     #[cfg(not(feature = "dialect-typescript"))]
     let _ = tuning;
     embedder.finish()

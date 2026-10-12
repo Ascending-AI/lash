@@ -376,3 +376,18 @@ async fn http_shutdown_cancels_stalled_catalog_discovery() {
     assert!(entry.actor_handle.lock_recover().is_none());
     assert_eq!(fixture.state.calls.load(Ordering::SeqCst), 2);
 }
+
+/// MCP-DATA-POLICY: complete discovery respects deployment catalog bounds.
+#[tokio::test]
+async fn a_nondefault_catalog_limit_is_honored_at_discovery() {
+    let fixture = HttpPeer::start(Scenario::Valid).await;
+    let mut config = fixture.config();
+    config.data_limits.catalog_items = 0;
+    let result =
+        McpConnectionPool::connect(BTreeMap::from([("configured".to_string(), config)])).await;
+    // Pools retain a disconnected peer's typed operational health, rather than failing deployment construction.
+    let pool = result.expect("pool");
+    let health = pool.server_statuses();
+    assert!(format!("{health:?}").contains("item limit 0"), "{health:?}");
+    pool.shutdown_all().await;
+}

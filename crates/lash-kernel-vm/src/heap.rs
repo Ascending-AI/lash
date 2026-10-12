@@ -342,6 +342,9 @@ fn trace(object: &Obj, seeds: &mut Vec<Identity>) {
 
 #[derive(Debug)]
 pub(crate) struct Heap {
+    pub(crate) value_depth: usize,
+    pub(crate) json_depth: usize,
+    pub(crate) inline_depth: u32,
     /// The chunks that hold an object, ascending by number. Nothing is
     /// freed between two collections, so every chunk numbered since the
     /// last one is here: a recent identity's chunk sits as many places
@@ -360,6 +363,9 @@ pub(crate) struct Heap {
 impl Heap {
     pub(crate) fn new(bound: u64) -> Self {
         Self {
+            value_depth: MAX_VALUE_DEPTH,
+            json_depth: 64,
+            inline_depth: 64,
             chunks: Vec::new(),
             next: 0,
             clock: 0,
@@ -632,6 +638,12 @@ fn table_of(entries: Vec<(Value, Value)>) -> Result<Table, NativeError> {
 }
 
 impl NativeHeap for NativeView<'_> {
+    fn data_depth_limit(&self) -> usize {
+        self.heap.json_depth
+    }
+    fn value_depth_limit(&self) -> usize {
+        self.heap.value_depth
+    }
     fn len(&self, object: ObjectId) -> usize {
         match self.heap.get(object) {
             Some(Obj::List(items)) => items.len(),

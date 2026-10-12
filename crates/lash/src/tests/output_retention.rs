@@ -19,6 +19,7 @@ use lash_core::llm::types::LlmResponse;
 
 /// A policy far below the outputs: 4 KiB inline, a 512-byte witness.
 const POLICY: lash_core::OutputRetentionPolicy = lash_core::OutputRetentionPolicy {
+    shape: lash_core::ValueShapeLimits::standard(),
     inline_limit_bytes: 4 * 1024,
     witness_bytes: 512,
 };

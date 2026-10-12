@@ -41,6 +41,8 @@ pub struct GroupCommit {
 /// takes effect only through [`DurableSettings::validate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DurableSettings {
+    /// Deployment admission for graph reads of durable owner state.
+    pub graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
     /// L1, then L8: node-lease timings, including the claim poll.
     pub lease: LeaseSettings,
     /// L3, then L8: the most actors one claim takes; a claim never takes
@@ -79,6 +81,7 @@ impl DurableSettings {
     /// no workload measurement establishes the other numerical values.
     pub fn standard() -> Self {
         Self {
+            graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy::standard(),
             lease: LeaseSettings::default(),
             claim_batch: 16,
             max_active: 256,

@@ -244,7 +244,8 @@ impl Embedding {
 /// printer, the library it ships with beyond the kernel's, and its helpers
 /// as the build defined them ([`typescript`], [`python`]).
 pub struct Dialect {
-    package: Package,
+    name: &'static str,
+    package: Result<Package, EmbedError>,
     /// Registers the functions the dialect's helpers call beyond the
     /// kernel library's.
     extensions: Option<RegisterExtensions>,
@@ -257,7 +258,7 @@ impl Dialect {
     /// The dialect's name: what a session records and a run names.
     #[must_use]
     pub fn name(&self) -> &str {
-        &self.package.dialect
+        self.name
     }
 }
 
@@ -319,9 +320,11 @@ impl Embedder {
     /// when a function is refused.
     pub fn dialect(mut self, dialect: Dialect) -> Result<Self, EmbedError> {
         let Dialect {
+            name: _,
             package,
             extensions,
         } = dialect;
+        let package = package?;
         if self.dialects.contains_key(&package.dialect) {
             return Err(EmbedError::DuplicateDialect {
                 dialect: package.dialect,
@@ -434,13 +437,14 @@ impl Embedder {
 #[must_use]
 pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Dialect {
     Dialect {
-        package: Package {
+        name: lash_vm_releases::TYPESCRIPT,
+        package: typescript::FrontEnd::new(tuning).map(|front_end| Package {
             dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
-            front_end: Box::new(typescript::FrontEnd::new(tuning)),
+            front_end: Box::new(front_end),
             printer: Some(Box::new(typescript::Printer)),
             function_values: Some(lash_dialect_typescript::function_values()),
             functions: Vec::new(),
-        },
+        }),
         extensions: Some(crate::library::register_extensions),
     }
 }
@@ -449,8 +453,18 @@ pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Dialect {
 #[cfg(feature = "dialect-python")]
 #[must_use]
 pub fn python() -> Dialect {
+    python_with_limits(lash_dialect_python::SourceLimits::standard())
+}
+
+/// The Python dialect under the host's validated source admission policy.
+#[cfg(feature = "dialect-python")]
+#[must_use]
+pub fn python_with_limits(limits: lash_dialect_python::SourceLimits) -> Dialect {
+    let mut package = lash_dialect_python::package(Vec::new());
+    package.front_end = Box::new(lash_dialect_python::Python { limits });
     Dialect {
-        package: lash_dialect_python::package(Vec::new()),
+        name: lash_vm_releases::PYTHON,
+        package: Ok(package),
         extensions: None,
     }
 }
@@ -469,15 +483,28 @@ mod typescript {
     }
 
     impl FrontEnd {
-        pub(super) fn new(tuning: &lash_vm_client::WorkerTuning) -> Self {
-            Self {
-                parser: Mutex::new(lash_dialect_typescript::Parser::with_stack(
-                    lash_dialect_typescript::ParserStack {
-                        base_bytes: tuning.parser_stack_base_bytes,
-                        bytes_per_source_byte: tuning.parser_stack_bytes_per_source_byte,
-                    },
-                )),
-            }
+        pub(super) fn new(
+            tuning: &lash_vm_client::WorkerTuning,
+        ) -> Result<Self, super::EmbedError> {
+            let limits = lash_dialect_typescript::SourceLimits::new(
+                tuning.typescript_source_bytes,
+                tuning.typescript_source_nesting,
+            )
+            .map_err(|error| super::EmbedError::Dialect {
+                dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
+                message: error.to_string(),
+            })?;
+            Ok(Self {
+                parser: Mutex::new(
+                    lash_dialect_typescript::Parser::with_stack(
+                        lash_dialect_typescript::ParserStack {
+                            base_bytes: tuning.parser_stack_base_bytes,
+                            bytes_per_source_byte: tuning.parser_stack_bytes_per_source_byte,
+                        },
+                    )
+                    .with_limits(limits),
+                ),
+            })
         }
     }
 
@@ -876,6 +903,47 @@ pub(crate) mod tests {
             )
             .unwrap_or_else(|invalid| panic!("{cell} lowers to an invalid document: {invalid}"));
         }
+    }
+    /// WORKER-DATA-POLICY: the bootstrap's source admission reaches the installed dialect.
+    #[test]
+    fn worker_tuning_allows_a_larger_typescript_source() {
+        let source = format!("//{}", "x".repeat(64 * 1024));
+        let mut tuning = WorkerTuning::standard();
+        tuning.typescript_source_bytes = source.len();
+        let embedding = typescript_only(&tuning).unwrap();
+        let environment = Environment {
+            library: embedding.library(),
+            effects: &BTreeMap::new(),
+            controls: &BTreeMap::new(),
+            tool_roots: &BTreeSet::new(),
+            bindings: &BTreeSet::new(),
+            functions: &BTreeMap::new(),
+        };
+        embedding
+            .lower(lash_vm_releases::TYPESCRIPT, &source, &environment)
+            .unwrap()
+            .unwrap();
+        let mut invalid = tuning;
+        invalid.typescript_source_nesting = 29;
+        assert!(matches!(
+            Embedder::kernel().unwrap().dialect(typescript(&invalid)),
+            Err(EmbedError::Dialect { .. })
+        ));
+        let python_source = format!("#{}", "x".repeat(1 << 20));
+        tuning.python_source_bytes = python_source.len();
+        let embedding = crate::built_dialects(&tuning).unwrap();
+        let environment = Environment {
+            library: embedding.library(),
+            effects: &BTreeMap::new(),
+            controls: &BTreeMap::new(),
+            tool_roots: &BTreeSet::new(),
+            bindings: &BTreeSet::new(),
+            functions: &BTreeMap::new(),
+        };
+        embedding
+            .lower(lash_vm_releases::PYTHON, &python_source, &environment)
+            .unwrap()
+            .unwrap();
     }
 }
 

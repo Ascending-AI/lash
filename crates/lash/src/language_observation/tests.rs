@@ -735,3 +735,42 @@ async fn an_oversized_committed_fact_invalidates_only_its_own_process() {
         dispatch.publisher.shutdown().await;
     }
 }
+
+/// LANGUAGE-INGRESS-POLICY: a deployment's admission cuts reach both queues.
+#[test]
+fn deployment_language_publication_limits_are_honored() {
+    let process_store = Arc::new(lash_core::InMemoryProcessReplayStore::new(
+        lash_core::InMemoryProcessReplayStoreConfig::standard(),
+    ));
+    let session_store = Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
+        lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+    ));
+    let mut limits = lash_trace::ObservationWorkLimits::standard();
+    limits.language_session_events = 1;
+    limits.language_bytes = 3;
+    let publisher = LanguageObservationPublisher::new(process_store, session_store, limits);
+    assert!(publisher.charge(&"xxxx").is_none());
+    let mut count_limits = limits;
+    count_limits.language_bytes = 4 * 1024 * 1024;
+    let publisher = LanguageObservationPublisher::new(
+        Arc::new(lash_core::InMemoryProcessReplayStore::new(
+            lash_core::InMemoryProcessReplayStoreConfig::standard(),
+        )),
+        Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
+            lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+        )),
+        count_limits,
+    );
+    let subject = TraceRuntimeSubject::Effect {
+        address: lash_sansio::EffectAddress::new(
+            lash_sansio::ExecutionScope::turn(SessionId::from("language-limit"), "turn"),
+            "language",
+        )
+        .unwrap(),
+        effect_id: "cell".into(),
+    };
+    publisher.append(&record(subject.clone(), 0)).unwrap();
+    assert_eq!(publisher.session.admitted(), 1);
+    publisher.append(&record(subject, 1)).unwrap();
+    assert_eq!(publisher.session.admitted(), 0);
+}

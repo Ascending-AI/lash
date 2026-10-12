@@ -10,7 +10,7 @@ use lash_kernel_doc::{
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
-use crate::heap::{Heap, MAX_VALUE_DEPTH, Obj};
+use crate::heap::{Heap, Obj};
 
 /// A raise the machine makes itself: one of the kinds of `K-ERR-002`.
 #[derive(Debug)]
@@ -225,7 +225,7 @@ pub(crate) fn magnitude(value: &Value) -> u64 {
 
 /// Copies a value out of the run as a tree (`K-EFF-002`).
 pub(crate) fn copy_out(heap: &Heap, value: &Value) -> Result<Datum, Raised> {
-    copy(heap, value, MAX_VALUE_DEPTH, &mut Vec::new())
+    copy(heap, value, heap.value_depth, &mut Vec::new())
 }
 
 fn copy(
@@ -237,7 +237,10 @@ fn copy(
     let Some(budget) = budget.checked_sub(1) else {
         return Err(raised(
             "too_deep",
-            format!("a value copied out of the run nests more than {MAX_VALUE_DEPTH} levels"),
+            format!(
+                "a value copied out of the run exceeds the configured {}-level value depth",
+                heap.value_depth
+            ),
         ));
     };
     let not_data = |what: &str| {
@@ -312,6 +315,7 @@ fn copy(
 
 /// How an inbound datum is read.
 pub(crate) struct Decoder<'a> {
+    pub(crate) max_depth: usize,
     pub(crate) policy: NumberPolicy,
     /// Whether the document declares a function of this name.
     pub(crate) declared: &'a dyn Fn(&Name) -> bool,
@@ -394,7 +398,7 @@ impl Decoder<'_> {
     /// Reads `datum` as `ty`: the same tree with every number decoded and
     /// every part in the shape the type names, or why it does not fit.
     pub(crate) fn decode(&self, datum: &Datum, ty: &Type) -> Result<Datum, String> {
-        self.fit(datum, ty, MAX_VALUE_DEPTH)
+        self.fit(datum, ty, self.max_depth)
     }
 
     fn all(&self, items: &[Datum], ty: &Type, budget: usize) -> Result<Vec<Datum>, String> {
@@ -406,7 +410,10 @@ impl Decoder<'_> {
 
     fn fit(&self, datum: &Datum, ty: &Type, budget: usize) -> Result<Datum, String> {
         let Some(budget) = budget.checked_sub(1) else {
-            return Err(format!("it nests more than {MAX_VALUE_DEPTH} levels"));
+            return Err(format!(
+                "it exceeds the configured {}-level value depth",
+                self.max_depth
+            ));
         };
         let mismatch = |expected: &str| Err(format!("expected {expected}, found {}", kind(datum)));
         match (ty, datum) {
@@ -566,7 +573,10 @@ impl Decoder<'_> {
 
     fn any(&self, datum: &Datum, budget: usize) -> Result<Datum, String> {
         let Some(budget) = budget.checked_sub(1) else {
-            return Err(format!("it nests more than {MAX_VALUE_DEPTH} levels"));
+            return Err(format!(
+                "it exceeds the configured {}-level value depth",
+                self.max_depth
+            ));
         };
         let all = |items: &[Datum]| -> Result<Vec<Datum>, String> {
             items.iter().map(|item| self.any(item, budget)).collect()

@@ -12,7 +12,6 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
     turn_cancel_undelivered_wire,
 };
-use lash_durable::domain::graph::OWNER_READ_LIMITS;
 use lash_durable::domain::namespace_value::NamespaceValue;
 use lash_durable::domain::{
     DomainRefusal, ExecKey, SessionCommitWrite, StoredValues, TurnCancelAnswer, TurnCancelRequest,
@@ -626,6 +625,7 @@ pub(super) fn turn_namespaces(
     tx: &Connection,
     session: &SessionId,
     run: &TurnId,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Answer<Vec<TurnNamespace>> {
     let mut statement = tx.prepare_cached(SQL.namespaces.sql())?;
     let rows = statement
@@ -649,11 +649,11 @@ pub(super) fn turn_namespaces(
                     Ok(root) => root,
                     Err(error) => return Ok(Err(error)),
                 };
-                let nodes = match super::graph::graph_closure(tx, root, &OWNER_READ_LIMITS)? {
+                let nodes = match super::graph::graph_closure(tx, root, &limits)? {
                     Ok(nodes) => nodes,
                     Err(refusal) => return Ok(Err(DurableError::from(refusal))),
                 };
-                match NamespaceValue::load(&nodes, root, &plugin, OWNER_READ_LIMITS) {
+                match NamespaceValue::load(&nodes, root, &plugin, limits) {
                     Ok(value) => Some(value.body),
                     Err(refusal) => return Ok(Err(DurableError::from(refusal))),
                 }

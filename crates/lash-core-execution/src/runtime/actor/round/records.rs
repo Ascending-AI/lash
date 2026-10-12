@@ -2,7 +2,7 @@
 //! documentation of [`super`]).
 
 use lash_core_store::checkpoint_graph::{
-    DecodeLimits, EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId,
+    EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId,
 };
 use lash_durable::domain::{
     Ordinal, OwnerKey, RunFactKind, RunFactRow, RunFactWrite, RunFacts, RunSeq,
@@ -107,10 +107,6 @@ impl Record {
     }
 }
 
-/// The limits a run's facts are read within: each was admitted under a
-/// commit budget when it was written, so these bound only corruption.
-const READ_LIMITS: DecodeLimits = lash_durable::domain::graph::OWNER_READ_LIMITS;
-
 fn settled_fact(
     staging: &mut GraphStaging,
     output: &SettledOutput,
@@ -187,7 +183,7 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<NodeId, GraphRef
 ///
 /// Why the record does not decode.
 pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String> {
-    let mut decoder = GraphDecoder::new(facts, READ_LIMITS);
+    let mut decoder = GraphDecoder::new(facts, facts.read_limits);
     let fact = RoundFact::load(&mut decoder, row.record).map_err(|refusal| refusal.to_string())?;
     if fact.kind() != row.kind {
         return Err(format!(

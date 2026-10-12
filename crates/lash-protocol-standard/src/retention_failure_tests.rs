@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 const CALL_ID: &str = "oversized-call";
 const LIVE_POLICY: OutputRetentionPolicy = OutputRetentionPolicy {
+    shape: lash_core::ValueShapeLimits::standard(),
     inline_limit_bytes: 1024,
     witness_bytes: 256,
 };

@@ -260,6 +260,10 @@ impl PluginSession {
     }
 
     /// The runtime's execution budgets this session's tools run under.
+    pub fn data_limits(&self) -> crate::runtime::RuntimeDataLimits {
+        self.host.data_limits()
+    }
+
     pub fn execution_budgets(&self) -> crate::ExecutionBudgets {
         self.host.execution_budgets()
     }

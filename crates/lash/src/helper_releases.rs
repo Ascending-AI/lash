@@ -162,7 +162,14 @@ async fn helper_session(
     let reads = backend.durable();
     let mut cells = Vec::new();
     if let Some(turn) = reads.turn(&session).await? {
-        for cell in crate::kernel_migration::stored_cells(&**reads, &session, &turn.run).await? {
+        for cell in crate::kernel_migration::stored_cells(
+            &**reads,
+            &session,
+            &turn.run,
+            backend.config().settings().graph_reads,
+        )
+        .await?
+        {
             let lash_core::durable_port::domain::ExecKey::Cell(_, _, id) = &cell.exec else {
                 continue;
             };

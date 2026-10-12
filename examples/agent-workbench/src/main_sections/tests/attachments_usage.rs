@@ -27,9 +27,12 @@ async fn retained_mcp_binary_retrieves_exact_bytes_with_octet_stream() {
     assert_eq!(response.status(), StatusCode::OK);
     let media = response.headers()[header::CONTENT_TYPE].clone();
     assert_eq!(response.headers()["x-content-type-options"], "nosniff");
-    let bytes = axum::body::to_bytes(response.into_body(), MAX_WORKBENCH_ATTACHMENT_BYTES)
-        .await
-        .expect("read retained binary bytes");
+    let bytes = axum::body::to_bytes(
+        response.into_body(),
+        WorkbenchDataLimits::default().attachment_bytes,
+    )
+    .await
+    .expect("read retained binary bytes");
     assert_eq!(bytes.as_ref(), crate::mcp_fixture::BADGE_BYTES);
     assert_eq!(media, "application/octet-stream");
 }
@@ -303,9 +306,12 @@ async fn assert_retrieved_attachment(
             .and_then(|value| value.to_str().ok()),
         Some(attachment_id.to_string().as_str())
     );
-    let bytes = axum::body::to_bytes(response.into_body(), MAX_WORKBENCH_ATTACHMENT_BYTES)
-        .await
-        .expect("read retrieved attachment body");
+    let bytes = axum::body::to_bytes(
+        response.into_body(),
+        WorkbenchDataLimits::default().attachment_bytes,
+    )
+    .await
+    .expect("read retrieved attachment body");
     assert_eq!(bytes.as_ref(), expected);
 }
 

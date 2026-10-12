@@ -251,7 +251,7 @@ impl Reader<'_> {
                 k::Action::Perform {
                     effect,
                     args: self.atoms(args)?,
-                    result: super::decode(&string(value)?)
+                    result: super::decode(&string(value)?, self.limits)
                         .map_err(|error| invalid(error.to_string(), Some(value.span())))?,
                 }
             }

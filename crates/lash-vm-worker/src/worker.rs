@@ -463,7 +463,8 @@ impl<'embedding> Server<'embedding> {
         let document = std::str::from_utf8(&document)
             .map_err(|error| undecodable(RunInput::Document, &error))
             .and_then(|text| {
-                Document::from_json(text).map_err(|error| undecodable(RunInput::Document, &error))
+                Document::from_json_with_limits(text, self.bootstrap.tuning.kernel_data)
+                    .map_err(|error| undecodable(RunInput::Document, &error))
             })?;
         let identity = document
             .identity()
@@ -504,12 +505,17 @@ impl<'embedding> Server<'embedding> {
                             start.dialect
                         ))
                     })?;
-                let machine =
-                    KernelMachine::start(program, bounds, from.into()).map_err(|error| {
-                        PoolError::refused(RunRefusal::Start {
-                            detail: Detail::new(error),
-                        })
-                    })?;
+                let machine = KernelMachine::start_with_data_limits(
+                    program,
+                    bounds,
+                    from.into(),
+                    self.bootstrap.tuning.kernel_data,
+                )
+                .map_err(|error| {
+                    PoolError::refused(RunRefusal::Start {
+                        detail: Detail::new(error),
+                    })
+                })?;
                 (machine, release)
             }
             StartFrom::ParkedGraph(parked) => {
@@ -534,6 +540,7 @@ impl<'embedding> Server<'embedding> {
                 // reads back whole at each: the logical body is bounded by
                 // the state and the run's heap together.
                 let limits = DecodeLimits {
+                    kernel_data: self.bootstrap.tuning.kernel_data,
                     logical_bytes: self.bootstrap.state.saturating_add(bounds.memory),
                     ..DecodeLimits::within_total(self.bootstrap.state)
                 };

@@ -8,9 +8,8 @@ use rmcp::service::{Peer, RoleClient};
 
 use crate::error::McpError;
 
-const MAX_CATALOG_PAGES: usize = 64;
-const MAX_CATALOG_ITEMS: usize = 4096;
-const MAX_CATALOG_BYTES: usize = 8 * 1024 * 1024;
+#[cfg(test)]
+const MAX_CATALOG_BYTES: usize = crate::config::McpDataLimits::standard().catalog_bytes;
 
 struct CatalogByteBudget {
     remaining: usize,
@@ -30,28 +29,35 @@ impl Write for CatalogByteBudget {
     }
 }
 
-pub(super) async fn discover_tools(peer: &Peer<RoleClient>) -> Result<Vec<Tool>, McpError> {
+pub(super) async fn discover_tools(
+    peer: &Peer<RoleClient>,
+    limits: crate::config::McpDataLimits,
+) -> Result<Vec<Tool>, McpError> {
     let mut tools = Vec::new();
     let mut cursor = None;
     let mut cursors = BTreeSet::new();
     let mut bytes = CatalogByteBudget {
-        remaining: MAX_CATALOG_BYTES,
+        remaining: limits.catalog_bytes,
     };
-    for _ in 0..MAX_CATALOG_PAGES {
+    for _ in 0..limits.catalog_pages {
         let params = PaginatedRequestParams::default().with_cursor(cursor);
         let page = peer
             .list_tools(Some(params))
             .await
             .map_err(|error| McpError::Protocol(format!("MCP tools/list failed: {error}")))?;
-        if page.tools.len() > MAX_CATALOG_ITEMS - tools.len() {
-            return Err(McpError::Protocol(
-                "MCP catalog item limit exceeded".to_string(),
-            ));
+        if page.tools.len() > limits.catalog_items.saturating_sub(tools.len()) {
+            return Err(McpError::Protocol(format!(
+                "MCP catalog item limit {} exceeded",
+                limits.catalog_items
+            )));
         }
         // Count serialized bytes without allocating a second catalog copy.
         // Metadata and cursors consume the same aggregate budget as tools.
         serde_json::to_writer(&mut bytes, &page).map_err(|error| {
-            McpError::Protocol(format!("MCP catalog byte limit exceeded: {error}"))
+            McpError::Protocol(format!(
+                "MCP catalog byte limit {} exceeded: {error}",
+                limits.catalog_bytes
+            ))
         })?;
         tools.extend(page.tools);
         cursor = page.next_cursor;
@@ -64,9 +70,10 @@ pub(super) async fn discover_tools(peer: &Peer<RoleClient>) -> Result<Vec<Tool>,
             ));
         }
     }
-    Err(McpError::Protocol(
-        "MCP catalog page limit exceeded".to_string(),
-    ))
+    Err(McpError::Protocol(format!(
+        "MCP catalog page limit {} exceeded",
+        limits.catalog_pages
+    )))
 }
 
 #[cfg(test)]

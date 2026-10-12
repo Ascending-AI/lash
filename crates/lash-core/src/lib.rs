@@ -302,7 +302,6 @@ pub mod facade_support {
     pub use crate::runtime::RuntimeEnvironment;
     pub use crate::runtime::RuntimeEnvironmentBuilder;
     pub use crate::runtime::RuntimeHandle;
-    pub use crate::runtime::RuntimeHostConfig;
     pub use crate::runtime::RuntimeObservation;
     pub use crate::runtime::RuntimeSleepOptions;
     pub use crate::runtime::SessionCommand;
@@ -312,6 +311,7 @@ pub mod facade_support {
     pub use crate::runtime::SessionResume;
     pub use crate::runtime::SessionScopeId;
     pub use crate::runtime::load_durable_observation_head;
+    pub use crate::runtime::{RuntimeDataLimits, RuntimeHostConfig};
 
     pub use crate::runtime::OperationCancelOutcome;
     pub use crate::runtime::QueueWithdrawalPublisher;
@@ -487,7 +487,7 @@ pub use lash_sansio::{
     ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity,
     ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract, ToolValue, ToolView,
     ToolViewBlock, ToolViewMeta, TurnControl, TurnControlKind, TurnControls, TurnId,
-    TurnOutputSource, TurnReply, ValueMismatch, ValueShape,
+    TurnOutputSource, TurnReply, ValueMismatch, ValueShape, ValueShapeLimits,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,
@@ -771,9 +771,9 @@ pub use tool_intent::{
     CancelProcessIntent, DeclaredModuleArtifact, GetDefinitionIntent, PublishDefinitionIntent,
     StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
     TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, ToolAttemptOutcome, ToolIntent,
-    ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome, ToolIntentSubmissionRecord,
-    ToolIntentSubmissionSettlement, ToolIntents, ToolOutcomeDone, derive_tool_intent_identity,
-    derive_tool_intent_identity_under, rederive_tool_intent_identity,
+    ToolIntentLimits, ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome,
+    ToolIntentSubmissionRecord, ToolIntentSubmissionSettlement, ToolIntents, ToolOutcomeDone,
+    derive_tool_intent_identity, derive_tool_intent_identity_under, rederive_tool_intent_identity,
 };
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{

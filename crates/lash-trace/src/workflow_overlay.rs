@@ -167,6 +167,7 @@ impl Incoming {
 /// What the reducer knows of the document, and what did not belong to it.
 #[derive(Clone, Debug, Default)]
 struct DocumentState {
+    mismatch_limit: Option<usize>,
     loaded: Option<WorkflowDocumentRef>,
     mismatches: BTreeSet<WorkflowOverlayMismatch>,
     truncated: bool,
@@ -175,6 +176,7 @@ struct DocumentState {
 impl DocumentState {
     fn of(overlay: &WorkflowExecutionOverlay) -> Self {
         Self {
+            mismatch_limit: None,
             loaded: match &overlay.document {
                 WorkflowOverlayDocumentBinding::Loaded { reference } => Some(reference.clone()),
                 WorkflowOverlayDocumentBinding::Unknown
@@ -189,7 +191,7 @@ impl DocumentState {
     /// order they were reported in.
     fn report(&mut self, mismatch: WorkflowOverlayMismatch) {
         self.mismatches.insert(mismatch);
-        while self.mismatches.len() > MISMATCH_LIMIT {
+        while self.mismatches.len() > self.mismatch_limit.unwrap_or(MISMATCH_LIMIT) {
             self.mismatches.pop_last();
             self.truncated = true;
         }

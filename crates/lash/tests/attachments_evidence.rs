@@ -385,7 +385,8 @@ async fn host_upload_is_ref_only(
     bytes: Vec<u8>,
     meta: lash::attachments::AttachmentCreateMeta,
 ) -> Result<lash::InputItem, lash::persistence::AttachmentStoreError> {
-    let reference: lash::attachments::AttachmentRef = session.put_attachment(bytes, meta).await?;
+    let reference: lash::attachments::AttachmentRef =
+        session.put_attachment(bytes, meta).await?.reference;
     Ok(lash::InputItem::attachment(reference))
 }
 

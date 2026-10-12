@@ -9,6 +9,7 @@ use super::ToolDispatchContext;
 /// admitted execution that runs its call, and stages what they write to the
 /// lash store to commit with the call's outcome (ADR 0132 §5).
 pub struct IntentRealizationContext<'run> {
+    pub limits: crate::tool_intent::ToolIntentLimits,
     pub effect_controller: crate::ActorContext,
     pub owner: crate::ExecutionOwner,
     pub processes: Arc<dyn crate::ProcessService>,
@@ -25,6 +26,7 @@ impl<'run> ToolDispatchContext<'run> {
     pub fn intent_realization_context(&self) -> IntentRealizationContext<'run> {
         let context = self;
         IntentRealizationContext {
+            limits: context.state.data_limits().tool_intents,
             effect_controller: context.effect_controller.clone(),
             owner: context.owner.clone(),
             processes: Arc::clone(&context.processes),
@@ -68,7 +70,7 @@ pub async fn execute_final_tool_intents(
     if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V3 {
         return Ok(super::Realization::default());
     }
-    if let Some(refusal) = admit_batch(&context.owner.runtime_owner(), intents) {
+    if let Some(refusal) = admit_batch(&context.owner.runtime_owner(), intents, context.limits) {
         return Ok(super::Realization {
             receipt: super::RealizationReceipt {
                 outcomes: refuse_all(context, &execution_scope_id, tool_call_id, intents, refusal),
@@ -285,24 +287,25 @@ pub(crate) fn declared_start_fault(
 pub(super) fn admit_batch(
     owner: &crate::RuntimeOwner,
     intents: &crate::ToolIntents,
+    limits: crate::tool_intent::ToolIntentLimits,
 ) -> Option<crate::ToolIntentRefusalReason> {
     if intents.protocol_version != crate::TOOL_INTENT_PROTOCOL_V3 {
         return Some(crate::ToolIntentRefusalReason::UnsupportedProtocolVersion {
             recorded: intents.protocol_version,
         });
     }
-    if intents.intents.len() > crate::TOOL_INTENT_MAX_COUNT {
+    if intents.intents.len() > limits.max_count() {
         return Some(crate::ToolIntentRefusalReason::CountBudgetExceeded {
             actual: intents.intents.len(),
-            maximum: crate::TOOL_INTENT_MAX_COUNT,
+            maximum: limits.max_count(),
         });
     }
     let canonical_bytes = intents.declared_canonical_bytes().unwrap_or(usize::MAX);
-    if canonical_bytes > crate::TOOL_INTENT_MAX_CANONICAL_BYTES {
+    if canonical_bytes > limits.max_canonical_bytes() {
         return Some(
             crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
                 actual: canonical_bytes,
-                maximum: crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+                maximum: limits.max_canonical_bytes(),
             },
         );
     }
@@ -312,11 +315,11 @@ pub(super) fn admit_batch(
             .entry(intent.kind().as_str())
             .or_insert((intent.kind(), 0));
         entry.1 += 1;
-        if entry.1 > crate::TOOL_INTENT_MAX_PER_KIND {
+        if entry.1 > limits.max_per_kind() {
             return Some(crate::ToolIntentRefusalReason::PerKindBudgetExceeded {
                 kind: entry.0,
                 actual: entry.1,
-                maximum: crate::TOOL_INTENT_MAX_PER_KIND,
+                maximum: limits.max_per_kind(),
             });
         }
         if intent.owner() != owner {
@@ -609,6 +612,22 @@ mod tests {
         })
     }
 
+    /// INTENT-ADMISSION-POLICY: the deployment's count, kind and byte budgets decide admission.
+    #[test]
+    fn a_nondefault_intent_policy_admits_and_refuses_its_own_bounds() {
+        let owner = session("configured-intents");
+        let intents = crate::ToolIntents::v3(vec![cancel(&owner, 0), cancel(&owner, 1)]);
+        let limits = crate::tool_intent::ToolIntentLimits::new(2, usize::MAX, 2).unwrap();
+        assert_eq!(admit_batch(&owner, &intents, limits), None);
+        for limits in [
+            crate::tool_intent::ToolIntentLimits::new(1, usize::MAX, 2).unwrap(),
+            crate::tool_intent::ToolIntentLimits::new(2, 1, 2).unwrap(),
+            crate::tool_intent::ToolIntentLimits::new(2, usize::MAX, 1).unwrap(),
+        ] {
+            assert!(admit_batch(&owner, &intents, limits).is_some());
+        }
+    }
+
     #[test]
     fn protocol_dispatch_refuses_predecessor_and_unknown_records() {
         for recorded in [0, 1, 2, 4] {
@@ -617,7 +636,11 @@ mod tests {
                 intents: vec![cancel(&session("session"), 1)],
             };
             assert_eq!(
-                admit_batch(&session("session"), &intents),
+                admit_batch(
+                    &session("session"),
+                    &intents,
+                    crate::tool_intent::ToolIntentLimits::standard()
+                ),
                 Some(crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded })
             );
         }
@@ -631,7 +654,11 @@ mod tests {
                 .collect(),
         );
         assert_eq!(
-            admit_batch(&session("session"), &intents),
+            admit_batch(
+                &session("session"),
+                &intents,
+                crate::tool_intent::ToolIntentLimits::standard()
+            ),
             Some(crate::ToolIntentRefusalReason::CountBudgetExceeded {
                 actual: 33,
                 maximum: 32,
@@ -647,7 +674,11 @@ mod tests {
                 .collect(),
         );
         assert_eq!(
-            admit_batch(&session("session"), &intents),
+            admit_batch(
+                &session("session"),
+                &intents,
+                crate::tool_intent::ToolIntentLimits::standard()
+            ),
             Some(crate::ToolIntentRefusalReason::PerKindBudgetExceeded {
                 kind: crate::ToolIntentKind::CancelProcess,
                 actual: 17,
@@ -761,7 +792,14 @@ mod tests {
                 < crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
             "the batch carries only the environment digest"
         );
-        assert_eq!(admit_batch(&session("session"), &intents), None);
+        assert_eq!(
+            admit_batch(
+                &session("session"),
+                &intents,
+                crate::tool_intent::ToolIntentLimits::standard()
+            ),
+            None
+        );
     }
 
     /// The same bytes in what the start declares are the attempt's, and the
@@ -773,7 +811,11 @@ mod tests {
             String::new(),
         )]);
         assert!(matches!(
-            admit_batch(&session("session"), &intents),
+            admit_batch(
+                &session("session"),
+                &intents,
+                crate::tool_intent::ToolIntentLimits::standard()
+            ),
             Some(
                 crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
                     maximum: crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
@@ -790,7 +832,11 @@ mod tests {
             cancel(&session("other-session"), 1),
         ]);
         assert_eq!(
-            admit_batch(&session("session"), &intents),
+            admit_batch(
+                &session("session"),
+                &intents,
+                crate::tool_intent::ToolIntentLimits::standard()
+            ),
             Some(crate::ToolIntentRefusalReason::OwnerMismatch {
                 expected: session("session"),
                 recorded: session("other-session"),

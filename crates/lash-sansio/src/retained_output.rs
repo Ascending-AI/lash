@@ -26,6 +26,8 @@ use crate::{AttachmentRef, ValueShape};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OutputRetentionPolicy {
+    /// Bounds the descriptor retained beside a code-mode value.
+    pub shape: crate::ValueShapeLimits,
     /// The longest output, in bytes, history keeps inline.
     pub inline_limit_bytes: u64,
     /// The longest witness, in bytes, history keeps in place of a retained
@@ -40,6 +42,7 @@ impl OutputRetentionPolicy {
     /// failures a renderer passed through, plugin additions after the cut,
     /// and code mode values. No measurement backs the witness size.
     pub const STANDARD: Self = Self {
+        shape: crate::ValueShapeLimits::standard(),
         inline_limit_bytes: 64 * 1024,
         witness_bytes: 4 * 1024,
     };
@@ -146,6 +149,7 @@ mod tests {
     #[test]
     fn the_witness_is_cut_on_a_character_boundary_within_its_bound() {
         let policy = OutputRetentionPolicy {
+            shape: crate::ValueShapeLimits::standard(),
             inline_limit_bytes: 1,
             witness_bytes: 6,
         };

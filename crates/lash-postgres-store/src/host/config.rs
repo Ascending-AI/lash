@@ -31,6 +31,7 @@ use crate::SchemaCheck;
 pub struct PostgresHostConfig {
     /// Transport policy every role shares.
     pub connection: ConnectionPolicy,
+    pub name_limits: PostgresNameLimits,
     /// Each pooled and dedicated role's capacity.
     pub roles: RolePolicies,
     /// The durable substrate's parameters, the node lease's included. The
@@ -74,6 +75,7 @@ impl PostgresHostConfig {
     pub fn standard() -> Self {
         Self {
             connection: ConnectionPolicy::default(),
+            name_limits: PostgresNameLimits::standard(),
             roles: RolePolicies::default(),
             node: DurableSettings::standard(),
             guards: GuardPolicies::default(),
@@ -858,6 +860,7 @@ enum NotifierDef {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "DurableSettings", deny_unknown_fields)]
 struct DurableSettingsDef {
+    graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
     #[serde(with = "LeaseSettingsDef")]
     lease: LeaseSettings,
     claim_batch: usize,
@@ -871,4 +874,51 @@ struct DurableSettingsDef {
     cascade_batch: usize,
     #[serde(with = "NotifierDef")]
     notifier: Notifier,
+}
+
+/// Host name admission within PostgreSQL's 63-byte identifier space. The
+/// remaining bytes are reserved for connection-role and channel suffixes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "NameLimitsWire")]
+pub struct PostgresNameLimits {
+    application_prefix: usize,
+    replay_schema: usize,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NameLimitsWire {
+    application_prefix: usize,
+    replay_schema: usize,
+}
+impl PostgresNameLimits {
+    pub const fn standard() -> Self {
+        Self {
+            application_prefix: 32,
+            replay_schema: 48,
+        }
+    }
+    pub fn new(application_prefix: usize, replay_schema: usize) -> Option<Self> {
+        (application_prefix <= 32 && replay_schema <= 48).then_some(Self {
+            application_prefix,
+            replay_schema,
+        })
+    }
+    pub const fn application_prefix(self) -> usize {
+        self.application_prefix
+    }
+    pub const fn replay_schema(self) -> usize {
+        self.replay_schema
+    }
+}
+impl Default for PostgresNameLimits {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+impl TryFrom<NameLimitsWire> for PostgresNameLimits {
+    type Error = &'static str;
+    fn try_from(wire: NameLimitsWire) -> Result<Self, Self::Error> {
+        Self::new(wire.application_prefix, wire.replay_schema)
+            .ok_or("name limits exceed their 32/48-byte safety ceilings")
+    }
 }

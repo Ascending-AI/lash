@@ -528,6 +528,7 @@ impl TokenWriter {
 /// Reads a token stream, refusing every non-canonical spelling.
 #[derive(Clone, Debug)]
 pub struct TokenReader<'a> {
+    limits: crate::KernelDataLimits,
     input: &'a [u8],
     pos: usize,
     form: RefForm,
@@ -543,10 +544,19 @@ impl<'a> TokenReader<'a> {
     #[must_use]
     pub fn with_form(input: &'a [u8], form: RefForm) -> Self {
         Self {
+            limits: crate::KernelDataLimits::standard(),
             input,
             pos: 0,
             form,
         }
+    }
+
+    pub fn with_data_limits(mut self, limits: crate::KernelDataLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+    pub fn decode_depth(&self) -> u64 {
+        self.limits.decode_depth()
     }
 
     /// Whether every byte was read.
@@ -932,7 +942,14 @@ pub fn encode_body<T: TokenCodec>(value: &T) -> Vec<u8> {
 ///
 /// Any refusal of `T`'s decoder, or trailing bytes.
 pub fn decode_body<T: TokenCodec>(body: &[u8]) -> Result<T, TokenError> {
-    let mut input = TokenReader::new(body);
+    decode_body_with_limits(body, crate::KernelDataLimits::standard())
+}
+/// Decode a logical body under deployment recursion safety policy.
+pub fn decode_body_with_limits<T: TokenCodec>(
+    body: &[u8],
+    limits: crate::KernelDataLimits,
+) -> Result<T, TokenError> {
+    let mut input = TokenReader::new(body).with_data_limits(limits);
     let value = T::decode(&mut input)?;
     input.finish()?;
     Ok(value)

@@ -116,6 +116,24 @@ impl KernelMachine {
         thaw: impl FnMut(ChildRef) -> Result<Datum, E>,
         admitted: impl FnMut(&EffectIdentity) -> Option<AdmittedRequest>,
     ) -> Result<Self, WholeImportError<E>> {
+        Self::import_whole_with_data_limits(
+            program,
+            bounds,
+            whole,
+            lash_kernel_doc::KernelDataLimits::standard(),
+            thaw,
+            admitted,
+        )
+    }
+    /// Import a whole under deployment recursive data admission.
+    pub fn import_whole_with_data_limits<E>(
+        program: Program,
+        bounds: Bounds,
+        whole: KernelWhole,
+        limits: lash_kernel_doc::KernelDataLimits,
+        thaw: impl FnMut(ChildRef) -> Result<Datum, E>,
+        admitted: impl FnMut(&EffectIdentity) -> Option<AdmittedRequest>,
+    ) -> Result<Self, WholeImportError<E>> {
         let functions = program
             .document
             .manifest
@@ -143,7 +161,7 @@ impl KernelMachine {
         }
         #[cfg(any(test, feature = "perf-witness"))]
         let mut phase = crate::perf_witness::Phase::begin("machine.import");
-        let machine = Self::import(program, bounds, parked)?;
+        let machine = Self::import_with_data_limits(program, bounds, parked, limits)?;
         #[cfg(any(test, feature = "perf-witness"))]
         if let Some(phase) = &mut phase {
             phase.complete(geometry.0, geometry.1, geometry.2);

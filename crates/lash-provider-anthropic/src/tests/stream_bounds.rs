@@ -147,3 +147,17 @@ async fn malformed_start_is_terminal_and_preserves_only_the_valid_prefix() {
     assert_eq!(partial.full_text(), "kept");
     assert_eq!(partial.usage.input_tokens, 7);
 }
+
+/// PROVIDER-BLOCK-POLICY: a route may select a smaller dense block budget.
+#[test]
+fn a_nondefault_stream_block_limit_refuses_before_growing_state() {
+    let mut state = StreamState {
+        limits: crate::AnthropicStreamLimits { max_blocks: 1 },
+        ..StreamState::default()
+    };
+    AnthropicProvider::process_sse_event(&start(0), &mut state, None, false).unwrap();
+    let error =
+        AnthropicProvider::process_sse_event(&start(1), &mut state, None, false).unwrap_err();
+    assert!(error.to_string().contains("1-block limit"), "{error}");
+    assert_eq!(state.blocks.len(), 1);
+}

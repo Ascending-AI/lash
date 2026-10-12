@@ -119,6 +119,7 @@ impl Fixture {
                 Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
                     lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
                 )),
+                lash_trace::ObservationWorkLimits::standard(),
             ),
         );
         crate::process_feed::ProcessFeedSource::new(

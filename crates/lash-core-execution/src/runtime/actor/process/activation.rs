@@ -709,8 +709,12 @@ impl ProcessActivation {
             .state_migration(&format.kind)
             .map(|migration| migration.carries())
             .unwrap_or_default();
-        let Some((root, written_by, state)) =
-            super::state_graph::read_engine_state(reads, process).await?
+        let Some((root, written_by, state)) = super::state_graph::read_engine_state(
+            reads,
+            process,
+            self.backend.config().settings().graph_reads.engine(),
+        )
+        .await?
         else {
             return Ok(if row.state_rev == 0 {
                 Ok((EngineState::empty(format), None))

@@ -23,11 +23,6 @@ use lash_durable::domain::{AdmittedId, ExecKey, ExecRootRow, Ordinal, RunSeq, Sn
 use crate::kernel::graph::AdmissionBook;
 use crate::members::Members;
 
-/// The most a read of an execution's root graph takes in. A read counts a
-/// shared node each time it reads it, so a state's own byte length is no
-/// bound on reading it.
-pub const READ_LIMITS: DecodeLimits = DecodeLimits::within_total(1 << 34);
-
 /// One admitted member's identity: the run of its operation's admission
 /// and its ordinal there, under its execution's owner. Minted at admission,
 /// stored in the snapshot, never a journal position.
@@ -100,6 +95,14 @@ impl std::fmt::Debug for DurableSnapshotStore {
 impl DurableSnapshotStore {
     /// The snapshot store of `exec`, owned by `cx`'s actor.
     #[must_use]
+    pub(crate) fn read_limits(&self) -> DecodeLimits {
+        self.cx
+            .backend()
+            .config()
+            .settings()
+            .graph_reads
+            .execution()
+    }
     pub fn new(cx: &ActorContext, exec: ExecKey) -> Self {
         Self {
             members: tokio::sync::Mutex::new(Members::new(cx, exec.owner())),

@@ -9,6 +9,7 @@ const CALL_ID: &str = "oversized-call";
 
 /// A 1 KiB inline limit and a 256-byte witness.
 const POLICY: crate::OutputRetentionPolicy = crate::OutputRetentionPolicy {
+    shape: crate::ValueShapeLimits::standard(),
     inline_limit_bytes: 1024,
     witness_bytes: 256,
 };

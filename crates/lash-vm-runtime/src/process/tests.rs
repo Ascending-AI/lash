@@ -85,7 +85,13 @@ fn a_parked_run_whose_whole_states_another_kernel_version_than_its_seal_is_refus
     let base = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
     let open = |run: &SealedRun| {
         let whole = super::migrate::unsealed(run).expect("the sealed run is whole");
-        super::migrate::open_run(&whole, &[], &base).map(drop)
+        super::migrate::open_run(
+            &whole,
+            &[],
+            &base,
+            lash_core_store::checkpoint_graph::GraphReadPolicy::standard().execution(),
+        )
+        .map(drop)
     };
     open(&sealed()).expect("a run that states its seal opens");
     let refused = open(&sealed_stating(crate::LASH_KERNEL_VERSION + 1))
@@ -173,8 +179,13 @@ fn every_engine_state_holding_a_run_is_read_against_its_seal() {
         let whole =
             super::migrate::unsealed(decoded.parked.as_ref().expect("the state holds its run"))
                 .expect("the sealed run is a whole state");
-        let refused = super::migrate::open_run(&whole, &[], &base)
-            .expect_err("a run whose whole states another version is refused");
+        let refused = super::migrate::open_run(
+            &whole,
+            &[],
+            &base,
+            lash_core_store::checkpoint_graph::GraphReadPolicy::standard().execution(),
+        )
+        .expect_err("a run whose whole states another version is refused");
         assert!(
             refused.contains(&format!(
                 "sealed under kernel version {}, and its whole states {}",

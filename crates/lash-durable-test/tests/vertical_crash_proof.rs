@@ -107,6 +107,7 @@ const ARCHIVED_CELL: &str = "<typescript>\nconst written = await tools.ext_write
 /// cell's prints exceed the inline limit, and the witness keeps the
 /// operation's answer.
 const ARCHIVE_RETENTION: lash_core::OutputRetentionPolicy = lash_core::OutputRetentionPolicy {
+    shape: lash_core::ValueShapeLimits::standard(),
     inline_limit_bytes: 1024,
     witness_bytes: 512,
 };

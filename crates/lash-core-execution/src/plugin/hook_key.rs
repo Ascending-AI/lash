@@ -18,11 +18,22 @@ pub struct HookKey(&'static str);
 impl HookKey {
     /// Validate `key`.
     pub fn new(key: &'static str) -> Result<Self, PluginError> {
-        if Self::is_valid(key) {
+        Self::with_limit(
+            key,
+            lash_core_store::plugin_state::NameByteLimit::standard(),
+        )
+    }
+    /// Narrow the recorded hook-name ceiling for this deployment.
+    pub fn with_limit(
+        key: &'static str,
+        limit: lash_core_store::plugin_state::NameByteLimit<64>,
+    ) -> Result<Self, PluginError> {
+        if Self::is_valid(key) && key.len() <= limit.max_bytes() {
             Ok(Self(key))
         } else {
             Err(PluginError::Registration(format!(
-                "invalid hook key `{key}`: a key is 1 to {MAX_HOOK_KEY_BYTES} bytes of ASCII letters, digits, `_`, `-` and `.`"
+                "invalid hook key `{key}`: configured key limit {} bytes; expected ASCII letters, digits, `_`, `-` and `.`",
+                limit.max_bytes()
             )))
         }
     }

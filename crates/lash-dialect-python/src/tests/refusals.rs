@@ -439,3 +439,21 @@ fn every_advertised_repair_form_lowers() {
             .unwrap_or_else(|error| panic!("the offered format must lower: {error}\n{form}"));
     }
 }
+
+/// SOURCE-ADMISSION-POLICY: a host can raise source bytes without changing the native nesting ceiling.
+#[test]
+fn a_host_source_policy_allows_a_larger_python_cell() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let source = format!("#{}", "x".repeat(crate::MAX_SOURCE_BYTES));
+    let environment = lash_kernel_dialect::Environment {
+        tool_roots: &BTreeSet::new(),
+        library: machine::library(),
+        effects: &BTreeMap::new(),
+        controls: &BTreeMap::new(),
+        bindings: &BTreeSet::new(),
+        functions: &BTreeMap::new(),
+    };
+    assert!(crate::lower(&source, &environment).is_err());
+    let limits = crate::SourceLimits::new(source.len(), 96).unwrap();
+    crate::lower_with_limits(&source, &environment, limits).unwrap();
+}

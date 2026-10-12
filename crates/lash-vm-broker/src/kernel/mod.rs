@@ -34,4 +34,7 @@ pub use store::{
     EFFECT_RESULT, EFFECT_TIMED_OUT, EffectAdmission, EndSave, FirstPark, HostParts, OutcomeOf,
     ParkSave, ParkedState, RootRead, Saved, SessionGraph, Settled, outcome_of,
 };
-pub use value::{InvalidJson, JsonlessKind, NotJson, datum_from_json, datum_to_json};
+pub use value::{
+    InvalidJson, JsonlessKind, NotJson, datum_from_json, datum_from_json_with_limits,
+    datum_to_json, datum_to_json_with_limits,
+};

@@ -16,7 +16,7 @@ pub fn print(document: &Document) -> Result<String, lash_kernel_dialect::Diagnos
         kind: lash_kernel_dialect::DiagnosticKind::ProgramDefect,
         repairs: vec![],
     })?;
-    Ok(render_source(&source, &TypeScript))
+    Ok(render_source(&source, &TypeScript::default()))
 }
 
 impl Printer for TypeScript {

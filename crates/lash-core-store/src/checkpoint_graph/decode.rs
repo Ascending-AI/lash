@@ -230,7 +230,7 @@ impl<'s> GraphDecoder<'s> {
     ) -> Result<T, GraphRefusal> {
         let logical = self.logical_body(id, expected)?;
         let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(expected.0));
-        let mut reader = TokenReader::new(&logical);
+        let mut reader = TokenReader::new(&logical).with_data_limits(self.limits.kernel_data);
         let value = T::decode(&mut reader).map_err(refuse)?;
         reader.finish().map_err(refuse)?;
         Ok(value)

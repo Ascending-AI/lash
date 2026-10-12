@@ -63,9 +63,17 @@ impl Deadlines {
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerTuning {
+    pub diagnostic_bytes: lash_vm_protocol::DetailLimit,
+    pub kernel_data: lash_kernel_doc::KernelDataLimits,
     /// Parent reads while idle or awaiting a host projection. This is not compute spend.
     pub parent_wait: Duration,
     pub inbound_buffer_bytes: std::num::NonZeroUsize,
+    /// TypeScript source admission. Defaults: 64 KiB and 28 nesting levels.
+    pub typescript_source_bytes: usize,
+    pub typescript_source_nesting: usize,
+    /// Python source admission. Defaults: 1 MiB and 96 nesting levels.
+    pub python_source_bytes: usize,
+    pub python_source_nesting: usize,
     pub parser_stack_base_bytes: usize,
     pub parser_stack_bytes_per_source_byte: usize,
     /// The charge units one `Run` exchange may spend before the machine
@@ -79,8 +87,14 @@ impl WorkerTuning {
     /// frames; the other working values have no workload measurements.
     pub const fn standard() -> Self {
         Self {
+            diagnostic_bytes: lash_vm_protocol::DetailLimit::standard(),
+            kernel_data: lash_kernel_doc::KernelDataLimits::standard(),
             parent_wait: Duration::from_secs(86_400),
             inbound_buffer_bytes: std::num::NonZeroUsize::MIN.saturating_add(16 * 1024 - 1),
+            typescript_source_bytes: 64 * 1024,
+            typescript_source_nesting: 28,
+            python_source_bytes: 1 << 20,
+            python_source_nesting: 96,
             parser_stack_base_bytes: 8 * 1024 * 1024,
             parser_stack_bytes_per_source_byte: 40_000,
             slice: 1_000_000,
@@ -130,6 +144,7 @@ pub struct PoolConfig {
     pub max_workers: usize,
     pub max_queue_items: usize,
     pub max_queue_bytes: usize,
+    pub graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
     pub protocol: ProtocolBounds,
     /// The most any run's bounds may allow.
     pub run_bounds: RunBounds,
@@ -159,6 +174,7 @@ impl PoolConfig {
             max_workers: 4,
             max_queue_items: 2,
             max_queue_bytes: 8 * 1024 * 1024,
+            graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy::standard(),
             protocol: ProtocolBounds::standard(),
             run_bounds: RunBounds {
                 charge: 50_000_000,
@@ -192,6 +208,7 @@ impl PoolConfig {
         let largest_parser_stack = usize::try_from(self.protocol.max_source_bytes)
             .ok()
             .and_then(|bytes| {
+                let bytes = bytes.max(self.tuning.typescript_source_bytes);
                 self.tuning
                     .parser_stack_bytes_per_source_byte
                     .checked_mul(bytes)
@@ -234,5 +251,22 @@ impl PoolConfig {
             return Err(PoolError::InvalidConfiguration);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// WORKER-PARSER-RESERVATION: confinement covers the frontend's admitted source, even under a smaller wire cap.
+    #[test]
+    fn confinement_honors_the_configured_frontend_source_allowance() {
+        let mut config = PoolConfig::standard(WorkerEntry::helper("worker"));
+        config.tuning.typescript_source_bytes = 128 * 1024;
+        assert!(matches!(
+            config.validate(),
+            Err(PoolError::InvalidConfiguration)
+        ));
+        config.confinement.address_space_bytes = 8 * 1024 * 1024 * 1024;
+        assert!(config.validate().is_ok());
     }
 }

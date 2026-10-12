@@ -94,6 +94,13 @@ impl Default for WorkflowExecutionOverlayAccumulator {
 impl WorkflowExecutionOverlayAccumulator {
     /// Retain at most `history_limit` occurrences per site (at least one).
     /// The standard preset is 256; no workload measurements justify that value.
+    /// Choose how many document mismatches the overlay retains; the default is 64.
+    /// Omitted mismatches remain counted. Configure before folding records.
+    pub fn with_mismatch_limit(mut self, limit: usize) -> Self {
+        self.document_state.mismatch_limit = Some(limit);
+        self
+    }
+
     pub fn new(history_limit: usize) -> Self {
         Self {
             history_limit: history_limit.max(1),

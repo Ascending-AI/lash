@@ -96,11 +96,20 @@ pub enum CodecRefusal {
 #[derive(Clone, Debug)]
 pub struct FrameCodec {
     limits: DecodeLimits,
+    detail_limit: crate::DetailLimit,
 }
 
 impl FrameCodec {
     pub fn new(limits: DecodeLimits) -> Self {
-        Self { limits }
+        Self {
+            limits,
+            detail_limit: crate::DetailLimit::standard(),
+        }
+    }
+
+    pub fn with_detail_limit(mut self, limit: crate::DetailLimit) -> Self {
+        self.detail_limit = limit;
+        self
     }
 
     pub fn limits(&self) -> DecodeLimits {
@@ -112,7 +121,15 @@ impl FrameCodec {
     }
 
     pub fn encode_worker(&self, frame: &WorkerFrame) -> Result<Vec<u8>, CodecRefusal> {
-        self.encode(frame)
+        if let crate::WorkerMessage::Refused { refusal } = &frame.message {
+            let mut frame = frame.clone();
+            frame.message = crate::WorkerMessage::Refused {
+                refusal: refusal.clone().with_detail_limit(self.detail_limit),
+            };
+            self.encode(&frame)
+        } else {
+            self.encode(frame)
+        }
     }
 
     /// The bytes of the [`ParentFrame`] `frame` borrows its message for.

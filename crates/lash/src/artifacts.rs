@@ -234,6 +234,22 @@ impl HostArtifacts {
         source: &str,
         environment: &ProcessExecutionEnvSpec,
     ) -> Result<crate::workflow::WorkflowImport> {
+        self.import_typescript_workflow_with_limits(
+            source,
+            environment,
+            crate::typescript::SourceLimits::standard(),
+        )
+        .await
+    }
+
+    /// Import a TypeScript workflow under the host's validated source policy.
+    #[cfg(feature = "typescript")]
+    pub async fn import_typescript_workflow_with_limits(
+        &self,
+        source: &str,
+        environment: &ProcessExecutionEnvSpec,
+        limits: crate::typescript::SourceLimits,
+    ) -> Result<crate::workflow::WorkflowImport> {
         use crate::workflow::{
             WorkflowAdmissionRefusal, WorkflowImport, WorkflowImportUnsupported,
         };
@@ -301,6 +317,7 @@ impl HostArtifacts {
             source,
             &dialect,
             &checked.checker(),
+            limits,
         ))
     }
 

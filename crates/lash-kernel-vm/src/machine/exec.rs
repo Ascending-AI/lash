@@ -769,6 +769,7 @@ impl KernelMachine {
         ty: &lash_kernel_doc::Type,
     ) -> Eval<Value> {
         let decoder = Decoder {
+            max_depth: self.heap.value_depth,
             policy: self.program.document.manifest.numbers,
             declared: &|name| exe.declared.contains_key(name),
         };

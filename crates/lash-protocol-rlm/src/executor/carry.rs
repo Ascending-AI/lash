@@ -26,7 +26,7 @@ use lash_vm_runtime::{
     KernelMigrationRefusal, migrate_run, migrate_saved_function, plan_migration,
 };
 
-use super::envelope::{CellEnvelope, EntryProjections, READ_LIMITS};
+use super::envelope::{CellEnvelope, EntryProjections};
 use super::host_graph::{CallStatus, HostState};
 
 /// What a session's plugin carries a stored kernel definition forward
@@ -110,7 +110,7 @@ impl KernelCarry {
         let state = |message: String| KernelMigrationRefusal::State { message };
         let graph =
             |error: lash_core_store::checkpoint_graph::GraphRefusal| state(error.to_string());
-        let mut decoder = GraphDecoder::new(&cell.graph, READ_LIMITS);
+        let mut decoder = GraphDecoder::new(&cell.graph, cell.read_limits);
         let body: ExecRoot = decoder
             .decode(cell.row.root, NodeKind::EXEC_ROOT)
             .map_err(graph)?;
@@ -170,9 +170,9 @@ impl KernelCarry {
                     .map_err(refused)?,
             );
         }
-        let parked = WholeState::parked_in(&cell.graph, body.state, body.format, &READ_LIMITS)
+        let parked = WholeState::parked_in(&cell.graph, body.state, body.format, &cell.read_limits)
             .map_err(graph)?;
-        let whole = migrate_run(&parked, &admitted, &base, &plan)?;
+        let whole = migrate_run(&parked, &admitted, &base, &plan, cell.read_limits)?;
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
         let reidentified = reidentify(
             &mut staging,
@@ -289,7 +289,7 @@ pub fn cell_migration_refusal(
 /// does not decode. What a build that drops a helper release asks of the
 /// cell a session's open turn stopped in.
 pub fn cell_snapshot_functions(cell: &StoredCell) -> Option<BTreeSet<FunctionId>> {
-    let loaded = super::envelope::load_cell(&cell.graph, cell.row.root).ok()?;
+    let loaded = super::envelope::load_cell(&cell.graph, cell.row.root, cell.read_limits).ok()?;
     let document = loaded.cell.document().ok()?;
     Some(document.manifest.functions.keys().copied().collect())
 }

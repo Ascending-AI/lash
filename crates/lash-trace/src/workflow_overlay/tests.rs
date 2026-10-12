@@ -1384,3 +1384,22 @@ fn a_fan_out_keeps_one_row_for_each_elements_run_of_a_site() {
         WorkflowOverlayOccurrence::Running { occurrence: 0, .. }
     ));
 }
+
+/// OVERLAY-RETENTION-POLICY: the host's document-mismatch cut is independent of site history.
+#[test]
+fn a_host_overlay_mismatch_limit_is_honored() {
+    let mut accumulator = WorkflowExecutionOverlayAccumulator::new(8).with_mismatch_limit(1);
+    accumulator.set_document(document());
+    let records = (0..3)
+        .map(|index| {
+            record_at(
+                started_at("stray", &site(&format!("stray-{index}")), 1),
+                index,
+            )
+        })
+        .collect::<Vec<_>>();
+    accumulator.fold(&records).unwrap();
+    let overlay = accumulator.snapshot().unwrap();
+    assert_eq!(overlay.mismatches.len(), 1);
+    assert!(overlay.mismatches_truncated);
+}

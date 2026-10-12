@@ -387,12 +387,44 @@ impl McpCallPolicy {
     }
 }
 
+/// Data admission for one server, independent of call and lifecycle timeouts.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct McpDataLimits {
+    pub catalog_pages: usize,
+    pub catalog_items: usize,
+    pub catalog_bytes: usize,
+    pub stdio_message_bytes: usize,
+}
+impl McpDataLimits {
+    /// Existing limits: 64 pages, 4,096 tools, 8 MiB catalog and stdio messages.
+    /// No protocol maximum is imposed; the host owns allocation policy.
+    pub const fn standard() -> Self {
+        Self {
+            catalog_pages: 64,
+            catalog_items: 4096,
+            catalog_bytes: 8 * 1024 * 1024,
+            stdio_message_bytes: 8 * 1024 * 1024,
+        }
+    }
+}
+impl Default for McpDataLimits {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+fn is_standard_data_limits(limits: &McpDataLimits) -> bool {
+    *limits == McpDataLimits::standard()
+}
+
 /// Connection configuration for one MCP server. Shared policy fields live on
 /// the struct once; `transport` carries the `transport` tag plus the fields
 /// that transport understands. The serialized shape is unchanged: every field
 /// still sits flat at the server level.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpServerConfig {
+    #[serde(default, skip_serializing_if = "is_standard_data_limits")]
+    pub data_limits: McpDataLimits,
     #[serde(
         default = "default_startup_timeout_ms",
         skip_serializing_if = "is_default_startup_timeout_ms"
@@ -506,6 +538,7 @@ impl McpServerConfig {
     /// measurements establishing a universal choice. All fields are mutable.
     pub fn standard(transport: McpTransport) -> Self {
         Self {
+            data_limits: McpDataLimits::standard(),
             startup_timeout_ms: default_startup_timeout_ms(),
             call_policy: McpCallPolicy::default(),
             shutdown_policy: McpShutdownPolicy::default(),

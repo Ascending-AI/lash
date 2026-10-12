@@ -33,7 +33,9 @@ pub const LLM_QUERY_INSTRUCTIONS: &str = "Answer the focused sub-question using 
 /// purpose, so a sub-question composes them and nothing of the session's
 /// turn prompt (ADR 0133 §8).
 #[derive(Clone, Debug, Default)]
-pub struct LlmToolsPluginFactory {}
+pub struct LlmToolsPluginFactory {
+    pub output_schema_limits: lash_sansio::schema_contract::OutputSchemaLimits,
+}
 
 impl PluginFactory for LlmToolsPluginFactory {
     fn id(&self) -> &'static str {
@@ -45,7 +47,7 @@ impl PluginFactory for LlmToolsPluginFactory {
         _ctx: &PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, PluginError> {
         Ok(Arc::new(LlmToolsPlugin {
-            provider: Arc::new(llm_query_provider()),
+            provider: Arc::new(llm_query_provider_with_limits(self.output_schema_limits)),
         }))
     }
 }
@@ -101,10 +103,22 @@ impl From<lash_core::ToolFailure> for LlmQueryError {
         Self::Failure(Box::new(failure))
     }
 }
-pub struct LlmToolsProvider;
+pub struct LlmToolsProvider {
+    output_schema_limits: lash_sansio::schema_contract::OutputSchemaLimits,
+}
 
 pub fn llm_query_provider() -> StaticToolProvider<LlmToolsProvider> {
-    StaticToolProvider::new(vec![llm_query_tool_definition()], LlmToolsProvider)
+    llm_query_provider_with_limits(lash_sansio::schema_contract::OutputSchemaLimits::standard())
+}
+pub fn llm_query_provider_with_limits(
+    limits: lash_sansio::schema_contract::OutputSchemaLimits,
+) -> StaticToolProvider<LlmToolsProvider> {
+    StaticToolProvider::new(
+        vec![llm_query_tool_definition()],
+        LlmToolsProvider {
+            output_schema_limits: limits,
+        },
+    )
 }
 
 impl LlmToolsProvider {
@@ -115,8 +129,11 @@ impl LlmToolsProvider {
     ) -> Result<Value, LlmQueryError> {
         let task = required_string(args, "task")?;
         let inputs = args.get("inputs").cloned().unwrap_or(Value::Null);
-        let output_schema = lash_sansio::schema_contract::parse_output_schema(args.get("output"))
-            .map_err(|err| err.to_string())?;
+        let output_schema = lash_sansio::schema_contract::parse_output_schema_with_limits(
+            args.get("output"),
+            self.output_schema_limits,
+        )
+        .map_err(|err| err.to_string())?;
         let session_model = context
             .sessions()
             .model()

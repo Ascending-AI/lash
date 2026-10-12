@@ -15,7 +15,7 @@ pub(crate) fn validate_literal(
         .map_err(|error| {
             let code = match &error {
                 SyntaxError::PatternTooLong { .. } => DiagnosticCode::RegexPatternTooLong,
-                SyntaxError::PatternTooDeep => DiagnosticCode::RegexNestingLimit,
+                SyntaxError::PatternTooDeep { .. } => DiagnosticCode::RegexNestingLimit,
                 SyntaxError::UnsupportedFlag { flag: 'd' } => {
                     DiagnosticCode::RegexIndicesFlagUnsupported
                 }

@@ -46,11 +46,52 @@ pub use lash_sansio::worker_limit::{WorkerFrameKind, WorkerLimit};
 #[serde(from = "String", into = "String")]
 pub struct Detail(String);
 
+/// Diagnostic retention within the refusal frame's 512-byte safety ceiling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(try_from = "usize", into = "usize")]
+pub struct DetailLimit(usize);
+impl DetailLimit {
+    pub const fn standard() -> Self {
+        Self(512)
+    }
+    pub fn new(bytes: usize) -> Option<Self> {
+        (bytes <= 512).then_some(Self(bytes))
+    }
+    pub const fn bytes(self) -> usize {
+        self.0
+    }
+}
+impl Default for DetailLimit {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+impl TryFrom<usize> for DetailLimit {
+    type Error = &'static str;
+    fn try_from(bytes: usize) -> Result<Self, Self::Error> {
+        Self::new(bytes).ok_or("diagnostic limit exceeds the 512-byte refusal ceiling")
+    }
+}
+impl From<DetailLimit> for usize {
+    fn from(limit: DetailLimit) -> usize {
+        limit.0
+    }
+}
+
 impl Detail {
     pub const MAX_BYTES: usize = 512;
 
     pub fn new(text: impl std::fmt::Display) -> Self {
-        Self::from(text.to_string())
+        Self::with_limit(text, DetailLimit::standard())
+    }
+    pub fn with_limit(text: impl std::fmt::Display, limit: DetailLimit) -> Self {
+        let mut text = text.to_string();
+        let mut end = text.len().min(limit.bytes());
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+        Self(text)
     }
 
     pub fn as_str(&self) -> &str {
@@ -59,15 +100,8 @@ impl Detail {
 }
 
 impl From<String> for Detail {
-    fn from(mut text: String) -> Self {
-        if text.len() > Self::MAX_BYTES {
-            let mut end = Self::MAX_BYTES;
-            while !text.is_char_boundary(end) {
-                end -= 1;
-            }
-            text.truncate(end);
-        }
-        Self(text)
+    fn from(text: String) -> Self {
+        Self::new(text)
     }
 }
 
@@ -407,6 +441,30 @@ impl InfrastructureOutcome {
 }
 
 impl WorkerRefusal {
+    /// Apply the deployment's diagnostic cut without changing its typed cause.
+    pub fn with_detail_limit(mut self, limit: DetailLimit) -> Self {
+        let detail = match &mut self {
+            Self::Breach(
+                ProtocolBreach::Payload { detail, .. }
+                | ProtocolBreach::Machine { detail }
+                | ProtocolBreach::Panicked { detail },
+            )
+            | Self::Run(
+                RunRefusal::Undecodable { detail, .. }
+                | RunRefusal::Start { detail }
+                | RunRefusal::Resume { detail },
+            ) => Some(detail),
+            Self::Breach(ProtocolBreach::Frame {
+                refusal: CodecRefusal::Malformed { reason },
+            }) => Some(reason),
+            _ => None,
+        };
+        if let Some(detail) = detail {
+            *detail = Detail::with_limit(detail.as_str(), limit);
+        }
+        self
+    }
+
     /// The parent's reading of a worker's refusal: the one mapping every
     /// reader of the pipe shares.
     pub fn into_outcome(self) -> InfrastructureOutcome {
@@ -620,5 +678,27 @@ mod tests {
             }
         }
         assert!(Detail::new("é".repeat(1 << 20)).as_str().len() <= Detail::MAX_BYTES);
+    }
+    /// WORKER-DETAIL-POLICY: a diagnostic cut preserves UTF-8 and the typed cause.
+    #[test]
+    fn a_host_diagnostic_limit_is_honored_in_a_refusal_frame() {
+        let limit = DetailLimit::new(3).unwrap();
+        let refusal = WorkerRefusal::Run(RunRefusal::Start {
+            detail: Detail::new("ééé"),
+        });
+        let codec = FrameCodec::new(crate::DecodeLimits::standard()).with_detail_limit(limit);
+        let frame = WorkerFrame {
+            header: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0))
+                .next_header(),
+            message: WorkerMessage::Refused { refusal },
+        };
+        let bytes = codec.encode_worker(&frame).unwrap();
+        let WorkerMessage::Refused {
+            refusal: WorkerRefusal::Run(RunRefusal::Start { detail }),
+        } = codec.decode_worker(&bytes).unwrap().message
+        else {
+            panic!("typed start refusal")
+        };
+        assert_eq!(detail.as_str(), "é");
     }
 }

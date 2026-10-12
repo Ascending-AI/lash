@@ -15,7 +15,10 @@ mod omission_null;
 #[path = "schema_contract/omission_null_tests.rs"]
 mod omission_null_tests;
 mod typed_output;
-pub use typed_output::{LASH_TYPE_KEY, OutputSchemaError, SchemaScalarKind, parse_output_schema};
+pub use typed_output::{
+    LASH_TYPE_KEY, OutputSchemaError, OutputSchemaLimits, SchemaScalarKind, parse_output_schema,
+    parse_output_schema_with_limits,
+};
 
 mod ref_inline;
 #[cfg(test)]

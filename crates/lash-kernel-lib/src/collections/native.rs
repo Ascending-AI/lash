@@ -472,9 +472,12 @@ fn position(value: &Integer, length: usize, clamp: bool) -> Result<usize, Native
     n.to_usize()
         .ok_or_else(|| raise("index_out_of_range", "index is outside the collection"))
 }
-fn key(value: &Value, depth: usize) -> Result<(), NativeError> {
-    if depth > 128 {
-        return Err(raise("too_deep", "key is too deep"));
+fn key(value: &Value, depth: usize, limit: usize) -> Result<(), NativeError> {
+    if depth > limit {
+        return Err(raise(
+            "too_deep",
+            &format!("key exceeds the configured {limit}-level depth"),
+        ));
     }
     match value {
         Value::Null
@@ -488,7 +491,7 @@ fn key(value: &Value, depth: usize) -> Result<(), NativeError> {
         | Value::Ref(_) => Ok(()),
         Value::Tuple(items) => {
             for item in items.iter() {
-                key(item, depth + 1)?;
+                key(item, depth + 1, limit)?;
             }
             Ok(())
         }
@@ -783,7 +786,7 @@ impl Native {
                 }
                 Value::Map(id) => {
                     let k = nth(args, 1)?;
-                    key(k, 0)?;
+                    key(k, 0, heap.value_depth_limit().min(128))?;
                     heap.map_get(*id, k)
                         .ok_or_else(|| raise("key_missing", "map has no such key"))
                 }
@@ -796,11 +799,11 @@ impl Native {
                 let value = nth(args, 1)?;
                 let found = match xs {
                     Value::Map(id) => {
-                        key(value, 0)?;
+                        key(value, 0, heap.value_depth_limit().min(128))?;
                         Some(heap.map_get(*id, value).is_some())
                     }
                     Value::Set(id) => {
-                        key(value, 0)?;
+                        key(value, 0, heap.value_depth_limit().min(128))?;
                         Some(heap.set_contains(*id, value))
                     }
                     Value::Record(id) => Some(heap.record_get(*id, field(value)?).is_some()),

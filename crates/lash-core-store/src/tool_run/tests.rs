@@ -561,6 +561,7 @@ fn only_sequential_turn_and_tool_result_check_callbacks_publish_state() {
     let limits = StateCommandLimits {
         max_commands: 2,
         max_encoded_bytes: 256,
+        ..StateCommandLimits::PUBLISHED
     };
     let batch = StateCommandBatch {
         plugin: revision("state"),
@@ -604,7 +605,7 @@ fn only_sequential_turn_and_tool_result_check_callbacks_publish_state() {
                 ..limits
             }
         ),
-        Err(StateCommandRefusal::TooManyCommands { count: 2 })
+        Err(StateCommandRefusal::TooManyCommands { count: 2, limit: 1 })
     );
     assert!(matches!(
         batch.check(
@@ -626,6 +627,7 @@ fn only_sequential_turn_and_tool_result_check_callbacks_publish_state() {
             StateCommandLimits {
                 max_commands: 3,
                 max_encoded_bytes: 1024,
+                ..StateCommandLimits::PUBLISHED
             }
         ),
         Err(StateCommandRefusal::InvalidKey {
@@ -758,6 +760,7 @@ fn presentation_plans_record_explicit_empty_and_decision_only_callbacks() {
     let limits = StateCommandLimits {
         max_commands: 1,
         max_encoded_bytes: 256,
+        ..StateCommandLimits::PUBLISHED
     };
     for proposer in recorded
         .callbacks()
@@ -779,4 +782,67 @@ fn presentation_plans_record_explicit_empty_and_decision_only_callbacks() {
             Err(StateCommandRefusal::DecisionOnly)
         );
     }
+}
+
+/// STATE-PUBLICATION-POLICY: host-selected value and namespace budgets govern one whole batch.
+#[test]
+fn state_publication_honors_nondefault_payload_limits() {
+    let batch = StateCommandBatch {
+        plugin: revision("state"),
+        origin: StateCommandOrigin::TurnHook {
+            callback: callback("state", "checkpoint:0"),
+            segment: SegmentOrdinal(0),
+        },
+        commands: vec![StateCommand::Set {
+            key: "long-key".into(),
+            value: json!("payload"),
+        }],
+    };
+    let limits = StateCommandLimits {
+        max_value_bytes: 3,
+        ..StateCommandLimits::PUBLISHED
+    };
+    assert!(matches!(
+        batch.check_bounds(limits),
+        Err(StateCommandRefusal::ValueTooLarge { limit: 3, .. })
+    ));
+    let limits = StateCommandLimits {
+        max_value_bytes: 16,
+        max_namespace_bytes: 64,
+        ..limits
+    };
+    batch.check_bounds(limits).unwrap();
+    assert!(matches!(
+        batch.reduce(
+            &std::collections::BTreeMap::new(),
+            &mut |_, _, _, _| unreachable!(),
+            limits
+        ),
+        StateResolutionOutcome::Applied { .. }
+    ));
+    let key_limits = StateCommandLimits {
+        key_bytes: crate::plugin_state::NameByteLimit::new(1).unwrap(),
+        ..limits
+    };
+    assert!(matches!(
+        batch.check_bounds(key_limits),
+        Err(StateCommandRefusal::InvalidKey {
+            reason: crate::plugin_state::KeyRejection::TooLong { limit: 1 },
+            ..
+        })
+    ));
+    let limits = StateCommandLimits {
+        max_namespace_bytes: 1,
+        ..limits
+    };
+    assert!(matches!(
+        batch.reduce(
+            &std::collections::BTreeMap::new(),
+            &mut |_, _, _, _| unreachable!(),
+            limits
+        ),
+        StateResolutionOutcome::Refused {
+            refusal: StateCommandRefusal::NamespaceTooLarge { limit: 1, .. }
+        }
+    ));
 }

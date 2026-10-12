@@ -166,8 +166,11 @@ impl ProcessActivation {
 pub async fn stored_engine_state(
     reads: &dyn DurableReads,
     process: &ProcessId,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<Option<EngineState>, DurableError> {
-    Ok(super::state_graph::read_engine_state(reads, process)
-        .await?
-        .map(|(_, _, state)| state))
+    Ok(
+        super::state_graph::read_engine_state(reads, process, limits)
+            .await?
+            .map(|(_, _, state)| state),
+    )
 }

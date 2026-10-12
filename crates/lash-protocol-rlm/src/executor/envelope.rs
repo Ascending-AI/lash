@@ -141,12 +141,6 @@ pub(super) fn cell_release(dialect: &str) -> Result<NodeId, String> {
         .ok_or_else(|| format!("the build holds no helper release of the dialect `{dialect}`"))
 }
 
-/// The limits a cell's own root is read within: every node was admitted
-/// under a commit budget when it was written, so these bound only
-/// corruption.
-pub(super) const READ_LIMITS: lash_core_store::checkpoint_graph::DecodeLimits =
-    lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 34);
-
 /// Each tool request read back through the projection it was frozen
 /// under, over the cell's document's entries.
 pub(super) struct EntryProjections<'a>(pub &'a super::processes::CellEntries);
@@ -181,10 +175,11 @@ pub(super) struct ResumedCell {
 pub(super) fn load_cell(
     source: &dyn lash_core_store::checkpoint_graph::NodeSource,
     root: NodeId,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<ResumedCell, String> {
     use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
     let text = |error: GraphRefusal| error.to_string();
-    let mut decoder = GraphDecoder::new(source, READ_LIMITS);
+    let mut decoder = GraphDecoder::new(source, limits);
     let body: ExecRoot = decoder.decode(root, NodeKind::EXEC_ROOT).map_err(text)?;
     let (host, envelope) = match body.status {
         ExecStatus::Parked => (
@@ -296,7 +291,7 @@ pub(super) async fn resumed_cell(
     let Some(read) = snapshots.latest_root().await.map_err(|refusal| refusal.0)? else {
         return Ok(None);
     };
-    let cell = load_cell(&read.graph, read.held.root)?;
+    let cell = load_cell(&read.graph, read.held.root, read.read_limits)?;
     if cell.cell.code != CellEnvelope::code_digest(code) {
         return Err("the root under this cell's execution holds other source".to_owned());
     }
@@ -308,7 +303,7 @@ pub(super) async fn resumed_cell(
 pub(crate) fn snapshot_tool_calls(
     cell: &lash_core::plugin::StoredCell,
 ) -> Result<Vec<lash_core::ToolCallRecord>, String> {
-    Ok(load_cell(&cell.graph, cell.row.root)?
+    Ok(load_cell(&cell.graph, cell.row.root, cell.read_limits)?
         .ledgers
         .tool_call_records())
 }
@@ -319,10 +314,10 @@ pub(crate) fn snapshot_tool_calls(
 /// whichever does not decode is the `Err`.
 pub(crate) fn check_cell_snapshot(cell: &lash_core::plugin::StoredCell) -> Result<(), String> {
     use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
-    let loaded = load_cell(&cell.graph, cell.row.root)?;
+    let loaded = load_cell(&cell.graph, cell.row.root, cell.read_limits)?;
     loaded.cell.document()?;
     loaded.cell.boundary()?;
-    let mut decoder = GraphDecoder::new(&cell.graph, READ_LIMITS);
+    let mut decoder = GraphDecoder::new(&cell.graph, cell.read_limits);
     let body: ExecRoot = decoder
         .decode(cell.row.root, NodeKind::EXEC_ROOT)
         .map_err(|error| error.to_string())?;

@@ -448,6 +448,7 @@ pub mod runtime_ops {
             let response =
                 worker.prepare(VmOwner::new("pure-worker-work"), EncodedPayload(bytes))?;
             lash_vm_protocol::FrameCodec::new(self.config.protocol.decode)
+                .with_detail_limit(self.config.tuning.diagnostic_bytes)
                 .check_payload(&response.0)?;
             let response = rmp_serde::from_slice(&response.0).map_err(|error| {
                 PoolError::payload(lash_vm_protocol::PayloadKind::ServiceResponse, error)

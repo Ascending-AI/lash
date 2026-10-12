@@ -68,8 +68,8 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() {
         session
             .send(
                 crate::TurnInput::text("adopt two attachments")
-                    .with_attachment(first)
-                    .with_attachment(second),
+                    .with_attachment(first.reference)
+                    .with_attachment(second.reference),
             )
             .output(),
     )
@@ -100,5 +100,57 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() {
     );
     assert!(error.is_terminal(), "{error}");
     assert!(!error.is_retryable(), "{error}");
+    core.shutdown().await.expect("shutdown");
+}
+
+/// PUT-DELIVERY-BUDGET: successful admission reports an independent read refusal.
+#[tokio::test]
+async fn attachment_put_reports_its_configured_byte_delivery_budget() {
+    let mut retention = crate::DataRetention::standard();
+    retention.attachments.read.max_blob_bytes = 3;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .data_retention(retention)
+    .serve_test_llm_profile(
+        crate::testing::TestProvider::builder()
+            .kind("put-budget")
+            .complete(|_| async { Ok(text_response("unused")) })
+            .build()
+            .into_handle(),
+        mock_llm_profile_spec(),
+    )
+    .build(crate::testing::runtime_lease_owner())
+    .expect("core");
+    core.session(crate::SessionId::from("put-budget-receipt"))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
+        .await
+        .expect("session");
+    let session = core
+        .session(crate::SessionId::from("put-budget-receipt"))
+        .open()
+        .await
+        .expect("open");
+    let receipt = session
+        .put_attachment(
+            vec![0; 4],
+            lash_core::AttachmentCreateMeta::new(
+                lash_core::MediaType::parse("image/png").unwrap(),
+                None,
+                None,
+            ),
+        )
+        .await
+        .expect("put remains independent of reads");
+    let receipt = serde_json::to_value(receipt).unwrap();
+    assert_eq!(
+        receipt["byte_delivery"],
+        serde_json::json!({
+            "status": "exceeds_budget", "byte_len": 4, "max_bytes": 3,
+        })
+    );
     core.shutdown().await.expect("shutdown");
 }

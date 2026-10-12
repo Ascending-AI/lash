@@ -182,6 +182,26 @@ impl AttachmentPolicy {
     }
 }
 
+/// Put-time information about the independent byte-read delivery policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum AttachmentByteDelivery {
+    /// The blob fits the configured per-blob byte budget.
+    WithinBudget { byte_len: u64, max_bytes: u64 },
+    /// Admission succeeded, but byte delivery needs a larger budget.
+    ExceedsBudget { byte_len: u64, max_bytes: u64 },
+    /// The store is configured for URL delivery, which has no blob-byte cap.
+    NotApplicable,
+}
+
+/// A successful host upload, with its content reference and delivery advisory.
+/// The advisory reflects deployment policy at put time, not a durable blob field.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AttachmentPutReceipt {
+    pub reference: AttachmentRef,
+    pub byte_delivery: AttachmentByteDelivery,
+}
+
 /// Attachment bytes held by a session execution, a process record, or one
 /// session upload. Pending writes precede byte publication; completion records
 /// upload evidence. Reads resolve content addresses; deletion releases only
@@ -419,6 +439,32 @@ impl RuntimeAttachmentStore {
             .map(|puts| puts.lock_recover().clone())
             .unwrap_or_default()
     }
+    /// Upload for a host, reporting the independently configured read budget.
+    pub async fn put_receipt(
+        &self,
+        bytes: Vec<u8>,
+        meta: AttachmentCreateMeta,
+    ) -> Result<AttachmentPutReceipt, AttachmentStoreError> {
+        let reference = self.put(bytes, meta).await?;
+        let byte_delivery = if !self.backend.byte_delivery_budget_applies() {
+            AttachmentByteDelivery::NotApplicable
+        } else if reference.byte_len > self.read_policy.max_blob_bytes {
+            AttachmentByteDelivery::ExceedsBudget {
+                byte_len: reference.byte_len,
+                max_bytes: self.read_policy.max_blob_bytes,
+            }
+        } else {
+            AttachmentByteDelivery::WithinBudget {
+                byte_len: reference.byte_len,
+                max_bytes: self.read_policy.max_blob_bytes,
+            }
+        };
+        Ok(AttachmentPutReceipt {
+            reference,
+            byte_delivery,
+        })
+    }
+
     pub async fn put(
         &self,
         bytes: Vec<u8>,

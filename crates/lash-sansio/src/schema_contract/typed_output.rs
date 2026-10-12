@@ -80,13 +80,34 @@ pub enum OutputSchemaError {
     #[error("Type schema `anyOf` cannot have sibling fields")]
     TypeSchemaAnyOfSiblings,
     /// A `$lash_type` schema is nested beyond the validation depth bound.
-    #[error("Type schema exceeds maximum nesting depth of {MAX_SCHEMA_DEPTH}")]
-    TypeSchemaDepthExceeded,
+    #[error("Type schema exceeds the configured {limit}-level nesting limit")]
+    TypeSchemaDepthExceeded { limit: usize },
     /// A `$lash_type` object declares an unsupported JSON Schema type.
     #[error("unsupported Type schema kind `{kind}`")]
     UnsupportedTypeSchema { kind: String },
     #[error("unknown scalar type `{kind}`")]
     UnknownScalar { kind: String },
+}
+
+/// Host narrowing of the recursive Type-schema validator's 32-level safety ceiling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutputSchemaLimits {
+    max_depth: usize,
+}
+impl OutputSchemaLimits {
+    pub const fn standard() -> Self {
+        Self {
+            max_depth: MAX_SCHEMA_DEPTH,
+        }
+    }
+    pub fn new(max_depth: usize) -> Option<Self> {
+        (max_depth <= MAX_SCHEMA_DEPTH).then_some(Self { max_depth })
+    }
+}
+impl Default for OutputSchemaLimits {
+    fn default() -> Self {
+        Self::standard()
+    }
 }
 
 /// Two shapes are accepted:
@@ -100,6 +121,13 @@ pub enum OutputSchemaError {
 /// Returns `Ok(None)` when `output` is absent or `null` (the tool falls back
 /// to its untyped default).
 pub fn parse_output_schema(value: Option<&Value>) -> Result<Option<Value>, OutputSchemaError> {
+    parse_output_schema_with_limits(value, OutputSchemaLimits::standard())
+}
+/// Parse under the host tool's recursive schema admission policy.
+pub fn parse_output_schema_with_limits(
+    value: Option<&Value>,
+    limits: OutputSchemaLimits,
+) -> Result<Option<Value>, OutputSchemaError> {
     let Some(value) = value else {
         return Ok(None);
     };
@@ -114,7 +142,7 @@ pub fn parse_output_schema(value: Option<&Value>) -> Result<Option<Value>, Outpu
     if output.len() == 1
         && let Some(schema) = output.get(LASH_TYPE_KEY)
     {
-        validate_lash_type_schema(schema)?;
+        validate_lash_type_schema(schema, limits)?;
         return Ok(Some(schema.clone()));
     }
 
@@ -137,16 +165,20 @@ pub fn parse_output_schema(value: Option<&Value>) -> Result<Option<Value>, Outpu
     })))
 }
 
-fn validate_lash_type_schema(schema: &Value) -> Result<(), OutputSchemaError> {
-    validate_lash_type_schema_at_depth(schema, 0)
+fn validate_lash_type_schema(
+    schema: &Value,
+    limits: OutputSchemaLimits,
+) -> Result<(), OutputSchemaError> {
+    validate_lash_type_schema_at_depth(schema, 0, limits.max_depth)
 }
 
 fn validate_lash_type_schema_at_depth(
     schema: &Value,
     depth: usize,
+    limit: usize,
 ) -> Result<(), OutputSchemaError> {
-    if depth >= MAX_SCHEMA_DEPTH {
-        return Err(OutputSchemaError::TypeSchemaDepthExceeded);
+    if depth >= limit {
+        return Err(OutputSchemaError::TypeSchemaDepthExceeded { limit });
     }
     let object = schema
         .as_object()
@@ -163,7 +195,7 @@ fn validate_lash_type_schema_at_depth(
             return Err(OutputSchemaError::TypeSchemaAnyOfEmpty);
         }
         for variant in variants {
-            validate_lash_type_schema_at_depth(variant, depth + 1)?;
+            validate_lash_type_schema_at_depth(variant, depth + 1, limit)?;
         }
         return Ok(());
     }
@@ -343,7 +375,9 @@ mod tests {
             parse_output_schema(Some(&serde_json::json!({
                 (LASH_TYPE_KEY): schema
             }))),
-            Err(OutputSchemaError::TypeSchemaDepthExceeded)
+            Err(OutputSchemaError::TypeSchemaDepthExceeded {
+                limit: MAX_SCHEMA_DEPTH
+            })
         );
     }
     #[test]
@@ -365,5 +399,15 @@ mod tests {
         let wrapped = json!({ LASH_TYPE_KEY: {"properties": {}} });
         let err = parse_output_schema(Some(&wrapped)).expect_err("missing type");
         assert!(err.to_string().contains("type"), "error: {err}");
+    }
+    /// OUTPUT-SCHEMA-ADMISSION: a host's narrower recursion policy is honored.
+    #[test]
+    fn a_host_output_schema_policy_refuses_its_configured_depth() {
+        let value = serde_json::json!({"$lash_type": {"anyOf": [{"type": "string"}]}});
+        parse_output_schema(Some(&value)).unwrap();
+        assert_eq!(
+            parse_output_schema_with_limits(Some(&value), OutputSchemaLimits::new(1).unwrap()),
+            Err(OutputSchemaError::TypeSchemaDepthExceeded { limit: 1 })
+        );
     }
 }

@@ -327,7 +327,7 @@ async fn restore_working(
     let Some(code_executor) = driver.session.plugins().code_executor() else {
         return Ok(());
     };
-    let limits = lash_durable::domain::graph::OWNER_READ_LIMITS;
+    let limits = cx.backend().config().settings().graph_reads.owner();
     let graph = cx
         .durable_reads()?
         .hydrate(
@@ -372,10 +372,15 @@ async fn stored_cell(
         .hydrate(
             lash_durable::domain::graph::RootOwner::Exec(exec.clone()),
             Some(row.root),
-            lash_durable::domain::graph::OWNER_READ_LIMITS,
+            cx.backend().config().settings().graph_reads.owner(),
         )
         .await?;
-    Ok(Some(crate::plugin::StoredCell { exec, row, graph }))
+    Ok(Some(crate::plugin::StoredCell {
+        exec,
+        row,
+        graph,
+        read_limits: cx.backend().config().settings().graph_reads.execution(),
+    }))
 }
 
 /// The machine a prepared turn starts: ended at once when its recorded model

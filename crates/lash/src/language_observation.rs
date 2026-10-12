@@ -45,22 +45,42 @@ impl LanguageObservationPublisher {
     pub(crate) fn new(
         process_store: Arc<dyn ProcessReplayStore>,
         session_store: Arc<dyn LiveReplayStore>,
+        limits: lash_trace::ObservationWorkLimits,
     ) -> Self {
-        let events = ingress::process_events(process_store.publish_limits());
-        Self::with_limits(process_store, session_store, events, ingress::MAX_BYTES)
+        let events = process_store
+            .publish_limits()
+            .round_events()
+            .saturating_mul(limits.language_process_rounds);
+        Self::with_policy(
+            process_store,
+            session_store,
+            events,
+            limits.language_session_events,
+            limits.language_bytes,
+        )
     }
 
     /// A dispatcher whose process class admits `events` events and whose
     /// classes each admit `bytes` bytes.
+    #[cfg(test)]
     fn with_limits(
         process_store: Arc<dyn ProcessReplayStore>,
         session_store: Arc<dyn LiveReplayStore>,
         events: usize,
         bytes: usize,
     ) -> Self {
+        Self::with_policy(process_store, session_store, events, 256, bytes)
+    }
+    fn with_policy(
+        process_store: Arc<dyn ProcessReplayStore>,
+        session_store: Arc<dyn LiveReplayStore>,
+        events: usize,
+        session_events: usize,
+        bytes: usize,
+    ) -> Self {
         Self {
             process: Arc::new(Channel::new(Ingress::new(events, bytes))),
-            session: Arc::new(Channel::new(Ingress::new(ingress::MAX_EVENTS, bytes))),
+            session: Arc::new(Channel::new(Ingress::new(session_events, bytes))),
             process_store,
             session_store,
             committing: Arc::default(),

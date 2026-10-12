@@ -359,3 +359,33 @@ fn the_sizing_rule_counts_every_session_a_process_opens() {
         .expect("a valid budget");
     assert_eq!(peak, 276, "four replicas over two generations");
 }
+
+/// POSTGRES-NAME-POLICY: a deployment may narrow the reserved identifier budgets.
+#[test]
+fn deployment_name_limits_are_honored_before_io() {
+    let mut config = PostgresHostConfig::standard();
+    config.name_limits = PostgresNameLimits::new(1, 1).unwrap();
+    assert!(
+        config
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("1 characters")
+    );
+    config.connection.application_name_prefix = "a".into();
+    config.live_replay = Some(LiveReplayPolicy::default());
+    assert!(
+        config
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("at most 1")
+    );
+    config.live_replay.as_mut().unwrap().data.schema = "a".into();
+    assert!(config.validate().is_ok());
+    assert_eq!(
+        serde_json::from_value::<PostgresHostConfig>(serde_json::to_value(&config).unwrap())
+            .unwrap(),
+        config
+    );
+}

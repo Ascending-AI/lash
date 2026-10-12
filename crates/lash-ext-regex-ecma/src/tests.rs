@@ -727,3 +727,19 @@ fn operands_of_the_wrong_shape_are_typed_errors() {
         "number_range"
     );
 }
+
+/// REGEX-COMPILER-POLICY: the host narrows length and native group recursion together.
+#[test]
+fn a_host_pattern_policy_controls_compiler_admission() {
+    let engine = Engine::new(0).with_limits(crate::PatternLimits::new(3, 1).unwrap());
+    assert!(engine.check("abc", "").is_ok());
+    assert!(matches!(
+        engine.check("abcd", ""),
+        Err(crate::SyntaxError::PatternTooLong { limit: 3, .. })
+    ));
+    let engine = Engine::new(0).with_limits(crate::PatternLimits::new(32, 1).unwrap());
+    assert!(matches!(
+        engine.check("((a))", ""),
+        Err(crate::SyntaxError::PatternTooDeep { limit: 1 })
+    ));
+}

@@ -402,8 +402,12 @@ async fn hold_declared_execution_environments(
 ) -> Result<crate::ToolAttemptLaunch, crate::RuntimeEffectControllerError> {
     let mut env_refs: Vec<_> = match &launch {
         crate::ToolAttemptLaunch::Done { intents, .. }
-            if super::intent_executor::admit_batch(&context.owner.runtime_owner(), intents)
-                .is_none() =>
+            if super::intent_executor::admit_batch(
+                &context.owner.runtime_owner(),
+                intents,
+                context.state.data_limits().tool_intents,
+            )
+            .is_none() =>
         {
             intents
                 .intents

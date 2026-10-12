@@ -13,7 +13,9 @@
 mod ast;
 mod canonical;
 mod codec_variants;
+mod data_limits;
 mod document;
+pub use data_limits::KernelDataLimits;
 mod function;
 mod graph_codec;
 /// The canonical binary token grammar of checkpoint graph node bodies: a
@@ -63,13 +65,14 @@ pub use number::{
     Float, Integer, InvalidFloat, InvalidInteger, InvalidNumberToken, NumberPolicy, NumberToken,
 };
 pub use text::{
-    ParseError, ParseErrorReason, parse_definition, parse_document, print_definition,
-    print_document,
+    ParseError, ParseErrorReason, parse_definition, parse_definition_with_limits, parse_document,
+    parse_document_with_limits, print_definition, print_document,
 };
 pub use types::{MapType, Param, RecordType, RecordTypeField, Signature, Type};
 pub use validate::{
     Invalid, InvalidReason, StatementForm, StatementRuleViolation, check_statement,
-    validate_annotations, validate_definition, validate_document,
+    validate_annotations, validate_definition, validate_definition_with_limits, validate_document,
+    validate_document_with_limits,
 };
 pub use value::{
     Bytes, ClosureObject, Datum, ErrorDatum, ErrorValue, Handle, Identity, InvalidBytes, Object,

@@ -24,8 +24,8 @@ pub struct TraceLimits {
     pub process_effect_occurrences: u64,
     /// Characters retained from a trace diagnostic before its omission annotation.
     pub diagnostic_error_chars: usize,
-    /// Threshold for a plugin session's state-size warning; the fixed rejection
-    /// ceiling remains independent. `usize::MAX` disables this warning.
+    /// Threshold for a plugin session's state-size warning; the configured publication
+    /// rejection budget remains independent. `usize::MAX` disables this warning.
     pub plugin_state_warn_bytes: usize,
 }
 
@@ -81,6 +81,12 @@ impl Default for TraceLimits {
 /// Optional observation work budgets, independent of retained data lifetimes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ObservationWorkLimits {
+    /// Provisional language publications queued in the session class.
+    pub language_session_events: usize,
+    /// Bytes each language publication class admits, including in-flight work.
+    pub language_bytes: usize,
+    /// Process publication rounds queued, including the round in flight.
+    pub language_process_rounds: usize,
     pub replay_expiry_batch: std::num::NonZeroUsize,
     pub publisher_batch: std::num::NonZeroUsize,
     pub process_snapshot_event_tail: usize,
@@ -108,6 +114,9 @@ impl ObservationWorkLimits {
     /// workload measurements.
     pub const fn standard() -> Self {
         Self {
+            language_session_events: 256,
+            language_bytes: 4 * 1024 * 1024,
+            language_process_rounds: 2,
             replay_expiry_batch: std::num::NonZeroUsize::MIN.saturating_add(63),
             publisher_batch: std::num::NonZeroUsize::MIN.saturating_add(31),
             process_snapshot_event_tail: 32,

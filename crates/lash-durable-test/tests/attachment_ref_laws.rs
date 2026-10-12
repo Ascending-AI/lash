@@ -328,7 +328,8 @@ async fn send(url: bool, tools: bool) -> Sent {
     let reference = session
         .put_attachment(BLOB.to_vec(), meta("input.png"))
         .await
-        .unwrap();
+        .unwrap()
+        .reference;
     let failed = session
         .put_attachment(vec![0; 1025], meta("too-large.png"))
         .await;

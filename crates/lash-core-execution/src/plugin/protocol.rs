@@ -223,6 +223,7 @@ pub enum CodeExecutionOutcome {
 /// (FIG-5887 §3).
 #[derive(Clone, Debug)]
 pub struct StoredCell {
+    pub read_limits: lash_core_store::checkpoint_graph::DecodeLimits,
     pub exec: lash_durable::domain::ExecKey,
     pub row: lash_durable::domain::ExecRootRow,
     pub graph: lash_durable::domain::graph::HydratedGraph,

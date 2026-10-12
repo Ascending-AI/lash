@@ -8,7 +8,7 @@ use lash_kernel_doc::{Datum, ErrorValue, Float, ObjectId, TaskId, Value};
 use super::ops::{Entry, Flow, Reg, key};
 use super::{Eval, Halt, Interrupt, KernelMachine, fault, raise};
 use crate::compile::{CodeId, Executable, Expr, LibId, Member};
-use crate::heap::{ClosureObj, Key, MAX_VALUE_DEPTH, Obj, Table, within_depth};
+use crate::heap::{ClosureObj, Key, Obj, Table, within_depth};
 use crate::interface::Host;
 
 impl KernelMachine {
@@ -46,10 +46,13 @@ impl KernelMachine {
                 self.eval_each(task, host, exe, items)?;
                 self.charge((self.regs.len() - out) as u64)?;
                 let tuple = Value::Tuple(self.regs.drain(out..).collect());
-                if !within_depth(&tuple, MAX_VALUE_DEPTH) {
+                if !within_depth(&tuple, self.heap.value_depth) {
                     return raise(
                         "too_deep",
-                        format!("a tuple nests more than {MAX_VALUE_DEPTH} levels"),
+                        format!(
+                            "a tuple exceeds the configured {}-level value depth",
+                            self.heap.value_depth
+                        ),
                     );
                 }
                 self.regs.push(tuple);

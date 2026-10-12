@@ -155,7 +155,7 @@ pub use turn_driver::{
     append_assistant_text_part, build_newest_writer_formats, normalized_response_parts,
     reasoning_part, visible_response_parts, visible_response_text_from_parts,
 };
-pub use value_shape::{FieldShape, ValueShape};
+pub use value_shape::{FieldShape, ValueShape, ValueShapeLimits};
 #[cfg(any(test, feature = "testing"))]
 pub use workflow_site::effect_identity_fixture;
 pub use workflow_site::{EffectIdentity, LoopIteration, Site, SpawnIdentity, TaskIdentity, Unit};

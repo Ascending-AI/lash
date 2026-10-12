@@ -31,12 +31,11 @@ use num_traits::ToPrimitive;
 
 use super::exec::Call;
 use super::{
-    Control, Cursor, Eval, Halt, Interrupt, KernelMachine, MAX_INLINE_DEPTH, TaskState, bound,
-    fault, raise,
+    Control, Cursor, Eval, Halt, Interrupt, KernelMachine, TaskState, bound, fault, raise,
 };
 use crate::compile::{Charge, Executable, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
-use crate::heap::{Key, MAX_VALUE_DEPTH, NativeView, Obj, object_bytes, value_bytes, within_depth};
+use crate::heap::{Key, NativeView, Obj, object_bytes, value_bytes, within_depth};
 use crate::interface::{Bound, Host};
 use crate::observe::Event;
 
@@ -426,8 +425,8 @@ impl KernelMachine {
         match entry {
             Entry::Frame(awaiting) => self.push_frame(task, exe, call.awaited_by(awaiting))?,
             Entry::Inline => {
-                if self.inline_depth >= MAX_INLINE_DEPTH {
-                    return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
+                if self.inline_depth >= self.heap.inline_depth {
+                    return Err(bound(Bound::CallDepth, u64::from(self.heap.inline_depth)).into());
                 }
                 self.push_frame(task, exe, call.inline())
                     .map_err(|halt| halt.in_function(&function.definition.name))?;
@@ -502,7 +501,7 @@ impl KernelMachine {
                     // raise.
                     if let Some(value) = native
                         .fast(&self.regs[args..end], &view)
-                        .filter(|value| within_depth(value, MAX_VALUE_DEPTH))
+                        .filter(|value| within_depth(value, self.heap.value_depth))
                     {
                         // What the general call does with its result: keep
                         // it, then charge the formula.
@@ -546,10 +545,13 @@ impl KernelMachine {
                     self.observe(Event::GuardWork(counter.spent()));
                     match answer {
                         Ok(value) => {
-                            if !within_depth(&value, MAX_VALUE_DEPTH) {
+                            if !within_depth(&value, self.heap.value_depth) {
                                 break Err(super::error(
                                     "too_deep",
-                                    format!("a value nests more than {MAX_VALUE_DEPTH} levels"),
+                                    format!(
+                                        "a value exceeds the configured {}-level value depth",
+                                        self.heap.value_depth
+                                    ),
                                 ));
                             }
                             // What the call reserved was room the bound

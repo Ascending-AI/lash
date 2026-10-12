@@ -27,7 +27,7 @@ use super::run_event::{AttemptOrdinal, SegmentOrdinal};
 use super::tool_hooks::{HookCause, HookOccurrence};
 use crate::plugin_state::{
     FormatRefusal, KeyRejection, PLUGIN_STATE_NAMESPACE_LIMIT, PLUGIN_STATE_VALUE_LIMIT,
-    validate_state_key,
+    validate_state_key_with_limit,
 };
 use crate::store::plugin_writers::{PluginCallbackIdentity, PluginRevision};
 
@@ -179,17 +179,31 @@ pub enum StateCommandOrigin {
 /// The bounds a batch is checked against before any reduction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StateCommandLimits {
+    pub key_bytes: crate::plugin_state::NameByteLimit<128>,
     pub max_commands: usize,
     pub max_encoded_bytes: usize,
+    pub max_value_bytes: usize,
+    pub max_namespace_bytes: usize,
+    pub max_session_bytes: usize,
 }
 
 impl StateCommandLimits {
     /// The bounds every published batch is held to: 64 commands, and one
     /// namespace's worth of encoded input with room for its keys.
     pub const PUBLISHED: Self = Self {
+        key_bytes: crate::plugin_state::NameByteLimit::standard(),
         max_commands: 64,
         max_encoded_bytes: PLUGIN_STATE_NAMESPACE_LIMIT + 16 * 1024,
+        max_value_bytes: PLUGIN_STATE_VALUE_LIMIT,
+        max_namespace_bytes: PLUGIN_STATE_NAMESPACE_LIMIT,
+        max_session_bytes: crate::plugin_state::PLUGIN_STATE_SESSION_LIMIT,
     };
+}
+
+impl Default for StateCommandLimits {
+    fn default() -> Self {
+        Self::PUBLISHED
+    }
 }
 
 /// A bounded, ordered command batch.
@@ -210,10 +224,10 @@ pub enum StateCommandRefusal {
     DecisionOnly,
     #[error("the batch addresses another plugin's namespace")]
     WrongOwner,
-    #[error("the batch holds {count} commands, over the limit")]
-    TooManyCommands { count: usize },
-    #[error("the batch encodes to {bytes} bytes, over the limit")]
-    TooLarge { bytes: usize },
+    #[error("the batch holds {count} commands, limit {limit}")]
+    TooManyCommands { count: usize, limit: usize },
+    #[error("the batch encodes to {bytes} bytes, limit {limit}")]
+    TooLarge { bytes: usize, limit: usize },
     #[error("command {index} names an invalid key: {reason}")]
     InvalidKey { index: usize, reason: KeyRejection },
     #[error("command {index} writes a {bytes}-byte value, limit {limit}")]
@@ -279,17 +293,21 @@ impl StateCommandBatch {
         if self.commands.len() > limits.max_commands {
             return Err(StateCommandRefusal::TooManyCommands {
                 count: self.commands.len(),
+                limit: limits.max_commands,
             });
         }
         let bytes = serde_json::to_vec(&self.commands).map_or(usize::MAX, |bytes| bytes.len());
         if bytes > limits.max_encoded_bytes {
-            return Err(StateCommandRefusal::TooLarge { bytes });
+            return Err(StateCommandRefusal::TooLarge {
+                bytes,
+                limit: limits.max_encoded_bytes,
+            });
         }
         for (index, command) in self.commands.iter().enumerate() {
-            validate_state_key(command.key())
+            validate_state_key_with_limit(command.key(), limits.key_bytes)
                 .map_err(|reason| StateCommandRefusal::InvalidKey { index, reason })?;
             if let StateCommand::Set { value, .. } = command {
-                check_value(index, value)?;
+                check_value(index, value, limits.max_value_bytes)?;
             }
         }
         Ok(())
@@ -306,8 +324,9 @@ impl StateCommandBatch {
         &self,
         published: &BTreeMap<String, serde_json::Value>,
         reducer: &mut ApplyReducer<'_>,
+        limits: StateCommandLimits,
     ) -> StateResolutionOutcome {
-        match self.resolve(published, reducer) {
+        match self.resolve(published, reducer, limits) {
             Ok(changes) => StateResolutionOutcome::Applied { changes },
             Err(refusal) => StateResolutionOutcome::Refused { refusal },
         }
@@ -317,6 +336,7 @@ impl StateCommandBatch {
         &self,
         published: &BTreeMap<String, serde_json::Value>,
         reducer: &mut ApplyReducer<'_>,
+        limits: StateCommandLimits,
     ) -> Result<Vec<ResolvedStateChange>, StateCommandRefusal> {
         let mut candidate = published.clone();
         let mut changes = Vec::with_capacity(self.commands.len());
@@ -330,7 +350,7 @@ impl StateCommandBatch {
                 StateCommand::Apply { key, name, input } => {
                     match reducer(key, name, candidate.get(key), input) {
                         Ok(Some(value)) => {
-                            check_value(index, &value)?;
+                            check_value(index, &value, limits.max_value_bytes)?;
                             ResolvedStateChange::Put {
                                 key: key.clone(),
                                 value: canonical(value),
@@ -353,10 +373,10 @@ impl StateCommandBatch {
             changes.push(change);
         }
         let bytes = serde_json::to_vec(&candidate).map_or(usize::MAX, |bytes| bytes.len());
-        if bytes > PLUGIN_STATE_NAMESPACE_LIMIT {
+        if bytes > limits.max_namespace_bytes {
             return Err(StateCommandRefusal::NamespaceTooLarge {
                 bytes,
-                limit: PLUGIN_STATE_NAMESPACE_LIMIT,
+                limit: limits.max_namespace_bytes,
             });
         }
         Ok(changes)
@@ -372,13 +392,17 @@ pub enum ReducerRefusal {
     Refused(HookCause),
 }
 
-fn check_value(index: usize, value: &serde_json::Value) -> Result<(), StateCommandRefusal> {
+fn check_value(
+    index: usize,
+    value: &serde_json::Value,
+    limit: usize,
+) -> Result<(), StateCommandRefusal> {
     let bytes = serde_json::to_vec(value).map_or(usize::MAX, |bytes| bytes.len());
-    if bytes > PLUGIN_STATE_VALUE_LIMIT {
+    if bytes > limit {
         return Err(StateCommandRefusal::ValueTooLarge {
             index,
             bytes,
-            limit: PLUGIN_STATE_VALUE_LIMIT,
+            limit,
         });
     }
     Ok(())

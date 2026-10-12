@@ -15,6 +15,7 @@ use tokio_util::codec::{Decoder, FramedWrite};
 /// Upper bound on one inbound stdio message. A line's bytes accumulate before
 /// its JSON is decoded, so without a cap a malfunctioning child grows the
 /// receive buffer without limit.
+#[cfg(test)]
 pub(crate) const MAX_STDIO_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Why reading the child's stdout ended. rmcp's `receive` reports only
@@ -24,7 +25,7 @@ pub(crate) const MAX_STDIO_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) enum StdioReadError {
     #[error("MCP stdio read failed: {0}")]
     Io(#[from] std::io::Error),
-    /// The child produced a message past [`MAX_STDIO_MESSAGE_BYTES`]; the
+    /// The child produced a message past its configured byte bound; the
     /// transport closes rather than keep accumulating bytes it can never
     /// decode.
     #[error("MCP stdio inbound message exceeded the {limit}-byte limit")]
@@ -83,12 +84,17 @@ where
     R: AsyncRead + Unpin + Send,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    pub(crate) fn new(read: R, write: W, close_cause: StdioCloseCause) -> Self {
+    pub(crate) fn new(
+        read: R,
+        write: W,
+        close_cause: StdioCloseCause,
+        max_line_bytes: usize,
+    ) -> Self {
         Self {
             reader: LineReader {
                 read: BufReader::new(read),
                 line: BytesMut::new(),
-                max_line_bytes: MAX_STDIO_MESSAGE_BYTES,
+                max_line_bytes,
             },
             writer: Arc::new(Mutex::new(Some(FramedWrite::new(
                 write,

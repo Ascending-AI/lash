@@ -16,8 +16,14 @@ pub(super) fn start(
     bounds: Bounds,
     start: Start,
     layout: Layout,
+    limits: lash_kernel_doc::KernelDataLimits,
 ) -> Result<KernelMachine, StartError> {
     let library = program.library.in_layout(layout);
+    lash_kernel_doc::validate_document_with_limits(
+        &program.document,
+        library.registry().as_ref(),
+        limits,
+    )?;
     let admitted = library.admit(&program.document)?;
     let exe = admitted
         .executable(&program.document, &library)
@@ -25,8 +31,12 @@ pub(super) fn start(
             function: missing.0,
         })?;
     let costs = crate::costs::Costs::of_document(&program.document);
+    let mut heap = Heap::new(bounds.memory);
+    heap.value_depth = limits.value_depth();
+    heap.json_depth = limits.document_depth();
+    heap.inline_depth = limits.inline_depth();
     let mut machine = KernelMachine {
-        heap: Heap::new(bounds.memory),
+        heap,
         document: None,
         exe: Arc::clone(&exe),
         bounds,

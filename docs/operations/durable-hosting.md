@@ -1280,3 +1280,110 @@ the current boundary and its owning contract.
 | Shared execution budgets and declared body/park bounds | [§6](#6-execution-budgets) | [Execution budgets](../../crates/lash-sansio/src/execution_budgets.rs). |
 | Required choices and explicit presets | [Required choices](#required-choices-before-serving) | [Core validation](../../crates/lash/src/core/runtime_host_config.rs). |
 | Admitted body and response context | [Provider sends](#implementing-the-provider-boundary) | [Provider trait](../../crates/lash-core-llm/src/provider/traits.rs). |
+
+
+## 12. Data admission, delivery and presentation budgets
+
+A successful `LashSession::put_attachment` returns `AttachmentPutReceipt`.
+Its `reference` is the stored attachment; `byte_delivery` is a typed advisory
+about the configured per-blob byte-read budget. `ExceedsBudget` names
+`byte_len` and `max_bytes`; `WithinBudget` names the same quantities. URL
+stores report `NotApplicable`. This advisory does not refuse the put or
+promise that a complete provider request fits its independent request budget.
+Put admission and byte delivery remain independent (ADR 0058).
+
+Choose deployment budgets before serving. Lowering a recovery read budget
+can refuse previously stored heads; repair the deployment policy before
+redriving them. Public `standard` constructors below state the existing
+presets; required host choices have no implicit default. Counts and byte
+budgets without a smaller safety ceiling stop at their Rust integer's or
+platform's addressable range. Raising a parser byte allowance also requires
+raising the independent worker source and address-space allowances.
+
+H denotes host admission or retention; S denotes a host setting with a hard
+safety ceiling; I denotes lossless mechanics or a semantic representation
+contract. New recursive settings apply at deployment or reader construction,
+not as saved guest state. The table includes existing configurable budgets as
+well as the newly exposed ones. The source inventory found no 12 MB attachment
+cap; the workbench's upload preset is 1 MiB.
+
+| Class | Limit / source family | Default | Host configuration | Maximum / reason |
+|---|---|---|---|---|
+| H | Attachment put admission (`core-store/attachments`) | Unbounded | `LashCoreBuilder::data_retention(...).attachments.max_attachment_bytes` or store builder | `u64`; `None` opts out |
+| H | Attachment byte delivery | 32 MiB/blob, 128 MiB/request | `DataRetention.attachments.read.max_blob_bytes`, `.max_request_bytes` | `u64` |
+| H | Attachment pending upload lifetime | 24 h | `DataRetention.attachments.upload_expiry_ms` | Representable duration |
+| H | Retained tool output / witness | 64 KiB inline, 4 KiB witness | `DataRetention.attachments.output_retention.inline_limit_bytes`, `output_retention.witness_bytes` | Addressable bytes |
+| H/S | Retained value descriptor | Depth 4, fields 32, key bytes 64, nodes 96 | `OutputRetentionPolicy.shape: ValueShapeLimits` | Depth 128 protects recursive walks; other cuts addressable |
+| H | Attachment delete attempts | 5 | `AttachmentReclamationPolicy::with_delete_attempt_limit` | `u32` |
+| H | Attachment reclamation/reconciliation retry | 64 attempts, 8 immediate yields, 2–250 ms backoff | `AttachmentReclamationRetryPolicy` | Representable counts/durations |
+| H | Provider file cache | 1024 entries, 24 h | `ProviderFileCacheLimits` | Addressable counts/durations; eviction reuploads |
+| H/S | Signed attachment URL horizon | Caller-declared | `DeliveryLimits.valid_through_ms`, `LashCoreBuilder::delivery_fetch_horizon` | S3 7 days, external signing contract; signer refuses impossible horizons |
+| H | Commit nodes / encoded bytes | No implicit default; guidance 512 / 1 MiB | `LashCoreBuilder::commit_budget(CommitBudget)` | Bounded nonzero `usize` or explicitly unbounded |
+| H | Commit admission queue | Required host policy | `CommitAdmissionPolicy` | Nonzero counts and representable duration |
+| H/S | Plugin state keys | 128 bytes | `RuntimeDataLimits.plugin_state.key_bytes: NameByteLimit<128>` | 128: stored key identity and canonical encoding |
+| H | Plugin state value / namespace / session | 32 KiB / 128 KiB / 6 MiB | `RuntimeDataLimits.plugin_state.{max_value_bytes,max_namespace_bytes,max_session_bytes}` | Addressable bytes |
+| H | State-command count / encoded batch | 64 / 144 KiB | `RuntimeDataLimits.plugin_state.{max_commands,max_encoded_bytes}` | Addressable counts/bytes |
+| H/S | Hook, prompt section and wrapper keys | 64 bytes | `HookKey::with_limit`, `PromptSectionKey::with_limit`, `PromptWrapperKey::with_limit`, `NameByteLimit<64>` | 64: stable stored names |
+| H/S | Tool intents | 32 total, 16/kind, 64 KiB canonical declaration | `RuntimeDataLimits.tool_intents: ToolIntentLimits` via `LashCoreBuilder::data_limits` | Count `u32::MAX` preserves durable intent ordinals; other counts/bytes addressable |
+| H/S | TypeScript cell and parsed workflow source | 64 KiB; nesting 28 | `SourceLimits`, `lower_with_limits`, `lower_workflow_with_limits`, `HostArtifacts::import_typescript_workflow_with_limits`, `Parser::with_limits`, `WorkerTuning.typescript_source_*` | 128 KiB / 28; measured proportional parser stack stays below 8 GiB; nesting protects conversion/destruction |
+| H/S | Python cell source | 1 MiB; nesting 96 | Python `SourceLimits`, `lower_with_limits`, `Python.limits`, worker `python_with_limits`, `WorkerTuning.python_source_*` | Addressable bytes; nesting 96 protects native recursive lowering |
+| S | Kernel document / JSON document / binary decode / parked JSON / value / inline-call depth | 64 / 352 / 512 / 512 / 128 / 64 | `KernelDataLimits`; `*_with_limits`, machine `*_with_data_limits`, `WorkerTuning.kernel_data`, `GraphReadPolicy` | Each existing depth is its hard ceiling, protecting recursive native readers/copying/evaluation |
+| S | Kernel text and TypeScript kernel syntax / metadata | 64 nodes; syntax 272 / JSON 352 | Kernel `parse_*_with_limits`, TypeScript `lower_kernel_text_with_limits(KernelDataLimits)` | Derived from the 64-level document ceiling |
+| S | Native JSON and collection conversion/copy | JSON 64; collection values 128 | `KernelDataLimits.document_depth` / `.value_depth` through machine native heap; custom `NativeHeap` policy methods | 64 / 128, recursive stack safety |
+| S | Broker effect JSON conversion | 64 | `datum_{from,to}_json_with_limits(KernelDataLimits)`; host `KernelEffects::outcome` selects effect-result policy | 64, recursive conversion safety |
+| H/S | Checkpoint graph reads | Owner 4 GiB; engine and execution 16 GiB; graph depth 64 | `DurableSettings.graph_reads: GraphReadPolicy`, `SqliteStoreSetOptions.graph_reads`, `PoolConfig.graph_reads`, `InProcess::with_read_policy`, explicit `GraphDecodeLimits` | Bytes `u64`; depth 64 and envelope bytes 64 KiB protect canonical graph invariants |
+| H/S | Output Type schema admission | 32 levels | `OutputSchemaLimits`, `parse_output_schema_with_limits` | 32, recursive schema walk |
+| S | ECMA regex compile admission | 4096 UTF-16 units, 32 group levels | `PatternLimits`, `Engine::with_limits` | Existing 4096 / 32 protect compiler stack and finite indexed program |
+| H | Model output tokens / reasoning tokens / stop sequences | Model/profile request choice | `LlmGenerationConfig`, model generation defaults and request overrides | Provider capability contract, typed wire refusal for unsupported settings |
+| H | Provider SSE event/line, total, buffered response | 8 MiB / 64 MiB / 16 MiB | `ProviderOptions.{sse_event_bytes,sse_total_bytes,response_body_bytes}` | `u64`, clamped to addressable bytes |
+| H | Provider response-start, total-request, retry, throttle time | Attempts and deadlines inherit runtime; backoff 2–10 s + 500 ms jitter; Retry-After 60 s; courtesy 90 s / 8 calls / ≥1 s | `ProviderOptions.reliability`, `LlmTimeouts`, `ProviderReliability` | Representable durations, explicit zero/none semantics |
+| H | Stream content blocks | 1024 | `AnthropicStreamLimits`, provider `with_stream_limits` | Addressable count; checked before indexed allocation |
+| H | MCP catalog pages / items / bytes | 64 / 4096 / 8 MiB | `McpServerConfig.data_limits: McpDataLimits` | Addressable counts/bytes |
+| H | MCP inbound stdio message | 8 MiB | `McpServerConfig.data_limits.stdio_message_bytes` | Addressable bytes |
+| H | MCP calls / startup / liveness / reconnect / shutdown | Startup 10 s; call 60 s idle / 600 s total; probe 5 s, disconnect after 3 timeouts, keepalive off; reconnect 500 ms–30 s, unlimited attempts; close 3 s, forced stages 1 s each, scheduling 1 s, child poll 10 ms | `McpServerConfig.{startup_timeout_ms,call_max_total_timeout_ms,call_policy,shutdown_policy}` | Representable milliseconds and validated reconnect/cleanup ordering |
+| H | Tool body, park, requests, source/execution allowance | Explicit, no inferred tool default | `ToolDraft` / admitted tool execution and park bounds; `ToolSourcePolicy` | Typed bounds; provider/native capabilities still checked |
+| H/S | Execution and provider attempts | Recommended model 10 min, control 60 s, stop 2 s; attempts host-declared | `LashCoreBuilder::execution_budgets`, `ProviderAttemptLimits`, tool/model contracts | 30 days / 16 attempts; finite recorded deadline and retry arithmetic |
+| H | Turn / no-progress budgets | Required explicit finite or unbounded choice | `SessionSpec` / `TurnBudget` / `NoProgressBudget` | Nonzero addressable count or explicit unbounded |
+| H/S | Delta coalescing | 50 ms, 8 KiB, first immediate | `LashCoreBuilder::delta_coalescing(DeltaCoalescing)` | 10 s / 1 MiB; bounded event frame/coalescing latency |
+| H | Queued work / age / claimed turn inputs | 64 / 30 s / 64 | `LashCoreBuilder::queued_work_batching(QueuedWorkBatching)` | Nonzero addressable counts/duration |
+| H | Prompt sections / wrappers / section bytes / total / render time | 128 / 256 / 32 KiB / 256 KiB / 2000 ms | `PromptLimits` in prompt composition plan | Nonzero `u32` |
+| H | Prompt render workers / queued renders | Available cores capped at 8; 1024 jobs | `PromptRenderPoolConfig` | Nonzero addressable counts |
+| H | Compact tool examples / chars / schema depth | 2 / 240 / 8 | `ToolPresentationConfig` | Addressable cuts |
+| H | Human value/error render cuts | 8000 chars, depth 3, array threshold 10, head 3/tail 2, stack head 3/tail 1 | `RenderParams` | Addressable counts; omitted data remains in source value |
+| H | Runtime tool value / raw error text | 16 Ki chars / 4000 chars | `RuntimeOutputCuts`, `LashCoreBuilder::output_cuts` | Addressable character counts |
+| H/S | VM wire frame / decode depth / nodes / allocation | 4 MiB / 128 / 100000 / 64 MiB | `ProtocolBounds.decode: vm_protocol::DecodeLimits` | Frame `u32`, depth `u32`, charges `u64`; encoded address-space limits |
+| H | VM state / effect input / source / silence watchdog | 2 MiB / 1 MiB / 64 KiB / 5 s | `PoolConfig.protocol: ProtocolBounds` | Wire/addressable sizes and representable duration |
+| H | VM run charge / memory / call depth / live tasks / park requests / join members | 50M / 64 MiB / 1024 / 1024 / 256 / 1024 | `PoolConfig.run_bounds`, individual run `RunBounds` | Typed `u64` / `u32` bounds |
+| H | VM workers / queued items / bytes / restarts | 1–4 / 2 / 8 MiB / 8 per 60 s | `PoolConfig` | Addressable counts/bytes/durations |
+| H | VM checkout / compute / serialization / cancel / CPU / attempts | 5 s / 30 s / 5 s / 100 ms / 10 s / 3 | `PoolConfig.deadlines: Deadlines` | Representable durations / `u32` |
+| H | VM worker address space | 4 GiB | `PoolConfig.confinement: WorkerConfinement` | Platform rlimit; must exceed parser reservation |
+| H | VM parser stack / parent wait / ingress / slice | 8 MiB + 40000/source byte / 24 h / 16 KiB / 1M charge | `WorkerTuning` | Checked arithmetic; inbound at least frame header; finite positive values |
+| H/S | VM diagnostic detail | 512 UTF-8 bytes | `WorkerTuning.diagnostic_bytes: DetailLimit`, `FrameCodec::with_detail_limit`, `Detail::with_limit` | 512 ensures typed refusals fit the minimal frame |
+| H | Session revisions / transcript retention | Until GC | `DataRetention.session_revisions`, session retention policy, history queries | Explicit retention choice / caller page limits |
+| H | Session replay events / age / sessions / total bytes | 2048 / 120 s / 4096 / 64 MiB | `InMemoryLiveReplayStoreConfig` via `LashCoreBuilder::live_replay_store` | Addressable counts/bytes/durations |
+| H | Process replay events / age / bytes/process / processes / total bytes | 2048 / 120 s / 8 MiB / 4096 / 64 MiB | `InMemoryProcessReplayStoreConfig` via `LashCoreBuilder::process_replay_store` | Addressable counts/bytes/durations |
+| H | Observation expiry / publisher batch / process tail / dedup / effect-fold / bridge | 64 / 32 / 32 / 4096 per class / 64×256 / 256 | `LashCoreBuilder::observation_work_limits(ObservationWorkLimits)` | Addressable counts; page sizes obey store's paginated read contract |
+| H | Provisional language session ingress / bytes/class / process rounds | 256 / 4 MiB / 2 | `ObservationWorkLimits.language_{session_events,bytes,process_rounds}` | Addressable counts/bytes; overflow explicitly retires provisional continuity |
+| H | Trace held records / attempt stream / diff value / paths / failure output / provider body | 256 / 256 KiB / 2048 B / 8 / 64 KiB / 2048 B | `TraceLimits` through core tracing | Addressable counts/bytes |
+| H/S | Trace composition generations / sessions / process occurrences / error chars / state warning | 8 / 1024 / 8 / 4000 / 4 MiB | `TraceLimits` | Occurrences hard 8 preserves stored event representation; other cuts addressable |
+| H/S | W3C tracestate members / chars / key / tenant / system / value | 32 / 512 / 256 / 241 / 14 / 256 | `TraceStateLimits`, `W3cTraceState::parse_with_limits` | Each default is its W3C interoperability maximum |
+| H/S | Retained trace links | 64 | `TraceLinks::with_limit` | 64, bounded stored telemetry |
+| H | Workflow overlay history / mismatches | 256 / 64 | `WorkflowExecutionOverlayAccumulator::new`, `.with_mismatch_limit` | Addressable counts |
+| H | Catalogue preview modules / call names | 100 / 50 | `CataloguePreviewOptions` | Addressable counts |
+| H/S | Charge-safety retry count | Host-declared policy | `ChargeSafetyPolicy`, session/core config | 5 unsafe retries; bounded provider billing exposure |
+| H | Durable lease TTL / heartbeat / self-stop / reap / poll / backoff / startup / shutdown | 15 s / 3 s / 10 s / 2 s / 250 ms / 25 ms / 2 s / 2 s | `DurableSettings.lease: LeaseSettings` | Representable durations with lease ordering validation |
+| H | Durable claim / active / idle eviction / activation loop / group commit / snapshot / cascade | 16 / 256 / 60 s / 8 / 64 members and 5 ms / 1M fuel / 256 | `DurableSettings` | Typed representable counts/durations |
+| H | SQLite busy / connection and WAL working policies | Busy 15 s; role-specific presets | `SqliteConnectionPolicy`, store/node working config | Platform/typed ranges, timeout checked |
+| H/S | PostgreSQL connection prefix / replay schema names | 32 / 48 bytes | `PostgresHostConfig.name_limits: PostgresNameLimits` | 32 / 48 reserve suffix space within PostgreSQL's 63-byte identifiers |
+| H/S | PostgreSQL roles / SQL deadlines / retries / replay / maintenance | Role presets in `docs/operations/postgres.md`; live replay 2048/120 s/8 MiB; process replay 2048/120 s/8 MiB/4096/256 MiB | `PostgresHostConfig.{roles,guards,retry,signals,live_replay,process_replay,maintenance,deployment}` | Server timeouts `i32::MAX` ms; replay events ≤1M, batch ≤65536, per-owner bytes ≤1 GiB, age ≤24 h, aggregate process replay ≤1 TiB; other validated role ranges documented there |
+| H | Workbench upload / attachment name / retrieval / HTTP request body | 1 MiB / 200 chars / 32 MiB / 2 MiB | `AGENT_WORKBENCH_DATA_LIMITS` JSON typed as `WorkbenchDataLimits` | Addressable sizes; application deployment policy |
+| I | Graph envelope / root / inline token / leaf / fanout | 64 KiB / 4 KiB / 256 B / 65520 B / format fanout | Canonical chunking; caller read budgets may narrow envelopes | Larger payloads stream across nodes; no total payload refusal |
+| I | SQL wake / replay notification payload | 7900 bytes | No host knob needed | Oversize uses authoritative polling / invalidation notification, data stays in store |
+| I | Process registry/roster pages and attachment root scan lookahead | 256 + 1 lookahead | Caller page size, bounded page with continuation | No truncation of the complete scan |
+| I | Failed-settlement uncharged receipt | 1024 encoded bytes | Accounting exemption only | Larger refusal is charged normally, not dropped |
+| I | Regex register limits / opcode chunks / optimization depth | 65535 groups/loops; 16-byte instructions; duplicate depth 100 | Outer `PatternLimits` covers reachable admission | Register caps unreachable under 4096 units; optimizer declines optimization, keeps original program |
+| I | Type inference fixed-point rounds | 32 | Internal conservative inference | No source/result refusal; unknown facts remain conservative |
+| I | Provider model name/hash shortening and HTTP error summary | MCP 64 chars; error fallback 200 chars | Native names retained in dispatch map; raw HTTP error retained in envelope | Lossless mapping or presentation alongside original data |
+| I | Read/cache buffers, reservation steps, batching and cooperative slices | Various | Existing cache/working configs where useful | Evict/reload, paginate or yield; data remains recoverable |
+| I | Numeric/time domains, varint width, Unicode, schema/format version | ECMAScript TimeClip 8.64e15 ms; exact f64 integers 2^53; u64 varint 10 bytes | Semantic/representation contracts | Changing these changes the language or stored representation, not an operational budget |
+| I | Test generators, conformance/performance witnesses, diagnostic sampling counters | Harness-specific | Harness arguments / explicit measurement selection | No production host/user payload admission |

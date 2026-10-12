@@ -788,9 +788,11 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
         }],
     };
     let resolved = |value| {
-        let StateResolutionOutcome::Applied { changes } =
-            batch(value).reduce(&BTreeMap::new(), &mut |_, _, _, _| unreachable!())
-        else {
+        let StateResolutionOutcome::Applied { changes } = batch(value).reduce(
+            &BTreeMap::new(),
+            &mut |_, _, _, _| unreachable!(),
+            lash_core_store::tool_run::StateCommandLimits::PUBLISHED,
+        ) else {
             panic!("a valid set resolves");
         };
         rmp_serde::to_vec_named(&changes).unwrap()

@@ -28,6 +28,22 @@ pub struct FormatRefusal {
     pub readable: FormatVersion,
 }
 
+/// Host narrowing of an identifier's representation safety ceiling.
+/// `HARD` is the format's maximum, never an allocation default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NameByteLimit<const HARD: usize>(usize);
+impl<const HARD: usize> NameByteLimit<HARD> {
+    pub const fn standard() -> Self {
+        Self(HARD)
+    }
+    pub fn new(max_bytes: usize) -> Option<Self> {
+        (max_bytes <= HARD).then_some(Self(max_bytes))
+    }
+    pub const fn max_bytes(self) -> usize {
+        self.0
+    }
+}
+
 /// The largest encoded value a namespace key may hold.
 pub const PLUGIN_STATE_VALUE_LIMIT: usize = 32 * 1024;
 /// The largest encoded namespace a plugin may publish.
@@ -48,8 +64,8 @@ pub const PLUGIN_STATE_NAMESPACE_LIMIT: usize = 128 * 1024;
 pub enum KeyRejection {
     #[error("empty key")]
     Empty,
-    #[error("key exceeds 128 bytes")]
-    TooLong,
+    #[error("key exceeds the configured {limit}-byte key limit")]
+    TooLong { limit: usize },
     #[error("illegal byte {byte} at {at}")]
     IllegalCharacter { at: usize, byte: u8 },
 }
@@ -118,11 +134,20 @@ impl PluginStateError {
 ///
 /// The first [`KeyRejection`] the key meets.
 pub fn validate_state_key(key: &str) -> Result<(), KeyRejection> {
+    validate_state_key_with_limit(key, NameByteLimit::standard())
+}
+/// Validate a proposed key under deployment policy, at most the format's 128 bytes.
+pub fn validate_state_key_with_limit(
+    key: &str,
+    limit: NameByteLimit<128>,
+) -> Result<(), KeyRejection> {
     if key.is_empty() {
         return Err(KeyRejection::Empty);
     }
-    if key.len() > 128 {
-        return Err(KeyRejection::TooLong);
+    if key.len() > limit.max_bytes() {
+        return Err(KeyRejection::TooLong {
+            limit: limit.max_bytes(),
+        });
     }
     match key
         .bytes()

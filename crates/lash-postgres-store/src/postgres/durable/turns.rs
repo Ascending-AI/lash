@@ -12,7 +12,6 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
     turn_cancel_undelivered_wire,
 };
-use lash_durable::domain::graph::OWNER_READ_LIMITS;
 use lash_durable::domain::namespace_value::NamespaceValue;
 use lash_durable::domain::{
     DomainRefusal, ExecKey, SessionCommitWrite, StoredValues, TurnCancelAnswer, TurnCancelRequest,
@@ -792,6 +791,7 @@ pub(super) async fn turn_namespaces(
     tx: &mut PgConnection,
     session: &SessionId,
     run: &TurnId,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<Vec<TurnNamespace>, DurableError> {
     let rows = crate::observed_sql::query(SQL.namespaces.sql())
         .bind(session.as_str())
@@ -810,8 +810,8 @@ pub(super) async fn turn_namespaces(
             None => None,
             Some(root) => {
                 let root = node_ref(&root)?;
-                let nodes = super::graph::graph_closure(tx, root, &OWNER_READ_LIMITS).await?;
-                Some(NamespaceValue::load(&nodes, root, &plugin, OWNER_READ_LIMITS)?.body)
+                let nodes = super::graph::graph_closure(tx, root, &limits).await?;
+                Some(NamespaceValue::load(&nodes, root, &plugin, limits)?.body)
             }
         };
         namespaces.push(TurnNamespace {

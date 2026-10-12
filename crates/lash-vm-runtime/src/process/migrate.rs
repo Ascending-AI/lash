@@ -175,6 +175,7 @@ pub fn migrate_run(
     admitted: &[AdmittedWait],
     base: &Document,
     plan: &PlannedMigration,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<WholeState, KernelMigrationRefusal> {
     let state = |message: String| KernelMigrationRefusal::State { message };
     let refused = |refusal| KernelMigrationRefusal::Parked {
@@ -187,7 +188,7 @@ pub fn migrate_run(
             from: base.manifest.kernel,
         }));
     };
-    let opened = open_run(parked, admitted, base).map_err(state)?;
+    let opened = open_run(parked, admitted, base, limits).map_err(state)?;
     let carried = (migration.parked)(&opened.run, base, &plan.rewritten).map_err(refused)?;
     capture_whole(
         &OpenedRun {
@@ -205,6 +206,7 @@ pub(crate) fn open_run(
     parked: &WholeState,
     admitted: &[AdmittedWait],
     base: &Document,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<OpenedRun, String> {
     let releases = lash_vm_broker::kernel::state::release_manifests()
         .map_err(|failure| failure.to_string())?;
@@ -215,7 +217,7 @@ pub(crate) fn open_run(
         &releases,
         admitted,
         base.manifest.functions.keys().copied().collect(),
-        lash_vm_broker::snapshot::READ_LIMITS,
+        limits,
     )
     .map_err(|failure| failure.to_string())
 }
@@ -278,6 +280,7 @@ impl KernelStateMigration {
             retired,
             engine.writes,
             state,
+            engine.workers.config().graph_reads.execution(),
         )
         .await
         .map_err(|error| match error {
@@ -356,12 +359,18 @@ impl lash_core::EngineStateMigration for KernelStateMigration {
         if state.format == advance::state_format(engine.writes) {
             return self.adopt(process, state).await;
         }
-        let carried = carry(&engine.documents, &engine.functions, engine.writes, state)
-            .await
-            .map_err(|error| match error {
-                CarryError::Refused(refusal) => fatal(&refusal),
-                CarryError::Store(error) => retried(error),
-            })?;
+        let carried = carry(
+            &engine.documents,
+            &engine.functions,
+            engine.writes,
+            state,
+            engine.workers.config().graph_reads.execution(),
+        )
+        .await
+        .map_err(|error| match error {
+            CarryError::Refused(refusal) => fatal(&refusal),
+            CarryError::Store(error) => retried(error),
+        })?;
         // A run in flight settles in the format it started in; the process
         // is carried from its next park.
         let Some(Carried {
@@ -428,6 +437,7 @@ async fn carry(
     functions: &FunctionRegistry,
     writes: KernelVersion,
     state: &EngineState,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<Option<Carried>, CarryError> {
     let undecodable = |message: String| KernelMigrationRefusal::State { message };
     let (mut state, written) =
@@ -466,7 +476,7 @@ async fn carry(
             .values()
             .map(|admission| admission.0.clone())
             .collect();
-        let carried = migrate_run(&whole, &admitted, &base, &plan)?;
+        let carried = migrate_run(&whole, &admitted, &base, &plan, limits)?;
         state.parked = Some(if at_park {
             SealedRun(carried.sealed(
                 parked.0.owner().clone(),
@@ -506,8 +516,9 @@ pub async fn migration_refusal(
     documents: &KernelDocuments,
     functions: &FunctionRegistry,
     state: &EngineState,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<Option<KernelMigrationRefusal>, DocumentStoreError> {
-    match carry(documents, functions, KernelVersion::NEWEST, state).await {
+    match carry(documents, functions, KernelVersion::NEWEST, state, limits).await {
         Ok(_) => Ok(None),
         Err(CarryError::Refused(refusal)) => Ok(Some(refusal)),
         Err(CarryError::Store(error)) => Err(error),
@@ -624,6 +635,7 @@ pub async fn survey_kernel_processes(
             let Some(state) = lash_core::runtime::durable::stored_engine_state(
                 backend.durable().as_ref(),
                 &record.id,
+                backend.config().settings().graph_reads.engine(),
             )
             .await?
             else {
@@ -633,7 +645,14 @@ pub async fn survey_kernel_processes(
             if state.format != advance::state_format(KernelVersion::NEWEST) {
                 survey.unmigrated += 1;
             }
-            let Some(refusal) = migration_refusal(&documents, functions, &state).await? else {
+            let Some(refusal) = migration_refusal(
+                &documents,
+                functions,
+                &state,
+                backend.config().settings().graph_reads.execution(),
+            )
+            .await?
+            else {
                 continue;
             };
             if let KernelMigrationRefusal::Document {

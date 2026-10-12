@@ -19,8 +19,8 @@ pub use lash_vm_protocol::StateDigest;
 /// The VM-protocol vocabulary a worker pool's configuration and outcomes
 /// name.
 pub use lash_vm_protocol::{
-    BootstrapFault, CodecRefusal, DecodeLimits, Detail, Exchange, ExecutionLease, FrameEpoch,
-    GraphStateRefusal, HeaderRefusal, HostReadId, HostReadKind, InfrastructureOutcome,
+    BootstrapFault, CodecRefusal, DecodeLimits, Detail, DetailLimit, Exchange, ExecutionLease,
+    FrameEpoch, GraphStateRefusal, HeaderRefusal, HostReadId, HostReadKind, InfrastructureOutcome,
     KernelRestoreRefusal, OwnerEpoch, PayloadKind, PoolFault, ProtocolBounds, ProtocolBreach,
     ProtocolVersionRefusal, RunBounds, RunInput, RunMeters, RunRefusal, SequenceFault,
     SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit,

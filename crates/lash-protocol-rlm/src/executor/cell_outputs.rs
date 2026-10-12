@@ -226,6 +226,6 @@ async fn retain_value(
             witness: policy.witness(&encoded, &notice),
             reference,
         },
-        shape: lash_core::ValueShape::of(value),
+        shape: lash_core::ValueShape::of_with_limits(value, policy.shape),
     })
 }

@@ -9,6 +9,7 @@ use super::*;
 
 #[derive(Clone)]
 pub struct PluginHost {
+    data_limits: crate::runtime::RuntimeDataLimits,
     prompt_render_pool: Option<Arc<super::prompt::PromptRenderPool>>,
     trace_runtime: crate::trace::TraceRuntime,
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
@@ -126,6 +127,14 @@ impl SessionAuthorityContext {
 }
 
 impl PluginHost {
+    /// Deployment payload bounds used by every session and process this host builds.
+    pub fn with_data_limits(mut self, limits: crate::runtime::RuntimeDataLimits) -> Self {
+        self.data_limits = limits;
+        self
+    }
+    pub fn data_limits(&self) -> crate::runtime::RuntimeDataLimits {
+        self.data_limits
+    }
     pub fn with_prompt_render_pool(
         mut self,
         pool: Option<Arc<super::prompt::PromptRenderPool>>,
@@ -177,6 +186,7 @@ impl PluginHost {
         );
         let config_registry = Arc::new(std::sync::OnceLock::new());
         Self {
+            data_limits: crate::runtime::RuntimeDataLimits::standard(),
             prompt_render_pool: None,
             factories: Arc::new(all_factories),
             protocol_factory: None,
@@ -236,6 +246,7 @@ impl PluginHost {
 
     pub fn isolated_registry(&self) -> Self {
         Self {
+            data_limits: self.data_limits,
             prompt_render_pool: self.prompt_render_pool.clone(),
             factories: Arc::clone(&self.factories),
             protocol_factory: self.protocol_factory.clone(),
@@ -462,6 +473,7 @@ impl PluginHost {
                     PluginStateRegistry::from_snapshot(snapshot)
                 };
                 registry.trace_limits = self.trace_runtime.limits();
+                registry.limits = self.data_limits.plugin_state;
                 registry
             })),
             native_view: Arc::new(StdMutex::new(None)),

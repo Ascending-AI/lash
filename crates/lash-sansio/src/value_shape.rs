@@ -25,6 +25,69 @@ pub const MAX_KEY_BYTES: usize = 64;
 /// The most shapes one descriptor holds, itself included.
 pub const MAX_NODES: usize = 96;
 
+/// Host policy for retained-value descriptors. Only depth has a native
+/// ceiling (128) to bound recursive descriptor construction; width, key bytes
+/// and total nodes are host allocation policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(try_from = "ValueShapeLimitsWire")]
+pub struct ValueShapeLimits {
+    max_depth: usize,
+    max_fields: usize,
+    max_key_bytes: usize,
+    max_nodes: usize,
+}
+impl ValueShapeLimits {
+    pub const HARD_MAX_DEPTH: usize = 128;
+    pub const fn standard() -> Self {
+        Self {
+            max_depth: MAX_DEPTH,
+            max_fields: MAX_FIELDS,
+            max_key_bytes: MAX_KEY_BYTES,
+            max_nodes: MAX_NODES,
+        }
+    }
+    /// Refuse an unsafe recursion depth or a node budget that cannot hold the root.
+    pub fn new(
+        max_depth: usize,
+        max_fields: usize,
+        max_key_bytes: usize,
+        max_nodes: usize,
+    ) -> Option<Self> {
+        (max_depth <= Self::HARD_MAX_DEPTH && max_nodes > 0).then_some(Self {
+            max_depth,
+            max_fields,
+            max_key_bytes,
+            max_nodes,
+        })
+    }
+}
+
+impl Default for ValueShapeLimits {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ValueShapeLimitsWire {
+    max_depth: usize,
+    max_fields: usize,
+    max_key_bytes: usize,
+    max_nodes: usize,
+}
+impl TryFrom<ValueShapeLimitsWire> for ValueShapeLimits {
+    type Error = &'static str;
+    fn try_from(wire: ValueShapeLimitsWire) -> Result<Self, Self::Error> {
+        Self::new(
+            wire.max_depth,
+            wire.max_fields,
+            wire.max_key_bytes,
+            wire.max_nodes,
+        )
+        .ok_or("value shape requires at most 128 depth and a positive node budget")
+    }
+}
+
 /// What a JSON value is made of. A position that held several values — the
 /// elements of an array — is their merge: its sizes are the largest
 /// observed, an object key not every one of them held is `optional`, and a
@@ -83,12 +146,16 @@ fn count(len: usize) -> u64 {
 impl ValueShape {
     /// The bounded descriptor of `value`.
     pub fn of(value: &serde_json::Value) -> Self {
-        let mut shape = Self::describe(value, 0);
-        shape.bound_nodes();
+        Self::of_with_limits(value, ValueShapeLimits::standard())
+    }
+    /// Construct a descriptor under deployment retention policy.
+    pub fn of_with_limits(value: &serde_json::Value, limits: ValueShapeLimits) -> Self {
+        let mut shape = Self::describe(value, 0, limits);
+        shape.bound_nodes(limits.max_nodes);
         shape
     }
 
-    fn describe(value: &serde_json::Value, depth: usize) -> Self {
+    fn describe(value: &serde_json::Value, depth: usize, limits: ValueShapeLimits) -> Self {
         match value {
             serde_json::Value::Null => Self::Null,
             serde_json::Value::Bool(_) => Self::Boolean,
@@ -98,18 +165,18 @@ impl ValueShape {
             },
             serde_json::Value::Array(elements) => Self::Array {
                 length: count(elements.len()),
-                items: (depth < MAX_DEPTH)
+                items: (depth < limits.max_depth)
                     .then(|| {
                         elements
                             .iter()
-                            .map(|element| Self::describe(element, depth + 1))
-                            .reduce(Self::merge)
+                            .map(|element| Self::describe(element, depth + 1, limits))
+                            .reduce(|left, right| left.merge(right, limits.max_fields))
                     })
                     .flatten()
                     .map(Box::new),
             },
             serde_json::Value::Object(entries) => {
-                if depth >= MAX_DEPTH {
+                if depth >= limits.max_depth {
                     return Self::Object {
                         fields: Vec::new(),
                         omitted: count(entries.len()),
@@ -118,10 +185,10 @@ impl ValueShape {
                 let mut fields = Vec::new();
                 let mut omitted = 0;
                 for (key, entry) in entries {
-                    if fields.len() < MAX_FIELDS && key.len() <= MAX_KEY_BYTES {
+                    if fields.len() < limits.max_fields && key.len() <= limits.max_key_bytes {
                         fields.push(FieldShape {
                             key: key.clone(),
-                            shape: Self::describe(entry, depth + 1),
+                            shape: Self::describe(entry, depth + 1, limits),
                             optional: false,
                         });
                     } else {
@@ -148,7 +215,7 @@ impl ValueShape {
     }
 
     /// The shape of a position that held a value of each shape.
-    fn merge(self, other: Self) -> Self {
+    fn merge(self, other: Self, max_fields: usize) -> Self {
         match (self, other) {
             (Self::OneOf { mut shapes }, other) => {
                 let others = match other {
@@ -162,7 +229,7 @@ impl ValueShape {
                     {
                         Some(at) => {
                             let merged = std::mem::replace(&mut shapes[at], Self::Null);
-                            shapes[at] = merged.merge(other);
+                            shapes[at] = merged.merge(other, max_fields);
                         }
                         None => shapes.push(other),
                     }
@@ -172,7 +239,7 @@ impl ValueShape {
             (single, other @ Self::OneOf { .. }) => Self::OneOf {
                 shapes: vec![single],
             }
-            .merge(other),
+            .merge(other, max_fields),
             (Self::String { bytes: left }, Self::String { bytes: right }) => Self::String {
                 bytes: left.max(right),
             },
@@ -188,7 +255,7 @@ impl ValueShape {
             ) => Self::Array {
                 length: left.max(right),
                 items: match (left_items, right_items) {
-                    (Some(left), Some(right)) => Some(Box::new(left.merge(*right))),
+                    (Some(left), Some(right)) => Some(Box::new(left.merge(*right, max_fields))),
                     (left, right) => left.or(right),
                 },
             },
@@ -209,10 +276,10 @@ impl ValueShape {
                         Some(at) => {
                             seen[at] = true;
                             let shape = std::mem::replace(&mut merged[at].shape, Self::Null);
-                            merged[at].shape = shape.merge(other.shape);
+                            merged[at].shape = shape.merge(other.shape, max_fields);
                             merged[at].optional |= other.optional;
                         }
-                        None if merged.len() < MAX_FIELDS => {
+                        None if merged.len() < max_fields => {
                             merged.push(FieldShape {
                                 optional: true,
                                 ..other
@@ -254,14 +321,14 @@ impl ValueShape {
     /// Counts what lies past [`MAX_NODES`] shapes, outermost first: a
     /// container whose contents would pass the bound keeps its sizes and
     /// loses its contents.
-    fn bound_nodes(&mut self) {
+    fn bound_nodes(&mut self, max_nodes: usize) {
         let mut kept = 1;
         let mut level = vec![self];
         while !level.is_empty() {
             let mut next = Vec::new();
             for shape in level {
                 let children = shape.children_mut().len();
-                if kept + children > MAX_NODES {
+                if children > max_nodes.saturating_sub(kept) {
                     shape.drop_contents();
                     continue;
                 }
@@ -407,5 +474,24 @@ mod tests {
                 omitted: 1
             }
         );
+    }
+    /// DESCRIPTOR-RETENTION-POLICY: omitted field descriptions follow the host's cut.
+    #[test]
+    fn a_host_descriptor_policy_controls_what_fields_are_retained() {
+        let value = serde_json::json!({"a": 1, "b": 2});
+        let small =
+            ValueShape::of_with_limits(&value, ValueShapeLimits::new(4, 1, 64, 96).unwrap());
+        let ValueShape::Object { fields, omitted } = small else {
+            panic!("object")
+        };
+        assert_eq!(fields.len(), 1);
+        assert_eq!(omitted, 1);
+        let large =
+            ValueShape::of_with_limits(&value, ValueShapeLimits::new(4, 64, 128, 512).unwrap());
+        let ValueShape::Object { fields, omitted } = large else {
+            panic!("object")
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(omitted, 0);
     }
 }

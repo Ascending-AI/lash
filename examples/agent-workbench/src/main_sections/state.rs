@@ -13,6 +13,7 @@ pub(crate) struct AppState {
     /// value and each creation states it with the model selected at that
     /// moment ([`AppState::session_creation`]).
     pub(crate) session_defaults: lash::SessionSpec,
+    pub(crate) data_limits: WorkbenchDataLimits,
     pub(crate) attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     /// The deployment's session-store factory, retained beside the core it was
     /// built with because it is also this host's attachment **root authority**
@@ -998,4 +999,45 @@ pub(crate) struct WorkAwaitResult {
 pub(crate) struct WorkAwaitEvent {
     pub(crate) sequence: u64,
     pub(crate) event_type: String,
+}
+
+/// Application admission, separate from the library's byte-delivery policy.
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct WorkbenchDataLimits {
+    pub(crate) attachment_bytes: usize,
+    pub(crate) attachment_name_chars: usize,
+    pub(crate) attachment_read_bytes: u64,
+    pub(crate) request_body_bytes: usize,
+}
+impl Default for WorkbenchDataLimits {
+    fn default() -> Self {
+        Self {
+            attachment_bytes: 1024 * 1024,
+            attachment_name_chars: 200,
+            attachment_read_bytes: lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
+            request_body_bytes: 2 * 1024 * 1024,
+        }
+    }
+}
+
+impl WorkbenchDataLimits {
+    pub(crate) fn admit_attachment_name(self, name: &str) -> Result<(), AppError> {
+        if name.chars().count() > self.attachment_name_chars {
+            return Err(AppError::bad_request(format!(
+                "attachment name must be at most {} characters",
+                self.attachment_name_chars
+            )));
+        }
+        Ok(())
+    }
+    pub(crate) fn admit_attachment_bytes(self, bytes: usize) -> Result<(), AppError> {
+        if bytes > self.attachment_bytes {
+            return Err(AppError::bad_request(format!(
+                "attachment exceeds the {} byte workbench limit",
+                self.attachment_bytes
+            )));
+        }
+        Ok(())
+    }
 }

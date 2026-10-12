@@ -50,6 +50,7 @@ pub(super) struct LifecycleActor {
     published: watch::Sender<Option<Arc<PublishedService>>>,
     active_pid: Arc<AtomicU32>,
     shutdown_policy: McpShutdownPolicy,
+    data_limits: crate::config::McpDataLimits,
     generation: u64,
     reconnect_backoff: Duration,
     reconnect_attempts: u64,
@@ -258,8 +259,9 @@ impl LifecycleActor {
     ) -> CatalogRefresh {
         #[cfg(test)]
         let entry = self.entry.clone();
+        let limits = self.data_limits;
         Box::pin(async move {
-            let result = timeout(deadline, super::catalog::discover_tools(&peer)).await;
+            let result = timeout(deadline, super::catalog::discover_tools(&peer, limits)).await;
             #[cfg(test)]
             if matches!(result, Ok(Ok(_)))
                 && let Some(entry) = entry.upgrade()
@@ -347,6 +349,7 @@ impl LifecycleActor {
             published,
             active_pid,
             shutdown_policy: *config.shutdown_policy(),
+            data_limits: config.data_limits,
             finished: false,
             generation: 0,
             reconnect_backoff: config.reconnect_initial_backoff(),
@@ -538,7 +541,10 @@ impl LifecycleActor {
             return ConnectionExit::Shutdown;
         }
 
-        let discovery = timeout(startup_timeout, super::catalog::discover_tools(&peer));
+        let discovery = timeout(
+            startup_timeout,
+            super::catalog::discover_tools(&peer, self.data_limits),
+        );
         tokio::pin!(discovery);
         let tools = loop {
             tokio::select! {

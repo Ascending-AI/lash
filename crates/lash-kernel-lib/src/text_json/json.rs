@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 
 use lash_kernel_doc::{
-    Element, Float, Integer, MAX_NESTING_DEPTH, NativeCall, NativeError, NativeHeap, NumberPolicy,
-    NumberToken, Object, ObjectId, Type, Value,
+    Element, Float, Integer, NativeCall, NativeError, NativeHeap, NumberPolicy, NumberToken,
+    Object, ObjectId, Type, Value,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -178,8 +178,14 @@ impl<'a> Parser<'a> {
 
     fn value(&mut self, depth: usize) -> Result<Json, NativeError> {
         self.whitespace();
-        if depth > MAX_NESTING_DEPTH {
-            return Err(raise("json_depth", "JSON exceeds the kernel nesting limit"));
+        if depth > self.heap.data_depth_limit().min(64) {
+            return Err(raise(
+                "json_depth",
+                &format!(
+                    "JSON exceeds the configured {}-level kernel nesting limit",
+                    self.heap.data_depth_limit().min(64)
+                ),
+            ));
         }
         match self.text.as_bytes().get(self.cursor) {
             Some(b'"') => self.string().map(Json::Text),
@@ -581,8 +587,14 @@ fn write(
     raw_numbers: bool,
     out: &mut Out<'_>,
 ) -> Result<(), NativeError> {
-    if depth > MAX_NESTING_DEPTH {
-        return Err(raise("json_depth", "JSON exceeds the kernel nesting limit"));
+    if depth > out.heap.data_depth_limit().min(64) {
+        return Err(raise(
+            "json_depth",
+            &format!(
+                "JSON exceeds the configured {}-level kernel nesting limit",
+                out.heap.data_depth_limit().min(64)
+            ),
+        ));
     }
     match value {
         Value::Null => out.push("null")?,

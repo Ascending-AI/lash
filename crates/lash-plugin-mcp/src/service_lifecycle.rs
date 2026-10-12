@@ -64,6 +64,7 @@ pub(crate) fn connect_service(
                     tokio::fs::File::from_std(child_stdout_file(stdout)),
                     tokio::fs::File::from_std(child_stdin_file(stdin)),
                     stdio_close_cause.clone(),
+                    config.data_limits.stdio_message_bytes,
                 )),
                 (None, _) => Err(McpError::Protocol(format!(
                     "failed to capture stdout for `{command}` MCP server `{server_name}`"

@@ -31,9 +31,7 @@
 use super::*;
 use crate::{RuntimeEffectControllerError, RuntimeEffectKind, RuntimeEffectOutcome};
 use lash_core_store::store::plugin_writers::PluginCallbackIdentity;
-use lash_core_store::tool_run::{
-    FrontierStep, ReducerRefusal, StateCommandBatch, StateCommandLimits,
-};
+use lash_core_store::tool_run::{FrontierStep, ReducerRefusal, StateCommandBatch};
 use std::future::Future;
 
 /// The resolutions one recorded body published, retained with its result.
@@ -433,17 +431,21 @@ impl crate::PluginSession {
                 namespace.publication.owner_segment = registry.segment;
                 let mut outcome = match self.admit_batch(&batch, proposer.as_ref(), namespace) {
                     Err(refusal) => StateResolutionOutcome::Refused { refusal },
-                    Ok(()) => batch.reduce(&namespace.values, &mut |key, name, current, input| {
-                        self.run_reducer(
-                            &plugin,
-                            name,
-                            StateReduction {
-                                key,
-                                current,
-                                input,
-                            },
-                        )
-                    }),
+                    Ok(()) => batch.reduce(
+                        &namespace.values,
+                        &mut |key, name, current, input| {
+                            self.run_reducer(
+                                &plugin,
+                                name,
+                                StateReduction {
+                                    key,
+                                    current,
+                                    input,
+                                },
+                            )
+                        },
+                        self.host.data_limits().plugin_state,
+                    ),
                 };
                 let reduced = match &outcome {
                     StateResolutionOutcome::Applied { changes } => {
@@ -493,8 +495,8 @@ impl crate::PluginSession {
         namespace: &PluginNamespaceState,
     ) -> Result<(), StateCommandRefusal> {
         match proposer {
-            Some(proposer) => batch.check(proposer, StateCommandLimits::PUBLISHED)?,
-            None => batch.check_bounds(StateCommandLimits::PUBLISHED)?,
+            Some(proposer) => batch.check(proposer, self.host.data_limits().plugin_state)?,
+            None => batch.check_bounds(self.host.data_limits().plugin_state)?,
         }
         let declaration = self
             .host
@@ -818,7 +820,7 @@ fn session_budget(
     plugin: &str,
     values: &BTreeMap<String, Value>,
 ) -> Result<(), lash_core_store::tool_run::StateCommandRefusal> {
-    use lash_core_store::plugin_state::PLUGIN_STATE_SESSION_LIMIT;
+    let limit = registry.limits.max_session_bytes;
     let encoded = |values: &BTreeMap<String, Value>| {
         serde_json::to_vec(values).map_or(usize::MAX, |bytes| bytes.len())
     };
@@ -853,19 +855,16 @@ fn session_budget(
         };
         bytes = bytes.saturating_add(measured);
     }
-    if bytes > PLUGIN_STATE_SESSION_LIMIT {
+    if bytes > limit {
         tracing::debug!(
             event = "plugin_state.session_budget_refused",
             plugin_id = %plugin,
             bytes,
-            limit = PLUGIN_STATE_SESSION_LIMIT,
+            limit = limit,
             "a plugin-state publication would take the session past its total budget and is refused"
         );
         return Err(
-            lash_core_store::tool_run::StateCommandRefusal::SessionTooLarge {
-                bytes,
-                limit: PLUGIN_STATE_SESSION_LIMIT,
-            },
+            lash_core_store::tool_run::StateCommandRefusal::SessionTooLarge { bytes, limit },
         );
     }
     let warn = registry.trace_limits.plugin_state_warn_bytes;
@@ -875,7 +874,7 @@ fn session_budget(
             plugin_id = %plugin,
             bytes,
             warn,
-            limit = PLUGIN_STATE_SESSION_LIMIT,
+            limit = limit,
             "a plugin-state publication takes the session past its warn tier"
         );
     }

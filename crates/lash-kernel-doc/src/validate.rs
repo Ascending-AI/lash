@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use crate::ast::{
     Action, Atom, Block, Callee, Closure, Expr, Literal, Member, Node, Place, Rhs, Site, Stmt, Unit,
 };
-use crate::document::{Annotations, Document, MAX_NESTING_DEPTH};
+use crate::document::{Annotations, Document};
 use crate::function::{Formula, FunctionDefinition, Implementation, Operand};
 use crate::name::{EffectName, FunctionId, FunctionName, Name};
 use crate::native::FunctionCatalog;
@@ -206,6 +206,14 @@ pub fn validate_document(
     document: &Document,
     catalog: &dyn FunctionCatalog,
 ) -> Result<(), Invalid> {
+    validate_document_with_limits(document, catalog, crate::KernelDataLimits::standard())
+}
+/// Validate under a deployment's document recursion safety policy.
+pub fn validate_document_with_limits(
+    document: &Document,
+    catalog: &dyn FunctionCatalog,
+    limits: crate::KernelDataLimits,
+) -> Result<(), Invalid> {
     let Some(version) = KernelVersion::of(document.manifest.kernel) else {
         return Err(invalid(
             None,
@@ -246,6 +254,7 @@ pub fn validate_document(
         }
     }
     let scope = Scope {
+        limits,
         document: Some(document),
         functions: &document.manifest.functions,
         catalog,
@@ -265,6 +274,14 @@ pub fn validate_document(
 pub fn validate_definition(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
+) -> Result<(), Invalid> {
+    validate_definition_with_limits(definition, catalog, crate::KernelDataLimits::standard())
+}
+/// Validate under a deployment's document recursion safety policy.
+pub fn validate_definition_with_limits(
+    definition: &FunctionDefinition,
+    catalog: &dyn FunctionCatalog,
+    limits: crate::KernelDataLimits,
 ) -> Result<(), Invalid> {
     let Some(version) = KernelVersion::of(definition.kernel) else {
         return Err(invalid(
@@ -328,6 +345,7 @@ pub fn validate_definition(
         )
     })?;
     let scope = Scope {
+        limits,
         document: None,
         functions: &body.functions,
         catalog,
@@ -431,6 +449,7 @@ fn native_call<'c>(
 }
 
 struct Scope<'a> {
+    limits: crate::KernelDataLimits,
     /// The document being validated, or `None` inside a library body.
     document: Option<&'a Document>,
     /// The library functions this code may name.
@@ -442,7 +461,7 @@ struct Scope<'a> {
 
 impl Scope<'_> {
     fn check_unit(&self, body: &Block, site: Site) -> Result<(), Invalid> {
-        check_depth(body, &site)?;
+        check_depth(body, &site, self.limits.document_depth())?;
         self.check_block(body, &site, false)
     }
 
@@ -817,16 +836,11 @@ fn check_arity(
 /// Refuses a body that nests deeper than [`MAX_NESTING_DEPTH`]. The walk is
 /// iterative: a recursive one would overflow on the input it exists to
 /// refuse.
-fn check_depth(body: &Block, site: &Site) -> Result<(), Invalid> {
+fn check_depth(body: &Block, site: &Site, limit: usize) -> Result<(), Invalid> {
     let mut pending: Vec<(Node<'_>, usize)> = vec![(Node::Block(body), 0)];
     while let Some((node, depth)) = pending.pop() {
-        if depth > MAX_NESTING_DEPTH {
-            return Err(invalid(
-                Some(site),
-                InvalidReason::TooDeep {
-                    limit: MAX_NESTING_DEPTH,
-                },
-            ));
+        if depth > limit {
+            return Err(invalid(Some(site), InvalidReason::TooDeep { limit }));
         }
         pending.extend(node.children().into_iter().map(|child| (child, depth + 1)));
     }

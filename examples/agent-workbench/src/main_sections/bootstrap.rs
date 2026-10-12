@@ -448,6 +448,12 @@ pub(crate) fn workbench_app_state(
         core,
         dialect: host.dialect,
         session_defaults: host.session_defaults,
+        data_limits: match std::env::var("AGENT_WORKBENCH_DATA_LIMITS") {
+            Ok(json) => serde_json::from_str(&json)
+                .context("AGENT_WORKBENCH_DATA_LIMITS must be a WorkbenchDataLimits JSON object")?,
+            Err(std::env::VarError::NotPresent) => WorkbenchDataLimits::default(),
+            Err(error) => return Err(error.into()),
+        },
         attachment_store: stores.attachment_store(),
         session_store_factory: stores.session_store_factory(),
         process_observer,
@@ -883,6 +889,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/work/{process_id}/await", get(await_work))
         .route("/api/lash-vm-graphs", get(list_lash_vm_graphs))
         .route("/api/lash-vm-graph/{graph_key}", get(lash_vm_graph))
+        .layer(axum::extract::DefaultBodyLimit::max(state.data_limits.request_body_bytes))
         .with_state(state.clone())
         .merge(crate::mcp_host::router(Arc::clone(&mcp_search)));
         // The case's control routes; a case without a tool fixture runs the

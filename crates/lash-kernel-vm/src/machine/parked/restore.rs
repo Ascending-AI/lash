@@ -15,7 +15,7 @@ use super::super::{
 use super::action_of;
 use crate::Layout;
 use crate::compile::{ActionKind, BlockId, CodeId, Executable, Stmt};
-use crate::heap::{ClosureObj, Heap, Key, MAX_VALUE_DEPTH, Obj, Table, within_depth};
+use crate::heap::{ClosureObj, Heap, Key, Obj, Table, within_depth};
 use crate::interface::{
     Bounds, EffectRequest, ImportError, Outcome, Program, Request, SleepRequest, WaitId,
 };
@@ -52,8 +52,11 @@ impl Restore<'_> {
     /// Checks that a value names only what the run holds, as the kind it
     /// says.
     fn value(&self, value: &Value) -> Result<(), ImportError> {
-        if !within_depth(value, MAX_VALUE_DEPTH) {
-            return Err(malformed("a value nests too deep"));
+        if !within_depth(value, self.heap.value_depth) {
+            return Err(malformed(format!(
+                "a value exceeds the configured {}-level value depth",
+                self.heap.value_depth
+            )));
         }
         self.named(value)
     }
@@ -457,6 +460,7 @@ pub(in crate::machine) fn import(
     bounds: Bounds,
     parked: ParkedRun,
     layout: Layout,
+    limits: lash_kernel_doc::KernelDataLimits,
 ) -> Result<KernelMachine, ImportError> {
     let ParkedRun {
         run,
@@ -502,6 +506,9 @@ pub(in crate::machine) fn import(
         })?;
 
     let mut heap = Heap::new(bounds.memory);
+    heap.value_depth = limits.value_depth();
+    heap.json_depth = limits.document_depth();
+    heap.inline_depth = limits.inline_depth();
     for (id, object) in objects {
         if !heap.restore(id, object_of(&exe, object)?) {
             return Err(malformed("an object is held twice"));

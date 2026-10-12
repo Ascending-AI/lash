@@ -52,7 +52,9 @@ pub use definitions::{
     BRAND, CHARGE_BASE, CHARGE_PER_PATTERN_UNIT, GUARD_BASE, GUARD_PER_INPUT_UNIT, GUARD_UNIT,
     LONE_SURROGATE_ERROR, Operation, SYNTAX_ERROR,
 };
-pub use pattern::{Engine, Flags, MAX_GROUP_NESTING, MAX_PATTERN_UNITS, SyntaxError};
+pub use pattern::{
+    Engine, Flags, MAX_GROUP_NESTING, MAX_PATTERN_UNITS, PatternLimits, SyntaxError,
+};
 
 /// The identities of the six functions, as [`register`] registered them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

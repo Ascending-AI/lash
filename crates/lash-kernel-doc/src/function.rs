@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ast::Block;
 use crate::canonical::{EncodeError, digest};
-use crate::document::{DecodeError, from_versioned_json, to_json};
+use crate::document::{DecodeError, from_versioned_json_with_limits, to_json};
 use crate::name::{FunctionId, FunctionName, Name};
 use crate::types::Signature;
 
@@ -207,6 +207,12 @@ impl FunctionDefinition {
     }
 
     pub fn from_json(text: &str) -> Result<Self, DecodeError> {
-        from_versioned_json(text)
+        Self::from_json_with_limits(text, crate::KernelDataLimits::standard())
+    }
+    pub fn from_json_with_limits(
+        text: &str,
+        limits: crate::KernelDataLimits,
+    ) -> Result<Self, DecodeError> {
+        from_versioned_json_with_limits(text, limits)
     }
 }

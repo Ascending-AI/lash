@@ -91,7 +91,12 @@ fn typescript_workflow_print_import_preserves_the_printer_corpus_observations() 
                     lash_dialect_typescript::print(&document).map_err(|e| e.to_string())?;
                 let mut checker = lash_kernel_check::Environment::new(registry.as_ref());
                 checker.effects = effects.clone();
-                let imported = super::import(&source, &environment, &checker);
+                let imported = super::import(
+                    &source,
+                    &environment,
+                    &checker,
+                    lash_dialect_typescript::SourceLimits::standard(),
+                );
                 let super::WorkflowImport::Imported {
                     document: imported,
                     annotations,

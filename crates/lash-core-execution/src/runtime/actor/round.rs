@@ -629,10 +629,8 @@ pub fn cell_report(
     facts: &lash_durable::domain::RunFacts,
     report: lash_core_store::checkpoint_graph::NodeId,
 ) -> Result<graph::CellReport, lash_core_store::checkpoint_graph::GraphRefusal> {
-    let mut decoder = lash_core_store::checkpoint_graph::GraphDecoder::new(
-        facts,
-        lash_durable::domain::graph::OWNER_READ_LIMITS,
-    );
+    let mut decoder =
+        lash_core_store::checkpoint_graph::GraphDecoder::new(facts, facts.read_limits);
     graph::ReportView::records(&mut decoder, report)
 }
 

@@ -24,10 +24,6 @@ pub const KERNEL_VERSION: u32 = 1;
 /// in it are two levels.
 pub const MAX_NESTING_DEPTH: usize = 64;
 
-/// The deepest array-and-object nesting a JSON document or definition may
-/// have. No tree within [`MAX_NESTING_DEPTH`] encodes deeper.
-const MAX_JSON_DEPTH: usize = MAX_NESTING_DEPTH * 5 + 32;
-
 /// A workflow document: `main`, the declared functions, the entries a host
 /// may start, the private bindings and the requirements manifest.
 ///
@@ -105,7 +101,14 @@ impl Document {
     }
 
     pub fn from_json(text: &str) -> Result<Self, DecodeError> {
-        from_versioned_json(text)
+        Self::from_json_with_limits(text, crate::KernelDataLimits::standard())
+    }
+    /// Read under the host's recursive JSON safety policy.
+    pub fn from_json_with_limits(
+        text: &str,
+        limits: crate::KernelDataLimits,
+    ) -> Result<Self, DecodeError> {
+        from_versioned_json_with_limits(text, limits)
     }
 }
 
@@ -134,13 +137,14 @@ pub(crate) fn to_json<T: Serialize>(value: &T) -> Result<String, EncodeError> {
     })
 }
 
-pub(crate) fn from_json<T: DeserializeOwned>(text: &str) -> Result<T, DecodeError> {
+pub(crate) fn from_json_with_limits<T: DeserializeOwned>(
+    text: &str,
+    limits: crate::KernelDataLimits,
+) -> Result<T, DecodeError> {
+    let limit = limits.document_json_depth();
     let depth = json_depth(text);
-    if depth > MAX_JSON_DEPTH {
-        return Err(DecodeError::TooDeep {
-            depth,
-            limit: MAX_JSON_DEPTH,
-        });
+    if depth > limit {
+        return Err(DecodeError::TooDeep { depth, limit });
     }
     #[cfg(feature = "synthetic-next")]
     if let Some(value) = crate::version::synthetic::decode(text)? {
@@ -161,7 +165,10 @@ pub(crate) fn from_json<T: DeserializeOwned>(text: &str) -> Result<T, DecodeErro
 /// Read only the version envelope before decoding any forms (K-VER-003).
 /// Unknown fields are skipped by serde, so a payload malformed for this
 /// build cannot disguise an unsupported version as a form decoding fault.
-pub(crate) fn from_versioned_json<T: DeserializeOwned>(text: &str) -> Result<T, DecodeError> {
+pub(crate) fn from_versioned_json_with_limits<T: DeserializeOwned>(
+    text: &str,
+    limits: crate::KernelDataLimits,
+) -> Result<T, DecodeError> {
     #[derive(Deserialize)]
     struct Version {
         kernel: u32,
@@ -173,7 +180,7 @@ pub(crate) fn from_versioned_json<T: DeserializeOwned>(text: &str) -> Result<T, 
         #[serde(default)]
         manifest: Option<Version>,
     }
-    let header: Header = from_json(text)?;
+    let header: Header = from_json_with_limits(text, limits)?;
     let kernel = header
         .manifest
         .map(|manifest| manifest.kernel)
@@ -188,7 +195,7 @@ pub(crate) fn from_versioned_json<T: DeserializeOwned>(text: &str) -> Result<T, 
             column: 0,
         });
     }
-    from_json(text)
+    from_json_with_limits(text, limits)
 }
 
 /// The annotation layer of one document: everything about it that is not
@@ -248,6 +255,12 @@ impl Annotations {
     }
 
     pub fn from_json(text: &str) -> Result<Self, DecodeError> {
-        from_json(text)
+        Self::from_json_with_limits(text, crate::KernelDataLimits::standard())
+    }
+    pub fn from_json_with_limits(
+        text: &str,
+        limits: crate::KernelDataLimits,
+    ) -> Result<Self, DecodeError> {
+        from_json_with_limits(text, limits)
     }
 }

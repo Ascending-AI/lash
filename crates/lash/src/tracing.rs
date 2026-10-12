@@ -19,8 +19,8 @@ pub use lash_trace::{
     TraceDomainCompletion, TraceDomainProjector, TraceDomainStatus, TraceDomainSubject,
     TraceEventKind, TraceHostOperation, TraceLinks, TraceRecordIdentity, TraceScopeAdmission,
     TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
-    TraceToolOwner, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
-    W3cTraceState,
+    TraceStateLimits, TraceToolOwner, TraceTransitionKind, UntracedScopes, W3cSpanId,
+    W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 pub use lash_trace::{TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT};
 

@@ -9,6 +9,29 @@ pub const MAX_PATTERN_UNITS: usize = 4_096;
 /// The deepest a pattern's groups may nest.
 pub const MAX_GROUP_NESTING: usize = 32;
 
+/// Host-selected compiler safety limits, at most 4,096 pattern units and
+/// 32 group levels. Those hard maxima bound the native compiler's recursion
+/// and program construction before a guest execution guard can run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PatternLimits {
+    max_units: usize,
+    max_group_nesting: usize,
+}
+impl PatternLimits {
+    pub const fn standard() -> Self {
+        Self {
+            max_units: MAX_PATTERN_UNITS,
+            max_group_nesting: MAX_GROUP_NESTING,
+        }
+    }
+    pub fn new(max_units: usize, max_group_nesting: usize) -> Option<Self> {
+        (max_units <= MAX_PATTERN_UNITS && max_group_nesting <= MAX_GROUP_NESTING).then_some(Self {
+            max_units,
+            max_group_nesting,
+        })
+    }
+}
+
 /// The flags of a regex. `d` and `v` are refused.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Flags {
@@ -71,21 +94,26 @@ pub enum SyntaxError {
     #[error("invalid regular expression flags: `{flag}` is not supported")]
     UnsupportedFlag { flag: char },
     #[error(
-        "invalid regular expression: the pattern has {units} UTF-16 code units, more than {MAX_PATTERN_UNITS}"
+        "invalid regular expression: the pattern has {units} UTF-16 code units, more than the configured {limit}-unit pattern limit"
     )]
-    PatternTooLong { units: usize },
-    #[error("invalid regular expression: groups nest deeper than {MAX_GROUP_NESTING}")]
-    PatternTooDeep,
+    PatternTooLong { units: usize, limit: usize },
+    #[error(
+        "invalid regular expression: groups nest deeper than the configured {limit}-level group limit"
+    )]
+    PatternTooDeep { limit: usize },
     #[error("invalid regular expression: /{pattern}/: {detail}")]
     Pattern { pattern: String, detail: String },
 }
 
 /// Checks a pattern's length and nesting, the two bounds that keep
 /// compiling it cheap. Decided from the text alone, before any compile.
-fn check_shape(pattern: &str) -> Result<(), SyntaxError> {
+fn check_shape(pattern: &str, limits: PatternLimits) -> Result<(), SyntaxError> {
     let units = pattern.encode_utf16().count();
-    if units > MAX_PATTERN_UNITS {
-        return Err(SyntaxError::PatternTooLong { units });
+    if units > limits.max_units {
+        return Err(SyntaxError::PatternTooLong {
+            units,
+            limit: limits.max_units,
+        });
     }
     let mut depth = 0_usize;
     let mut escaped = false;
@@ -101,8 +129,10 @@ fn check_shape(pattern: &str) -> Result<(), SyntaxError> {
             ']' if in_class => in_class = false,
             '(' if !in_class => {
                 depth += 1;
-                if depth > MAX_GROUP_NESTING {
-                    return Err(SyntaxError::PatternTooDeep);
+                if depth > limits.max_group_nesting {
+                    return Err(SyntaxError::PatternTooDeep {
+                        limit: limits.max_group_nesting,
+                    });
                 }
             }
             ')' if !in_class => depth = depth.saturating_sub(1),
@@ -159,6 +189,7 @@ struct Cache {
 /// flags, and a call compiles whatever the cache lacks.
 #[derive(Debug)]
 pub struct Engine {
+    limits: PatternLimits,
     capacity: usize,
     cache: Mutex<Cache>,
 }
@@ -168,9 +199,16 @@ impl Engine {
     /// zero keeps none.
     pub fn new(cached_patterns: usize) -> Self {
         Self {
+            limits: PatternLimits::standard(),
             capacity: cached_patterns,
             cache: Mutex::new(Cache::default()),
         }
+    }
+
+    /// Select compiler admission before the engine is installed.
+    pub fn with_limits(mut self, limits: PatternLimits) -> Self {
+        self.limits = limits;
+        self
     }
 
     /// How many compiled patterns the cache holds now.
@@ -191,7 +229,7 @@ impl Engine {
         pattern: &str,
         flags: Flags,
     ) -> Result<Arc<lash_regress::Regex>, SyntaxError> {
-        check_shape(pattern)?;
+        check_shape(pattern, self.limits)?;
         let key = Key {
             pattern: pattern.into(),
             ignore_case: flags.ignore_case,

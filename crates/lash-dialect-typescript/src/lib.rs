@@ -21,7 +21,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack};
+pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack, SourceLimits};
 pub use builtins::{Receiver, Row};
 pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 pub use package::define_helpers;
@@ -56,6 +56,15 @@ pub fn function_values() -> FunctionValues {
 /// bindings are the session's (`K-SES-001`), and `environment.bindings`
 /// names those earlier cells left.
 pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
+    lower_with_limits(source, environment, SourceLimits::standard())
+}
+
+/// Lower source under the host's byte and nesting admission policy.
+pub fn lower_with_limits(
+    source: &str,
+    environment: &Environment<'_>,
+    limits: SourceLimits,
+) -> Result<Lowered, Diagnostic> {
     lower::check_binding_names(
         environment
             .bindings
@@ -63,7 +72,7 @@ pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Dia
             .map(lash_kernel_doc::Name::as_str),
         environment.effects,
     )?;
-    let program = adapter::parse(source)?;
+    let program = adapter::parse_with_limits(source, limits)?;
     lower::lower(&program, source, environment)
 }
 
@@ -76,7 +85,20 @@ pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Dia
 /// Unlike cell lowering, this trusted source entry accepts the printer's
 /// reserved kernel surface, including `finish`.
 pub fn lower_workflow(source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
-    if let Some(lowered) = intrinsics::lower(source, environment) {
+    lower_workflow_with_limits(source, environment, SourceLimits::standard())
+}
+
+/// Lower a whole TypeScript workflow under host source admission policy.
+pub fn lower_workflow_with_limits(
+    source: &str,
+    environment: &Environment<'_>,
+    limits: SourceLimits,
+) -> Result<Lowered, Diagnostic> {
+    if let Some(lowered) = intrinsics::lower(
+        source,
+        environment,
+        lash_kernel_doc::KernelDataLimits::standard(),
+    ) {
         return lowered;
     }
     lower::check_binding_names(
@@ -86,7 +108,7 @@ pub fn lower_workflow(source: &str, environment: &Environment<'_>) -> Result<Low
             .map(lash_kernel_doc::Name::as_str),
         environment.effects,
     )?;
-    let program = adapter::parse_workflow(source)?;
+    let program = adapter::parse_workflow(source, limits)?;
     lower::workflow(&program, source, environment)
 }
 
@@ -103,7 +125,18 @@ pub fn lower_kernel_text(
     source: &str,
     environment: &Environment<'_>,
 ) -> Result<Lowered, Diagnostic> {
-    intrinsics::lower(source, environment).unwrap_or_else(|| {
+    lower_kernel_text_with_limits(
+        source,
+        environment,
+        lash_kernel_doc::KernelDataLimits::standard(),
+    )
+}
+pub fn lower_kernel_text_with_limits(
+    source: &str,
+    environment: &Environment<'_>,
+    limits: lash_kernel_doc::KernelDataLimits,
+) -> Result<Lowered, Diagnostic> {
+    intrinsics::lower(source, environment, limits).unwrap_or_else(|| {
         Err(Diagnostic::new(
             DiagnosticCode::InvalidAst,
             "the source is not exact kernel text",
@@ -140,6 +173,13 @@ impl Parser {
         }
     }
 
+    /// Set admission before starting the reusable parser thread.
+    pub fn with_limits(self, limits: SourceLimits) -> Self {
+        Self {
+            parser: self.parser.with_limits(limits),
+        }
+    }
+
     pub fn lower(
         &mut self,
         source: &str,
@@ -165,7 +205,9 @@ pub(crate) fn validate(source: &str) -> Result<(), Diagnostic> {
 
 /// The TypeScript front end, as a dialect package holds it.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct TypeScript;
+pub struct TypeScript {
+    pub limits: SourceLimits,
+}
 
 impl FrontEnd for TypeScript {
     fn lower(
@@ -173,6 +215,6 @@ impl FrontEnd for TypeScript {
         source: &str,
         environment: &Environment<'_>,
     ) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
-        lower(source, environment).map_err(Into::into)
+        lower_with_limits(source, environment, self.limits).map_err(Into::into)
     }
 }

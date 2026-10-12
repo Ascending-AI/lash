@@ -68,6 +68,7 @@ impl LashCoreBuilder {
         }
         core.providers.delivery_fetch_horizon = self.delivery_fetch_horizon;
         core.observation_work_limits = self.observation_work_limits;
+        core.data_limits = self.data_limits;
         if let Some(limits) = self.trace_limits.take() {
             core.tracing = core.tracing.clone().with_limits(limits);
         }

@@ -47,7 +47,7 @@ pub use message::{
     TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase,
 };
 pub use outcome::{
-    BootstrapFault, Detail, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,
+    BootstrapFault, Detail, DetailLimit, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,
     ProtocolBreach, RunInput, RunRefusal, SequenceFault, SupervisorEvidence, WorkerDeploymentFault,
     WorkerFrameKind, WorkerLimit, WorkerRefusal,
 };

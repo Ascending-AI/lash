@@ -135,6 +135,7 @@ pub fn plan_helper_adoption(
     parked: Option<(&WholeState, &[AdmittedWait])>,
     functions: &FunctionRegistry,
     retired: &RetiredHelpers,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<Option<AdoptedRun>, HelperAdoptionRefusal> {
     let state = |message: String| HelperAdoptionRefusal::State { message };
     let from = document.identity().map_err(|error| state(error.message))?;
@@ -169,7 +170,15 @@ pub fn plan_helper_adoption(
     })?;
     let parked = parked
         .map(|(parked, admitted)| {
-            adopt_run(parked, admitted, document, from, &rewritten, &replacements)
+            adopt_run(
+                parked,
+                admitted,
+                document,
+                from,
+                &rewritten,
+                &replacements,
+                limits,
+            )
         })
         .transpose()?;
     Ok(Some(AdoptedRun {
@@ -188,6 +197,7 @@ fn adopt_run(
     from: DocumentId,
     rewritten: &Rewritten,
     replacements: &BTreeMap<FunctionId, FunctionId>,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<WholeState, HelperAdoptionRefusal> {
     let state = |message: String| HelperAdoptionRefusal::State { message };
     let version = KernelVersion::of(parked.kernel).ok_or_else(|| {
@@ -196,7 +206,7 @@ fn adopt_run(
             parked.kernel
         ))
     })?;
-    let opened = super::migrate::open_run(parked, admitted, base).map_err(state)?;
+    let opened = super::migrate::open_run(parked, admitted, base, limits).map_err(state)?;
     let carried =
         lash_kernel_migrate::carry(&opened.run, base, rewritten, version).map_err(|refusal| {
             let inside = match &refusal {
@@ -251,6 +261,7 @@ pub(crate) async fn adopt_state(
     retired: &RetiredHelpers,
     writes: KernelVersion,
     state: &EngineState,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<Option<Adopted>, AdoptError> {
     let undecodable =
         |message: String| AdoptError::Refused(HelperAdoptionRefusal::State { message });
@@ -288,6 +299,7 @@ pub(crate) async fn adopt_state(
         whole.as_ref().map(|whole| (whole, admitted.as_slice())),
         functions,
         retired,
+        limits,
     )
     .map_err(AdoptError::Refused)?
     else {
@@ -397,6 +409,7 @@ pub async fn survey_helper_processes(
             let stored = lash_core::runtime::durable::stored_engine_state(
                 backend.durable().as_ref(),
                 &record.id,
+                backend.config().settings().graph_reads.engine(),
             )
             .await?;
             let decoded = stored.as_ref().and_then(|stored| {
@@ -432,11 +445,22 @@ pub async fn survey_helper_processes(
                 Some((Err(message), _)) => Some(HelperAdoptionRefusal::State {
                     message: message.clone(),
                 }),
-                Some((Ok(whole), admitted)) => {
-                    plan_helper_adoption(&document, Some((whole, admitted)), functions, retired)
-                        .err()
-                }
-                None => plan_helper_adoption(&document, None, functions, retired).err(),
+                Some((Ok(whole), admitted)) => plan_helper_adoption(
+                    &document,
+                    Some((whole, admitted)),
+                    functions,
+                    retired,
+                    backend.config().settings().graph_reads.execution(),
+                )
+                .err(),
+                None => plan_helper_adoption(
+                    &document,
+                    None,
+                    functions,
+                    retired,
+                    backend.config().settings().graph_reads.execution(),
+                )
+                .err(),
             };
             dependents.push(HelperDependentProcess {
                 process: record.id,

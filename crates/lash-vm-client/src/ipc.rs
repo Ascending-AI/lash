@@ -93,7 +93,8 @@ impl Worker {
             used: false,
             inbound: FrameSource::with_capacity(config.tuning.inbound_buffer_bytes),
             pipe,
-            codec: FrameCodec::new(config.protocol.decode),
+            codec: FrameCodec::new(config.protocol.decode)
+                .with_detail_limit(config.tuning.diagnostic_bytes),
             cpu_nanos: 0,
             exit_grace: config.deadlines.cancel_grace,
         })

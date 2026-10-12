@@ -41,8 +41,10 @@ pub(crate) fn import(
     source: &str,
     dialect: &Environment<'_>,
     checker: &lash_kernel_check::Environment<'_>,
+    limits: lash_dialect_typescript::SourceLimits,
 ) -> WorkflowImport {
-    let lowered = match lash_dialect_typescript::lower_workflow(source, dialect) {
+    let lowered = match lash_dialect_typescript::lower_workflow_with_limits(source, dialect, limits)
+    {
         Ok(lowered) => lowered,
         Err(diagnostic) => return WorkflowImport::Refused(vec![diagnostic.into()]),
     };

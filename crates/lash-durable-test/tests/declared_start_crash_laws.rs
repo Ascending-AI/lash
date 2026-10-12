@@ -882,22 +882,23 @@ async fn declared_start_prune_after_hold_release_before_settlement_replays_termi
         1,
         Fault::Abort,
     );
-    let ((child, pruned, after), violations, _) = run_cut(spawn, script, async |backend| {
-        let children = registered(backend).await;
-        assert_eq!(children.len(), 1, "one child: {children:#?}");
-        assert!(
-            children[0].is_terminal(),
-            "the call released its hold on an ended child: {children:#?}"
-        );
-        let registry = backend.process_registry();
-        let report = registry
-            .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
-            .await
-            .expect("prune the ended processes");
-        let after = registry.get_process(&children[0].id).await;
-        (children[0].id.clone(), report.pruned_processes, after)
-    })
-    .await;
+    let ((child, pruned, after), violations, _) =
+        Box::pin(run_cut(spawn, script, async |backend| {
+            let children = registered(backend).await;
+            assert_eq!(children.len(), 1, "one child: {children:#?}");
+            assert!(
+                children[0].is_terminal(),
+                "the call released its hold on an ended child: {children:#?}"
+            );
+            let registry = backend.process_registry();
+            let report = registry
+                .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+                .await
+                .expect("prune the ended processes");
+            let after = registry.get_process(&children[0].id).await;
+            (children[0].id.clone(), report.pruned_processes, after)
+        }))
+        .await;
     assert!(
         pruned >= 1 && !matches!(after, Ok(Some(_))),
         "the prune took the released child {child}: {pruned} pruned, then read {after:?}"

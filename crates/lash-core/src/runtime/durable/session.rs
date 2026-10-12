@@ -1415,14 +1415,17 @@ impl<'a> TurnRestore<'a> {
                             run: row.run.clone(),
                         },
                         Some(root),
-                        lash_durable::domain::graph::OWNER_READ_LIMITS,
+                        self.cx.backend().config().settings().graph_reads.owner(),
                     )
                     .await?;
-                super::phase_root::load(&graph, root).map_err(|reason| {
-                    TurnRestoreError::Undecodable {
-                        run: row.run.clone(),
-                        reason,
-                    }
+                super::phase_root::load(
+                    &graph,
+                    root,
+                    self.cx.backend().config().settings().graph_reads.owner(),
+                )
+                .map_err(|reason| TurnRestoreError::Undecodable {
+                    run: row.run.clone(),
+                    reason,
                 })?
             }
         };

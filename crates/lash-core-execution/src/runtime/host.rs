@@ -8,6 +8,22 @@ use super::process::{
 };
 use super::{DeploymentStore, ProcessWorkSubstrate, ProcessWorkWiring};
 
+/// Deployment payload admission, independent of execution time and commit budgets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeDataLimits {
+    pub plugin_state: crate::tool_run::StateCommandLimits,
+    pub tool_intents: crate::tool_intent::ToolIntentLimits,
+}
+impl RuntimeDataLimits {
+    /// The existing plugin-state and intent limits, with no imposed host maximum.
+    pub const fn standard() -> Self {
+        Self {
+            plugin_state: crate::tool_run::StateCommandLimits::PUBLISHED,
+            tool_intents: crate::tool_intent::ToolIntentLimits::standard(),
+        }
+    }
+}
+
 /// Required host configuration for all runtimes.
 ///
 /// A config is built over exactly one [`Backend`](crate::Backend) (ADR 0102,
@@ -16,6 +32,7 @@ use super::{DeploymentStore, ProcessWorkSubstrate, ProcessWorkWiring};
 /// session-store factory and the process-definition registry — is read from the same backend. There is no in-memory default.
 #[derive(Clone)]
 pub struct RuntimeHostConfig {
+    pub data_limits: RuntimeDataLimits,
     /// Working budgets shared by this host's observation surfaces.
     pub observation_work_limits: lash_trace::ObservationWorkLimits,
     backend: crate::Backend,
@@ -320,6 +337,7 @@ impl RuntimeHostConfig {
         let clock = backend.clock();
         let artifact_ports = ArtifactReferrerPorts::of_backend(&backend);
         Self {
+            data_limits: RuntimeDataLimits::standard(),
             backend: backend.clone(),
             durability: RuntimeDurabilityConfig {
                 commit_budget,

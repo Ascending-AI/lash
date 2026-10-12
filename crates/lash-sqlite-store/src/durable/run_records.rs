@@ -228,22 +228,86 @@ pub(super) fn facts(
     tx: &Connection,
     owner: &OwnerKey,
     run: Option<RunSeq>,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Answer<lash_durable::domain::RunFacts> {
     let rows = match read(tx, owner, run)? {
         Ok(rows) => rows,
         Err(error) => return Ok(Err(error)),
     };
     let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
-    Ok(
-        super::graph::walk_roots(tx, &roots, &lash_durable::domain::graph::OWNER_READ_LIMITS)?
-            .map(|nodes| lash_durable::domain::RunFacts { rows, nodes })
-            .map_err(DurableError::from),
-    )
+    Ok(super::graph::walk_roots(tx, &roots, &limits)?
+        .map(|nodes| lash_durable::domain::RunFacts {
+            rows,
+            nodes,
+            read_limits: limits,
+        })
+        .map_err(DurableError::from))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// STORE-GRAPH-POLICY: SQLite's hydration refuses the deployment's byte budget.
+    #[tokio::test]
+    async fn a_sqlite_store_honors_its_deployment_graph_read_policy() {
+        use lash_core_store::checkpoint_graph::{
+            EncodeBudget, ExplicitLimit, GraphReadPolicy, GraphRefusal, GraphStaging, NodeKind,
+            TokenWriter, TypedBody,
+        };
+        use lash_durable::domain::DurableReads as _;
+        let mut options = crate::SqliteStoreSetOptions::memory();
+        options.graph_reads =
+            GraphReadPolicy::new(1, 2, 3, 64, lash_kernel_doc::KernelDataLimits::standard())
+                .unwrap();
+        let stores = crate::SqliteStoreSet::memory_with_options_and_clock(
+            options,
+            std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
+        )
+        .await
+        .unwrap();
+        let store = stores.durable_store();
+        let owner = OwnerKey::Turn("read-policy".into(), "turn".into());
+        let stored_owner = owner.stored();
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let mut body = TokenWriter::new();
+        body.text("fact");
+        let root = staging
+            .encode(NodeKind::ROUND_FACT, TypedBody::logical(body.as_bytes()))
+            .unwrap();
+        let node = staging.nodes()[&root].bytes.clone();
+        store
+            .conn
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)",
+                    rusqlite::params![root.to_hex(), node.as_ref()],
+                )?;
+                conn.query_row(
+                    SQL.append.sql(),
+                    rusqlite::params![
+                        stored_owner,
+                        1,
+                        0,
+                        "admit",
+                        Option::<String>::None,
+                        root.to_hex(),
+                        1
+                    ],
+                    |_| Ok(()),
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            store.run_facts(&owner).await,
+            Err(DurableError::Graph(GraphRefusal::DecodeLimit {
+                limit: 1,
+                ..
+            }))
+        ));
+    }
 
     /// RUN-READ: round k's recovery selects only its rows and visits each
     /// shared descendant once in one walk, regardless of earlier rounds.
@@ -298,9 +362,14 @@ mod tests {
             conn.execute("INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1) ON CONFLICT DO NOTHING", rusqlite::params![id.to_hex(), node.bytes.as_ref()]).expect("blob");
         }
         super::super::graph::WALK_COUNTS.with_borrow_mut(|counts| *counts = Default::default());
-        let recovered = facts(&conn, &owner, Some(RunSeq(k as u64)))
-            .expect("read")
-            .expect("hydrate");
+        let recovered = facts(
+            &conn,
+            &owner,
+            Some(RunSeq(k as u64)),
+            lash_durable::domain::graph::OWNER_READ_LIMITS,
+        )
+        .expect("read")
+        .expect("hydrate");
         let selected_rows = recovered.rows.len();
         let (walks, visits) = super::super::graph::WALK_COUNTS.with_borrow(Clone::clone);
         eprintln!(
@@ -355,9 +424,14 @@ mod tests {
             )
         ));
         super::super::graph::WALK_COUNTS.with_borrow_mut(|counts| *counts = Default::default());
-        let all = facts(&conn, &owner, None)
-            .expect("turn read")
-            .expect("turn graph");
+        let all = facts(
+            &conn,
+            &owner,
+            None,
+            lash_durable::domain::graph::OWNER_READ_LIMITS,
+        )
+        .expect("turn read")
+        .expect("turn graph");
         let (walks, visits) = super::super::graph::WALK_COUNTS.with_borrow(Clone::clone);
         assert_eq!(all.rows.len(), 16);
         assert_eq!(all.nodes.len(), 17);

@@ -58,6 +58,7 @@ pub use commit::{
 };
 pub use decode::{BlobEncoding, GraphDecoder, NodeSource, StoredNode, closure};
 pub use encode::{GraphStaging, TypedBody, encode_node};
+pub use lash_kernel_doc::KernelDataLimits;
 pub use lash_kernel_doc::graph_tokens::{
     CanonicalFault, ChildRef, CodecVariant, DecodeDimension, TokenCodec, TokenError, TokenReader,
     TokenWriter,
@@ -66,6 +67,6 @@ pub use node::{
     ChildTable, EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, LEAF_PAYLOAD_MAX, MAGIC,
     MAX_NODE_BYTES, MAX_ROOT_BYTES, NodeEnvelope, NodeId, check_envelope, parse_envelope,
 };
-pub use refusal::{DecodeLimits, GraphRefusal, KernelRestoreRefusal};
+pub use refusal::{DecodeLimits, GraphReadPolicy, GraphRefusal, KernelRestoreRefusal};
 pub use registry::{BodyShape, KindSpec, NodeKind, OwningLane, REGISTRY, SizeBound};
 pub use roots::RootSource;

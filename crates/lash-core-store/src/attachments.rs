@@ -266,6 +266,13 @@ pub enum AttachmentStorePersistence {
 /// Backends preserve that content address through bounded reads and deliveries.
 #[async_trait::async_trait]
 pub trait AttachmentStore: Send + Sync {
+    /// Whether delivery requires materializing bytes under the host's per-blob
+    /// budget. A store configured to deliver immutable URLs returns false.
+    /// This is a deployment capability, not a promise about a provider's acceptance.
+    fn byte_delivery_budget_applies(&self) -> bool {
+        true
+    }
+
     fn persistence(&self) -> AttachmentStorePersistence {
         AttachmentStorePersistence::Ephemeral
     }
@@ -790,10 +797,10 @@ mod runtime_store;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime_store::UnavailableAttachmentStore;
 pub use runtime_store::{
-    AttachmentExecutionBinding, AttachmentHolder, AttachmentPolicy, AttachmentReadPolicy,
-    AttachmentReclamationRetryPolicy, AttachmentReclamationRetryPolicyError,
-    NoopAttachmentReferrers, PersistenceReferrersAdapter, RuntimeAttachmentStore,
-    STANDARD_ATTACHMENT_UPLOAD_EXPIRY_MS,
+    AttachmentByteDelivery, AttachmentExecutionBinding, AttachmentHolder, AttachmentPolicy,
+    AttachmentPutReceipt, AttachmentReadPolicy, AttachmentReclamationRetryPolicy,
+    AttachmentReclamationRetryPolicyError, NoopAttachmentReferrers, PersistenceReferrersAdapter,
+    RuntimeAttachmentStore, STANDARD_ATTACHMENT_UPLOAD_EXPIRY_MS,
 };
 
 pub use lash_sansio::attachment::content_id;

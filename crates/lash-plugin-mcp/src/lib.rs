@@ -60,7 +60,7 @@ mod service_lifecycle;
 mod stdio_transport;
 
 pub use config::{
-    McpCallPolicy, McpServerConfig, McpShutdownPolicy, McpStdioTransport,
+    McpCallPolicy, McpDataLimits, McpServerConfig, McpShutdownPolicy, McpStdioTransport,
     McpStreamableHttpTransport, McpTransport, ReconnectAttempts, TimeoutDisconnectPolicy,
 };
 pub use error::McpError;

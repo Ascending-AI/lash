@@ -246,3 +246,32 @@ fn nesting_past_the_decode_bound_is_refused() {
     }
     round_trip(&nested);
 }
+
+/// KERNEL-DATA-POLICY: recursive safety guards can be narrowed at the host's reader.
+#[test]
+fn a_host_kernel_data_policy_controls_recursive_decoding() {
+    let value = Datum::Tuple(vec![Datum::Tuple(vec![Datum::Null])]);
+    let bytes = encode_body(&value);
+    let limits = crate::KernelDataLimits::new(1, 1, 1, 1, 1).unwrap();
+    assert!(matches!(
+        crate::graph_tokens::decode_body_with_limits::<Datum>(&bytes, limits),
+        Err(TokenError::Limit {
+            dimension: DecodeDimension::Depth,
+            limit: 1,
+            ..
+        })
+    ));
+    let document = parse_document("kernel 1\nnumbers by_spelling\nmain { return null }\n").unwrap();
+    assert!(
+        crate::text::parse_document_with_limits(
+            "kernel 1\nnumbers by_spelling\nmain { return ((null)) }\n",
+            limits
+        )
+        .is_err()
+    );
+    let json = document.to_json().unwrap();
+    assert!(matches!(
+        crate::Document::from_json_with_limits(&json, limits),
+        Err(crate::DecodeError::TooDeep { limit: 1, .. })
+    ));
+}

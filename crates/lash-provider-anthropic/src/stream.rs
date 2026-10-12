@@ -7,11 +7,6 @@ use crate::support::*;
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::HashSet;
 
-/// A message may contain at most this many dense, zero-based content blocks.
-/// This bounds both block slots and stopped-block identities independently
-/// of the transport's byte limits.
-const MAX_STREAM_BLOCKS: usize = 1024;
-
 fn invalid_block_index(raw: &str, detail: impl std::fmt::Display) -> LlmTransportError {
     LlmTransportError::new(format!("Invalid Anthropic content block index: {detail}"))
         .with_raw(raw.to_string())
@@ -19,17 +14,21 @@ fn invalid_block_index(raw: &str, detail: impl std::fmt::Display) -> LlmTranspor
         .with_retry_verdict(TransportRetryVerdict::NotRetryable)
 }
 
-fn checked_block_index(event: &Value, raw: &str) -> Result<usize, LlmTransportError> {
+fn checked_block_index(
+    event: &Value,
+    raw: &str,
+    max_blocks: usize,
+) -> Result<usize, LlmTransportError> {
     let wire_index = event
         .get("index")
         .and_then(Value::as_u64)
         .ok_or_else(|| invalid_block_index(raw, "expected an unsigned integer"))?;
     let index = usize::try_from(wire_index)
         .map_err(|_| invalid_block_index(raw, "index does not fit usize"))?;
-    if index >= MAX_STREAM_BLOCKS {
+    if index >= max_blocks {
         return Err(invalid_block_index(
             raw,
-            format!("{index} exceeds the {MAX_STREAM_BLOCKS}-block limit"),
+            format!("{index} exceeds the {max_blocks}-block limit"),
         ));
     }
     Ok(index)
@@ -40,7 +39,7 @@ fn started_block_index(
     raw: &str,
     state: &StreamState,
 ) -> Result<usize, LlmTransportError> {
-    let index = checked_block_index(event, raw)?;
+    let index = checked_block_index(event, raw, state.limits.max_blocks)?;
     if index >= state.blocks.len() {
         return Err(invalid_block_index(
             raw,
@@ -144,6 +143,7 @@ impl StreamBlock {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct StreamState {
+    pub(crate) limits: crate::AnthropicStreamLimits,
     pub(crate) blocks: Vec<StreamBlock>,
     pub(crate) usage: LlmUsage,
     /// Raw provider `usage` JSON sidecar. Anthropic splits it across the wire:
@@ -321,7 +321,7 @@ impl AnthropicProvider {
                 }
             }
             "content_block_start" => {
-                let index = checked_block_index(&event, raw)?;
+                let index = checked_block_index(&event, raw, state.limits.max_blocks)?;
                 if index != state.blocks.len() {
                     return Err(invalid_block_index(
                         raw,

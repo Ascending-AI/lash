@@ -149,3 +149,43 @@ fn presigned_url_delivery_is_a_builder_opt_in() {
             .is_some()
     );
 }
+
+/// PUT-DELIVERY-BUDGET: byte admission reports size and budget; URL delivery has no blob-byte cap.
+#[tokio::test]
+async fn a_put_reports_the_byte_budget_or_url_delivery_not_applicable() {
+    use lash_core::attachments::AttachmentByteDelivery;
+    use lash_core::attachments::{
+        AttachmentPolicy, ProviderFileCacheLimits, ProviderFileDelivery, RuntimeAttachmentStore,
+    };
+    let objects = Arc::new(object_store::memory::InMemory::new());
+    let bytes = vec![7; 4];
+    let meta = || AttachmentCreateMeta::new("image/png".parse().unwrap(), None, None);
+    let mut policy = AttachmentPolicy::standard();
+    policy.read.max_blob_bytes = 3;
+    let store = RuntimeAttachmentStore::ephemeral(
+        Arc::new(S3AttachmentStore::from_object_store(objects.clone(), None)),
+        policy,
+    );
+    let receipt = store.put_receipt(bytes.clone(), meta()).await.unwrap();
+    assert_eq!(
+        receipt.byte_delivery,
+        AttachmentByteDelivery::ExceedsBudget {
+            byte_len: 4,
+            max_bytes: 3
+        }
+    );
+    let store = RuntimeAttachmentStore::ephemeral(
+        Arc::new(ProviderFileDelivery::new(
+            Arc::new(S3AttachmentStore::from_object_store_with_signer(
+                objects,
+                Arc::new(SigningProbe::default()),
+                None,
+            )),
+            Vec::new(),
+            ProviderFileCacheLimits::standard(),
+        )),
+        policy,
+    );
+    let receipt = store.put_receipt(bytes, meta()).await.unwrap();
+    assert_eq!(receipt.byte_delivery, AttachmentByteDelivery::NotApplicable);
+}

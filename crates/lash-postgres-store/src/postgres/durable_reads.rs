@@ -46,7 +46,13 @@ impl DurableReads for PostgresDurableStore {
         self.read(|connection| {
             Box::pin(async move {
                 let mut snapshot = super::snapshot(connection).await?;
-                let namespaces = turns::turn_namespaces(&mut snapshot, session, run).await?;
+                let namespaces = turns::turn_namespaces(
+                    &mut snapshot,
+                    session,
+                    run,
+                    self.pools.graph_reads.owner(),
+                )
+                .await?;
                 snapshot.rollback().await.map_err(super::sqlx_failure)?;
                 Ok(namespaces)
             })

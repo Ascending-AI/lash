@@ -74,7 +74,8 @@ fn worker_entry_inner(
         max_depth: bootstrap.depth,
         max_nodes: bootstrap.nodes,
         max_allocation_bytes: bootstrap.allocation,
-    });
+    })
+    .with_detail_limit(bootstrap.tuning.diagnostic_bytes);
     // A registry that cannot be assembled is a defect of this build: the
     // worker never becomes ready, and the pool reports its bootstrap.
     let embedding = embed(&bootstrap.tuning).map_err(|error| {

@@ -79,6 +79,12 @@ impl Provider for AnthropicProvider {
                 serde_json::to_value(self.stream_termination).unwrap_or(Value::Null),
             );
         }
+        if self.stream_limits != crate::AnthropicStreamLimits::standard() {
+            map.insert(
+                "stream_limits".into(),
+                serde_json::json!({"max_blocks": self.stream_limits.max_blocks}),
+            );
+        }
         serialize_options_tail(&mut map, &self.options);
         serde_json::Value::Object(map)
     }
@@ -320,6 +326,7 @@ impl AnthropicProvider {
             }));
         }
         let mut state = StreamState {
+            limits: self.stream_limits,
             execution_evidence: provider_request_id.map(|provider_request_id| ExecutionEvidence {
                 provider_request_id: Some(provider_request_id),
                 ..Default::default()

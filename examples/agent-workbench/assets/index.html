@@ -2603,7 +2603,7 @@
     }
   </style>
 </head>
-<body>
+<body data-attachment-byte-limit="1048576">
   <div class="shell" data-view="chat">
     <aside class="left" id="sidebar" aria-label="Workbench navigation">
       <div class="brand">
@@ -4643,8 +4643,10 @@
         clearAttachment();
         return;
       }
-      if (!file.size || file.size > 1024 * 1024) {
-        renderError("the PNG attachment must be between 1 byte and 1 MiB");
+      const byteLimit = Number(document.body.dataset.attachmentByteLimit);
+      if (!file.size || file.size > byteLimit) {
+        const label = byteLimit === 1024 * 1024 ? "1 MiB" : `${byteLimit} bytes`;
+        renderError(`the PNG attachment must be between 1 byte and ${label}`);
         clearAttachment();
         return;
       }

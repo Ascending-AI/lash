@@ -721,6 +721,7 @@ pub struct LashCoreBuilder {
     telemetry_content: Option<lash_trace::TelemetryContent>,
     trace_limits: Option<crate::tracing::TraceLimits>,
     observation_work_limits: crate::tracing::ObservationWorkLimits,
+    data_limits: crate::RuntimeDataLimits,
     trace_context: Option<lash_trace::TraceContext>,
     tool_source_policy: Option<lash_core::ToolSourcePolicy>,
     execution_budgets: Option<lash_core::ExecutionBudgets>,
@@ -786,6 +787,7 @@ impl LashCoreBuilder {
             telemetry_content: None,
             trace_limits: None,
             observation_work_limits: Default::default(),
+            data_limits: crate::RuntimeDataLimits::standard(),
             trace_context: None,
             tool_source_policy: None,
             execution_budgets: None,
@@ -1087,6 +1089,13 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Select deployment plugin-state and tool-intent payload bounds.
+    /// Omission preserves [`RuntimeDataLimits::standard`](crate::RuntimeDataLimits::standard).
+    pub fn data_limits(mut self, limits: crate::RuntimeDataLimits) -> Self {
+        self.data_limits = limits;
+        self
+    }
+
     /// Configure attachment write-fence retries independently of retention.
     /// Omission selects the documented standard preset.
     pub fn attachment_reclamation_retry(
@@ -1210,6 +1219,7 @@ impl LashCoreBuilder {
             crate::language_observation::LanguageObservationPublisher::new(
                 Arc::clone(&process_replay_store),
                 Arc::clone(&live_replay_store),
+                core.observation_work_limits,
             ),
         );
         let observation_sink: Arc<dyn lash_trace::TraceSink> =
@@ -1380,7 +1390,8 @@ pub(crate) fn build_plugin_host(
         core.control.execution_budgets.clone(),
         core.tracing.clone(),
     )
-    .with_prompt_render_pool(core.control.prompt_render_pool.clone());
+    .with_prompt_render_pool(core.control.prompt_render_pool.clone())
+    .with_data_limits(core.data_limits);
     if let Some(protocol) = protocol_factory {
         host = host.with_protocol_plugin(Arc::clone(protocol));
     }

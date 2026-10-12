@@ -72,8 +72,8 @@ pub use effect::{
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
     DataRetentionConfig, DeltaCoalescing, DeltaCoalescingError, EmbeddedRuntimeHost,
-    ProcessRuntimeHost, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeHostConfig,
-    RuntimeProviderConfig,
+    ProcessRuntimeHost, RuntimeControlConfig, RuntimeDataLimits, RuntimeDurabilityConfig,
+    RuntimeHostConfig, RuntimeProviderConfig,
 };
 pub use process::ProcessChangeSubscription;
 pub use process::registry_transitions;

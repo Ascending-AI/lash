@@ -347,7 +347,7 @@ impl TokenCodec for ToolValue {
 }
 
 fn decode_tool_value(input: &mut TokenReader<'_>, depth: u64) -> Result<ToolValue, TokenError> {
-    within(DecodeDimension::Depth, depth, MAX_VALUE_DEPTH)?;
+    within(DecodeDimension::Depth, depth, input.decode_depth())?;
     let (variant, fields) = input.sum()?;
     TokenReader::expect_fields(fields, u64::from(variant != 0))?;
     Ok(match variant {

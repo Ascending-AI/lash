@@ -35,9 +35,6 @@ use crate::observe::{Event, GuestPhase, Observer};
 
 /// What a frame is accounted before its variables.
 const FRAME_BYTES: u64 = 64;
-/// The deepest library bodies may nest inside expressions (`K-BND-002`).
-const MAX_INLINE_DEPTH: u32 = 64;
-
 /// What ends a run from inside a statement.
 #[derive(Debug)]
 pub(crate) enum Halt {
@@ -410,6 +407,25 @@ impl Roots {
 }
 
 impl KernelMachine {
+    /// Start under deployment recursive data admission, independent of run spend.
+    pub fn start_with_data_limits(
+        program: Program,
+        bounds: Bounds,
+        start: Start,
+        limits: lash_kernel_doc::KernelDataLimits,
+    ) -> Result<Self, StartError> {
+        session::start(program, bounds, start, Layout::default(), limits)
+    }
+    /// Resume under the deployment's current recursive data admission policy.
+    pub fn import_with_data_limits(
+        program: Program,
+        bounds: Bounds,
+        parked: ParkedRun,
+        limits: lash_kernel_doc::KernelDataLimits,
+    ) -> Result<Self, ImportError> {
+        parked::import(program, bounds, parked, Layout::default(), limits)
+    }
+
     /// Starts a run whose executable is laid out as `layout` says. A test
     /// uses it to show that the layout changes nothing a run can observe;
     /// [`Machine::start`] is layout 0.
@@ -419,7 +435,13 @@ impl KernelMachine {
         start: Start,
         layout: Layout,
     ) -> Result<Self, StartError> {
-        session::start(program, bounds, start, layout)
+        session::start(
+            program,
+            bounds,
+            start,
+            layout,
+            lash_kernel_doc::KernelDataLimits::standard(),
+        )
     }
 
     /// Rebuilds a run from a parked state against an executable laid out
@@ -431,7 +453,13 @@ impl KernelMachine {
         parked: ParkedRun,
         layout: Layout,
     ) -> Result<Self, ImportError> {
-        parked::import(program, bounds, parked, layout)
+        parked::import(
+            program,
+            bounds,
+            parked,
+            layout,
+            lash_kernel_doc::KernelDataLimits::standard(),
+        )
     }
 
     /// Writes the run's state at this safe point as a header and one

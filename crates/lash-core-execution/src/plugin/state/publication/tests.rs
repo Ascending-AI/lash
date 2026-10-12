@@ -556,7 +556,15 @@ async fn one_refused_command_publishes_none_of_its_batch() {
                         .collect::<Vec<_>>(),
                 ),
             ),
-            |refusal| matches!(refusal, StateCommandRefusal::TooManyCommands { count: 65 }),
+            |refusal| {
+                matches!(
+                    refusal,
+                    StateCommandRefusal::TooManyCommands {
+                        count: 65,
+                        limit: 64
+                    }
+                )
+            },
         ),
         (
             "wide-value",
@@ -1145,4 +1153,29 @@ async fn a_publication_past_the_session_budget_warns_then_is_refused() {
     );
     let reported = capture.exactly_one("plugin_state.session_budget_refused");
     assert_eq!(reported.field("plugin_id"), id);
+}
+
+/// DEPLOYMENT-DATA-POLICY: the plugin host carries its session byte limit through isolated reconstruction.
+#[tokio::test]
+async fn a_deployment_state_limit_is_honored_by_its_sessions() {
+    let mut limits = crate::runtime::RuntimeDataLimits::standard();
+    limits.plugin_state.max_session_bytes = 1;
+    let host = host(&Arc::new(AtomicUsize::new(0))).with_data_limits(limits);
+    let session = session(&host, None);
+    let outcome = record(
+        &session,
+        "configured-session-budget",
+        vec![tool_commands(
+            LEDGER,
+            "configured",
+            StateCommands::new().set("k", serde_json::json!(1)),
+        )],
+    )
+    .await;
+    assert!(matches!(
+        &resolutions(&outcome)[0].outcome,
+        StateResolutionOutcome::Refused {
+            refusal: StateCommandRefusal::SessionTooLarge { limit: 1, .. }
+        }
+    ));
 }

@@ -143,3 +143,30 @@ fn main_of(lowered: Result<Lowered, Diagnostic>) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+/// SOURCE-ADMISSION-POLICY: source byte limits are deployment choices, independently of nesting safety.
+#[test]
+fn a_host_source_policy_allows_a_larger_typescript_cell() {
+    let source = format!("//{}", "x".repeat(crate::MAX_SOURCE_BYTES));
+    let environment = Environment {
+        tool_roots: &BTreeSet::new(),
+        library: library(),
+        effects: &BTreeMap::new(),
+        controls: &BTreeMap::new(),
+        bindings: &BTreeSet::new(),
+        functions: &BTreeMap::new(),
+    };
+    assert!(crate::lower(&source, &environment).is_err());
+    let limits = crate::SourceLimits::new(source.len(), crate::MAX_SOURCE_NESTING_DEPTH).unwrap();
+    crate::lower_with_limits(&source, &environment, limits).unwrap();
+    assert!(crate::lower_workflow(&source, &environment).is_err());
+    crate::lower_workflow_with_limits(&source, &environment, limits).unwrap();
+    crate::Parser::default()
+        .with_limits(limits)
+        .lower(&source, &environment)
+        .unwrap();
+    let limits = crate::SourceLimits::new(source.len(), 1).unwrap();
+    let diagnostic =
+        crate::lower_with_limits("const x = ((1));", &environment, limits).unwrap_err();
+    assert!(diagnostic.message.contains("1-level"), "{diagnostic}");
+}

@@ -26,9 +26,9 @@ pub(crate) mod validate;
 pub use config::{
     ConnectionPolicy, ConnectionTopology, DedicatedConnectionPolicy, DeploymentBudget,
     GuardPolicies, LiveReplayPolicy, MaintenancePolicy, PoolPolicy, PostgresHostConfig,
-    ProcessReplayDataPolicy, ProcessReplayPolicy, ReconnectPolicy, ReplayDataPolicy,
-    ReplaySchemaMode, RetryPolicies, RetryPolicy, RolePolicies, ServerTimeout, SignalPolicy,
-    SslMode, TransactionGuards, TransportOverrides,
+    PostgresNameLimits, ProcessReplayDataPolicy, ProcessReplayPolicy, ReconnectPolicy,
+    ReplayDataPolicy, ReplaySchemaMode, RetryPolicies, RetryPolicy, RolePolicies, ServerTimeout,
+    SignalPolicy, SslMode, TransactionGuards, TransportOverrides,
 };
 pub use validate::PostgresHostConfigError;
 
@@ -619,6 +619,7 @@ impl Preludes {
 
 /// Every role pool of one storage, shared by each handle it hands out.
 pub(crate) struct RolePools {
+    pub(crate) graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
     pub(crate) work: PgPool,
     pub(crate) scheduler: PgPool,
     pub(crate) critical: PgPool,
@@ -654,6 +655,7 @@ impl RolePools {
     /// The role pools over `pools` under the validated `config`.
     pub(crate) fn new(pools: PostgresPoolSet, config: &PostgresHostConfig) -> Self {
         Self {
+            graph_reads: config.node.graph_reads,
             work: pools.work,
             scheduler: pools.scheduler,
             critical: pools.critical,
