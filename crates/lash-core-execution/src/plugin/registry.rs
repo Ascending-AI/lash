@@ -767,36 +767,6 @@ impl<T: PluginDefinition> PluginMetadata for T {
 /// rebuilding it. Factories that own host-visible resources also
 /// participate in the explicit post-intake lifecycle through
 /// [`shutdown`](Self::shutdown).
-///
-/// The typical shape is:
-/// ```ignore
-/// pub struct MyFactory {
-///     pool: Arc<ConnectionPool>,          // expensive, built once
-///     compiled: Arc<Regex>,               // expensive, built once
-/// }
-///
-/// impl PluginDefinition for MyFactory {
-///     fn declaration() -> PluginDeclaration {
-///         PluginDeclaration::initial("my_plugin")
-///     }
-/// }
-///
-/// impl PluginFactory for MyFactory {
-///     fn id(&self) -> &'static str { "my_plugin" }
-///
-///     fn build(&self, _ctx: &PluginSessionContext)
-///         -> Result<Arc<dyn SessionPlugin>, PluginError>
-///     {
-///         // Cheap: clone Arcs, assemble spec, wrap in SpecPlugin.
-///         let pool = Arc::clone(&self.pool);
-///         let spec = PluginSpec::new().with_before_turn(Arc::new(move |_ctx| {
-///             let pool = Arc::clone(&pool);
-///             Box::pin(async move { /* use pool */ Ok(vec![]) })
-///         }));
-///         Ok(Arc::new(SpecPluginFromSpec::new("my_plugin", spec)))
-///     }
-/// }
-/// ```
 #[async_trait::async_trait]
 pub trait PluginFactory: PluginMetadata + Send + Sync {
     /// Pure display extension. Available to durable readers without plugin
