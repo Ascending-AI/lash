@@ -402,12 +402,12 @@ async fn inline_deliveries_refuse_content_length_acceptance_and_budget_mismatche
         inline.deliver(&[&slot], &ctx).await,
         Err(AttachmentDeliveryError::LimitExceeded { max_bytes: 3 })
     ));
-    // Envelope = 1024 + 24 * MIME bytes; encoding = 16 * ceil(3/3)
+    // Envelope = 1024 + 24 * MIME bytes; encoding = 12 * ceil(3/3)
     // per occurrence; retained capacity is charged once per content id.
     let envelope = 1024 + 24 * reference.media_type.as_str().len() as u64;
     let tight = AttachmentReadPolicy {
         max_blob_bytes: 3,
-        max_request_bytes: 2 * (envelope + 16) + 3,
+        max_request_bytes: 2 * (envelope + 12) + 3,
     };
     let inline =
         InlineDeliveries::from_bytes([(reference.clone(), b"abc".to_vec())], tight).unwrap();

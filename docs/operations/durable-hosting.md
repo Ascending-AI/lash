@@ -1286,11 +1286,30 @@ the current boundary and its owning contract.
 
 A successful `LashSession::put_attachment` returns `AttachmentPutReceipt`.
 Its `reference` is the stored attachment; `byte_delivery` is a typed advisory
-about the configured per-blob byte-read budget. `ExceedsBudget` names
-`byte_len` and `max_bytes`; `WithinBudget` names the same quantities. URL
-stores report `NotApplicable`. This advisory does not refuse the put or
-promise that a complete provider request fits its independent request budget.
-Put admission and byte delivery remain independent (ADR 0058).
+about one occurrence's byte delivery under the configured read policy.
+`ExceedsBudget` names `byte_len` and `max_bytes`; `WithinBudget` names the same
+quantities. `max_bytes` is the effective blob limit: the smaller of the blob
+cap and what the request budget can deliver after reserving this ref's
+MIME/label envelope. URL stores report `NotApplicable`. Put admission and
+byte delivery remain independent (ADR 0058): an over-budget blob is still
+stored successfully. The advisory does not promise that multiple attachments
+or repeated occurrences fit together, or that a provider accepts the MIME.
+
+The shared `AttachmentReadPolicy::byte_delivery_cost(capacity, byte_len,
+occurrences)` charges `capacity + occurrences * 12 * ceil(byte_len / 3)`.
+Retained capacity is charged once per delivery group; three base64-sized
+values cover encoding, assembled requests and transport framing/diagnostics.
+Base64 characters need no JSON escaping. Each occurrence also reserves
+`1024 + 24 * (MIME bytes + label bytes)` through `delivery_envelope_cost`.
+Overflow refuses delivery. These are payload-work allowances, not whole-process
+RSS or a bound on the full prompt.
+
+For example, at 128 MiB/request, one tightly allocated `image/png` blob with
+no label has a largest byte-delivered size of **26,843,296 bytes** (about
+25.6 MiB), including its 1,240-byte envelope, under the standard 32 MiB blob
+cap. A 50 MiB blob needs both a blob cap of at least 50 MiB and a request
+budget of at least **262,145,244 bytes** for that same ref. The receipt reports
+`ExceedsBudget` under the standard policy while still accepting the put.
 
 Choose deployment budgets before serving. Lowering a recovery read budget
 can refuse previously stored heads; repair the deployment policy before

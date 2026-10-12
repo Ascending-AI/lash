@@ -181,7 +181,8 @@ pub async fn attachment_delivery_charges_a_provider_file_as_a_file(
     let fixture = fixture(backend.clone(), scaled);
     let reference = backend
         .put(
-            vec![7; 24 * 1024],
+            // Above the three-base64-copy inline boundary, below upload scratch.
+            vec![7; 28 * 1024],
             AttachmentCreateMeta::new(
                 MediaType::parse("application/pdf").expect("fixture MIME is valid"),
                 None,

@@ -253,6 +253,46 @@ pub struct AttachmentReadPolicy {
     pub max_request_bytes: u64,
 }
 impl AttachmentReadPolicy {
+    /// Payload allowance for a byte delivery group: one retained buffer and
+    /// three base64-sized values per occurrence. Base64's alphabet needs no
+    /// JSON escaping. Codecs retain at most two values while encoding; the
+    /// HTTP diagnostics and WebSocket framing paths retain at most three.
+    /// Envelopes are charged separately by [`Self::delivery_envelope_cost`].
+    /// Overflow is an undeliverable cost, never a wrapped budget.
+    pub fn byte_delivery_cost(capacity: u64, byte_len: u64, occurrences: u64) -> Option<u64> {
+        let encoded = byte_len.checked_add(2)?.checked_div(3)?.checked_mul(12)?;
+        capacity.checked_add(encoded.checked_mul(occurrences)?)
+    }
+
+    /// Per-occurrence allowance for escaped MIME, label and codec punctuation.
+    pub fn delivery_envelope_cost(reference: &AttachmentRef) -> Option<u64> {
+        let metadata = (reference.media_type.as_str().len() as u64).checked_add(
+            reference
+                .label
+                .as_ref()
+                .map_or(0, |label| label.len() as u64),
+        )?;
+        metadata.checked_mul(24)?.checked_add(1024)
+    }
+
+    /// Largest tightly allocated byte buffer fitting the remaining payload
+    /// budget for a group, independently of the envelopes already reserved.
+    pub fn max_byte_delivery_len(self, remaining: u64, occurrences: u64) -> u64 {
+        let mut low = 0;
+        let mut high = self.max_blob_bytes.min(remaining);
+        while low < high {
+            let middle = low + (high - low).div_ceil(2);
+            if Self::byte_delivery_cost(middle, middle, occurrences)
+                .is_some_and(|cost| cost <= remaining)
+            {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        low
+    }
+
     /// The read budgets the standard attachment policy states: 32 MiB per
     /// blob and 128 MiB per request. No measurement backs either value.
     pub const STANDARD: Self = Self {
@@ -342,18 +382,8 @@ pub(super) fn validate_deliveries(
     let mut seen = std::collections::HashSet::new();
     // Reserve every occurrence's envelope before inspecting payloads.
     for slot in slots {
-        let metadata = (slot.reference.media_type.as_str().len() as u64)
-            .checked_add(
-                slot.reference
-                    .label
-                    .as_ref()
-                    .map_or(0, |label| label.len() as u64),
-            )
-            .ok_or_else(refuse)?;
-        let overhead = metadata
-            .checked_mul(24)
-            .and_then(|n| n.checked_add(1024))
-            .ok_or_else(refuse)?;
+        let overhead =
+            AttachmentReadPolicy::delivery_envelope_cost(&slot.reference).ok_or_else(refuse)?;
         remaining = remaining.checked_sub(overhead).ok_or_else(refuse)?;
     }
     for (slot, value) in slots.iter().zip(values) {
@@ -376,13 +406,12 @@ pub(super) fn validate_deliveries(
                         max_bytes: policy.max_blob_bytes,
                     });
                 }
-                reference
-                    .byte_len
-                    .checked_add(2)
-                    .and_then(|n| n.checked_div(3))
-                    .and_then(|n| n.checked_mul(16))
-                    .and_then(|n| n.checked_add(if unique { bytes.capacity() as u64 } else { 0 }))
-                    .ok_or_else(refuse)?
+                AttachmentReadPolicy::byte_delivery_cost(
+                    if unique { bytes.capacity() as u64 } else { 0 },
+                    reference.byte_len,
+                    1,
+                )
+                .ok_or_else(refuse)?
             }
             Delivery::Url {
                 url,

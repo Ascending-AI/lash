@@ -94,7 +94,7 @@ Before an attempt is sent, its slot delivery (ADR 0135 §5) reserves an
 envelope and escaped MIME/label allowance per occurrence. Deliveries group by
 content id, media type and effective acceptance after narrowing to the live
 file scope. A byte delivery charges retained buffer capacity once per group
-and four base64-sized encoding allowances per occurrence. A URL charges its
+and three base64-sized encoding allowances per occurrence. A URL charges its
 escaped-length allowance per occurrence. A provider file charges its escaped
 id allowance per occurrence, plus upload scratch only when uploaded; a cache
 hit reads no scratch and incurs no base64 charge. Remaining request budget

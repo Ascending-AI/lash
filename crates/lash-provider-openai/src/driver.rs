@@ -392,7 +392,6 @@ async fn send_attempt(
     let request_id = context.scope.request_id.clone();
     let wire = body.wire();
     let blocking = crate::request_work::bytes_need_blocking(wire.len(), provider.request_work);
-    let body_bytes = wire.as_bytes();
     let generation_disposition = body.generation();
     let fingerprint = responses_request_fingerprint(body.template());
     let request_body_for_error = body.redacted();
@@ -424,7 +423,7 @@ async fn send_attempt(
         provider.responses_resume = None;
         None
     };
-    let request_body = bytes::Bytes::copy_from_slice(body_bytes);
+    let request_body = bytes::Bytes::from(wire.into_bytes());
     let base_url = provider.base_url.trim_end_matches('/');
     let mut creation_url = match base_url.split_once('?') {
         Some((base_path, query)) => format!("{}/{}?{}", base_path, endpoint.path(), query),

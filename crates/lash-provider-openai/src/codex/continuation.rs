@@ -20,9 +20,46 @@ pub(super) struct CodexContinuation {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct CodexWebsocketRequestPlan {
-    pub(super) body: Value,
+pub(super) struct CodexWebsocketRequestPlan<'a> {
+    body: &'a Value,
     pub(super) context: CodexWebsocketContextPlan,
+}
+
+// Serialize references directly into the frame. Planning and adding the
+// response.create envelope retain no extra copy of an attachment's base64.
+impl serde::Serialize for CodexWebsocketRequestPlan<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(serde::Serialize)]
+        #[serde(untagged)]
+        enum Field<'a> {
+            Value(&'a Value),
+            Input(&'a [Value]),
+            Text(&'a str),
+        }
+        let mut fields: std::collections::BTreeMap<&str, Field<'_>> = self
+            .body
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(key, value)| (key.as_str(), Field::Value(value)))
+            .collect();
+        if let CodexWebsocketContextPlan::Continued {
+            previous_response_id,
+            full_input_items,
+            sent_input_items,
+        } = &self.context
+        {
+            fields.insert("previous_response_id", Field::Text(previous_response_id));
+            fields.insert(
+                "input",
+                Field::Input(
+                    &CodexProvider::body_input(self.body)[full_input_items - sent_input_items..],
+                ),
+            );
+        }
+        fields.insert("type", Field::Text("response.create"));
+        fields.serialize(serializer)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -109,20 +146,22 @@ impl CodexWebsocketContextPlan {
 }
 
 impl CodexProvider {
-    fn body_input(body: &Value) -> Vec<Value> {
+    fn body_input(body: &Value) -> &[Value] {
         body.get("input")
             .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default()
+            .map_or(&[], Vec::as_slice)
     }
 
     fn body_fingerprint(body: &Value) -> String {
-        let mut comparable = body.clone();
-        if let Some(obj) = comparable.as_object_mut() {
-            obj.remove("input");
-            obj.remove("previous_response_id");
-        }
-        comparable.to_string()
+        // Borrow the non-input fields: removing input after cloning retained
+        // another full attachment payload solely to fingerprint the envelope.
+        let comparable: std::collections::BTreeMap<_, _> = body
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(key, _)| key.as_str() != "input" && key.as_str() != "previous_response_id")
+            .collect();
+        json!(comparable).to_string()
     }
 
     fn response_output_items(final_response: &Value) -> Vec<Value> {
@@ -136,28 +175,26 @@ impl CodexProvider {
     fn cached_websocket_body_result(
         continuation: &CodexContinuation,
         full_body: &Value,
-    ) -> Result<(Value, String), CodexWebsocketCacheMiss> {
+    ) -> Result<(usize, String), CodexWebsocketCacheMiss> {
         let current_fingerprint = Self::body_fingerprint(full_body);
         let current_input = Self::body_input(full_body);
         if continuation.body_fingerprint != current_fingerprint {
             return Err(CodexWebsocketCacheMiss::BodyFingerprintMismatch);
         }
-        let mut baseline = continuation.request_input.clone();
-        baseline.extend(continuation.response_items.clone());
-        if current_input.len() < baseline.len()
-            || !current_input
-                .iter()
-                .take(baseline.len())
-                .eq(baseline.iter())
+        let baseline_len = continuation.request_input.len() + continuation.response_items.len();
+        let baseline = continuation
+            .request_input
+            .iter()
+            .chain(&continuation.response_items);
+        if current_input.len() < baseline_len
+            || !current_input.iter().take(baseline_len).eq(baseline)
         {
             return Err(CodexWebsocketCacheMiss::InputPrefixMismatch);
         }
-
-        let mut body = full_body.clone();
-        let previous_response_id = continuation.previous_response_id.clone();
-        body["previous_response_id"] = json!(previous_response_id);
-        body["input"] = Value::Array(current_input[baseline.len()..].to_vec());
-        Ok((body, previous_response_id))
+        Ok((
+            current_input.len() - baseline_len,
+            continuation.previous_response_id.clone(),
+        ))
     }
 
     pub(super) fn websocket_continuation_enabled(&self) -> bool {
@@ -167,62 +204,43 @@ impl CodexProvider {
         )
     }
 
-    pub(super) fn websocket_request_plan(
+    pub(super) fn websocket_request_plan<'a>(
         &self,
-        full_body: &Value,
+        full_body: &'a Value,
         continuation: Option<&CodexContinuation>,
         allow_cached_context: bool,
-    ) -> CodexWebsocketRequestPlan {
+    ) -> CodexWebsocketRequestPlan<'a> {
         let full_input_items = Self::body_input(full_body).len();
         let continuation_available = continuation.is_some();
-        let (body, context) = match (allow_cached_context, continuation) {
-            (false, _) => (
-                full_body.clone(),
-                CodexWebsocketContextPlan::FullContext {
-                    miss: CodexWebsocketCacheMiss::Disabled {
-                        continuation_available,
-                    },
-                    input_items: full_input_items,
+        let context = match (allow_cached_context, continuation) {
+            (false, _) => CodexWebsocketContextPlan::FullContext {
+                miss: CodexWebsocketCacheMiss::Disabled {
+                    continuation_available,
                 },
-            ),
-            (true, None) => (
-                full_body.clone(),
-                CodexWebsocketContextPlan::FullContext {
-                    miss: CodexWebsocketCacheMiss::MissingContinuation,
-                    input_items: full_input_items,
-                },
-            ),
+                input_items: full_input_items,
+            },
+            (true, None) => CodexWebsocketContextPlan::FullContext {
+                miss: CodexWebsocketCacheMiss::MissingContinuation,
+                input_items: full_input_items,
+            },
             (true, Some(cached)) => match Self::cached_websocket_body_result(cached, full_body) {
-                Ok((body, previous_response_id)) => {
-                    let sent_input_items = Self::body_input(&body).len();
-                    (
-                        body,
-                        CodexWebsocketContextPlan::Continued {
-                            previous_response_id,
-                            full_input_items,
-                            sent_input_items,
-                        },
-                    )
+                Ok((sent_input_items, previous_response_id)) => {
+                    CodexWebsocketContextPlan::Continued {
+                        previous_response_id,
+                        full_input_items,
+                        sent_input_items,
+                    }
                 }
-                Err(miss) => (
-                    full_body.clone(),
-                    CodexWebsocketContextPlan::FullContext {
-                        miss,
-                        input_items: full_input_items,
-                    },
-                ),
+                Err(miss) => CodexWebsocketContextPlan::FullContext {
+                    miss,
+                    input_items: full_input_items,
+                },
             },
         };
-        CodexWebsocketRequestPlan { body, context }
-    }
-
-    pub(super) fn websocket_create_request(body: &Value) -> Value {
-        let mut request = body
-            .as_object()
-            .cloned()
-            .unwrap_or_else(serde_json::Map::new);
-        request.insert("type".to_string(), json!("response.create"));
-        Value::Object(request)
+        CodexWebsocketRequestPlan {
+            body: full_body,
+            context,
+        }
     }
 
     pub(super) fn continuation_from_response(
@@ -239,7 +257,7 @@ impl CodexProvider {
         }
         Some(CodexContinuation {
             previous_response_id: response_id.to_string(),
-            request_input: Self::body_input(full_body),
+            request_input: Self::body_input(full_body).to_vec(),
             response_items: Self::response_output_items(final_response),
             body_fingerprint: Self::body_fingerprint(full_body),
         })

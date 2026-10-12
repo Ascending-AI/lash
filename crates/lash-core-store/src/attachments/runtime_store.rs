@@ -186,7 +186,8 @@ impl AttachmentPolicy {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum AttachmentByteDelivery {
-    /// The blob fits the configured per-blob byte budget.
+    /// One byte-delivered occurrence fits the blob and request budgets,
+    /// including its MIME/label envelope. `max_bytes` is the effective blob limit.
     WithinBudget { byte_len: u64, max_bytes: u64 },
     /// Admission succeeded, but byte delivery needs a larger budget.
     ExceedsBudget { byte_len: u64, max_bytes: u64 },
@@ -446,17 +447,22 @@ impl RuntimeAttachmentStore {
         meta: AttachmentCreateMeta,
     ) -> Result<AttachmentPutReceipt, AttachmentStoreError> {
         let reference = self.put(bytes, meta).await?;
+        let remaining = AttachmentReadPolicy::delivery_envelope_cost(&reference)
+            .and_then(|envelope| self.read_policy.max_request_bytes.checked_sub(envelope));
+        let max_bytes = remaining.map_or(0, |remaining| {
+            self.read_policy.max_byte_delivery_len(remaining, 1)
+        });
         let byte_delivery = if !self.backend.byte_delivery_budget_applies() {
             AttachmentByteDelivery::NotApplicable
-        } else if reference.byte_len > self.read_policy.max_blob_bytes {
+        } else if remaining.is_none() || reference.byte_len > max_bytes {
             AttachmentByteDelivery::ExceedsBudget {
                 byte_len: reference.byte_len,
-                max_bytes: self.read_policy.max_blob_bytes,
+                max_bytes,
             }
         } else {
             AttachmentByteDelivery::WithinBudget {
                 byte_len: reference.byte_len,
-                max_bytes: self.read_policy.max_blob_bytes,
+                max_bytes,
             }
         };
         Ok(AttachmentPutReceipt {

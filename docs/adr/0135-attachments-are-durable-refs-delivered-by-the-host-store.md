@@ -135,7 +135,7 @@ The host states `AttachmentReadPolicy` through `DataRetention::attachments`.
 (ADR 0058); the selected bounds may differ. Each attempt reserves one request
 budget across its slots before any backend call: a per-occurrence envelope
 for MIME and label, and then what each delivered form costs. Bytes cost the blob's retained buffer
-once per delivery group and four base64-sized encoding allowances for every
+once per delivery group and three base64-sized encoding allowances for every
 occurrence. A URL costs its escaped length for every occurrence. A provider file costs its escaped id for every
 occurrence, plus the bytes it read as upload scratch when this delivery
 uploaded it; a file reused from the cache reads nothing. A provider file is

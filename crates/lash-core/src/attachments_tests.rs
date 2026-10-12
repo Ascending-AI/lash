@@ -229,6 +229,136 @@ fn meta() -> AttachmentCreateMeta {
     )
 }
 
+/// PUT-DELIVERY-CONSISTENCY: a single byte slot fits exactly when its put
+/// receipt says so, including both sides of the request-budget boundary.
+#[tokio::test]
+async fn put_delivery_advice_matches_the_single_slot_read_boundary() {
+    use lash_core_llm::provider::{AttachmentDeliveryError, InlineDeliveries, SlotDeliveries};
+    use lash_sansio::llm::attachment_delivery::{
+        AttachmentPosition, DeliveryContext, ProviderAccepts,
+    };
+    use lash_sansio::llm::types::{AttachmentSlot, SlotCodec};
+
+    let backend = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
+    let reference = AttachmentRef {
+        id: lash_sansio::attachment::content_id(&[7; 3]),
+        media_type: "image/png".parse().unwrap(),
+        byte_len: 3,
+        label: Some("pixel".into()),
+        type_metadata: None,
+    };
+    let envelope = AttachmentReadPolicy::delivery_envelope_cost(&reference).unwrap();
+    let ctx = DeliveryContext {
+        valid_through_ms: 0,
+        live_file_scope: None,
+    };
+    for boundary in 0..=7 {
+        let cost = AttachmentReadPolicy::byte_delivery_cost(boundary, boundary, 1).unwrap();
+        assert_eq!(
+            cost,
+            boundary + 3 * 4 * boundary.div_ceil(3),
+            "the charge bounds three unescaped base64 values and one buffer"
+        );
+        let policy = AttachmentReadPolicy {
+            max_blob_bytes: 100,
+            max_request_bytes: envelope + cost,
+        };
+        let store = RuntimeAttachmentStore::ephemeral(
+            backend.clone(),
+            AttachmentPolicy {
+                read: policy,
+                ..AttachmentPolicy::standard()
+            },
+        );
+        for len in [boundary, boundary + 1] {
+            let bytes = vec![7; len as usize];
+            let receipt = store.put_receipt(bytes.clone(), meta()).await.unwrap();
+            let slot = AttachmentSlot {
+                reference: receipt.reference.clone(),
+                position: AttachmentPosition::Message,
+                accepts: ProviderAccepts {
+                    bytes: true,
+                    ..ProviderAccepts::NONE
+                },
+                codec: SlotCodec {
+                    name: "lash.canonical".into(),
+                    revision: 1,
+                },
+            };
+            let delivered = store.deliver(&[&slot], &ctx).await;
+            let inline =
+                InlineDeliveries::from_bytes([(receipt.reference, bytes)], policy).unwrap();
+            let inline_delivered = inline.deliver(&[&slot], &ctx).await;
+            if len == boundary {
+                assert_eq!(
+                    receipt.byte_delivery,
+                    AttachmentByteDelivery::WithinBudget {
+                        byte_len: len,
+                        max_bytes: boundary,
+                    }
+                );
+                assert!(
+                    delivered.is_ok(),
+                    "a receipt called an undeliverable blob deliverable: {delivered:?}"
+                );
+                assert!(inline_delivered.is_ok());
+            } else {
+                assert_eq!(
+                    receipt.byte_delivery,
+                    AttachmentByteDelivery::ExceedsBudget {
+                        byte_len: len,
+                        max_bytes: boundary,
+                    }
+                );
+                assert!(matches!(
+                    delivered,
+                    Err(AttachmentDeliveryError::LimitExceeded { .. })
+                ));
+                assert!(matches!(
+                    inline_delivered,
+                    Err(AttachmentDeliveryError::LimitExceeded { .. })
+                ));
+            }
+        }
+    }
+    // Even an empty blob needs its envelope; overflow never looks affordable.
+    let store = RuntimeAttachmentStore::ephemeral(
+        backend,
+        AttachmentPolicy {
+            read: AttachmentReadPolicy {
+                max_blob_bytes: 100,
+                max_request_bytes: envelope - 1,
+            },
+            ..AttachmentPolicy::standard()
+        },
+    );
+    assert_eq!(
+        store
+            .put_receipt(Vec::new(), meta())
+            .await
+            .unwrap()
+            .byte_delivery,
+        AttachmentByteDelivery::ExceedsBudget {
+            byte_len: 0,
+            max_bytes: 0
+        }
+    );
+    assert_eq!(
+        AttachmentReadPolicy::byte_delivery_cost(u64::MAX, 3, 1),
+        None
+    );
+    assert_eq!(
+        AttachmentReadPolicy::byte_delivery_cost(0, u64::MAX, 1),
+        None
+    );
+    assert_eq!(
+        AttachmentReadPolicy::byte_delivery_cost(0, 3, u64::MAX),
+        None
+    );
+}
+
 async fn committed_factory_attachment() -> (
     Arc<dyn crate::DeploymentStore>,
     Arc<dyn AttachmentStore>,

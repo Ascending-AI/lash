@@ -224,7 +224,7 @@ impl CodexProvider {
         built_request: &BuiltRequest,
         admitted: &LiveRequestBody,
         lease: CodexWebsocketLease,
-        plan: &CodexWebsocketRequestPlan,
+        plan: &CodexWebsocketRequestPlan<'_>,
         retry_state: CodexWebsocketRetryState,
     ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
         let timeouts = self.options.llm_timeouts();
@@ -241,8 +241,7 @@ impl CodexProvider {
             .capability
             .stream_termination
             .unwrap_or_default();
-        let websocket_body = Self::websocket_create_request(&plan.body);
-        let wire_request_body = match serde_json::to_string(&websocket_body) {
+        let wire_request_body = match serde_json::to_string(plan) {
             Ok(request_body) => request_body,
             Err(error) => {
                 return Err(CodexWebSocketAttemptError::before_send(

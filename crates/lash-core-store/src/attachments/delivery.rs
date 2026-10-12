@@ -1,19 +1,12 @@
 //! One attempt's bounded, validated slot deliveries.
 use super::{AttachmentStoreError, RuntimeAttachmentStore, validate_attachment_bytes};
-use lash_core_llm::provider::{AttachmentDeliveryError, SlotDeliveries};
+use lash_core_llm::provider::{AttachmentDeliveryError, AttachmentReadPolicy, SlotDeliveries};
 use lash_sansio::AttachmentRef;
 use lash_sansio::llm::attachment_delivery::{
     Delivery, DeliveryContext, DeliveryLimits, ProviderAccepts,
 };
 use lash_sansio::llm::types::AttachmentSlot;
 use std::sync::Arc;
-
-pub(super) fn encoding_allowance(byte_len: u64) -> Option<u64> {
-    byte_len.checked_add(2)?.checked_div(3)?.checked_mul(16)
-}
-pub(super) fn delivery_cost(capacity: u64, byte_len: u64, occurrences: u64) -> Option<u64> {
-    capacity.checked_add(encoding_allowance(byte_len)?.checked_mul(occurrences)?)
-}
 
 /// The slots of one attempt that share one delivery: the same content as
 /// the same media type under the same effective acceptance. The media type
@@ -41,18 +34,8 @@ impl SlotDeliveries for RuntimeAttachmentStore {
         // Reserve all envelopes before making the first infrastructure call.
         for (index, slot) in slots.iter().enumerate() {
             let reference = &slot.reference;
-            let metadata = (reference.media_type.as_str().len() as u64)
-                .checked_add(
-                    reference
-                        .label
-                        .as_ref()
-                        .map_or(0, |label| label.len() as u64),
-                )
-                .ok_or_else(refusal)?;
-            let overhead = metadata
-                .checked_mul(24)
-                .and_then(|n| n.checked_add(1024))
-                .ok_or_else(refusal)?;
+            let overhead =
+                AttachmentReadPolicy::delivery_envelope_cost(reference).ok_or_else(refusal)?;
             remaining = remaining.checked_sub(overhead).ok_or_else(refusal)?;
             let accepts = slot
                 .accepts
@@ -84,17 +67,7 @@ impl SlotDeliveries for RuntimeAttachmentStore {
         let mut result = vec![None; slots.len()];
         for group in groups {
             let occurrences = group.indices.len() as u64;
-            let mut low = 0;
-            let mut high = policy.max_blob_bytes.min(remaining);
-            while low < high {
-                let middle = low + (high - low).div_ceil(2);
-                if delivery_cost(middle, middle, occurrences).is_some_and(|cost| cost <= remaining)
-                {
-                    low = middle;
-                } else {
-                    high = middle - 1;
-                }
-            }
+            let low = policy.max_byte_delivery_len(remaining, occurrences);
             // An upload reads its bytes once as scratch and sends a file id,
             // so it is bounded by what remains, not by the inline encoding.
             let max_upload_bytes = policy.max_blob_bytes.min(remaining);
@@ -124,8 +97,12 @@ impl SlotDeliveries for RuntimeAttachmentStore {
                 Delivery::Bytes(bytes) => {
                     validate_attachment_bytes(group.reference, bytes, bytes.capacity() as u64, low)
                         .map_err(delivery_error)?;
-                    delivery_cost(bytes.capacity() as u64, bytes.len() as u64, occurrences)
-                        .ok_or_else(refusal)?
+                    AttachmentReadPolicy::byte_delivery_cost(
+                        bytes.capacity() as u64,
+                        bytes.len() as u64,
+                        occurrences,
+                    )
+                    .ok_or_else(refusal)?
                 }
                 Delivery::Url {
                     url,

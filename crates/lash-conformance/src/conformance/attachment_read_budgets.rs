@@ -209,12 +209,17 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
     let second = slot(second, accepts);
     let bounded = store.reconfigured_read_policy(AttachmentReadPolicy {
         max_blob_bytes: 4,
-        max_request_bytes: 2548,
+        max_request_bytes: 2
+            * (AttachmentReadPolicy::delivery_envelope_cost(&first.reference).expect("envelope")
+                + AttachmentReadPolicy::byte_delivery_cost(4, 4, 1).expect("payload"))
+            - 1,
     });
     assert!(bounded.deliver(&[&first, &second], &ctx).await.is_err());
     let exact = store.reconfigured_read_policy(AttachmentReadPolicy {
         max_blob_bytes: 4,
-        max_request_bytes: 4 + 2 * (32 + 1024 + 24 * 9),
+        max_request_bytes: 2 * AttachmentReadPolicy::delivery_envelope_cost(&first.reference)
+            .expect("envelope")
+            + AttachmentReadPolicy::byte_delivery_cost(4, 4, 2).expect("payload"),
     });
     let before = probe.calls.load(Ordering::SeqCst);
     let values = exact
