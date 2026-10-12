@@ -623,7 +623,7 @@ impl lash_core::ToolProvider for Puts {
             )
         };
         let kept = match put(KEPT).await {
-            Ok(reference) => reference,
+            Ok(receipt) => receipt.reference,
             Err(error) => return ToolOutcome::err_fmt(error).into(),
         };
         if let Err(error) = put(SCRATCH).await {

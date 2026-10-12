@@ -195,7 +195,7 @@ pub enum AttachmentByteDelivery {
     NotApplicable,
 }
 
-/// A successful host upload, with its content reference and delivery advisory.
+/// A successful attachment put, with its content reference and delivery advisory.
 /// The advisory reflects deployment policy at put time, not a durable blob field.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AttachmentPutReceipt {
@@ -440,7 +440,7 @@ impl RuntimeAttachmentStore {
             .map(|puts| puts.lock_recover().clone())
             .unwrap_or_default()
     }
-    /// Upload for a host, reporting the independently configured read budget.
+    /// Store bytes, reporting the independently configured read budget.
     pub async fn put_receipt(
         &self,
         bytes: Vec<u8>,

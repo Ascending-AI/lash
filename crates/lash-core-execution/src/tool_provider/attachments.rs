@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::attachments::AttachmentPutReceipt;
 use crate::{AttachmentCreateMeta, AttachmentRef, AttachmentStoreError};
 
 #[derive(Clone)]
@@ -17,6 +18,11 @@ impl ToolAttachmentClient {
         self.store.read(reference).await
     }
 
+    /// Store attachment bytes and report their independent byte-delivery budget.
+    ///
+    /// A successful put may exceed the delivery budget; the receipt advises the
+    /// tool without changing put admission. URL delivery has no blob-byte cap.
+    ///
     /// # Integrator class
     ///
     /// Tool implementors use this capability to publish attachment bytes and
@@ -25,7 +31,7 @@ impl ToolAttachmentClient {
         &self,
         data: Vec<u8>,
         meta: AttachmentCreateMeta,
-    ) -> Result<AttachmentRef, AttachmentStoreError> {
-        self.store.put(data, meta).await
+    ) -> Result<AttachmentPutReceipt, AttachmentStoreError> {
+        self.store.put_receipt(data, meta).await
     }
 }

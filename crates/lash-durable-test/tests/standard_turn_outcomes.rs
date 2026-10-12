@@ -751,7 +751,8 @@ impl lash_core::ToolProvider for AttachmentResultTool {
                 ),
             )
             .await
-            .expect("store tool attachment");
+            .expect("store tool attachment")
+            .reference;
         lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
             lash_core::ToolValue::Attachment(attachment_ref),
         ))
@@ -1058,7 +1059,8 @@ impl lash_core::ToolProvider for ArrayAttachmentTool {
                 ),
             )
             .await
-            .expect("store tool attachment");
+            .expect("store tool attachment")
+            .reference;
         lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
             lash_core::ToolValue::Array(vec![
                 lash_core::ToolValue::String("before".to_owned()),

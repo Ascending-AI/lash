@@ -173,7 +173,8 @@ impl BlobTools {
             .attachments()
             .put(text.into_bytes(), text_meta("child-input.txt"))
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| error.to_string())?
+            .reference;
         // Park inside the turn until the law has run a cleanup pass over the
         // put's guard, as the core's own due pass may while the turn runs.
         self.witness.stored.add_permits(1);
@@ -271,9 +272,9 @@ impl ToolProvider for BlobTools {
                     .put(text().into_bytes(), text_meta("blob.txt"))
                     .await
                 {
-                    Ok(reference) => lash_core::ToolOutcome::from_output(
+                    Ok(receipt) => lash_core::ToolOutcome::from_output(
                         lash_core::ToolCallOutput::success_tool_value(
-                            lash_core::ToolValue::Attachment(reference),
+                            lash_core::ToolValue::Attachment(receipt.reference),
                         ),
                     ),
                     Err(error) => lash_core::ToolOutcome::err_fmt(error),

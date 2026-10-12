@@ -209,7 +209,7 @@ impl ToolProvider for NestedMedia {
             .put(TOOL_BLOB.to_vec(), meta("tool.png"))
             .await
         {
-            Ok(reference) => reference,
+            Ok(receipt) => receipt.reference,
             Err(error) => return lash_core::ToolOutcome::err_fmt(error).into(),
         };
         assert_eq!(
@@ -464,5 +464,159 @@ async fn input_and_tool_attachments_reach_history_as_refs() {
     assert!(
         sent.deliveries >= 3,
         "the model sends delivered both input and tool-result refs"
+    );
+}
+
+struct ReceiptTool {
+    receipts: Arc<Mutex<Vec<lash::attachments::AttachmentPutReceipt>>>,
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for ReceiptTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "nested_media").then(|| Arc::new(definition().contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        for len in [3, 4] {
+            let receipt = call
+                .context
+                .attachments()
+                .put(vec![7; len], meta("pixel"))
+                .await
+                .unwrap();
+            self.receipts.lock_recover().push(receipt);
+        }
+        lash_core::ToolOutcome::ok(serde_json::json!("stored")).into()
+    }
+}
+
+/// FIG-6069: a tool put reports the same independent delivery advice as a
+/// session put, on both sides of the request-byte budget boundary.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tool_put_receipts_match_session_delivery_advice() {
+    use lash::attachments::AttachmentByteDelivery;
+
+    let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let backend = lash::durable::DurableBackendBuilder::new(stores)
+        .build()
+        .unwrap();
+    let receipts = Arc::new(Mutex::new(Vec::new()));
+    let calls = AtomicUsize::new(0);
+    let provider = lash::testing::TestProvider::builder()
+        .complete(move |_| {
+            let invoke = calls.fetch_add(1, Ordering::SeqCst) == 0;
+            async move {
+                Ok(lash_core::llm::types::LlmResponse {
+                    parts: vec![if invoke {
+                        lash_core::LlmOutputPart::ToolCall {
+                            call_id: "put-receipts".into(),
+                            tool_name: "nested_media".into(),
+                            input_json: "{}".into(),
+                            replay: None,
+                        }
+                    } else {
+                        lash_core::LlmOutputPart::Text {
+                            text: "stored".into(),
+                            response_meta: None,
+                        }
+                    }],
+                    ..Default::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let core = lash::LashCore::standard_builder(backend)
+        .serve_test_llm_profile(
+            provider,
+            lash_core::LlmProfileMetadata::builder(MODEL)
+                .cache_retention(lash_core::provider::CacheRetention::Short)
+                .context_window_tokens(100_000)
+                .build()
+                .unwrap(),
+        )
+        .tools(Arc::new(ReceiptTool {
+            receipts: receipts.clone(),
+        }))
+        .data_retention(lash::DataRetention {
+            attachments: lash::persistence::AttachmentPolicy {
+                max_attachment_bytes: Some(1024),
+                read: lash::persistence::AttachmentReadPolicy {
+                    max_blob_bytes: 64,
+                    // MIME + label envelope: 1360; three bytes + base64 allowance: 15.
+                    max_request_bytes: 1375,
+                },
+                ..lash::persistence::AttachmentPolicy::standard()
+            },
+            ..lash::DataRetention::standard()
+        })
+        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            lash::persistence::LeaseOwnerId::new("put-receipt-law"),
+            lash::persistence::LeaseIncarnationId::new("node"),
+        ))
+        .unwrap();
+    let id = lash::SessionId::from("put-receipt-law");
+    core.session(id.clone())
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(4),
+            )
+            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+        ))
+        .await
+        .unwrap();
+    let session = core.session(id).open().await.unwrap();
+    let mut session_receipts = Vec::new();
+    for len in [3, 4] {
+        session_receipts.push(
+            session
+                .put_attachment(vec![7; len], meta("pixel"))
+                .await
+                .unwrap(),
+        );
+    }
+    assert_eq!(
+        session_receipts[0].byte_delivery,
+        AttachmentByteDelivery::WithinBudget {
+            byte_len: 3,
+            max_bytes: 3
+        }
+    );
+    assert_eq!(
+        session_receipts[1].byte_delivery,
+        AttachmentByteDelivery::ExceedsBudget {
+            byte_len: 4,
+            max_bytes: 3
+        }
+    );
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        session
+            .send(lash::TurnInput::text("put both blobs"))
+            .id(lash::TurnId::from("put-receipt-turn"))
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(output.is_success(), "{output:?}");
+    core.shutdown().await.unwrap();
+    assert_eq!(
+        *receipts.lock_recover(),
+        session_receipts,
+        "tool puts must report the session put's delivery advice, even when delivery exceeds its budget"
     );
 }

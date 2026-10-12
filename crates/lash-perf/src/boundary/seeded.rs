@@ -111,7 +111,8 @@ impl Tools {
                             Some(attachment.blob_key),
                         ),
                     )
-                    .await?;
+                    .await?
+                    .reference;
                 Ok(lash_core::ToolCallOutput::success_tool_value(
                     lash_core::ToolValue::Attachment(reference),
                 ))

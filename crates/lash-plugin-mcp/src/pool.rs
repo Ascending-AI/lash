@@ -1492,6 +1492,7 @@ async fn store_mcp_attachment(
             AttachmentCreateMeta::new(media_type, None, Some(label.to_string())),
         )
         .await
+        .map(|receipt| receipt.reference)
         .map_err(|err| {
             ToolOutcome::from(McpCallFailure::AttachmentStore {
                 cause: err.retention_failure(),

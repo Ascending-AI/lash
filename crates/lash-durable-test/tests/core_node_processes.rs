@@ -813,7 +813,7 @@ impl lash::tools::StaticToolExecute for WriteAttachment {
             )
             .await
         {
-            Ok(reference) => reference,
+            Ok(receipt) => receipt.reference,
             Err(error) => return lash_core::ToolOutcome::err_fmt(error).into(),
         };
         lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
