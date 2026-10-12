@@ -1003,7 +1003,7 @@ impl Activation for SessionActivation {
                                         tracing.metrics(),
                                         Some(&lash_trace::EmissionPermit::new_transition()),
                                         "session",
-                                        reason.code(),
+                                        reason.kind(),
                                     );
                                 }
                                 return Exit::Released;

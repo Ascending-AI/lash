@@ -51,6 +51,9 @@
 //! core/session/turn path; each domain module ([`tools`], [`persistence`],
 //! [`plugins`], [`observe`], [`attachments`], ...) carries its own
 //! vocabulary. [`prelude`] is the curated daily-use subset of the crate root.
+//! The two stable root re-exports are deliberate second homes:
+//! `StreamBlockIdentity` also lives at [`direct::StreamBlockIdentity`] and
+//! `LlmUsage` at [`usage::LlmUsage`] (FIG-6044).
 //!
 //! # Every type a facade signature names is nameable here
 //!
@@ -259,7 +262,7 @@ pub use lash_core::{
     ChargeSafetyRefusalEvidence, CommitBudget, CommitBudgetLimit, DrainMode, DrainModePolicy,
     EmptyLlmProfiles, FrameKey, InputId, InputItem, LlmCallRecord, LlmProfileConfig, LlmProfileKey,
     LlmProfileLimits, LlmProfileLimitsError, LlmProfileMetadata, LlmProfileMetadataBuilder,
-    LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason, LlmProfiles,
+    LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason, LlmProfiles, LlmUsage,
     MaxToolCalls, NoProgressBudget, NodeId, OmittedToolCalls, OutputTokenLimits, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
@@ -337,7 +340,8 @@ pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
 pub use lash_core_store::session_identity::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use lash_core_store::turn_input_vocabulary::ResolvedRun;
 pub use lash_sansio::llm::types::{
-    AttemptRecord, ChargeSafetyDenialReason, LlmCallId, StreamBlockEvent, StreamBlockKind,
+    AttemptRecord, ChargeSafetyDenialReason, LlmCallId, StreamBlockEvent, StreamBlockIdentity,
+    StreamBlockKind,
 };
 pub use lash_sansio::{
     BlankIdentity, ErrorEnvelope, ExecCodeFailure, FrameKeyError, InvalidProcessId, LlmCallError,

@@ -29,7 +29,7 @@ use lash_vm_runtime::{HostBoundary, ToolBindingError};
 /// carries the callable contract and identity (the tool definition) and the
 /// host-owned Tool Execution Binding that routes a call to the backing
 /// account, service, secret or remote executor.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ToolGrant {
     /// The callable contract and identity of the resolved tool.
     pub definition: lash_core::ToolDefinition,
@@ -62,7 +62,7 @@ impl ToolGrant {
 }
 
 /// Outcome of resolving one deferred call path.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Resolution {
     /// The call path resolved to a host-authorized tool.

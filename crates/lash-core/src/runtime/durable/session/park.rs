@@ -149,9 +149,11 @@ pub(in crate::runtime::durable) fn undecodable_state(
 }
 
 impl SessionParkReason {
-    /// The reason's code: the `lash.parked_work.reason` of its park.
+    /// The reason's kind: the serde `reason` tag's spelling, which a host
+    /// reads without a serde round trip (FIG-6044). The park reports it as
+    /// its `lash.parked_work.reason`.
     #[must_use]
-    pub const fn code(&self) -> &'static str {
+    pub const fn kind(&self) -> &'static str {
         match self {
             Self::PassLoop { .. } => "pass_loop",
             Self::UndecodableState { .. } => "undecodable_state",
@@ -193,4 +195,37 @@ pub(super) async fn park(
     });
     tx.give_up(Release::Parked);
     cx.commit(tx, CommitLabel::SESSION_RELEASE).await.map(drop)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `kind` is the serde `reason` tag's spelling for every variant, so a
+    /// host stores the park kind without a serde round trip (FIG-6044).
+    #[test]
+    fn kind_is_the_serde_reason_tag() {
+        let reasons = [
+            SessionParkReason::PassLoop {
+                failed_passes: 3,
+                error: SessionPassFailure {
+                    code: None,
+                    cause: None,
+                    message: "the pass failed".into(),
+                },
+            },
+            SessionParkReason::UndecodableState {
+                state: ParkedTurnState::Checkpoint,
+                message: "this build does not decode it".into(),
+            },
+        ];
+        for reason in &reasons {
+            let tag = serde_json::to_value(reason).unwrap()["reason"].clone();
+            assert_eq!(
+                tag,
+                serde_json::json!(reason.kind()),
+                "{reason:?}: kind does not match its serde tag"
+            );
+        }
+    }
 }

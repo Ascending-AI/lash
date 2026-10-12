@@ -4,8 +4,9 @@
 //! This test parses the crate's own public re-export map (`pub use` statements)
 //! and asserts no public name is re-exported from two module homes.
 //!
-//! One exemption, intentional: `prelude` duplicates a curated subset of root
-//! names for ergonomic glob imports.
+//! Two exemptions, both intentional: `prelude` duplicates a curated subset of
+//! root names for ergonomic glob imports, and the FIG-6044 stable root
+//! re-exports keep their module homes beside the crate root.
 
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
 // access is sanctioned here (the workspace clippy ban targets production
@@ -13,6 +14,11 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::collections::{BTreeMap, BTreeSet};
+
+/// The stable root re-exports (FIG-6044): each name keeps exactly two homes,
+/// the crate root and the module named here.
+const STABLE_ROOT_RE_EXPORTS: [(&str, &str); 2] =
+    [("LlmUsage", "usage"), ("StreamBlockIdentity", "direct")];
 
 #[test]
 fn every_public_name_has_exactly_one_home() {
@@ -30,6 +36,17 @@ fn every_public_name_has_exactly_one_home() {
             module
         };
         homes.entry(name).or_default().insert(module);
+    }
+
+    // Each stable root re-export lives at the root and its one module home.
+    for (name, module) in STABLE_ROOT_RE_EXPORTS {
+        let expected = BTreeSet::from(["root".to_string(), module.to_string()]);
+        let found = homes.remove(name).unwrap_or_default();
+        assert_eq!(
+            found, expected,
+            "stable root re-export `{name}` must live at the crate root and in \
+             lash::{module}, found {found:?}",
+        );
     }
 
     // Sanity check: the parser found a meaningful surface. If this drops to a

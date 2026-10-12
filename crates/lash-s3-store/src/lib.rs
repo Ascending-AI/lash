@@ -113,82 +113,26 @@ impl S3AttachmentStoreBuilder {
     }
 }
 
-#[derive(Clone)]
-pub struct S3AttachmentStore {
-    store: Arc<dyn ObjectStore>,
-    pages: Option<Arc<dyn PaginatedListStore>>,
-    signer: Option<Arc<dyn Signer>>,
+/// The object-key layout an [`S3AttachmentStore`] writes under: flat,
+/// content-addressed keys beneath an optional prefix. A host that presigns
+/// or reads objects directly shares the layout through this type instead of
+/// building a store's client (FIG-6044).
+#[derive(Clone, Debug)]
+pub struct S3AttachmentKeys {
     prefix: Option<String>,
 }
 
-impl std::fmt::Debug for S3AttachmentStore {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("S3AttachmentStore")
-            .field("prefix", &self.prefix)
-            .finish_non_exhaustive()
-    }
-}
-
-impl S3AttachmentStore {
-    pub fn builder(
-        bucket: impl Into<String>,
-        region: impl Into<String>,
-    ) -> S3AttachmentStoreBuilder {
-        S3AttachmentStoreBuilder::new(bucket, region)
-    }
-
-    pub fn from_config(config: S3AttachmentStoreConfig) -> Result<Self, AttachmentStoreError> {
-        let prefix = normalize_prefix(config.prefix.as_deref());
-        let store = amazon_s3_builder(&config)
-            .build()
-            .map_err(|err| terminal_backend_error("build", err))?;
-
-        let store = Arc::new(store);
-        let signer = config
-            .presigned_url_delivery
-            .then(|| store.clone() as Arc<dyn Signer>);
-        // General-purpose S3 lists are ordered by key and support StartAfter.
-        // Directory buckets do neither, so retain the bounded selection there.
-        let pages = (!config.bucket.ends_with("--x-s3"))
-            .then(|| store.clone() as Arc<dyn PaginatedListStore>);
-        Ok(Self {
-            store,
-            pages,
-            signer,
-            prefix,
-        })
-    }
-
-    /// Bind an arbitrary object store. Its unordered listing is streamed with
-    /// bounded adapter memory to select each content page, but may visit the
-    /// remaining namespace. Configured general-purpose S3 instead uses bounded
-    /// backend requests through ListObjectsV2.
-    pub fn from_object_store(store: Arc<dyn ObjectStore>, prefix: Option<String>) -> Self {
+impl S3AttachmentKeys {
+    /// The layout under `prefix`, normalized as a store's is.
+    pub fn new(prefix: impl Into<Option<String>>) -> Self {
         Self {
-            store,
-            pages: None,
-            signer: None,
-            prefix: normalize_prefix(prefix.as_deref()),
+            prefix: normalize_prefix(prefix.into().as_deref()),
         }
     }
 
-    /// Bind an object store and the signer for its immutable content namespace.
-    pub fn from_object_store_with_signer(
-        store: Arc<dyn ObjectStore>,
-        signer: Arc<dyn Signer>,
-        prefix: Option<String>,
-    ) -> Self {
-        Self {
-            store,
-            pages: None,
-            signer: Some(signer),
-            prefix: normalize_prefix(prefix.as_deref()),
-        }
-    }
-
-    /// The object key in this store's configured namespace. Prefix normalization
-    /// and path validation are the same as `put`; this grants no authorization
-    /// and performs no signing.
+    /// The object key of `id`'s blob in this namespace. Path validation is
+    /// the same as `put`; this grants no authorization and performs no
+    /// signing.
     pub fn object_key(&self, id: &AttachmentId) -> Result<String, AttachmentStoreError> {
         Ok(self.content_path(id)?.to_string())
     }
@@ -219,6 +163,95 @@ impl S3AttachmentStore {
         }
         path.push_str("blake3");
         Path::parse(path).map_err(|err| terminal_backend_error("path", err))
+    }
+}
+
+#[derive(Clone)]
+pub struct S3AttachmentStore {
+    store: Arc<dyn ObjectStore>,
+    pages: Option<Arc<dyn PaginatedListStore>>,
+    signer: Option<Arc<dyn Signer>>,
+    keys: S3AttachmentKeys,
+}
+
+impl std::fmt::Debug for S3AttachmentStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("S3AttachmentStore")
+            .field("prefix", &self.keys.prefix)
+            .finish_non_exhaustive()
+    }
+}
+
+impl S3AttachmentStore {
+    pub fn builder(
+        bucket: impl Into<String>,
+        region: impl Into<String>,
+    ) -> S3AttachmentStoreBuilder {
+        S3AttachmentStoreBuilder::new(bucket, region)
+    }
+
+    pub fn from_config(config: S3AttachmentStoreConfig) -> Result<Self, AttachmentStoreError> {
+        let keys = S3AttachmentKeys::new(config.prefix.clone());
+        let store = amazon_s3_builder(&config)
+            .build()
+            .map_err(|err| terminal_backend_error("build", err))?;
+
+        let store = Arc::new(store);
+        let signer = config
+            .presigned_url_delivery
+            .then(|| store.clone() as Arc<dyn Signer>);
+        // General-purpose S3 lists are ordered by key and support StartAfter.
+        // Directory buckets do neither, so retain the bounded selection there.
+        let pages = (!config.bucket.ends_with("--x-s3"))
+            .then(|| store.clone() as Arc<dyn PaginatedListStore>);
+        Ok(Self {
+            store,
+            pages,
+            signer,
+            keys,
+        })
+    }
+
+    /// Bind an arbitrary object store. Its unordered listing is streamed with
+    /// bounded adapter memory to select each content page, but may visit the
+    /// remaining namespace. Configured general-purpose S3 instead uses bounded
+    /// backend requests through ListObjectsV2.
+    pub fn from_object_store(store: Arc<dyn ObjectStore>, prefix: Option<String>) -> Self {
+        Self {
+            store,
+            pages: None,
+            signer: None,
+            keys: S3AttachmentKeys::new(prefix),
+        }
+    }
+
+    /// Bind an object store and the signer for its immutable content namespace.
+    pub fn from_object_store_with_signer(
+        store: Arc<dyn ObjectStore>,
+        signer: Arc<dyn Signer>,
+        prefix: Option<String>,
+    ) -> Self {
+        Self {
+            store,
+            pages: None,
+            signer: Some(signer),
+            keys: S3AttachmentKeys::new(prefix),
+        }
+    }
+
+    /// The object key in this store's configured namespace, laid out by
+    /// [`S3AttachmentKeys`]. Path validation is the same as `put`; this
+    /// grants no authorization and performs no signing.
+    pub fn object_key(&self, id: &AttachmentId) -> Result<String, AttachmentStoreError> {
+        self.keys.object_key(id)
+    }
+
+    fn content_path(&self, id: &AttachmentId) -> Result<Path, AttachmentStoreError> {
+        self.keys.content_path(id)
+    }
+
+    fn content_prefix(&self) -> Result<Path, AttachmentStoreError> {
+        self.keys.content_prefix()
     }
 
     #[cfg(any(test, feature = "testing"))]
