@@ -564,7 +564,25 @@ pub async fn run_phases(
                 };
                 match ran {
                     Some(ran) => {
-                        if ran? == CellExit::Suspended {
+                        let exit = match ran {
+                            Ok(exit) => exit,
+                            Err(error) => {
+                                // The cell failed its attempt before any
+                                // commit held the response: a worker lost
+                                // at lowering or start, a host fault before
+                                // its first park. The response commits on
+                                // its own as `model.done` first, so the
+                                // retried attempt re-delivers the cell and
+                                // never asks the model again (FIG-6038). A
+                                // refused commit leaves the attempt's own
+                                // failure to answer.
+                                if let Some(response) = unconsumed {
+                                    drop(response.commit_alone(cx).await);
+                                }
+                                return Err(error);
+                            }
+                        };
+                        if exit == CellExit::Suspended {
                             return Ok(PhaseExit::Suspended { due: None });
                         }
                         // Every answered cell is handed off, tools called
