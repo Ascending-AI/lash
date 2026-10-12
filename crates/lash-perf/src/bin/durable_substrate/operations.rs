@@ -8,7 +8,6 @@ use crate::turn::{Script, session_id};
 use crate::turns::{close, one_turn, turn_id};
 use anyhow::{Context as _, Result, ensure};
 use lash_core_execution::facade_support::sql::{self, Receipt};
-use lash_core_store::checkpoint_graph::NodeKind;
 use lash_core_store::store::{HistoryAnchor, HistoryBudget};
 use std::collections::BTreeMap;
 use std::num::{NonZeroU32, NonZeroU64};
@@ -115,7 +114,10 @@ pub async fn run(run: &Run<'_>) -> Result<()> {
         let mut ends = 0;
         let mut commits = 0;
         for tx in &owned {
-            let operation = if tx.by_kind.contains_key(&NodeKind::CELL_END.0) {
+            // This script's cell answers after its last park. The next
+            // model.start consumes that answer and retires its root in the
+            // same transaction; there is no standalone CellEnd node.
+            let operation = if tx.label == "model.start" && parks == run.cell_parks {
                 ends += 1;
                 "cell.end"
             } else if tx.label == "cell.snapshot+admit" {
@@ -220,7 +222,8 @@ pub async fn run(run: &Run<'_>) -> Result<()> {
 mod tests {
     use super::*;
     /// SQL-OPERATION-MATRIX: a fresh fixed-history sample must observe every
-    /// owning boundary, with exactly its declared parks and one real CellEnd.
+    /// owning boundary, with exactly its declared parks and one consuming
+    /// model.start as the fused cell end.
     #[tokio::test]
     async fn operation_matrix_covers_each_owning_boundary() {
         let fixture = tempfile::tempdir().unwrap();
@@ -255,6 +258,12 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
+        let ends: Vec<_> = records
+            .iter()
+            .filter(|record| record["kind"] == "operation" && record["operation"] == "cell.end")
+            .collect();
+        assert_eq!(ends.len(), 1);
+        assert_eq!(ends[0]["sql"]["operation"], "s/operations-0/model.start");
         for operation in [
             "turn.commit",
             "cell.park",

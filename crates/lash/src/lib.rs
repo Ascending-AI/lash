@@ -1478,9 +1478,11 @@ pub mod provider {
     pub use lash_llm_transport::{ExtraHeaders, TokenPolicy};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::llm::transport::HttpFailureContext;
+    /// Attachment delivery contracts. Their read limits live at
+    /// [`crate::persistence::AttachmentReadPolicy`], beside the host's attachment policy.
     pub use lash_core::provider::{
-        AttachmentDeliveryError, AttachmentReadPolicy, CanonicalDeliveries, InlineDeliveries,
-        LiveCallHorizon, NoSlotDeliveries, SlotDeliveries,
+        AttachmentDeliveryError, CanonicalDeliveries, InlineDeliveries, LiveCallHorizon,
+        NoSlotDeliveries, SlotDeliveries,
     };
     /// Read the request a canonical body says, for an in-process model that
     /// decides from what a call asks.

@@ -82,7 +82,10 @@ independent; existing `prior-300`/ten-await cases retain their original geometry
 
 The six operation records are `session.open`, `cell.park`, `cell.end`,
 `turn.commit`, `history.read` (a two-node page) and `graph.gc` (an unbounded live
-closure collection). CellEnd is selected by its actual staged CELL_END node;
+closure collection). The script's cell end is the `model.start` after its last
+declared park: that transaction consumes the cell's answer and retires its root.
+It has no standalone CELL_END node. The later `turn.commit` remains its own
+window, so neither owning boundary is lost or counted twice.
 `cell.quiet_snapshot` is a separate label. Every transaction carries the retained
 actor fence and its own SQL receipt. Background node work is excluded. GC reports
 marked-node/swept-blob/swept-edge counts separately from SQL result bytes. Opening
