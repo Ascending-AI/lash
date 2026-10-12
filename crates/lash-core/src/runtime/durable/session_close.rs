@@ -40,21 +40,18 @@
 use crate::store::SessionLookup;
 use lash_core_execution::runtime::actor::waits;
 use lash_durable::domain::{
-    SESSION_ACTOR_FORMATS, ScopeKey, SessionCloseRow, SessionCloseStep, SessionCloseWrite,
+    SESSION_ACTOR_FORMATS, SESSION_CLOSE_MAIL, ScopeKey, SessionCloseRow, SessionCloseStep,
+    SessionCloseWrite,
 };
 use lash_durable::{
     ActorKey, ActorTx, CommitLabel, DomainWrite, DurableError, FormatSet, MailKind, MailRefusal,
     MailTx, Release,
 };
 
-use super::session::{TurnError, cancel_open_turn, export_owed_admission};
+use super::session::{Pass, TurnError, cancel_open_turn, export_owed_admission};
 use super::turn_scope::{continue_scope_ends, end_turn_scope, mark_until_children};
 use crate::{ActorContext, Backend, SessionId};
 use lash_core_execution::runtime::actor::process::{self, CascadeProgress};
-
-/// The mail kind of a close request. The session's mailbox drain
-/// (`session_mail`) hands it to the activation as its `close`.
-pub const SESSION_CLOSE_MAIL: &str = "session.close";
 
 /// The reason a session close's `cancel` step gives the open turn's cancel.
 pub const SESSION_CLOSED: &str = "session_closed";
@@ -252,6 +249,9 @@ pub async fn run_session_close(
                 let cancelled = cancel_open_turn(cx, &mut tx, &cause).await?;
                 if let Some(turn) = &cancelled {
                     end_turn_scope(cx, &mut tx, session, &turn.run).await?;
+                    // Nothing the ended turn called is owed any more: no
+                    // claim requirement holds the rest of the close back.
+                    tx.set_requires(Vec::new());
                     // A turn the close ends before its first phase commit
                     // still owes its admission's export (FIG-5998).
                     export_owed_admission(tracing, turn);
@@ -332,6 +332,64 @@ async fn commit_step(
     }));
     cx.commit(tx, step.label()).await?;
     Ok(())
+}
+
+/// What a pass's close check left.
+pub(super) enum Closing {
+    /// The session is closing: the pass drained its close request, or ran
+    /// what remains of its close.
+    Ran(Pass),
+    /// It is not closing: the pass carries on in this open transaction.
+    Not(Box<ActorTx>),
+}
+
+/// Drain the session's close request into its closing state, or run what
+/// remains of a close under way (L6b): a closing session admits nothing.
+/// A close is registry work that calls no provider, so a claim that does
+/// not serve the session's claim requirements runs it too (FIG-6072).
+pub(super) async fn close_pass(
+    cx: &ActorContext,
+    session: &SessionId,
+    tracing: Option<&crate::trace::TraceRuntime>,
+) -> Result<Closing, TurnError> {
+    let mut tx = cx.begin().await?;
+    if let Some(seq) = tx
+        .mail()
+        .iter()
+        .filter(|mail| mail.kind.as_str() == SESSION_CLOSE_MAIL)
+        .map(|mail| mail.seq)
+        .max()
+    {
+        begin_session_close(&mut tx, session);
+        tx.ack_through(seq);
+        cx.commit(tx, CommitLabel::SESSION_CLOSE_BEGIN).await?;
+        return Ok(Closing::Ran(Pass::Again));
+    }
+    if !cx
+        .durable_reads()?
+        .session_close(session)
+        .await?
+        .is_some_and(|close| !close.is_tombstone())
+    {
+        return Ok(Closing::Not(Box::new(tx)));
+    }
+    drop(tx);
+    let pass = match run_session_close(cx, session, tracing)
+        .await
+        .map_err(|error| TurnError::Close(Box::new(error)))?
+    {
+        Some(SessionCloseExit::Closed) => Pass::Released,
+        Some(SessionCloseExit::Waiting) => {
+            let mut tx = cx.begin().await?;
+            tx.give_up(Release::Waiting {
+                next_due: cx.next_due(),
+            });
+            cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
+            Pass::Released
+        }
+        None => Pass::Again,
+    };
+    Ok(Closing::Ran(pass))
 }
 
 /// The session's close as its row stands; `None` when it never began.

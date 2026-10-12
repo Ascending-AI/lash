@@ -94,8 +94,9 @@ pub(super) fn stamp_requires(
 }
 
 /// Take up to `limit` actors claimable at `now` for boot `lease`: those it
-/// decodes and whose claim requirements it serves to run, and a process
-/// with a pending cancel otherwise, only for it (FIG-6034 D3).
+/// decodes and whose claim requirements it serves to run; otherwise a
+/// process with a pending cancel, and a session it decodes with a pending
+/// `Immediate` turn cancel or close, only for that (FIG-6034 D3, FIG-6072).
 pub(super) fn claim_within(
     tx: &Connection,
     lease: &lash_durable::NodeLease,
@@ -109,7 +110,14 @@ pub(super) fn claim_within(
     let candidates = tx
         .prepare_cached(SQL.sqlite.claimable.sql())?
         .query_map(
-            rusqlite::params![now.0, formats, limit, CANCEL_MAIL, serves],
+            rusqlite::params![
+                now.0,
+                formats,
+                limit,
+                CANCEL_MAIL,
+                serves,
+                lash_durable::domain::SESSION_CLOSE_MAIL
+            ],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,

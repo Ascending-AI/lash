@@ -20,6 +20,12 @@ use lash_sansio::SessionId;
 
 use super::keys::ScopeKey;
 
+/// The mail kind a session's close request is appended under; its body is
+/// empty. Its pending mail, like the close row before its tombstone, makes a
+/// session claimable to a node that does not serve its claim requirements
+/// ([`DurableStore::claim`](crate::DurableStore::claim)).
+pub const SESSION_CLOSE_MAIL: &str = "session.close";
+
 /// One step of a session close, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SessionCloseStep {

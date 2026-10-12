@@ -58,7 +58,7 @@ pub use prompts::{
     ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite, request_roots,
 };
 pub use run_records::AdmittedId;
-pub use session_close::{SessionCloseRow, SessionCloseStep, SessionCloseWrite};
+pub use session_close::{SESSION_CLOSE_MAIL, SessionCloseRow, SessionCloseStep, SessionCloseWrite};
 pub use session_mail::{
     MailBatch, MailBatchKind, MailInput, OperationCancelAnswer, OperationCancelRequest,
     SESSION_ACTOR_FORMATS, SessionMailWrite, SessionMailbox, queued_input_run,

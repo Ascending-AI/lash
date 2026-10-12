@@ -141,8 +141,9 @@ pub enum ClaimPurpose {
     Run,
     /// The node does not decode the actor's format set, or does not serve a
     /// requirement it carries, and claimed it only for its pending cancel:
-    /// the activation ends it from registry state and never reads its state
-    /// or calls its engine.
+    /// a process's cancel mail, or a session's close or `Immediate` turn
+    /// cancel (FIG-6072). The activation ends it from registry state and
+    /// never reads its engine state or calls its engine or a provider.
     CancelOnly,
 }
 
@@ -315,11 +316,15 @@ pub trait DurableStore: DurableReads {
     async fn release_node(&self, node: &NodeLease) -> Result<Vec<ActorKey>, DurableError>;
 
     /// Claim up to `limit` actors that are ready, or waiting with a passed
-    /// due time, in a format set `node` decodes; and process actors in a set
-    /// it does not decode that have a cancel request pending, so their
-    /// cancel ends them without decoding their state
-    /// ([`ClaimPurpose::CancelOnly`]). Each claim bumps the actor's
-    /// epoch. A draining node claims nothing. Refused with
+    /// due time, in a format set `node` decodes and with every claim
+    /// requirement it serves ([`ClaimPurpose::Run`]); otherwise, only so
+    /// their cancel ends them ([`ClaimPurpose::CancelOnly`]), process actors
+    /// with cancel mail pending, and session actors in a set it decodes
+    /// whose open turn holds an `Immediate` cancel request, with close mail
+    /// ([`SESSION_CLOSE_MAIL`](crate::domain::SESSION_CLOSE_MAIL)) pending,
+    /// or whose close has not reached its tombstone (FIG-6072). A session's
+    /// `AfterStep` request leaves it to a node that serves it. Each claim
+    /// bumps the actor's epoch. A draining node claims nothing. Refused with
     /// [`DurableError::NodeLeaseLost`] when the node holds no live lease.
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError>;
 

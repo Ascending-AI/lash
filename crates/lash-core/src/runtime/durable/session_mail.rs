@@ -27,7 +27,9 @@
 //! mails the switch's task as a next-turn input ([`follow_on_mail`]), so the
 //! follow-on is ordinary mail the session's next drain admits (ADR 0101 §3).
 
-use lash_durable::domain::{MailBatchKind, MailInput, SessionMailWrite, SessionMailbox};
+use lash_durable::domain::{
+    MailBatchKind, MailInput, SESSION_CLOSE_MAIL, SessionMailWrite, SessionMailbox,
+};
 use lash_durable::{ActorTx, DomainWrite, DurableError};
 use lash_sansio::{SessionId, TurnId};
 
@@ -78,9 +80,6 @@ impl InputBatching for OneInputPerRun {
         Ok(None)
     }
 }
-
-/// The mail kind a session's close is appended under; its body is empty.
-pub const SESSION_CLOSE_MAIL: &str = "session.close";
 
 /// A request to close the session, drained from its mailbox.
 #[derive(Clone, Debug, PartialEq, Eq)]

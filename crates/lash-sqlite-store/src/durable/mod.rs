@@ -241,11 +241,14 @@ lash_store_sql::statements! {
         boots = "SELECT node_id, boot_id FROM nodes ORDER BY node_id, boot_id";
 
         /// Up to `?3` actors claimable at `?1` in a format set of JSON array
-        /// `?2` whose claim requirements are all in JSON array `?5`, or
-        /// process actors in another set or with another requirement with
-        /// mail of kind `?4` (a cancel) pending, oldest first, with the
-        /// state that made each claimable, its format set and its
-        /// requirements.
+        /// `?2` whose claim requirements are all in JSON array `?5`; process
+        /// actors in another set or with another requirement with mail of
+        /// kind `?4` (a cancel) pending; and session actors in a set of `?2`
+        /// with another requirement whose open turn holds an `immediate`
+        /// cancel request, with mail of kind `?6` (a close) pending, or
+        /// whose close has not reached its tombstone (FIG-6072); oldest
+        /// first, with the state that made each claimable, its format set
+        /// and its requirements.
         claimable = "SELECT a.actor_key, a.state, a.formats, a.requires FROM actors a
              WHERE ((a.state = 'ready' AND a.ready_at_ms <= ?1)
                  OR (a.state = 'waiting' AND a.next_due_ms <= ?1))
@@ -256,7 +259,20 @@ lash_store_sql::statements! {
                  OR (a.kind = 'process' AND EXISTS (
                      SELECT 1 FROM actor_mail m
                      WHERE m.actor_key = a.actor_key AND m.seq > a.acked_seq
-                       AND m.kind = ?4)))
+                       AND m.kind = ?4))
+                 OR (a.kind = 'session' AND a.formats IN (SELECT value FROM json_each(?2))
+                     AND (EXISTS (
+                             SELECT 1 FROM turn_cancel_requests c
+                             WHERE c.session_id = substr(a.actor_key, 3)
+                               AND c.mode = 'immediate')
+                         OR EXISTS (
+                             SELECT 1 FROM actor_mail m
+                             WHERE m.actor_key = a.actor_key AND m.seq > a.acked_seq
+                               AND m.kind = ?6)
+                         OR EXISTS (
+                             SELECT 1 FROM session_close s
+                             WHERE s.session_id = substr(a.actor_key, 3)
+                               AND (s.done_step IS NULL OR s.done_step <> 'tombstone')))))
              ORDER BY COALESCE(a.ready_at_ms, a.next_due_ms), a.actor_key
              LIMIT ?3";
 

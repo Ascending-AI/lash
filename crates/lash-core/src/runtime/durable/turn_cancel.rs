@@ -41,20 +41,30 @@
 //! accepted a cancel, its checkpoints deliver it no more input. A crash
 //! anywhere in between leaves the request on the row, so the next owner
 //! finalizes the turn from its rows, before it starts any new work.
+//!
+//! A node that does not serve every claim requirement the session carries
+//! claims it only for an `Immediate` request or its close, and
+//! [`end_unserved`] ends the turn from its rows alone: no provider,
+//! composition or turn drive is built or called (FIG-6072). An `AfterStep`
+//! request waits for a node that can finish the step, unless the host
+//! escalates it to `Immediate`.
 
 use std::future::Future;
 
-use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, TurnWrite};
-use lash_durable::{CommitLabel, DurableError};
+use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, SESSION_CLOSE_MAIL, TurnWrite};
+use lash_durable::runner::{Exit, Owned};
+use lash_durable::{CommitLabel, DurableError, Release};
 
 use super::head::HeadCache;
 use super::session::{
-    OpenTurn, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow,
-    TurnServices, UnfinishedPhase, cancel_evidence, cancelled_cause, undecodable_state,
+    OpenTurn, Pass, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
+    TurnRow, TurnServices, UnfinishedPhase, await_stop, cancel_evidence, cancelled_cause,
+    undecodable_state,
 };
-use super::session_close::SESSION_CLOSE_MAIL;
+use super::session_close::{Closing, close_pass};
 use super::tool_round::AnsweredCell;
-use crate::{ActorContext, Effect, TurnCancelMode};
+use super::turn_scope::continue_scope_ends;
+use crate::{ActorContext, Effect, SessionId, TurnCancelMode};
 
 /// Whether the session's unfinished turn must stop now, as of a fenced
 /// read: it accepted an `Immediate` cancel request, or the session's close
@@ -114,6 +124,88 @@ pub(super) async fn unless_cancelled<F: Future>(
                 }
             }
         }
+    }
+}
+
+/// End what a node that does not serve every claim requirement session
+/// `owned` carries claimed it for ([`ClaimPurpose::CancelOnly`]), then let
+/// it go (FIG-6072). The claim took it for its close or an `Immediate`
+/// cancel of its open turn, and both end with registry writes alone: no
+/// provider, composition or turn drive is built, and none is called.
+///
+/// - A close runs as on any claim ([`close_pass`]).
+/// - An `Immediate` cancel ends the turn from its rows ([`finalize`] with no
+///   stopped drive), in one `turn.cancel` commit: its round's unfinished
+///   members settle `Cancelled`, its terminal commits without a head
+///   revision, its scope ends, and the session's claim requirements are
+///   cleared. The calls a cell completed stay in their durable records. An
+///   in-flight call's external work is never asked to stop, since its
+///   provider is absent: the scope's end only ends the local wait.
+///
+/// Anything else is left for a node that serves the session, which the
+/// actor goes back `ready` for: an `AfterStep` request waits for the step it
+/// lets finish, unless the host escalates it. A session adopted in a format
+/// set the node does not decode goes back unread.
+///
+/// [`ClaimPurpose::CancelOnly`]: lash_durable::ClaimPurpose::CancelOnly
+pub(super) async fn end_unserved(
+    owned: &Owned,
+    cx: &ActorContext,
+    services: &dyn TurnServices,
+    session: &SessionId,
+) -> Exit {
+    match unserved_passes(owned, cx, services, session).await {
+        Ok(()) | Err(TurnError::Durable(DurableError::OwnershipLost(_))) => Exit::Released,
+        Err(_) => Exit::Abandoned,
+    }
+}
+
+async fn unserved_passes(
+    owned: &Owned,
+    cx: &ActorContext,
+    services: &dyn TurnServices,
+    session: &SessionId,
+) -> Result<(), TurnError> {
+    let decoded = owned
+        .store()
+        .actor(owned.actor())
+        .await?
+        .is_some_and(|actor| {
+            cx.backend()
+                .formats()
+                .session_decodes()
+                .contains(&actor.formats)
+        });
+    if !decoded {
+        let mut tx = cx.begin().await?;
+        tx.give_up(Release::Idle);
+        cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
+        return Ok(());
+    }
+    let mut heads = HeadCache::default();
+    loop {
+        if owned.draining() {
+            cx.drain_release().await?;
+            return Ok(());
+        }
+        continue_scope_ends(cx, session).await?;
+        let mut tx = match close_pass(cx, session, services.tracing()).await? {
+            Closing::Ran(Pass::Again) => continue,
+            Closing::Ran(_) => return Ok(()),
+            Closing::Not(tx) => *tx,
+        };
+        if let Some(row) = cx.durable_reads()?.turn(session).await?
+            && let Some(request) = row.cancel.clone()
+            && stops_at_once(&request)
+        {
+            drop(tx);
+            finalize(cx, services, &row, &request, None, &mut heads).await?;
+            await_stop(cx, services, session, &row.run).await?;
+            continue;
+        }
+        tx.give_up(Release::Ready);
+        cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
+        return Ok(());
     }
 }
 
@@ -359,6 +451,9 @@ async fn end(
     // The turn's scope ends with its cancel (L6b): its waits are revoked and
     // its first batch of `Until` children marked; the next pass marks the rest.
     super::turn_scope::end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;
+    // Nothing the ended turn called is owed any more: the session's claim
+    // requirements go with it (FIG-6072).
+    tx.set_requires(Vec::new());
     // A turn cancelled before its first phase commit still owes its
     // admission's export: it is made before the commit that ends the turn
     // (FIG-5998).

@@ -55,9 +55,7 @@ pub use lash_durable::domain::{
     ModelPin, TurnCancelAnswer, TurnCancelRequest, TurnRow, UnfinishedPhase,
 };
 
-use super::session_close::{
-    SESSION_CLOSE_MAIL, SessionCloseError, SessionCloseExit, begin_session_close, run_session_close,
-};
+use super::session_close::{Closing, SessionCloseError, close_pass};
 use super::session_mail::{InputBatching, OneInputPerRun, SessionMailError, drain_session_mail};
 use super::turn_scope::{TurnChildrenStopError, await_turn_children, continue_scope_ends};
 
@@ -652,43 +650,10 @@ impl SessionActivation {
         // A turn's scope whose cascade a crash cut short is marked to its end
         // before anything else (L6b).
         continue_scope_ends(cx, session).await?;
-        let mut tx = cx.begin().await?;
-        if let Some(seq) = tx
-            .mail()
-            .iter()
-            .filter(|mail| mail.kind.as_str() == SESSION_CLOSE_MAIL)
-            .map(|mail| mail.seq)
-            .max()
-        {
-            begin_session_close(&mut tx, session);
-            tx.ack_through(seq);
-            cx.commit(tx, CommitLabel::SESSION_CLOSE_BEGIN).await?;
-            return Ok(Pass::Again);
-        }
-        // A closing session admits nothing: it runs its close (L6b).
-        if cx
-            .durable_reads()?
-            .session_close(session)
-            .await?
-            .is_some_and(|close| !close.is_tombstone())
-        {
-            drop(tx);
-            return match run_session_close(cx, session, self.services.tracing())
-                .await
-                .map_err(|error| TurnError::Close(Box::new(error)))?
-            {
-                Some(SessionCloseExit::Closed) => Ok(Pass::Released),
-                Some(SessionCloseExit::Waiting) => {
-                    let mut tx = cx.begin().await?;
-                    tx.give_up(Release::Waiting {
-                        next_due: cx.next_due(),
-                    });
-                    cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
-                    Ok(Pass::Released)
-                }
-                None => Ok(Pass::Again),
-            };
-        }
+        let mut tx = match close_pass(cx, session, self.services.tracing()).await? {
+            Closing::Ran(pass) => return Ok(pass),
+            Closing::Not(tx) => *tx,
+        };
         let open = cx.durable_reads()?.turn(session).await?;
         let Some(row) = open else {
             // No unfinished turn: the mailbox says what runs next (L3s).
@@ -779,7 +744,7 @@ impl SessionActivation {
             let stopped = turn_cancel::restore(cx, self.services.as_ref(), &row, heads).await?;
             turn_cancel::finalize(cx, self.services.as_ref(), &row, &request, stopped, heads)
                 .await?;
-            return self.await_stop(cx, session, &row.run).await;
+            return await_stop(cx, self.services.as_ref(), session, &row.run).await;
         }
         // The turn's work on this owner runs under its span: a host's
         // `tracing` instrumentation of a provider, a tool or a plugin it
@@ -825,7 +790,7 @@ impl SessionActivation {
                     turn_cancel::finalize(cx, self.services.as_ref(), &row, request, None, heads)
                         .await?;
                 }
-                return self.await_stop(cx, session, &row.run).await;
+                return await_stop(cx, self.services.as_ref(), session, &row.run).await;
             }
             Err(error) => return Err(error),
         };
@@ -844,7 +809,7 @@ impl SessionActivation {
         };
         match ran {
             PhaseExit::Committed(_) | PhaseExit::CancelRequested => Ok(Pass::Again),
-            PhaseExit::Cancelled => self.await_stop(cx, session, &row.run).await,
+            PhaseExit::Cancelled => await_stop(cx, self.services.as_ref(), session, &row.run).await,
             PhaseExit::Lost => Ok(Pass::Lost),
             PhaseExit::Released => Ok(Pass::Released),
             PhaseExit::Drained => drain_release(cx).await,
@@ -857,36 +822,36 @@ impl SessionActivation {
             }
         }
     }
+}
 
-    /// After `run`'s cancel committed, wait for the children it marked (G1b,
-    /// L6b): the rest of its cascade first, then their terminals, bounded by
-    /// the stop's grace. A child still running at the grace keeps its
-    /// cancel, and the stop completes anyway.
-    async fn await_stop(
-        &self,
-        cx: &ActorContext,
-        session: &SessionId,
-        run: &TurnId,
-    ) -> Result<Pass, TurnError> {
-        continue_scope_ends(cx, session).await?;
-        let stop = await_turn_children(
-            cx,
-            session,
-            run,
-            self.services.execution_budgets(session).stop_grace(),
-            self.backend.config().settings().cascade_batch,
-        )
-        .await?;
-        if !stop.may_still_be_running.is_empty() {
-            tracing::warn!(
-                session_id = %session,
-                run_id = %run,
-                children = ?stop.may_still_be_running,
-                "the cancelled turn's children may still be running past its stop grace"
-            );
-        }
-        Ok(Pass::Again)
+/// After `run`'s cancel committed, wait for the children it marked (G1b,
+/// L6b): the rest of its cascade first, then their terminals, bounded by the
+/// stop's grace. A child still running at the grace keeps its cancel, and the
+/// stop completes anyway.
+pub(super) async fn await_stop(
+    cx: &ActorContext,
+    services: &dyn TurnServices,
+    session: &SessionId,
+    run: &TurnId,
+) -> Result<Pass, TurnError> {
+    continue_scope_ends(cx, session).await?;
+    let stop = await_turn_children(
+        cx,
+        session,
+        run,
+        services.execution_budgets(session).stop_grace(),
+        cx.backend().config().settings().cascade_batch,
+    )
+    .await?;
+    if !stop.may_still_be_running.is_empty() {
+        tracing::warn!(
+            session_id = %session,
+            run_id = %run,
+            children = ?stop.may_still_be_running,
+            "the cancelled turn's children may still be running past its stop grace"
+        );
     }
+    Ok(Pass::Again)
 }
 
 /// Release the session `ready` for the next build: what a draining node
@@ -897,7 +862,7 @@ async fn drain_release(cx: &ActorContext) -> Result<Pass, TurnError> {
 }
 
 /// What one activation pass left.
-enum Pass {
+pub(super) enum Pass {
     /// Run another pass.
     Again,
     /// Nothing to do: the actor stays hot until mail or idle eviction.
@@ -921,19 +886,10 @@ impl Activation for SessionActivation {
             CancellationToken::new(),
             Arc::clone(&self.probe),
         );
-        // A claim never takes a session in a set its node does not decode;
-        // one adopted in another set goes back unread.
+        // A session whose claim requirements this node does not serve was
+        // claimed for its close or an `Immediate` cancel alone (FIG-6072).
         if owned.purpose() == lash_durable::ClaimPurpose::CancelOnly {
-            let mut tx = match cx.begin().await {
-                Ok(tx) => tx,
-                Err(DurableError::OwnershipLost(_)) => return Exit::Released,
-                Err(_) => return Exit::Abandoned,
-            };
-            tx.give_up(Release::Idle);
-            return match cx.commit(tx, CommitLabel::SESSION_RELEASE).await {
-                Ok(_) | Err(DurableError::OwnershipLost(_)) => Exit::Released,
-                Err(_) => Exit::Abandoned,
-            };
+            return turn_cancel::end_unserved(&owned, &cx, self.services.as_ref(), &session).await;
         }
         witness_claim(owned.claimed_on());
         // An owner with nothing to do keeps the actor hot for `idle_evict`,

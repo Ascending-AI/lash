@@ -179,13 +179,17 @@ lash_store_sql::statements! {
         node_live = "SELECT draining FROM nodes WHERE node_id = ?1 AND boot_id = ?2 FOR SHARE";
 
         /// Give up to `?5` actors claimable at `?1` in a format set of `?4`
-        /// whose claim requirements are all in `?7`, or process actors in
+        /// whose claim requirements are all in `?7`; process actors in
         /// another set or with another requirement with mail of kind `?6`
-        /// (a cancel) pending, to boot `?3` of node `?2`, oldest first,
-        /// bumping each epoch; returns each with the state that made it
-        /// claimable, its format set and its requirements. A claim that
-        /// finds no commit since the previous claim counts one more failed
-        /// activation; any commit since resets the count.
+        /// (a cancel) pending; and session actors in a set of `?4` with
+        /// another requirement whose open turn holds an `immediate` cancel
+        /// request, with mail of kind `?8` (a close) pending, or whose close
+        /// has not reached its tombstone (FIG-6072); to boot `?3` of node
+        /// `?2`, oldest first, bumping each epoch; returns each with the
+        /// state that made it claimable, its format set and its
+        /// requirements. A claim that finds no commit since the previous
+        /// claim counts one more failed activation; any commit since resets
+        /// the count.
         claim = "WITH c AS (
                  SELECT p.actor_key, p.state, p.formats, p.requires FROM actors p
                  WHERE ((p.state = 'ready' AND p.ready_at_ms <= ?1)
@@ -196,7 +200,20 @@ lash_store_sql::statements! {
                      OR (p.kind = 'process' AND EXISTS (
                          SELECT 1 FROM actor_mail m
                          WHERE m.actor_key = p.actor_key AND m.seq > p.acked_seq
-                           AND m.kind = ?6)))
+                           AND m.kind = ?6))
+                     OR (p.kind = 'session' AND p.formats = ANY(?4)
+                         AND (EXISTS (
+                                 SELECT 1 FROM turn_cancel_requests c
+                                 WHERE c.session_id = substr(p.actor_key, 3)
+                                   AND c.mode = 'immediate')
+                             OR EXISTS (
+                                 SELECT 1 FROM actor_mail m
+                                 WHERE m.actor_key = p.actor_key AND m.seq > p.acked_seq
+                                   AND m.kind = ?8)
+                             OR EXISTS (
+                                 SELECT 1 FROM session_close s
+                                 WHERE s.session_id = substr(p.actor_key, 3)
+                                   AND (s.done_step IS NULL OR s.done_step <> 'tombstone')))))
                  ORDER BY COALESCE(p.ready_at_ms, p.next_due_ms), p.actor_key
                  LIMIT ?5
                  FOR UPDATE OF p SKIP LOCKED
@@ -1247,6 +1264,7 @@ impl DurableStore for PostgresDurableStore {
                         .bind(limit)
                         .bind(lash_durable::domain::CANCEL_MAIL)
                         .bind(&node.serves)
+                        .bind(lash_durable::domain::SESSION_CLOSE_MAIL)
                         .fetch_all(crate::observed_sql::executor(&mut **tx))
                         .await
                         .map_err(sqlx_failure)?;
