@@ -653,6 +653,7 @@ fn scripted_servers(trace: &std::path::Path, scenario: &str) -> BTreeMap<String,
     BTreeMap::from([(
         "depth".to_string(),
         McpServerConfig {
+            diagnostics: Default::default(),
             data_limits: Default::default(),
             startup_timeout_ms: 10_000,
             call_policy: McpCallPolicy {

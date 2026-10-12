@@ -111,6 +111,7 @@ impl Default for MockOptions {
 
 fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
     McpServerConfig {
+        diagnostics: Default::default(),
         data_limits: Default::default(),
         startup_timeout_ms: options.startup_timeout_ms,
         call_policy: McpCallPolicy {

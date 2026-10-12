@@ -125,6 +125,12 @@ impl McpPluginFactory {
         self.pool.server_statuses()
     }
 
+    /// Typed evidence of the last failed startup, following host capture policy.
+    /// The pool clears it when the server connects successfully.
+    pub fn startup_failure(&self, server_name: &str) -> Option<crate::error::McpStartupFailure> {
+        self.pool.startup_failure(server_name)
+    }
+
     /// Notify connected servers that the host's current roots changed.
     pub async fn notify_roots_changed(&self) -> Result<(), McpError> {
         self.pool.notify_roots_changed().await
@@ -395,6 +401,7 @@ mod tests {
         let servers = BTreeMap::from([(
             "lifecycle".to_string(),
             McpServerConfig {
+                diagnostics: Default::default(),
                 data_limits: Default::default(),
                 startup_timeout_ms: 5_000,
                 call_policy: crate::McpCallPolicy {

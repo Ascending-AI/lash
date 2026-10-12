@@ -14,13 +14,14 @@ use std::time::Duration;
 use lash_sansio::sync::{MutexExt, RwLockExt};
 use rmcp::service::QuitReason;
 use tokio::sync::{mpsc, oneshot, watch};
-use tokio::time::{Instant, timeout};
+use tokio::time::{Instant, timeout, timeout_at};
 
 use super::admission;
 use super::{
     McpEntry, McpServerFault, McpServerHealth, McpToolListRefresh, PublishedService, import_tools,
 };
 use crate::config::McpShutdownPolicy;
+use crate::diagnostics::StartupDiagnostics;
 use crate::error::McpError;
 use crate::service_lifecycle::{ConnectingService, StdioChildGuard, connect_service};
 use crate::stdio_transport::StdioCloseCause;
@@ -190,6 +191,17 @@ fn quit_cause(
 }
 
 impl Connection {
+    async fn cancel_failed_startup(
+        mut self,
+        actor: &mut LifecycleActor,
+        server_name: &str,
+    ) -> bool {
+        if let Some(child) = self.child.as_mut() {
+            child.observe_startup_failure();
+        }
+        self.cancel_and_reap(actor, server_name).await
+    }
+
     // Cooperative terminal paths consume this owner and await cleanup. If the
     // actor itself is aborted, dropping the child guard retains the pool's
     // documented forced-abandonment kill-and-log fallback.
@@ -437,6 +449,7 @@ impl LifecycleActor {
         let host_services = entry.host_services.clone();
         let shutdown_requested = Arc::clone(&entry.health);
         let startup_timeout = config.startup_timeout();
+        let diagnostics = StartupDiagnostics::new(&config);
         let refresh = Arc::new(McpToolListRefresh {
             entry: Arc::downgrade(&entry),
             service_generation: generation,
@@ -454,6 +467,7 @@ impl LifecycleActor {
         } = match connect_service(
             &server_name,
             &config,
+            diagnostics.clone(),
             host_services,
             refresh,
             Arc::clone(&self.active_pid),
@@ -463,7 +477,7 @@ impl LifecycleActor {
             Err(error) => {
                 self.active_pid.store(0, Ordering::SeqCst);
                 self.record_mcp_error(&error);
-                send_result(initial_reply, Err(error));
+                self.report_startup_failure(initial_reply, error, &diagnostics);
                 return ConnectionExit::Failed;
             }
         };
@@ -479,7 +493,9 @@ impl LifecycleActor {
                 .send(crate::service_lifecycle::LifecycleEvent::Spawned { pid: child.pid() });
             child.observe(observer);
         }
-        let mut connection_attempt = Box::pin(timeout(startup_timeout, handshake));
+        let deadline = Instant::now() + startup_timeout;
+        diagnostics.observation.lock_recover().deadline = deadline;
+        let mut connection_attempt = Box::pin(timeout_at(deadline, handshake));
         let connected = loop {
             tokio::select! {
                 result = &mut connection_attempt => break result,
@@ -508,9 +524,12 @@ impl LifecycleActor {
         let running = match connected {
             Ok(Ok(running)) => running,
             Ok(Err(error)) => {
+                if let Some(child) = stdio_child.as_mut() {
+                    child.observe_startup_failure();
+                }
                 self.record_mcp_error(&error);
                 self.reap_child(stdio_child.take()).await;
-                send_result(initial_reply, Err(error));
+                self.report_startup_failure(initial_reply, error, &diagnostics);
                 return ConnectionExit::Failed;
             }
             Err(_) => {
@@ -518,10 +537,14 @@ impl LifecycleActor {
                 let error = McpError::StartupTimeout {
                     server: server_name.clone(),
                     timeout_ms: startup_timeout.as_millis() as u64,
+                    observation: diagnostics.snapshot(),
                 };
+                if let Some(child) = stdio_child.as_mut() {
+                    child.observe_startup_failure();
+                }
                 self.record_mcp_error(&error);
                 self.reap_child(stdio_child.take()).await;
-                send_result(initial_reply, Err(error));
+                self.report_startup_failure(initial_reply, error, &diagnostics);
                 return ConnectionExit::Failed;
             }
         };
@@ -541,8 +564,10 @@ impl LifecycleActor {
             return ConnectionExit::Shutdown;
         }
 
-        let discovery = timeout(
-            startup_timeout,
+        let deadline = Instant::now() + startup_timeout;
+        diagnostics.observation.lock_recover().deadline = deadline;
+        let discovery = timeout_at(
+            deadline,
             super::catalog::discover_tools(&peer, self.data_limits),
         );
         tokio::pin!(discovery);
@@ -555,26 +580,27 @@ impl LifecycleActor {
                         Ok(Err(error)) => {
                             let error = McpError::Protocol(format!("list_tools failed: {error}"));
                             self.record_mcp_error(&error);
-                            let shutdown = connection.cancel_and_reap(self, &server_name).await;
+                            let shutdown = connection.cancel_failed_startup(self, &server_name).await;
                             if shutdown {
                                 send_shutdown(initial_reply);
                                 return ConnectionExit::Shutdown;
                             }
-                            send_result(initial_reply, Err(error));
+                            self.report_startup_failure(initial_reply, error, &diagnostics);
                             return ConnectionExit::Failed;
                         }
                         Err(_) => {
                             let error = McpError::StartupTimeout {
                                 server: server_name.clone(),
                                 timeout_ms: startup_timeout.as_millis() as u64,
+                                observation: diagnostics.snapshot(),
                             };
                             self.record_mcp_error(&error);
-                            let shutdown = connection.cancel_and_reap(self, &server_name).await;
+                            let shutdown = connection.cancel_failed_startup(self, &server_name).await;
                             if shutdown {
                                 send_shutdown(initial_reply);
                                 return ConnectionExit::Shutdown;
                             }
-                            send_result(initial_reply, Err(error));
+                            self.report_startup_failure(initial_reply, error, &diagnostics);
                             return ConnectionExit::Failed;
                         }
                     }
@@ -582,12 +608,12 @@ impl LifecycleActor {
                 reason = &mut connection.waiting => {
                     let cause = quit_cause(&connection, &server_name, " during discovery", &reason);
                     self.record_error(cause.clone());
-                    let shutdown = connection.cancel_and_reap(self, &server_name).await;
+                    let shutdown = connection.cancel_failed_startup(self, &server_name).await;
                     if shutdown {
                         send_shutdown(initial_reply);
                         return ConnectionExit::Shutdown;
                     }
-                    send_result(initial_reply, Err(McpError::Protocol(cause)));
+                    self.report_startup_failure(initial_reply, McpError::Protocol(cause), &diagnostics);
                     return ConnectionExit::Failed;
                 }
                 command = self.commands.recv() => match Self::reduce_command(
@@ -619,30 +645,31 @@ impl LifecycleActor {
             Ok(imported) => imported,
             Err(error) => {
                 self.record_mcp_error(&error);
-                let shutdown = connection.cancel_and_reap(self, &server_name).await;
+                let shutdown = connection.cancel_failed_startup(self, &server_name).await;
                 if shutdown {
                     send_shutdown(initial_reply);
                     return ConnectionExit::Shutdown;
                 }
-                send_result(initial_reply, Err(error));
+                self.report_startup_failure(initial_reply, error, &diagnostics);
                 return ConnectionExit::Failed;
             }
         };
         let Some(entry) = self.entry.upgrade() else {
-            let _ = connection.cancel_and_reap(self, &server_name).await;
+            let _ = connection.cancel_failed_startup(self, &server_name).await;
             return ConnectionExit::Shutdown;
         };
         if let Err(error) = entry.replace_imported_tools(imported) {
             drop(entry);
             self.record_mcp_error(&error);
-            let shutdown = connection.cancel_and_reap(self, &server_name).await;
+            let shutdown = connection.cancel_failed_startup(self, &server_name).await;
             if shutdown {
                 send_shutdown(initial_reply);
                 return ConnectionExit::Shutdown;
             }
-            send_result(initial_reply, Err(error));
+            self.report_startup_failure(initial_reply, error, &diagnostics);
             return ConnectionExit::Failed;
         }
+        *entry.startup_failure.write_recover() = None;
         entry.consecutive_timeouts.store(0, Ordering::SeqCst);
         self.set_health(McpServerHealth::Connected {
             catalog_error: None,
@@ -1034,6 +1061,22 @@ impl LifecycleActor {
         });
     }
 
+    fn report_startup_failure(
+        &self,
+        reply: Option<oneshot::Sender<Result<(), McpError>>>,
+        error: McpError,
+        diagnostics: &StartupDiagnostics,
+    ) {
+        let observation = diagnostics.snapshot();
+        if let Some(entry) = self.entry.upgrade() {
+            *entry.startup_failure.write_recover() = Some(crate::error::McpStartupFailure {
+                message: error.to_string(),
+                observation: (*observation).clone(),
+            });
+        }
+        send_result(reply, Err(error.with_startup_observation(observation)));
+    }
+
     fn record_mcp_error(&self, error: &McpError) {
         let fault = match error {
             McpError::UnusableSchema(source) => {
@@ -1045,6 +1088,7 @@ impl LifecycleActor {
             | McpError::Json(_)
             | McpError::Protocol(_)
             | McpError::StartupTimeout { .. }
+            | McpError::StartupFailure { .. }
             | McpError::Reconfigure(_) => McpServerFault::Connection(error.to_string()),
         };
         self.record_fault(fault);
@@ -1269,6 +1313,145 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+
+    async fn startup_failure(
+        script: &str,
+        stderr_bytes: usize,
+        invalid_line_bytes: usize,
+    ) -> crate::error::McpStartupFailure {
+        let mut authored = serde_json::json!({
+            "transport": "stdio", "command": "sh", "args": ["-c", script],
+            "startup_timeout_ms": 250,
+            "reconnect_max_attempts": "disabled",
+            "graceful_period_ms": 50, "post_kill_wait_ms": 50,
+            "diagnostics": { "stderr_bytes": stderr_bytes, "invalid_line_bytes": invalid_line_bytes }
+        });
+        if stderr_bytes == 0 && invalid_line_bytes == 0 {
+            authored
+                .as_object_mut()
+                .expect("config object")
+                .remove("diagnostics");
+        }
+        let config = serde_json::from_value(authored).expect("server configuration");
+        let pool = crate::pool::McpConnectionPool::connect(std::collections::BTreeMap::from([(
+            "broken".into(),
+            config,
+        )]))
+        .await
+        .expect("outages retain the configured server");
+        let failure = pool
+            .startup_failure("broken")
+            .expect("host receives typed startup failure");
+        pool.shutdown_all().await;
+        failure
+    }
+
+    /// MCP-STARTUP-FAILURE-CARRIES-EXIT
+    #[tokio::test]
+    async fn startup_failure_carries_exit() {
+        use crate::error::{McpDiagnosticContent, McpExitObservation, McpPeer};
+        for limit in [8, 0] {
+            let script = if limit == 0 {
+                "read -r _; printf 'startup failed' >&2; exit 3"
+            } else {
+                // More than a pipe buffer proves the ring keeps draining.
+                "read -r _; head -c 131072 /dev/zero >&2; printf 'startup failed' >&2; exit 3"
+            };
+            let error = startup_failure(script, limit, 0).await;
+            let observation = &error.observation;
+            assert_eq!(
+                observation.peer,
+                McpPeer::Stdio {
+                    command: "sh".into()
+                }
+            );
+            assert_eq!(observation.timeout_ms, 250);
+            assert!(observation.deadline <= Instant::now() + Duration::from_millis(250));
+            assert!(
+                matches!(
+                    observation.exit,
+                    McpExitObservation::BeforeFailure {
+                        code: Some(3),
+                        signal: None
+                    } | McpExitObservation::DuringCleanup {
+                        code: Some(3),
+                        signal: None,
+                        forced: false
+                    }
+                ),
+                "exit 3 must survive cleanup: {observation:?}"
+            );
+            if limit == 0 {
+                assert_eq!(observation.stderr, McpDiagnosticContent::Omitted);
+            } else {
+                assert_eq!(
+                    observation.stderr,
+                    McpDiagnosticContent::Captured {
+                        bytes: b"p failed".to_vec(),
+                        truncated: true,
+                        complete: true,
+                    }
+                );
+            }
+        }
+    }
+
+    /// MCP-INVALID-LINE-CAUSE-RETAINED
+    #[tokio::test]
+    async fn invalid_line_cause_retained() {
+        use crate::error::{McpDecodeCause, McpDiagnosticContent, McpExitObservation};
+        for limit in [4, 0] {
+            // A valid notification after the malformed line must not erase
+            // the decode observation or change recoverable parse behavior.
+            let error = startup_failure(
+                "read -r _; printf 'not json rpc\\n{\"jsonrpc\":\"2.0\",\"method\":\"notifications/vendor\"}\\n'; cat >/dev/null",
+                0, limit,
+            ).await;
+            assert!(
+                error.message.contains("timed out"),
+                "parse errors remain recoverable: {error:?}"
+            );
+            let observation = &error.observation;
+            let line = observation
+                .invalid_line
+                .as_ref()
+                .expect("invalid line retained");
+            assert_eq!(
+                line.cause,
+                McpDecodeCause::Json {
+                    category: serde_json::error::Category::Syntax,
+                    line: 1,
+                    column: 2,
+                }
+            );
+            assert_eq!(
+                line.prefix,
+                if limit == 0 {
+                    McpDiagnosticContent::Omitted
+                } else {
+                    McpDiagnosticContent::Captured {
+                        bytes: b"not ".to_vec(),
+                        truncated: true,
+                        complete: true,
+                    }
+                }
+            );
+            assert!(
+                matches!(observation.exit, McpExitObservation::DuringCleanup { .. }),
+                "the still-running peer's cleanup exit is not a startup exit: {observation:?}"
+            );
+        }
+        let error = startup_failure(
+            "read -r _; trap '' TERM; printf 'bad\\n'; while :; do read -r _; done",
+            0,
+            3,
+        )
+        .await;
+        assert!(matches!(
+            error.observation.exit,
+            McpExitObservation::DuringCleanup { forced: true, .. }
+        ));
+    }
 
     #[tokio::test]
     async fn completed_http_wait_still_shuts_down_host_tasks_without_repoll() {

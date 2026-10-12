@@ -203,6 +203,7 @@ struct McpEntry {
     /// suffixes on cleanup/truncation collision groups.
     imported_tools: RwLock<BTreeMap<String, ImportedTool>>,
     health: Arc<RwLock<McpServerHealth>>,
+    startup_failure: RwLock<Option<crate::error::McpStartupFailure>>,
     /// Kept as a seam so pacing tests can observe ceilings without wall-clock sleeps.
     reconnect_jitter: RwLock<Arc<dyn Fn(Duration) -> Duration + Send + Sync>>,
     /// Consecutive idle timeouts since the last successful tool call. Both
@@ -508,6 +509,16 @@ impl McpConnectionPool {
                 tool_count: entry.imported_tools.read_recover().len(),
             })
             .collect()
+    }
+
+    /// Evidence of this server's last failed startup, retained after cleanup.
+    /// A successful connection clears it. Content follows the server's opt-in
+    /// diagnostics policy; status display strings never include that content.
+    pub fn startup_failure(&self, server_name: &str) -> Option<crate::error::McpStartupFailure> {
+        self.entries
+            .read_recover()
+            .get(server_name)
+            .and_then(|entry| entry.startup_failure.read_recover().clone())
     }
 
     /// Notify every connected server that the host's roots may have changed.
@@ -853,6 +864,7 @@ impl McpEntry {
                 active_pid,
                 imported_tools: RwLock::new(BTreeMap::new()),
                 health: Arc::new(RwLock::new(McpServerHealth::Connecting)),
+                startup_failure: RwLock::new(None),
                 reconnect_jitter: RwLock::new(Arc::new(equal_jitter)),
                 consecutive_timeouts: AtomicU64::new(0),
                 ping_degrade_warned: AtomicBool::new(false),

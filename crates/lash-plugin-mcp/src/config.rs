@@ -417,12 +417,26 @@ fn is_standard_data_limits(limits: &McpDataLimits) -> bool {
     *limits == McpDataLimits::standard()
 }
 
+/// Opt-in raw startup evidence. Zero omits content; the host owns what it
+/// enables and any handling of secrets. Stderr retains the newest bytes in a
+/// continuously drained ring; invalid lines retain their leading bytes.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct McpDiagnosticsPolicy {
+    pub stderr_bytes: usize,
+    pub invalid_line_bytes: usize,
+}
+fn diagnostics_off(policy: &McpDiagnosticsPolicy) -> bool {
+    *policy == McpDiagnosticsPolicy::default()
+}
+
 /// Connection configuration for one MCP server. Shared policy fields live on
 /// the struct once; `transport` carries the `transport` tag plus the fields
-/// that transport understands. The serialized shape is unchanged: every field
-/// still sits flat at the server level.
+/// that transport understands. Diagnostics are an opt-in nested policy.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpServerConfig {
+    #[serde(default, skip_serializing_if = "diagnostics_off")]
+    pub diagnostics: McpDiagnosticsPolicy,
     #[serde(default, skip_serializing_if = "is_standard_data_limits")]
     pub data_limits: McpDataLimits,
     #[serde(
@@ -538,6 +552,7 @@ impl McpServerConfig {
     /// measurements establishing a universal choice. All fields are mutable.
     pub fn standard(transport: McpTransport) -> Self {
         Self {
+            diagnostics: McpDiagnosticsPolicy::default(),
             data_limits: McpDataLimits::standard(),
             startup_timeout_ms: default_startup_timeout_ms(),
             call_policy: McpCallPolicy::default(),

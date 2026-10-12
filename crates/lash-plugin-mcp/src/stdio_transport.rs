@@ -77,6 +77,7 @@ pub(crate) struct ManagedChildTransport<R: AsyncRead, W: AsyncWrite> {
     reader: LineReader<R>,
     writer: Arc<Mutex<Option<TransportWriter<RoleClient, W>>>>,
     close_cause: StdioCloseCause,
+    diagnostics: Option<crate::diagnostics::StartupDiagnostics>,
 }
 
 impl<R, W> ManagedChildTransport<R, W>
@@ -101,7 +102,15 @@ where
                 JsonRpcMessageCodec::default(),
             )))),
             close_cause,
+            diagnostics: None,
         }
+    }
+    pub(crate) fn with_diagnostics(
+        mut self,
+        diagnostics: crate::diagnostics::StartupDiagnostics,
+    ) -> Self {
+        self.diagnostics = Some(diagnostics);
+        self
     }
 }
 
@@ -154,8 +163,42 @@ where
             }
             // Reuse the SDK's BOM, CRLF and notification compatibility rules.
             // Decode only complete lines, including an unterminated EOF line.
+            // The SDK may consume the buffer even on a decode error.
+            let prefix = self.diagnostics.as_ref().map(|diagnostics| {
+                let limit = diagnostics.policy.invalid_line_bytes;
+                if limit == 0 {
+                    crate::error::McpDiagnosticContent::Omitted
+                } else {
+                    crate::error::McpDiagnosticContent::Captured {
+                        bytes: self.reader.line[..self.reader.line.len().min(limit)].to_vec(),
+                        truncated: self.reader.line.len() > limit,
+                        complete: true,
+                    }
+                }
+            });
             let parsed = JsonRpcMessageCodec::default().decode_eof(&mut self.reader.line);
             self.reader.line.clear();
+            let parsed = parsed.inspect_err(|error| {
+                if let (Some(diagnostics), Some(prefix)) = (&self.diagnostics, prefix) {
+                    use crate::error::McpDecodeCause;
+                    let cause = match error {
+                        JsonRpcMessageCodecError::Serde(error) => McpDecodeCause::Json {
+                            category: error.classify(),
+                            line: error.line(),
+                            column: error.column(),
+                        },
+                        JsonRpcMessageCodecError::Io(error) => {
+                            McpDecodeCause::Io { kind: error.kind() }
+                        }
+                        JsonRpcMessageCodecError::MaxLineLengthExceeded => {
+                            McpDecodeCause::LineTooLong
+                        }
+                        _ => McpDecodeCause::Other,
+                    };
+                    diagnostics.observation.lock_recover().invalid_line =
+                        Some(crate::error::McpInvalidLine { cause, prefix });
+                }
+            });
             match parsed {
                 Ok(Some(message)) => return Some(message),
                 Ok(None) => continue,

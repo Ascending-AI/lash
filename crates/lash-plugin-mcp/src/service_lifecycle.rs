@@ -16,7 +16,8 @@ use rmcp::transport::streamable_http_client::{
 use tokio::time::Instant;
 
 use crate::config::{McpServerConfig, McpStdioTransport, McpTransport};
-use crate::error::McpError;
+use crate::diagnostics::{StartupDiagnostics, StderrCapture};
+use crate::error::{McpError, McpExitObservation};
 use crate::host::{LashMcpClientHandler, McpHostServices, McpToolListChangedHandler};
 use crate::stdio_transport::{ManagedChildTransport, StdioCloseCause, stdio_close_cause};
 
@@ -39,6 +40,7 @@ pub(crate) struct ConnectingService {
 pub(crate) fn connect_service(
     server_name: &str,
     config: &McpServerConfig,
+    diagnostics: StartupDiagnostics,
     host_services: McpHostServices,
     tool_list_changed: Arc<dyn McpToolListChangedHandler>,
     active_pid: Arc<AtomicU32>,
@@ -50,10 +52,26 @@ pub(crate) fn connect_service(
     match &config.transport {
         McpTransport::Stdio(transport) => {
             let command = &transport.command;
-            let child = spawn_stdio_server(server_name, transport)?;
+            let child =
+                spawn_stdio_server(server_name, transport, config.diagnostics.stderr_bytes > 0)?;
             // Preparation errors are returned by the handshake future so the actor first takes
             // ownership of the exact child handle and can always reap it.
             let mut stdio_child = StdioChildGuard::new(server_name, child, shutdown_requested);
+            stdio_child.diagnostics = Some(diagnostics.clone());
+            diagnostics.observation.lock_recover().exit = McpExitObservation::NotObserved;
+            let capture = stdio_child
+                .child
+                .stderr
+                .take()
+                .map(|stderr| StderrCapture::start(stderr, diagnostics.clone()))
+                .transpose();
+            let capture_error = match capture {
+                Ok(capture) => {
+                    stdio_child.stderr_capture = capture;
+                    None
+                }
+                Err(error) => Some(McpError::Io(error)),
+            };
             active_pid.store(stdio_child.pid(), Ordering::SeqCst);
             let stdio_close_cause = stdio_close_cause();
             let io = match (
@@ -65,7 +83,8 @@ pub(crate) fn connect_service(
                     tokio::fs::File::from_std(child_stdin_file(stdin)),
                     stdio_close_cause.clone(),
                     config.data_limits.stdio_message_bytes,
-                )),
+                )
+                .with_diagnostics(diagnostics)),
                 (None, _) => Err(McpError::Protocol(format!(
                     "failed to capture stdout for `{command}` MCP server `{server_name}`"
                 ))),
@@ -76,6 +95,9 @@ pub(crate) fn connect_service(
             let server_name = server_name.to_string();
             let handshake_cause = stdio_close_cause.clone();
             let handshake = Box::pin(async move {
+                if let Some(error) = capture_error {
+                    return Err(error);
+                }
                 let transport = io?;
                 client_handler.serve(transport).await.map_err(|err| {
                     let detail = handshake_cause
@@ -127,6 +149,7 @@ pub(crate) fn connect_service(
 fn spawn_stdio_server(
     server_name: &str,
     transport: &McpStdioTransport,
+    capture_stderr: bool,
 ) -> Result<std::process::Child, McpError> {
     let command = &transport.command;
     let mut cmd = std::process::Command::new(command);
@@ -138,6 +161,9 @@ fn spawn_stdio_server(
         cmd.env(key, value);
     }
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
+    if capture_stderr {
+        cmd.stderr(Stdio::piped());
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -380,6 +406,10 @@ pub(crate) struct StdioChildGuard {
     pid: u32,
     child: std::process::Child,
     reaped: bool,
+    diagnostics: Option<StartupDiagnostics>,
+    stderr_capture: Option<StderrCapture>,
+    cleanup_started: bool,
+    forced: bool,
     explicit_abandonment: bool,
     shutdown_requested: Arc<RwLock<McpServerHealth>>,
     #[cfg(test)]
@@ -399,6 +429,10 @@ impl StdioChildGuard {
             pid: child.id(),
             child,
             reaped: false,
+            diagnostics: None,
+            stderr_capture: None,
+            cleanup_started: false,
+            forced: false,
             explicit_abandonment: false,
             shutdown_requested,
             #[cfg(test)]
@@ -414,7 +448,31 @@ impl StdioChildGuard {
         post_kill_wait: Duration,
         child_exit_poll_interval: Duration,
     ) -> std::io::Result<()> {
+        let deadline =
+            Instant::now() + graceful_period.saturating_add(post_kill_wait.saturating_mul(2));
+        let result = self
+            .reap_inner(graceful_period, post_kill_wait, child_exit_poll_interval)
+            .await;
+        if let Some(capture) = self.stderr_capture.as_mut() {
+            capture
+                .finish(
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(post_kill_wait),
+                )
+                .await;
+        }
+        result
+    }
+
+    async fn reap_inner(
+        &mut self,
+        graceful_period: Duration,
+        post_kill_wait: Duration,
+        child_exit_poll_interval: Duration,
+    ) -> std::io::Result<()> {
         self.explicit_abandonment = true;
+        self.cleanup_started = true;
         let mut exits = ChildExits::subscribe();
         let deadline = Instant::now() + graceful_period;
         #[cfg(test)]
@@ -431,6 +489,7 @@ impl StdioChildGuard {
 
         // A well-behaved server exits on SIGTERM; the same bound then separates
         // the terminate request from the kill it precedes.
+        self.forced = true;
         let term_error = self.terminate().err();
         let term_deadline = Instant::now() + post_kill_wait;
         #[cfg(test)]
@@ -546,7 +605,43 @@ impl StdioChildGuard {
         if self.never_finish_reap {
             return Ok(None);
         }
-        self.child.try_wait()
+        let result = self.child.try_wait();
+        if let Some(diagnostics) = &self.diagnostics {
+            let mut observation = diagnostics.observation.lock_recover();
+            if !matches!(observation.exit, McpExitObservation::BeforeFailure { .. }) {
+                observation.exit = match &result {
+                    Ok(Some(status)) => {
+                        #[cfg(unix)]
+                        let signal = {
+                            use std::os::unix::process::ExitStatusExt;
+                            status.signal()
+                        };
+                        #[cfg(not(unix))]
+                        let signal = None;
+                        if self.cleanup_started {
+                            McpExitObservation::DuringCleanup {
+                                code: status.code(),
+                                signal,
+                                forced: self.forced,
+                            }
+                        } else {
+                            McpExitObservation::BeforeFailure {
+                                code: status.code(),
+                                signal,
+                            }
+                        }
+                    }
+                    Ok(None) => McpExitObservation::NotObserved,
+                    Err(error) => McpExitObservation::ObservationFailed { kind: error.kind() },
+                };
+            }
+        }
+        result
+    }
+
+    pub(crate) fn observe_startup_failure(&mut self) {
+        let _ = self.try_wait();
+        self.cleanup_started = true;
     }
 
     #[cfg(test)]
@@ -621,7 +716,7 @@ mod tests {
             grandchild_pidfile.display()
         );
         let transport = McpStdioTransport::new("sh", vec!["-c".to_string(), script]);
-        let child = spawn_stdio_server("fixture", &transport).expect("spawn fixture server");
+        let child = spawn_stdio_server("fixture", &transport, false).expect("spawn fixture server");
         let mut guard = StdioChildGuard::new(
             "fixture",
             child,
@@ -686,7 +781,7 @@ mod tests {
             tokio::time::pause();
             let transport =
                 McpStdioTransport::new("sh", vec!["-c".to_string(), "read value".to_string()]);
-            let child = spawn_stdio_server("fixture", &transport).expect("spawn");
+            let child = spawn_stdio_server("fixture", &transport, false).expect("spawn");
             let mut guard = StdioChildGuard::new(
                 "fixture",
                 child,

@@ -13,6 +13,16 @@
 //! Stdio receives retain partial lines across cancellation by the SDK service
 //! loop. Framing and message compatibility use the SDK codec.
 //!
+//! Startup failures retain typed peer, runtime-clock deadline, exit and decode
+//! observations through cleanup (`McpError::startup_observation`). The pool and
+//! plugin expose the last startup failure through `startup_failure(server)`,
+//! including when construction succeeds with an unavailable server. Raw content
+//! is off by default. Hosts can opt into bounded stderr tails and invalid-line
+//! prefixes with `diagnostics: { stderr_bytes, invalid_line_bytes }` on the
+//! server configuration. The host owns the content it enables; Lash does not
+//! redact it. Exit evidence distinguishes observations made before failure
+//! from exits during cleanup, including forced termination.
+//!
 //! Implementation note: the wire-level client is provided by the official
 //! [`rmcp`] SDK. The plugin owns a single connection pool (`McpConnectionPool`)
 //! that is shared across every session built from the same `LashCore`, so
@@ -51,6 +61,7 @@
 
 mod call_failure;
 pub mod config;
+mod diagnostics;
 pub mod error;
 pub mod host;
 pub mod naming;
@@ -60,10 +71,14 @@ mod service_lifecycle;
 mod stdio_transport;
 
 pub use config::{
-    McpCallPolicy, McpDataLimits, McpServerConfig, McpShutdownPolicy, McpStdioTransport,
-    McpStreamableHttpTransport, McpTransport, ReconnectAttempts, TimeoutDisconnectPolicy,
+    McpCallPolicy, McpDataLimits, McpDiagnosticsPolicy, McpServerConfig, McpShutdownPolicy,
+    McpStdioTransport, McpStreamableHttpTransport, McpTransport, ReconnectAttempts,
+    TimeoutDisconnectPolicy,
 };
-pub use error::McpError;
+pub use error::{
+    McpDecodeCause, McpDiagnosticContent, McpError, McpExitObservation, McpInvalidLine, McpPeer,
+    McpStartupFailure, McpStartupObservation,
+};
 pub use host::{
     MCP_PROTOCOL_VERSION, McpElicitationHandler, McpElicitationRequest,
     McpElicitationValidationError, McpNotificationContext, McpRequestContext, McpRootsProvider,
