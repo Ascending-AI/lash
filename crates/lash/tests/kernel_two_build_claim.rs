@@ -323,6 +323,42 @@ async fn in_state(
     panic!("the process did not become {state:?} within half a minute: {last:?}")
 }
 
+/// The actor row of `session` once the cell of its open turn has parked:
+/// the cell's snapshot is committed. The session's revision standing still
+/// says nothing of a park: the turn holds the model response that asked for
+/// the cell until the cell's first save (FIG-6000), so a cell that is still
+/// lowering has committed nothing since the model call started.
+async fn parked_cell(
+    backend: &lash::Backend,
+    session: &str,
+) -> lash_core::durable_port::ActorSnapshot {
+    let id = lash::SessionId::parse(session).expect("a session id");
+    let actor = ActorKey::session(session).expect("a session actor key");
+    let reads = backend.durable();
+    let mut last = None;
+    for _ in 0..3000 {
+        last = reads.turn(&id).await.expect("the turn row is read");
+        if let Some(turn) = &last
+            && !reads
+                .cell_roots(&id, &turn.run)
+                .await
+                .expect("the cell roots are read")
+                .is_empty()
+        {
+            return reads
+                .actor(&actor)
+                .await
+                .expect("the actor row is read")
+                .expect("the session has its actor");
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!(
+        "the cell did not park within half a minute: {last:?}, {:?}",
+        reads.actor(&actor).await
+    )
+}
+
 /// What `lashctl kernel-migration list` prints for `backend`.
 async fn survey(backend: &lash::Backend) -> serde_json::Value {
     let functions = lash::vm::standard_functions().expect("the shipped library assembles");
@@ -549,7 +585,6 @@ async fn a_session_cell_parked_by_build_n_is_claimed_migrated_and_resumed_by_bui
     let written = build_n
         .spawn({
             let stores = Arc::clone(&stores);
-            let actor = actor.clone();
             async move {
                 let (old_backend, old) = serving(
                     &stores,
@@ -573,28 +608,8 @@ async fn a_session_cell_parked_by_build_n_is_claimed_migrated_and_resumed_by_bui
                         .output()
                         .await;
                 });
-                // The cell parks in its sleep: its snapshot is the
-                // session's last commit until the sleep is over.
-                let row = || async {
-                    old_backend
-                        .durable()
-                        .actor(&actor)
-                        .await
-                        .expect("the actor row is read")
-                        .expect("the session has its actor")
-                };
-                let mut parked = row().await;
-                let mut still = 0;
-                while still < 100 {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                    let now = row().await;
-                    still = if now.revision == parked.revision && now.state == ActorState::Owned {
-                        still + 1
-                    } else {
-                        0
-                    };
-                    parked = now;
-                }
+                // The cell parks in its sleep.
+                let parked = parked_cell(&old_backend, SESSION).await;
                 // The core is kept from its drop, which would let the
                 // session go in order.
                 std::mem::forget(old);
@@ -1165,7 +1180,6 @@ async fn a_session_cell_parked_under_the_earlier_helpers_resumes_on_the_build_th
             .await
             .expect("an in-memory store set opens"),
     );
-    let actor = ActorKey::session(SESSION).expect("a session actor key");
     // Build N runs on a runtime of its own, which the law shuts down under
     // it: a node lets go of a turn whose cell sleeps only by dying.
     let build_n = tokio::runtime::Builder::new_multi_thread()
@@ -1176,7 +1190,6 @@ async fn a_session_cell_parked_under_the_earlier_helpers_resumes_on_the_build_th
     let written = build_n
         .spawn({
             let stores = Arc::clone(&stores);
-            let actor = actor.clone();
             async move {
                 let (old_backend, old) = serving(
                     &stores,
@@ -1191,31 +1204,8 @@ async fn a_session_cell_parked_under_the_earlier_helpers_resumes_on_the_build_th
                         .output()
                         .await;
                 });
-                let row = || async {
-                    loop {
-                        if let Some(row) = old_backend
-                            .durable()
-                            .actor(&actor)
-                            .await
-                            .expect("the actor row is read")
-                        {
-                            return row;
-                        }
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                    }
-                };
-                let mut parked = row().await;
-                let mut still = 0;
-                while still < 100 {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                    let now = row().await;
-                    still = if now.revision == parked.revision && now.state == ActorState::Owned {
-                        still + 1
-                    } else {
-                        0
-                    };
-                    parked = now;
-                }
+                // The cell parks in its sleep, after its `forEach`.
+                let parked = parked_cell(&old_backend, SESSION).await;
                 std::mem::forget(old);
                 parked.formats
             }
