@@ -3564,7 +3564,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5310: the macros were deleted with the shift (0cc1b81d98, FIG-5196). Their protocol-neutral laws run on the production session activation in crates/lash-durable-test/tests/pressure_frame_crash_proof.rs: an overflow-recovery pressure frame opens once, cut at every label on every tier, and the turn runs in it. FIG-5355 opens the frame as the session actor's own pressure.frame commit and adds the RLM legs beside them: an_rlm_pressure_frame_restarts_the_session_s_globals_from_its_seed (execution state restarts from the seed) and an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_{sqlite_memory,sqlite_file,postgres} (pressure then continue_as commits both frames once)"
+note = "FIG-5310: the macros were deleted with the shift (0cc1b81d98, FIG-5196). Their protocol-neutral laws run on the production session activation in crates/lash-durable-test/tests/pressure_frame_crash_proof.rs: an overflow-recovery pressure frame opens once, cut at every label on every tier, and the turn runs in it. FIG-5355 opens the frame as the session actor's own pressure.frame commit and adds the RLM legs beside them: an_rlm_pressure_frame_restarts_the_session_s_globals_from_its_seed (execution state restarts from the seed) and an_rlm_pressure_frame_then_continue_as_{killed,with_a_write_lost}_at_every_label_commits_both_frames_once_on_{sqlite_memory,sqlite_file,postgres} (pressure then continue_as commits both frames once; FIG-6040 splits its matrix between node kills and lost writes)"
 
 [[row]]
 path = "crates/lash-protocol-rlm/tests/protocol_drivers/budget_warning_runbook.rs"

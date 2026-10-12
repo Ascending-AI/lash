@@ -50,7 +50,9 @@
 //!   frame. Cut at every label, the session commits both frames,
 //!   in order, each once: the summary seeds the second frame, one
 //!   `pressure.frame` commit landed, and the follow-on never compacts again
-//!   on the switching turn's usage.
+//!   on the switching turn's usage. Each tier proves it in two laws, one
+//!   whose node is killed at the cut and one whose write is lost there, so
+//!   neither law holds a test action for the whole matrix.
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -855,16 +857,26 @@ fn uncut_labels(script: Script) -> Vec<CommitLabel> {
     }
 }
 
-/// `script` cut at every label of its uncut run on `dialect`.
-async fn prove(script: Script, dialect: Dialect, postgres_url: Option<String>) {
+/// Every fault the matrices cut under.
+const EVERY_FAULT: [Fault; 5] = [
+    Fault::FailBefore,
+    Fault::AckHidden,
+    Fault::Zombie,
+    Fault::Abort,
+    Fault::CommitThenAbort,
+];
+
+/// The faults that kill the cut write's node.
+const KILLS: [Fault; 2] = [Fault::Abort, Fault::CommitThenAbort];
+
+/// The faults that lose the cut write while its node lives on.
+const LOSSES: [Fault; 3] = [Fault::FailBefore, Fault::AckHidden, Fault::Zombie];
+
+/// `script` cut at every label of its uncut run on `dialect`, under
+/// `faults`.
+async fn prove(script: Script, dialect: Dialect, postgres_url: Option<String>, faults: &[Fault]) {
     let report = Matrix::new()
-        .faults(&[
-            Fault::FailBefore,
-            Fault::AckHidden,
-            Fault::Zombie,
-            Fault::Abort,
-            Fault::CommitThenAbort,
-        ])
+        .faults(faults)
         .horizon(Duration::from_secs(600))
         .run_test(|| PressureFrame::of(script, dialect, postgres_url.clone()))
         .await;
@@ -891,13 +903,7 @@ async fn prove(script: Script, dialect: Dialect, postgres_url: Option<String>) {
 async fn prove_resend(dialect: Dialect, postgres_url: Option<String>) {
     let first = Arc::new(std::sync::OnceLock::new());
     let report = Matrix::new()
-        .faults(&[
-            Fault::FailBefore,
-            Fault::AckHidden,
-            Fault::Zombie,
-            Fault::Abort,
-            Fault::CommitThenAbort,
-        ])
+        .faults(&EVERY_FAULT)
         .labels(&[CommitLabel::COMPLETION_START])
         .horizon(Duration::from_secs(600))
         .run_test(|| {
@@ -942,13 +948,13 @@ async fn a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on
 /// and the turn runs in it.
 #[tokio::test]
 async fn a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_memory() {
-    prove(Script::Overflow, Dialect::SqliteMemory, None).await;
+    prove(Script::Overflow, Dialect::SqliteMemory, None, &EVERY_FAULT).await;
 }
 
 /// On a SQLite file.
 #[tokio::test]
 async fn a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_file() {
-    prove(Script::Overflow, Dialect::SqliteFile, None).await;
+    prove(Script::Overflow, Dialect::SqliteFile, None, &EVERY_FAULT).await;
 }
 
 /// On PostgreSQL.
@@ -958,7 +964,7 @@ async fn a_pressure_frame_killed_at_every_label_opens_once_on_postgres() {
         eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    prove(Script::Overflow, Dialect::Postgres, Some(url)).await;
+    prove(Script::Overflow, Dialect::Postgres, Some(url), &EVERY_FAULT).await;
 }
 
 /// An RLM session's live execution state restarts from a pressure frame's
@@ -971,20 +977,20 @@ async fn an_rlm_pressure_frame_restarts_the_session_s_globals_from_its_seed() {
 }
 
 /// On SQLite in memory: an RLM pressure frame followed by a `continue_as`
-/// in the next turn, killed at every label, commits both frames in order,
-/// each once.
+/// in the next turn, its node killed at every label, commits both frames in
+/// order, each once.
 #[tokio::test]
 async fn an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_sqlite_memory()
  {
     uncut(Script::ContinueAs).await;
-    prove(Script::ContinueAs, Dialect::SqliteMemory, None).await;
+    prove(Script::ContinueAs, Dialect::SqliteMemory, None, &KILLS).await;
 }
 
 /// On a SQLite file.
 #[tokio::test]
 async fn an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_sqlite_file()
  {
-    prove(Script::ContinueAs, Dialect::SqliteFile, None).await;
+    prove(Script::ContinueAs, Dialect::SqliteFile, None, &KILLS).await;
 }
 
 /// On PostgreSQL.
@@ -995,7 +1001,34 @@ async fn an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_bo
         eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    prove(Script::ContinueAs, Dialect::Postgres, Some(url)).await;
+    prove(Script::ContinueAs, Dialect::Postgres, Some(url), &KILLS).await;
+}
+
+/// On SQLite in memory: an RLM pressure frame followed by a `continue_as`
+/// in the next turn, a write lost at every label (failed, unacknowledged or
+/// a zombie's), commits both frames in order, each once.
+#[tokio::test]
+async fn an_rlm_pressure_frame_then_continue_as_with_a_write_lost_at_every_label_commits_both_frames_once_on_sqlite_memory()
+ {
+    prove(Script::ContinueAs, Dialect::SqliteMemory, None, &LOSSES).await;
+}
+
+/// On a SQLite file.
+#[tokio::test]
+async fn an_rlm_pressure_frame_then_continue_as_with_a_write_lost_at_every_label_commits_both_frames_once_on_sqlite_file()
+ {
+    prove(Script::ContinueAs, Dialect::SqliteFile, None, &LOSSES).await;
+}
+
+/// On PostgreSQL.
+#[tokio::test]
+async fn an_rlm_pressure_frame_then_continue_as_with_a_write_lost_at_every_label_commits_both_frames_once_on_postgres()
+ {
+    let Some(url) = dialect::postgres_url() else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    prove(Script::ContinueAs, Dialect::Postgres, Some(url), &LOSSES).await;
 }
 
 const USAGE_SESSION: &str = "prompt-usage-session";

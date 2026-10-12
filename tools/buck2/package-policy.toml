@@ -151,12 +151,17 @@ targets = ["plugin_state_storage_laws"]
 shards = 6
 
 # All nine pressure/frame laws passed in 295 s, but the action including
-# its fixture work exhausted the unchanged 300 s bound (FIG-5427).
+# its fixture work exhausted the unchanged 300 s bound (FIG-5427). On a
+# loaded pool the RLM continue_as matrix alone ran 221-245 s on PostgreSQL
+# and 162-170 s on SQLite, against 25-40 s quiet, and its shards timed out
+# on main (FIG-6040). Each tier's matrix is now two laws, node kills and
+# lost writes; seven shards put at most an estimated 166 s of loaded law
+# time on one action. The bound is unchanged.
 [[rule]]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]
 targets = ["pressure_frame_crash_proof"]
-shards = 4
+shards = 7
 
 # The remaining long poles of the durable-test run (FIG-5280): whole,
 # vertical_crash_proof's 16 laws ran 156 s, declared_start's 24 ran 137 s,

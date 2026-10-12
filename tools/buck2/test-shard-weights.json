@@ -93,17 +93,20 @@
     "sqlite_memory::an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_cut": 18895
   },
   "//crates/lash-durable-test:pressure_frame_crash_proof__test": {
-    "a_pressure_frame_killed_at_every_label_opens_once_on_postgres": 66738,
-    "a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_file": 4278,
-    "a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_memory": 7431,
-    "a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_postgres": 6423,
-    "a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_sqlite_file": 537,
-    "a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_sqlite_memory": 1071,
-    "a_turn_killed_at_every_label_commits_its_last_calls_prompt_usage": 2106,
-    "an_rlm_pressure_frame_restarts_the_session_s_globals_from_its_seed": 894,
-    "an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_postgres": 22900,
-    "an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_sqlite_file": 58995,
-    "an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_sqlite_memory": 9682
+    "a_pressure_frame_killed_at_every_label_opens_once_on_postgres": 15356,
+    "a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_file": 3108,
+    "a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_memory": 2356,
+    "a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_postgres": 2652,
+    "a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_sqlite_file": 444,
+    "a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_sqlite_memory": 350,
+    "a_turn_killed_at_every_label_commits_its_last_calls_prompt_usage": 7734,
+    "an_rlm_pressure_frame_restarts_the_session_s_globals_from_its_seed": 807,
+    "an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_postgres": 24731,
+    "an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_sqlite_file": 10747,
+    "an_rlm_pressure_frame_then_continue_as_killed_at_every_label_commits_both_frames_once_on_sqlite_memory": 9347,
+    "an_rlm_pressure_frame_then_continue_as_with_a_write_lost_at_every_label_commits_both_frames_once_on_postgres": 34044,
+    "an_rlm_pressure_frame_then_continue_as_with_a_write_lost_at_every_label_commits_both_frames_once_on_sqlite_file": 13557,
+    "an_rlm_pressure_frame_then_continue_as_with_a_write_lost_at_every_label_commits_both_frames_once_on_sqlite_memory": 13371
   },
   "//crates/lash-durable-test:process_tool_call_crash_laws__test": {
     "postgres::an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a_crash": 9281,
