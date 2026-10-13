@@ -410,3 +410,6 @@ pub use lash_core::testing::prompt_catalog_from_recipes;
 
 mod plugin_harness;
 pub use plugin_harness::*;
+
+mod actor_park;
+pub use actor_park::{park_process, park_session};

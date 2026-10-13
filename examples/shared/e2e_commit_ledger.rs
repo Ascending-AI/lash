@@ -489,6 +489,17 @@ impl DurableStore for LedgerStore {
         answer
     }
 
+    async fn acquire_idle_for_testing(
+        &self,
+        node: &lash::durable::NodeLease,
+        actor: &lash::durable::ActorKey,
+        epoch: lash::durable::Epoch,
+    ) -> Result<lash::durable::Epoch, lash::durable::DurableError> {
+        self.inner
+            .acquire_idle_for_testing(node, actor, epoch)
+            .await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         let answer = self.inner.claim(node, limit).await;
         if let Ok(claimed) = &answer {

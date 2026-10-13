@@ -363,6 +363,20 @@ pub trait DurableStore: DurableReads {
     /// [`DurableError::NodeLeaseLost`] when the node holds no live lease.
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError>;
 
+    /// Acquire only `actor` for a test writer after execution is quiescent.
+    /// The compare-and-set requires its observed `epoch` and an unowned,
+    /// nonterminal row. Missing and terminal actors use the existing mailbox
+    /// refusals; an owned or changed row uses `OwnershipLost`. The caller
+    /// must release `node` after its fenced begin/commit. No other actor is
+    /// touched, and this grant never authorizes running an activation.
+    #[cfg(feature = "testing")]
+    async fn acquire_idle_for_testing(
+        &self,
+        node: &NodeLease,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<Epoch, DurableError>;
+
     /// Mark `node` draining (ADR 0106 §1): from this commit on it claims
     /// nothing, and its owners release their actors at their next committed
     /// phase. Refused with [`DurableError::NodeLeaseLost`] when the node

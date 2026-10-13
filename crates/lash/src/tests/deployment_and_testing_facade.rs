@@ -368,3 +368,263 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
     }
     core.shutdown().await.unwrap();
 }
+
+/// TEST-PARK-USES-FENCED-AUTHORITY (FIG-6175): quiescent session and process
+/// actors retain typed parks and resume on redrive; no test writer steals a
+/// live claim, changes an unrelated actor, or revives a terminal.
+async fn test_parks_are_typed_fenced_and_redrivable(stores: Arc<dyn lash_core::StoreSet>) {
+    use crate::durable::{
+        ActorKey, ActorState, CommitLabel, DurableError, MailRefusal, NodeId, NodeSpec, Release,
+    };
+    let backend = crate::durable::DurableBackendBuilder::new(stores)
+        .build()
+        .unwrap();
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    let client = standard_core_builder_over(backend.clone())
+        .serve_sessions(false)
+        .plugin(crate::testing::process_engine_plugin_fixture())
+        .build(crate::testing::runtime_lease_owner())
+        .unwrap();
+    let session_id = SessionId::fixture("test-park-session");
+    let session = client
+        .session(session_id.clone())
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .unwrap();
+    let handle = session
+        .send(TurnInput::text("resume the parked input"))
+        .id(crate::TurnId::parse("test-park-input").unwrap())
+        .await
+        .unwrap();
+    let session_actor = ActorKey::session(session_id.as_str()).unwrap();
+    let session_reason = crate::SessionParkReason::ActivationLoop {
+        failed_activations: 3,
+    };
+    let store = backend.durable();
+    let row = store.actor(&session_actor).await.unwrap().unwrap();
+    let writer = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("test-park-live-owner"),
+            decodes: vec![row.formats],
+            serves: crate::testing::node_serves(&client),
+            ttl_millis: 60_000,
+        })
+        .await
+        .unwrap();
+    let claim = store.claim(&writer, 1).await.unwrap().pop().unwrap();
+    assert_eq!(claim.actor, session_actor);
+    let before = store.actor(&session_actor).await.unwrap().unwrap();
+    assert!(matches!(
+        store
+            .acquire_idle_for_testing(&writer, &session_actor, before.epoch)
+            .await,
+        Err(DurableError::OwnershipLost(_))
+    ));
+    assert!(matches!(
+        crate::testing::park_session(&backend, &session_id, session_reason.clone()).await,
+        Err(DurableError::OwnershipLost(_))
+    ));
+    assert_eq!(store.actor(&session_actor).await.unwrap().unwrap(), before);
+    let mut tx = store.begin(&session_actor, claim.epoch).await.unwrap();
+    tx.ack_seen().give_up(Release::Idle);
+    store
+        .commit(tx, CommitLabel::SESSION_RELEASE)
+        .await
+        .unwrap();
+    assert_eq!(
+        store.actor(&session_actor).await.unwrap().unwrap().state,
+        ActorState::Idle
+    );
+
+    let process_id = backend
+        .process_registry()
+        .register_process(lash_core::ProcessRegistration::new(
+            lash_core::ProcessInput::Engine {
+                kind: "testing-fixture".into(),
+                payload: serde_json::Value::Null,
+                launch: lash_core::testing::fixture_engine_launch(),
+            },
+            lash_core::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
+        .await
+        .unwrap()
+        .id;
+    store.release_node(&writer).await.unwrap();
+    let process_actor = ActorKey::process(process_id.as_str()).unwrap();
+    let row = store.actor(&process_actor).await.unwrap().unwrap();
+    let writer = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("test-park-live-process-owner"),
+            decodes: vec![row.formats],
+            serves: crate::testing::node_serves(&client),
+            ttl_millis: 60_000,
+        })
+        .await
+        .unwrap();
+    let process_reason = crate::process::ProcessParkReason::ActivationLoop {
+        failed_activations: 4,
+    };
+    let claim = store.claim(&writer, 1).await.unwrap().pop().unwrap();
+    assert_eq!(claim.actor, process_actor);
+    let before = store.actor(&process_actor).await.unwrap().unwrap();
+    assert!(matches!(
+        crate::testing::park_process(&backend, &process_id, process_reason.clone()).await,
+        Err(DurableError::OwnershipLost(_))
+    ));
+    assert_eq!(store.actor(&process_actor).await.unwrap().unwrap(), before);
+    let mut tx = store.begin(&process_actor, claim.epoch).await.unwrap();
+    tx.ack_seen().give_up(Release::Waiting { next_due: None });
+    store
+        .commit(tx, CommitLabel::PROCESS_ADVANCE)
+        .await
+        .unwrap();
+    store.release_node(&writer).await.unwrap();
+
+    // A different ready actor must not be taken while acquiring either writer.
+    let unrelated = ActorKey::session("test-park-unrelated").unwrap();
+    let mut mail = crate::durable::MailTx::new();
+    mail.create_actor(
+        unrelated.clone(),
+        crate::durable::FormatSet::new("test-park-unrelated"),
+    );
+    store
+        .commit_mail(mail, CommitLabel::MAIL_SESSION)
+        .await
+        .unwrap();
+    let unrelated_before = store.actor(&unrelated).await.unwrap();
+    crate::testing::park_session(&backend, &session_id, session_reason.clone())
+        .await
+        .unwrap();
+    crate::testing::park_process(&backend, &process_id, process_reason.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        session.park_reason().await.unwrap(),
+        Some(session_reason.clone())
+    );
+    assert_eq!(
+        client
+            .processes()
+            .get(&process_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .park,
+        crate::process::ProcessParkState::Parked(process_reason.clone())
+    );
+    assert_eq!(
+        store.actor(&session_actor).await.unwrap().unwrap().state,
+        ActorState::Parked
+    );
+    assert_eq!(
+        store.actor(&process_actor).await.unwrap().unwrap().state,
+        ActorState::Parked
+    );
+    assert_eq!(store.actor(&unrelated).await.unwrap(), unrelated_before);
+    assert!(matches!(
+        crate::testing::park_session(
+            &backend,
+            &SessionId::fixture("test-park-missing"),
+            session_reason.clone()
+        )
+        .await,
+        Err(DurableError::MailRefused(MailRefusal::UnknownActor(_)))
+    ));
+    assert!(matches!(
+        crate::testing::park_process(
+            &backend,
+            &crate::ProcessId::fixture("test-park-missing"),
+            process_reason.clone()
+        )
+        .await,
+        Err(DurableError::MailRefused(MailRefusal::UnknownActor(_)))
+    ));
+
+    let serving = standard_core_builder_over(backend.clone())
+        .plugin(crate::testing::process_engine_plugin_fixture())
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            lash_core::LeaseOwnerId::new("test-park-serving"),
+            lash_core::LeaseIncarnationId::new("test-park-serving-boot"),
+        ))
+        .unwrap();
+    assert!(session.redrive("test-park-law").await.unwrap());
+    assert!(
+        serving
+            .processes()
+            .redrive(&process_id, "test-park-law")
+            .await
+            .unwrap()
+    );
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), handle.outcome())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.status(), crate::TurnStatus::Answered);
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        serving.processes().await_output(&process_id),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        output.into_tool_output().value_for_projection(),
+        serde_json::json!({"fixture": "complete"})
+    );
+    assert!(session.park_reason().await.unwrap().is_none());
+    assert_eq!(
+        serving
+            .processes()
+            .get(&process_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .park,
+        crate::process::ProcessParkState::NotParked
+    );
+    assert!(matches!(
+        crate::testing::park_process(&backend, &process_id, process_reason).await,
+        Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_)))
+    ));
+    // The session's terminal actor also refuses a park, regardless of its reason.
+    serving.shutdown().await.unwrap();
+    client.shutdown().await.unwrap();
+    let row = store.actor(&session_actor).await.unwrap().unwrap();
+    let writer = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("test-park-terminal"),
+            decodes: Vec::new(),
+            serves: Vec::new(),
+            ttl_millis: 60_000,
+        })
+        .await
+        .unwrap();
+    let epoch = store
+        .acquire_idle_for_testing(&writer, &session_actor, row.epoch)
+        .await
+        .unwrap();
+    let mut tx = store.begin(&session_actor, epoch).await.unwrap();
+    tx.give_up(Release::Terminal);
+    store
+        .commit(tx, CommitLabel::SESSION_RELEASE)
+        .await
+        .unwrap();
+    store.release_node(&writer).await.unwrap();
+    assert!(matches!(
+        crate::testing::park_session(&backend, &session_id, session_reason).await,
+        Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_)))
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_test_parks_are_typed_fenced_and_redrivable() {
+    test_parks_are_typed_fenced_and_redrivable(sqlite_memory_store_set().await).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires PostgreSQL; run inside a with-service.sh pg gate"]
+async fn postgres_test_parks_are_typed_fenced_and_redrivable_when_configured() {
+    let (stores, _database, _attachments) = postgres_store_parts().await;
+    test_parks_are_typed_fenced_and_redrivable(stores).await;
+}

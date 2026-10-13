@@ -25,7 +25,7 @@ otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel
 # site compiled out unless an internal witness explicitly enables this feature.
 perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness"]
 # Expose `testing` fixtures shared with `lash-core`'s own tests.
-testing = ["dep:tracing-subscriber", "lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing"]
+testing = ["lash-durable/testing", "dep:tracing-subscriber", "lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing"]
 
 [lints]
 workspace = true

@@ -30,7 +30,7 @@ workspace = true
 [features]
 perf-witness = ["lash-core-execution/perf-witness"]
 # Test/performance-only seams. Production builds cannot bypass the schema gate.
-testing = ["lash-core-execution/testing"]
+testing = ["lash-store-sql/testing", "lash-core-execution/testing"]
 synthetic-next = ["lash-core-store/synthetic-next", "lash-core-execution/synthetic-next"]
 
 [dependencies]

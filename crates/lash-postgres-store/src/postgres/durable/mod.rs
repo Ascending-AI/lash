@@ -32,6 +32,9 @@
 //! transaction, and each node's liveness lock, a session advisory lock its
 //! listener holds.
 
+#[cfg(feature = "testing")]
+mod test_writer;
+
 use std::sync::{Arc, LazyLock};
 
 use lash_durable::{
@@ -1065,6 +1068,16 @@ impl DurableStore for PostgresDurableStore {
             .await
         })
         .await
+    }
+
+    #[cfg(feature = "testing")]
+    async fn acquire_idle_for_testing(
+        &self,
+        node: &NodeLease,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<Epoch, DurableError> {
+        self.acquire_test_writer(node, actor, epoch).await
     }
 
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {

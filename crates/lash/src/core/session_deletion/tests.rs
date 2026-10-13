@@ -194,6 +194,17 @@ impl DurableStore for CloseDuringRead {
         self.inner.release_node(node).await
     }
 
+    async fn acquire_idle_for_testing(
+        &self,
+        node: &crate::durable::NodeLease,
+        actor: &crate::durable::ActorKey,
+        epoch: crate::durable::Epoch,
+    ) -> Result<crate::durable::Epoch, crate::durable::DurableError> {
+        self.inner
+            .acquire_idle_for_testing(node, actor, epoch)
+            .await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         self.inner.claim(node, limit).await
     }

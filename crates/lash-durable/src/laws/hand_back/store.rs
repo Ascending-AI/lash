@@ -41,6 +41,17 @@ impl DurableStore for ObservedStore {
         self.inner.release_node(node).await
     }
 
+    async fn acquire_idle_for_testing(
+        &self,
+        node: &crate::NodeLease,
+        actor: &crate::ActorKey,
+        epoch: crate::Epoch,
+    ) -> Result<crate::Epoch, crate::DurableError> {
+        self.inner
+            .acquire_idle_for_testing(node, actor, epoch)
+            .await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         self.inner.claim(node, limit).await
     }

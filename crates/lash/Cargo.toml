@@ -135,6 +135,8 @@ http-transport = ["dep:lash-http-transport"]
 testing = [
     "lash-core/testing",
     "dep:lash-sqlite-store",
+    "lash-sqlite-store?/testing",
+    "lash-postgres-store?/testing",
     "tokio/rt-multi-thread",
     "tokio/time",
     "lash-protocol-rlm?/testing",

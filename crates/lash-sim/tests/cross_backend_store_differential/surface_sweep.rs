@@ -40,6 +40,8 @@ pub(super) enum SurfaceMethod {
     LoadSession,
     RunFactsOf,
     ClaimFacts,
+    /// Test authority refuses an absent actor without changing durable state.
+    AcquireIdleForTesting,
     ListPendingTurnInputs,
     /// [`IngressStore::pending_turn_input`]: the keyed point read of the
     /// case's next-turn input (`known`), or of an id no case enqueues
@@ -178,6 +180,7 @@ impl SurfaceMethod {
             Self::LoadSession => "surface:load_session",
             Self::RunFactsOf => "surface:run_facts_of",
             Self::ClaimFacts => "surface:claim_facts",
+            Self::AcquireIdleForTesting => "surface:acquire_idle_for_testing",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
             Self::PendingTurnInput { known: true } => "surface:pending_turn_input",
             Self::PendingTurnInput { known: false } => "surface:pending_turn_input_unknown",
@@ -361,6 +364,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::EnvironmentBytes),
             surface(SurfaceMethod::RunFactsOf),
             surface(SurfaceMethod::ClaimFacts),
+            surface(SurfaceMethod::AcquireIdleForTesting),
             surface(SurfaceMethod::ReadSessionStateVersion),
             surface(SurfaceMethod::AdmitSessionState),
             surface(SurfaceMethod::LoadKnownNode),
@@ -582,6 +586,37 @@ impl BackendRunner {
                     .environment_bytes(&env_ref)
                     .await?;
                 format!("present={}", bytes.is_some())
+            }
+            SurfaceMethod::AcquireIdleForTesting => {
+                // The test-only authority refuses a missing actor without residue.
+                let store = self.lifecycle_backend.durable();
+                let node = store
+                    .register_node(&lash_core::durable_port::NodeSpec {
+                        node: lash_core::durable_port::NodeId::new(format!(
+                            "surface-test-writer-{session_id}"
+                        )),
+                        decodes: Vec::new(),
+                        serves: Vec::new(),
+                        ttl_millis: 60_000,
+                    })
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let absent = lash_core::durable_port::ActorKey::session("surface-test-absent")
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let refused = store
+                    .acquire_idle_for_testing(&node, &absent, lash_core::durable_port::Epoch(0))
+                    .await;
+                store
+                    .release_node(&node)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                assert!(matches!(
+                    refused,
+                    Err(lash_core::durable_port::DurableError::MailRefused(
+                        lash_core::durable_port::MailRefusal::UnknownActor(_)
+                    ))
+                ));
+                "unknown_actor".to_owned()
             }
             SurfaceMethod::ClaimFacts => {
                 let actor = lash_core::durable_port::ActorKey::session(session_id.as_str())

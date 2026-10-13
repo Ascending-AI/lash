@@ -158,6 +158,17 @@ impl DurableStore for RecordedStore {
         released
     }
 
+    async fn acquire_idle_for_testing(
+        &self,
+        node: &lash_durable::NodeLease,
+        actor: &lash_durable::ActorKey,
+        epoch: lash_durable::Epoch,
+    ) -> Result<lash_durable::Epoch, lash_durable::DurableError> {
+        self.inner
+            .acquire_idle_for_testing(node, actor, epoch)
+            .await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         let claimed = self.inner.claim(node, limit).await;
         if let Ok(claimed) = &claimed {

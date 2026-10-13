@@ -18,6 +18,7 @@ doctest = false
 
 [features]
 default = []
+testing = []
 
 [lints]
 workspace = true

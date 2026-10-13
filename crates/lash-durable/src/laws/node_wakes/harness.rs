@@ -323,6 +323,17 @@ impl DurableStore for CountingStore {
         self.inner.release_node(node).await
     }
 
+    async fn acquire_idle_for_testing(
+        &self,
+        node: &crate::NodeLease,
+        actor: &crate::ActorKey,
+        epoch: crate::Epoch,
+    ) -> Result<crate::Epoch, crate::DurableError> {
+        self.inner
+            .acquire_idle_for_testing(node, actor, epoch)
+            .await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         let claimed = self.inner.claim(node, limit).await;
         if let Ok(claimed) = &claimed {

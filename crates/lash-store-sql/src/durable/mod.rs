@@ -240,3 +240,18 @@ crate::statements! {
                 LEFT JOIN actors a ON a.actor_key = requested.actor_key";
     }
 }
+
+#[cfg(feature = "testing")]
+crate::statements! {
+    /// Targeted test-writer acquisition; production has no such authority seam.
+    pub struct TestActorStatements @ "durable_test_actor" {
+        /// Acquire exactly actor `?1` at its observed epoch `?2`, for boot
+        /// `?4` of node `?3`. Never replace a live owner or a terminal.
+        acquire_idle = "UPDATE actors
+             SET state = 'owned', epoch = epoch + 1, owner_node = ?3, owner_boot = ?4,
+                 ready_at_ms = NULL, next_due_ms = NULL
+             WHERE actor_key = ?1 AND epoch = ?2
+               AND state IN ('idle', 'ready', 'waiting', 'parked')
+             RETURNING epoch";
+    }
+}
