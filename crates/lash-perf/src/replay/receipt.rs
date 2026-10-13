@@ -19,13 +19,15 @@ pub struct ReplayReceipt {
 }
 
 /// What a receipt's numbers depend on. Counted metrics compare across hosts;
-/// timed metrics compare only within one host and build.
+/// allocation and SQL baselines require one build profile and allocator;
+/// timed metrics additionally compare only within one host.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Identity {
     pub commit: Option<String>,
     pub dirty: bool,
     /// `debug` or `release`: allocation counts differ between them.
     pub build: String,
+    pub build_profile: String,
     pub allocator: String,
     pub host: String,
     pub cpus: usize,
@@ -44,6 +46,11 @@ impl Identity {
                 "release"
             }
             .to_owned(),
+            build_profile: format!(
+                "{};debug_assertions={}",
+                env!("LASH_PERF_BUILD_PROFILE"),
+                cfg!(debug_assertions)
+            ),
             allocator: crate::ALLOCATION_MODE.to_owned(),
             host: std::fs::read_to_string("/proc/sys/kernel/hostname")
                 .map(|name| name.trim().to_owned())

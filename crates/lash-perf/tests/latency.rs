@@ -140,6 +140,6 @@ async fn grace_case_probes_binding_before_remote_terminal_wait() {
         serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
     assert_eq!(
         report["verdict"]["violations"],
-        serde_json::json!(["gated case `fast` did not run"])
+        serde_json::json!([{ "reason": "missing-case" }])
     );
 }

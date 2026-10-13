@@ -157,6 +157,8 @@ pub struct Baseline {
     pub format: String,
     pub blessed_from: Option<String>,
     pub build: String,
+    pub build_profile: String,
+    pub allocator: String,
     pub workloads: BTreeMap<String, BaselineWorkload>,
 }
 
@@ -186,11 +188,17 @@ impl Baseline {
     }
 
     /// The baseline `receipt` blesses.
-    pub fn bless(receipt: &ReplayReceipt) -> Self {
-        Self {
+    pub fn bless(receipt: &ReplayReceipt) -> Result<Self> {
+        ensure!(
+            missing_identity(&receipt.identity).is_none(),
+            "cannot bless a receipt with missing counted identity"
+        );
+        Ok(Self {
             format: BASELINE_FORMAT.to_owned(),
             blessed_from: receipt.identity.commit.clone(),
             build: receipt.identity.build.clone(),
+            build_profile: receipt.identity.build_profile.clone(),
+            allocator: receipt.identity.allocator.clone(),
             workloads: receipt
                 .workloads
                 .iter()
@@ -209,7 +217,7 @@ impl Baseline {
                     )
                 })
                 .collect(),
-        }
+        })
     }
 }
 
@@ -228,6 +236,8 @@ fn counted(
 /// The gate's finding on one receipt.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Verdict {
+    /// SQL and allocation comparisons share one cohort; neither is certified after an identity refusal.
+    pub identity_refusal: Option<CountedIdentityRefusal>,
     /// Breaches that fail the gate.
     pub violations: Vec<String>,
     /// Committed known breaches that still breach.
@@ -246,9 +256,87 @@ fn applies(pattern: &str, workload: &str) -> bool {
     pattern == "*" || pattern == workload
 }
 
+/// The identity dimension required by the counted baseline.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CountedIdentityDimension {
+    Build,
+    BuildProfile,
+    Allocator,
+}
+
+/// Why counted metrics cannot be compared or blessed.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "reason", rename_all = "kebab-case")]
+pub enum CountedIdentityRefusal {
+    Missing {
+        dimension: CountedIdentityDimension,
+    },
+    Mismatch {
+        dimension: CountedIdentityDimension,
+        baseline: String,
+        candidate: String,
+    },
+}
+
+fn missing_identity(identity: &super::receipt::Identity) -> Option<CountedIdentityDimension> {
+    [
+        (CountedIdentityDimension::Build, &identity.build),
+        (
+            CountedIdentityDimension::BuildProfile,
+            &identity.build_profile,
+        ),
+        (CountedIdentityDimension::Allocator, &identity.allocator),
+    ]
+    .into_iter()
+    .find_map(|(dimension, value)| value.trim().is_empty().then_some(dimension))
+}
+
+fn counted_identity_refusal(
+    identity: &super::receipt::Identity,
+    baseline: &Baseline,
+) -> Option<CountedIdentityRefusal> {
+    for (dimension, candidate, blessed) in [
+        (
+            CountedIdentityDimension::Build,
+            &identity.build,
+            &baseline.build,
+        ),
+        (
+            CountedIdentityDimension::BuildProfile,
+            &identity.build_profile,
+            &baseline.build_profile,
+        ),
+        (
+            CountedIdentityDimension::Allocator,
+            &identity.allocator,
+            &baseline.allocator,
+        ),
+    ] {
+        if candidate.trim().is_empty() || blessed.trim().is_empty() {
+            return Some(CountedIdentityRefusal::Missing { dimension });
+        }
+        if candidate != blessed {
+            return Some(CountedIdentityRefusal::Mismatch {
+                dimension,
+                baseline: blessed.clone(),
+                candidate: candidate.clone(),
+            });
+        }
+    }
+    None
+}
+
 /// Check `receipt` against `budgets` and `baseline`.
 pub fn evaluate(receipt: &ReplayReceipt, budgets: &Budgets, baseline: &Baseline) -> Verdict {
     let mut verdict = Verdict::default();
+    if let Some(refusal) = counted_identity_refusal(&receipt.identity, baseline) {
+        verdict
+            .violations
+            .push(format!("counted baseline identity refused: {refusal:?}"));
+        verdict.identity_refusal = Some(refusal);
+        return verdict;
+    }
     let mut breached_known = vec![false; budgets.known_breaches.len()];
     for gate in &budgets.subset {
         let Some(workload) = receipt
@@ -493,6 +581,65 @@ mod tests {
         }
     }
 
+    /// REPLAY-IDENTITY: counted medians belong to their build and allocator,
+    /// including SQL-only populations; a debug baseline cannot certify release.
+    #[test]
+    fn counted_baselines_refuse_another_build_or_allocator() {
+        let mut candidate = receipt(0.0);
+        candidate.identity.build = "debug".to_owned();
+        let baseline = Baseline::bless(&candidate).unwrap();
+        assert!(evaluate(&candidate, &budgets(false), &baseline).passed());
+        candidate.identity.build = "release".to_owned();
+        let verdict = evaluate(&candidate, &budgets(false), &baseline);
+        println!(
+            "replay-identity-refusals.json={}",
+            serde_json::to_string(&verdict).unwrap()
+        );
+        assert!(
+            !verdict.passed(),
+            "debug baseline certified release: {verdict:?}"
+        );
+        candidate.identity.build = "debug".to_owned();
+        candidate.identity.allocator = "dhat-heap+stats_alloc".to_owned();
+        assert!(matches!(
+            evaluate(&candidate, &budgets(false), &baseline).identity_refusal,
+            Some(CountedIdentityRefusal::Mismatch {
+                dimension: CountedIdentityDimension::Allocator,
+                ..
+            })
+        ));
+        candidate.identity.allocator = baseline.allocator.clone();
+        candidate
+            .identity
+            .build_profile
+            .push_str(";another-optimization-profile");
+        assert!(matches!(
+            evaluate(&candidate, &budgets(false), &baseline).identity_refusal,
+            Some(CountedIdentityRefusal::Mismatch {
+                dimension: CountedIdentityDimension::BuildProfile,
+                ..
+            })
+        ));
+        candidate.identity.build_profile = baseline.build_profile.clone();
+        for dimension in [
+            CountedIdentityDimension::Build,
+            CountedIdentityDimension::BuildProfile,
+            CountedIdentityDimension::Allocator,
+        ] {
+            let mut missing = candidate.clone();
+            match dimension {
+                CountedIdentityDimension::Build => missing.identity.build.clear(),
+                CountedIdentityDimension::BuildProfile => missing.identity.build_profile.clear(),
+                CountedIdentityDimension::Allocator => missing.identity.allocator.clear(),
+            }
+            assert!(!evaluate(&missing, &budgets(false), &baseline).passed());
+            assert!(Baseline::bless(&missing).is_err());
+        }
+        let mut absent = serde_json::to_value(&baseline).unwrap();
+        absent.as_object_mut().unwrap().remove("allocator");
+        assert!(serde_json::from_value::<Baseline>(absent).is_err());
+    }
+
     /// REPLAY-GATE: bytes written that grow with history depth (the
     /// FIG-5501 terminal-window copy's shape) fail the slope budget, a
     /// committed known breach reports instead of failing, and a known breach
@@ -502,7 +649,7 @@ mod tests {
     fn a_depth_slope_fails_unless_it_is_a_known_breach_that_still_breaches() {
         let flat = receipt(0.0);
         let copying = receipt(774.0);
-        let baseline = Baseline::bless(&copying);
+        let baseline = Baseline::bless(&copying).unwrap();
         let unknown = evaluate(&copying, &budgets(false), &baseline);
         assert!(!unknown.passed());
         assert!(
@@ -533,6 +680,6 @@ mod tests {
             fixed.violations[0].contains("no longer breaches"),
             "{fixed:?}"
         );
-        assert!(evaluate(&flat, &budgets(false), &Baseline::bless(&flat)).passed());
+        assert!(evaluate(&flat, &budgets(false), &Baseline::bless(&flat).unwrap()).passed());
     }
 }

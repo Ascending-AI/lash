@@ -170,7 +170,7 @@ pub async fn run_gate(args: &GateArgs) -> Result<i32> {
     .await?;
     print!("{}", receipt::table(&receipt));
     if let Some(path) = &args.bless {
-        let baseline = gate::Baseline::bless(&receipt);
+        let baseline = gate::Baseline::bless(&receipt)?;
         std::fs::write(path, serde_json::to_string_pretty(&baseline)? + "\n")
             .with_context(|| format!("write {}", path.display()))?;
         println!("replay gate: blessed baseline {}", path.display());

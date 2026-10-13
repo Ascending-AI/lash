@@ -296,6 +296,21 @@ impl RunRecorder {
         Ok(value)
     }
 
+    /// Validation's clock, counters and resource samples start after both
+    /// operation spans have closed. The run total retains this work.
+    pub(crate) async fn validation<T, F>(&mut self, f: F) -> anyhow::Result<T>
+    where
+        F: Future<Output = anyhow::Result<T>>,
+    {
+        let (value, span) = self.measured_span(stage::VALIDATION, f).await?;
+        self.turns
+            .last_mut()
+            .ok_or_else(|| anyhow::anyhow!("validation requires a recorded turn"))?
+            .stages
+            .insert(stage::VALIDATION.to_owned(), span.stage_result());
+        Ok(value)
+    }
+
     /// The turns recorded so far — for tails that aggregate over them
     /// beyond the default phase-profile fold.
     pub(crate) fn turns(&self) -> &[RuntimePerfTurnResult] {
@@ -363,6 +378,85 @@ impl RunRecorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// OPERATION-WINDOW: validation is attributed outside the operation and
+    /// background spans in every formerly widened producer.
+    #[tokio::test]
+    async fn operation_windows_attribute_validation_separately() {
+        let embed = super::super::checkpoint::run_once_embed(RuntimePerfScenario::EmbedStandard, 1)
+            .await
+            .unwrap();
+        let trace = super::super::live_replay::run_once_trace_jsonl(
+            RuntimePerfScenario::TraceJsonlStandard,
+            1,
+        )
+        .await
+        .unwrap();
+        let contention = super::super::contention::run_once_writer_contention(
+            RuntimePerfScenario::WriterContention2Workers,
+            1,
+        )
+        .await
+        .unwrap();
+        let mut ledger = serde_json::json!({
+            "embed": embed.stages, "trace": trace.stages,
+            "contention": contention.metric_samples_ms,
+        });
+        assert!(
+            embed.stage("validation").is_some(),
+            "embed has no separate validation window"
+        );
+        assert!(
+            trace.stage("validation").is_some(),
+            "trace has no separate validation window"
+        );
+        assert!(
+            contention
+                .metric_samples_ms
+                .contains_key("writer_contention.same_session.second_turn.validation_ms"),
+            "contention has no separate validation window"
+        );
+
+        // Retain validation's allocation after its meter closes: it must
+        // never be charged to the operation or its background drain.
+        let mut recorder = RunRecorder::start(RuntimePerfScenario::EmbedStandard, 1);
+        recorder
+            .turn(
+                0,
+                async {
+                    Ok(TurnRun {
+                        value: (),
+                        tail: TurnTail::default(),
+                    })
+                },
+                async { Ok(()) },
+            )
+            .await
+            .unwrap();
+        let canary = recorder
+            .validation(async { Ok(vec![42u8; 8 * 1024 * 1024]) })
+            .await
+            .unwrap();
+        let result = recorder.finish(RunTail::default());
+        assert!(
+            result
+                .stage("validation")
+                .unwrap()
+                .allocations
+                .bytes_allocated
+                >= 8 * 1024 * 1024
+        );
+        for stage in [stage::RUN_TURN, stage::AWAIT_BACKGROUND_WORK] {
+            assert!(
+                result.stage(stage).unwrap().allocations.bytes_allocated < 8 * 1024 * 1024,
+                "{stage}"
+            );
+        }
+        ledger["canary"] =
+            serde_json::json!({ "retained_bytes": canary.len(), "stages": result.stages });
+        println!("operation-validation-ledger.json={ledger}");
+        std::hint::black_box(&canary);
+    }
 
     #[tokio::test]
     async fn run_fold_sums_turn_spans_and_mirrors_last_turn_memory() {

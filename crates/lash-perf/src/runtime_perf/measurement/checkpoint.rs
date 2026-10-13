@@ -1025,52 +1025,58 @@ impl EmbedRun {
             turn_entry,
         } = self;
         for turn_index in 0..chat_turns {
-            run.turn(
-                turn_index,
-                async {
-                    let cancel = CancellationToken::new();
-                    let turn_id = TurnId::fixture(format!("runtime-perf-embed-{}", turn_index + 1));
-                    let turn = runtime_perf_timed(
-                        scenario,
-                        turn_index,
-                        "run_turn",
-                        Some(cancel.clone()),
-                        turn_entry.run(
-                            &session,
-                            lash_core::TurnInput::text(benchmark_prompt(scenario, turn_index)),
-                            Some(&turn_id),
-                            cancel,
-                        ),
-                    )
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "run embed runtime perf scenario {} turn {}",
-                            scenario.name(),
-                            turn_index + 1
+            let turn = run
+                .turn(
+                    turn_index,
+                    async {
+                        let cancel = CancellationToken::new();
+                        let turn_id =
+                            TurnId::fixture(format!("runtime-perf-embed-{}", turn_index + 1));
+                        let turn = runtime_perf_timed(
+                            scenario,
+                            turn_index,
+                            "run_turn",
+                            Some(cancel.clone()),
+                            turn_entry.run(
+                                &session,
+                                lash_core::TurnInput::text(benchmark_prompt(scenario, turn_index)),
+                                Some(&turn_id),
+                                cancel,
+                            ),
                         )
-                    })?;
-                    validate_runtime_perf_turn(
-                        scenario,
-                        turn_index,
-                        &turn,
-                        &session
-                            .durable()
-                            .read()
-                            .await?
-                            .ok_or_else(|| anyhow::anyhow!("missing committed head"))?
-                            .to_snapshot(),
-                    )?;
-                    Ok(TurnRun {
-                        value: (),
-                        tail: TurnTail {
-                            turn_usage: turn.usage,
-                            ..TurnTail::default()
-                        },
-                    })
-                },
-                async { Ok(()) },
-            )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "run embed runtime perf scenario {} turn {}",
+                                scenario.name(),
+                                turn_index + 1
+                            )
+                        })?;
+                        Ok(TurnRun {
+                            tail: TurnTail {
+                                turn_usage: turn.usage.clone(),
+                                ..TurnTail::default()
+                            },
+                            value: turn,
+                        })
+                    },
+                    async { Ok(()) },
+                )
+                .await?;
+            run.validation(async {
+                validate_runtime_perf_turn(
+                    scenario,
+                    turn_index,
+                    &turn,
+                    &session
+                        .durable()
+                        .read()
+                        .await?
+                        .ok_or_else(|| anyhow::anyhow!("missing committed head"))?
+                        .to_snapshot(),
+                )?;
+                Ok(())
+            })
             .await?;
         }
 

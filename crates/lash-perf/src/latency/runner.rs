@@ -1074,6 +1074,7 @@ pub(crate) struct CaseReport {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) errors: Vec<String>,
     pub(crate) phases_ms: PhaseSummaries,
+    pub(crate) population_refusals: Vec<GateRefusal>,
     /// The cold/warm split on every phase.
     pub(crate) cold: Option<PhaseSummaries>,
     pub(crate) warm: Option<PhaseSummaries>,
@@ -1121,6 +1122,7 @@ impl CaseReport {
                 .count(),
             errors,
             phases_ms: phases_of(&all),
+            population_refusals: certificate::population_refusals(samples),
             cold: (!cold.is_empty()).then(|| phases_of(&cold)),
             warm: (!warm.is_empty()).then(|| phases_of(&warm)),
             session_wakes: None,
@@ -1128,92 +1130,9 @@ impl CaseReport {
     }
 }
 
-/// The verdict the gate exits on.
-#[derive(Debug, Serialize)]
-pub(crate) struct GateVerdict {
-    pub(crate) gate: &'static str,
-    pub(crate) budget: serde_json::Value,
-    pub(crate) pass: bool,
-    pub(crate) violations: Vec<String>,
-}
-
-/// The run report: config, environment, every case and the verdict.
-#[derive(Debug, Serialize)]
-pub(crate) struct LatencyReport {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) samples_file: Option<std::path::PathBuf>,
-    pub(crate) kind: &'static str,
-    pub(crate) load_model: crate::offered_load::LoadModel,
-    pub(crate) schema: u32,
-    pub(crate) crate_version: &'static str,
-    pub(crate) environment: serde_json::Value,
-    pub(crate) cases: Vec<CaseReport>,
-    pub(crate) verdict: GateVerdict,
-}
-
-/// Assemble the run report and evaluate the gate.
-pub(crate) fn build_report(
-    environment: serde_json::Value,
-    cases: Vec<CaseReport>,
-) -> LatencyReport {
-    let mut violations = Vec::new();
-    let gate = cases.iter().find(|case| case.name == super::GATE_CASE);
-    match gate {
-        None => violations.push(format!("gated case `{}` did not run", super::GATE_CASE)),
-        Some(case) => {
-            if case.samples < super::GATE_MIN_SAMPLES {
-                violations.push(format!(
-                    "gated case `{}` ran {} samples (< {})",
-                    super::GATE_CASE,
-                    case.samples,
-                    super::GATE_MIN_SAMPLES
-                ));
-            }
-            match &case.phases_ms.overhead {
-                None => violations.push(format!(
-                    "gated case `{}` produced no overhead samples",
-                    super::GATE_CASE
-                )),
-                Some(overhead) => {
-                    if overhead.p50 >= super::GATE_OVERHEAD_P50_MS {
-                        violations.push(format!(
-                            "overhead p50 {:.1} ms >= {:.1} ms budget",
-                            overhead.p50,
-                            super::GATE_OVERHEAD_P50_MS
-                        ));
-                    }
-                    if overhead.p99 >= super::GATE_OVERHEAD_P99_MS {
-                        violations.push(format!(
-                            "overhead p99 {:.1} ms >= {:.1} ms budget",
-                            overhead.p99,
-                            super::GATE_OVERHEAD_P99_MS
-                        ));
-                    }
-                }
-            }
-        }
-    }
-    LatencyReport {
-        samples_file: None,
-        kind: "lash.send-latency",
-        load_model: crate::offered_load::LoadModel::ServiceDiagnostic,
-        schema: 1,
-        crate_version: env!("CARGO_PKG_VERSION"),
-        environment,
-        cases,
-        verdict: GateVerdict {
-            gate: "latency-gate",
-            budget: serde_json::json!({
-                "case": super::GATE_CASE,
-                "overhead_p50_ms_lt": super::GATE_OVERHEAD_P50_MS,
-                "overhead_p99_ms_lt": super::GATE_OVERHEAD_P99_MS,
-                "min_samples": super::GATE_MIN_SAMPLES,
-            }),
-            pass: violations.is_empty(),
-            violations,
-        },
-    }
-}
+#[path = "certificate.rs"]
+mod certificate;
+pub(crate) use certificate::{GateRefusal, LatencyReport, build_report};
 
 async fn start_worker(
     stores_dir: &Path,
@@ -1301,6 +1220,112 @@ pub(super) async fn run_worker(stores_dir: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    use super::*;
+
+    fn complete_sample(index: usize) -> Sample {
+        let stamp = Stamp {
+            monotonic_ns: 1,
+            unix_ns: 1,
+        };
+        Sample {
+            case: "fast",
+            lane: index % 16,
+            index,
+            cold: false,
+            status: "answered".to_owned(),
+            session_id: String::new(),
+            input_id: String::new(),
+            clocks: SampleClocks {
+                request: stamp,
+                accepted: Some(stamp),
+                acceptance_acknowledged: stamp,
+                admission: Some(stamp),
+                terminal: Some(stamp),
+                terminal_commit_returned: Some(stamp),
+                completion: stamp,
+                first_activity: Some(stamp),
+                first_visible: Some(stamp),
+                first_delta: Some(stamp),
+                admission_observed: Some(stamp),
+                terminal_observed: Some(stamp),
+                host_first_activity: Some(stamp),
+                host_first_visible: Some(stamp),
+                host_first_delta: Some(stamp),
+            },
+            admission_to_first_visible_ms: Some(1.0),
+            admission_to_first_activity_ms: Some(1.0),
+            admission_observation_lag_ms: Some(1.0),
+            terminal_observation_lag_ms: Some(1.0),
+            request_to_accept_ms: 1.0,
+            accept_to_admission_ms: Some(1.0),
+            accept_to_applied_ms: Some(1.0),
+            admission_to_first_delta_ms: Some(1.0),
+            admission_to_settled_ms: Some(1.0),
+            settled_to_complete_ms: Some(1.0),
+            send_to_completion_ms: 6.0,
+            provider_ms: Some(5.0),
+            overhead_ms: Some(1.0),
+            model_span_ms: Some(5.0),
+            poll_detect_ms: Some(1.0),
+            poller_timed_out: false,
+            sqlite_workers_at_request: Vec::new(),
+            sqlite_workers_at_completion: Vec::new(),
+            process_cpu_ms_at_end: None,
+            process_rss_kb_at_end: None,
+            error: None,
+        }
+    }
+
+    /// FAST-POPULATION: a certificate covers every answered row and clock
+    /// in the fixed 16-lane population, never a filtered percentile subset.
+    #[test]
+    fn fast_population_refuses_incomplete_clocks_failures_and_wrong_geometry() {
+        let mut fixtures = Vec::new();
+        for fault in [
+            "complete",
+            "overhead-n-1",
+            "missing-clocks",
+            "failure",
+            "errors",
+            "lanes",
+            "actual-lanes",
+        ] {
+            let mut samples: Vec<_> = (0..10_000).map(complete_sample).collect();
+            let mut errors = Vec::new();
+            let mut spec = super::super::default_cases(10_000, 16).remove(0);
+            match fault {
+                "overhead-n-1" => samples
+                    .iter_mut()
+                    .skip(1)
+                    .for_each(|s| s.overhead_ms = None),
+                "missing-clocks" => samples[9999].clocks.admission = None,
+                "failure" => samples[9999].status = "failed".to_owned(),
+                "errors" => errors.push("lane failed".to_owned()),
+                "lanes" => spec.lanes = 8,
+                _ => {}
+            }
+            let mut case = CaseReport::assemble(&spec, &samples, errors, Duration::ZERO);
+            case.actual_lanes = if fault == "actual-lanes" {
+                8
+            } else {
+                spec.lanes
+            };
+            let report = build_report(serde_json::json!({}), vec![case]);
+            fixtures.push(serde_json::json!({"fixture": fault, "rows": samples.len(), "verdict": report.verdict}));
+        }
+        println!(
+            "fast-population-refusals.json={}",
+            serde_json::to_string(&fixtures).unwrap()
+        );
+        for fixture in fixtures {
+            assert_eq!(
+                fixture["verdict"]["pass"],
+                fixture["fixture"] == "complete",
+                "{fixture}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn startup_store_phases_are_complete_and_ordered() {

@@ -800,25 +800,30 @@ async fn run_once_inner(
                     .or_default() += value;
             }
         }
-        // The run_turn meter is closed before this validation reads the head.
-        if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
-            if !matches!(
-                turn.outcome,
-                TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
-            ) {
-                anyhow::bail!(
-                    "cancel round-trip turn did not finish cancelled: {:?}",
-                    turn.outcome
-                );
-            }
-        } else {
-            validate_runtime_perf_turn(
-                scenario,
-                turn_index,
-                &turn,
-                &runtime.export_state().await?,
-            )?;
-        }
+        executed
+            .validation(async {
+                // The run_turn meter is closed before this validation reads the head.
+                if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
+                    if !matches!(
+                        turn.outcome,
+                        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
+                    ) {
+                        anyhow::bail!(
+                            "cancel round-trip turn did not finish cancelled: {:?}",
+                            turn.outcome
+                        );
+                    }
+                } else {
+                    validate_runtime_perf_turn(
+                        scenario,
+                        turn_index,
+                        &turn,
+                        &runtime.export_state().await?,
+                    )?;
+                }
+                Ok(())
+            })
+            .await?;
     }
 
     let state = executed

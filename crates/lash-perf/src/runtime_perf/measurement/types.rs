@@ -194,6 +194,8 @@ pub(crate) mod stage {
     pub(crate) const RUN_TURN: &str = "run_turn";
     /// Draining background work after the turn.
     pub(crate) const AWAIT_BACKGROUND_WORK: &str = "await_background_work";
+    /// Reading and asserting the settled result after operation counters close.
+    pub(crate) const VALIDATION: &str = "validation";
     /// Exporting the resulting state.
     pub(crate) const EXPORT_STATE: &str = "export_state";
     /// The whole run or turn, measured as its own span.
@@ -318,7 +320,11 @@ pub(crate) fn run_stages(
         .into_iter()
         .map(|(name, result)| (name.to_string(), result))
         .collect::<BTreeMap<_, _>>();
-    for name in [stage::RUN_TURN, stage::AWAIT_BACKGROUND_WORK] {
+    for name in [
+        stage::RUN_TURN,
+        stage::AWAIT_BACKGROUND_WORK,
+        stage::VALIDATION,
+    ] {
         if let Some(entry) = summed_turn_stage(turns, name) {
             stages.entry(name.to_string()).or_insert(entry);
         }

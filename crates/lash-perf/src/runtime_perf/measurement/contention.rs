@@ -23,22 +23,25 @@ impl WriterContentionOperation {
 struct ContentionWave {
     execution_ms: Vec<f64>,
     wait_ms: Vec<f64>,
+    validation_ms: Vec<f64>,
     release_latency_ms: f64,
+}
+
+enum WriterOperationResult {
+    Configure(lash::config::ConfigTransactionOutcome),
+    AppendMessages,
+    SecondTurn(Box<lash::TurnReport>),
 }
 
 async fn run_writer_operation(
     turn_entry: &TurnEntry,
-    session: lash::LashSession,
-    scenario: RuntimePerfScenario,
+    session: &lash::LashSession,
     operation: WriterContentionOperation,
     ordinal: usize,
-) -> anyhow::Result<()> {
-    match operation {
+) -> anyhow::Result<WriterOperationResult> {
+    let result = match operation {
         WriterContentionOperation::Configure => {
-            // A config transaction takes the writer and settles through the
-            // command lane. Concurrent writers read the same revision, so a
-            // later one settles stale; either settlement is the measured
-            // operation, and only an owner refusal is a failure.
+            // Concurrent writers may settle stale; only owner refusal fails.
             let config = session.admin().config();
             let revision = config.revision().await?;
             let outcome = config
@@ -54,13 +57,7 @@ async fn run_writer_operation(
                 .await?
                 .await_outcome(&config)
                 .await?;
-            anyhow::ensure!(
-                !matches!(
-                    outcome,
-                    lash::config::ConfigTransactionOutcome::Refused { .. }
-                ),
-                "writer contention config transaction was refused: {outcome:?}"
-            );
+            WriterOperationResult::Configure(outcome)
         }
         WriterContentionOperation::AppendMessages => {
             session
@@ -79,11 +76,12 @@ async fn run_writer_operation(
                     lash::testing::admin_fixture_outcome,
                 )
                 .await?;
+            WriterOperationResult::AppendMessages
         }
         WriterContentionOperation::SecondTurn => {
             let turn = turn_entry
                 .run(
-                    &session,
+                    session,
                     TurnInput::text(format!(
                         "writer contention operation {ordinal}: reply with exactly: runtime perf benchmark ok"
                     )),
@@ -91,20 +89,10 @@ async fn run_writer_operation(
                     CancellationToken::new(),
                 )
                 .await?;
-            validate_runtime_perf_turn(
-                scenario,
-                ordinal,
-                &turn,
-                &session
-                    .durable()
-                    .read()
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("missing committed head"))?
-                    .to_snapshot(),
-            )?;
+            WriterOperationResult::SecondTurn(Box::new(turn))
         }
-    }
-    Ok(())
+    };
+    Ok(result)
 }
 
 async fn measure_writer_operation(
@@ -113,10 +101,35 @@ async fn measure_writer_operation(
     scenario: RuntimePerfScenario,
     operation: WriterContentionOperation,
     ordinal: usize,
-) -> anyhow::Result<f64> {
+) -> anyhow::Result<(f64, f64)> {
     let started = Instant::now();
-    run_writer_operation(turn_entry, session, scenario, operation, ordinal).await?;
-    Ok(elapsed_ms(started))
+    let result = run_writer_operation(turn_entry, &session, operation, ordinal).await?;
+    let operation_ms = elapsed_ms(started);
+    // Close the operation before head hydration and assertions. Do not
+    // subtract validation from a larger span: measure the two directly.
+    let validation_started = Instant::now();
+    match result {
+        WriterOperationResult::Configure(outcome) => anyhow::ensure!(
+            !matches!(
+                outcome,
+                lash::config::ConfigTransactionOutcome::Refused { .. }
+            ),
+            "writer contention config transaction was refused: {outcome:?}"
+        ),
+        WriterOperationResult::AppendMessages => {}
+        WriterOperationResult::SecondTurn(turn) => validate_runtime_perf_turn(
+            scenario,
+            ordinal,
+            &turn,
+            &session
+                .durable()
+                .read()
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("missing committed head"))?
+                .to_snapshot(),
+        )?,
+    }
+    Ok((operation_ms, elapsed_ms(validation_started)))
 }
 
 async fn run_contention_wave(
@@ -129,11 +142,13 @@ async fn run_contention_wave(
     expect_contention: bool,
 ) -> anyhow::Result<ContentionWave> {
     let mut execution_ms = Vec::with_capacity(target_sessions.len());
+    let mut validation_ms = Vec::with_capacity(target_sessions.len() * 2);
     for (ordinal, session) in target_sessions.iter().enumerate() {
-        execution_ms.push(
+        let (operation_ms, validated_ms) =
             measure_writer_operation(turn_entry, session.clone(), scenario, operation, ordinal)
-                .await?,
-        );
+                .await?;
+        execution_ms.push(operation_ms);
+        validation_ms.push(validated_ms);
     }
 
     control.arm();
@@ -180,7 +195,9 @@ async fn run_contention_wave(
         );
     } else {
         while let Some(result) = waiters.join_next().await {
-            contended_ms.push(result.map_err(anyhow::Error::from)??);
+            let (operation_ms, validated_ms) = result.map_err(anyhow::Error::from)??;
+            contended_ms.push(operation_ms);
+            validation_ms.push(validated_ms);
         }
         assert_eq!(
             completed.load(std::sync::atomic::Ordering::SeqCst),
@@ -192,7 +209,9 @@ async fn run_contention_wave(
     control.release_provider.notify_one();
 
     while let Some(result) = waiters.join_next().await {
-        contended_ms.push(result.map_err(anyhow::Error::from)??);
+        let (operation_ms, validated_ms) = result.map_err(anyhow::Error::from)??;
+        contended_ms.push(operation_ms);
+        validation_ms.push(validated_ms);
     }
     holder.await.map_err(anyhow::Error::from)??;
     contended_ms.sort_by(f64::total_cmp);
@@ -208,6 +227,7 @@ async fn run_contention_wave(
     Ok(ContentionWave {
         execution_ms,
         wait_ms,
+        validation_ms,
         release_latency_ms,
     })
 }
@@ -219,6 +239,10 @@ fn push_contention_wave_metrics(
     wave: ContentionWave,
 ) {
     let prefix = format!("writer_contention.{scope}");
+    metrics.insert(
+        format!("{prefix}.{}.validation_ms", operation.name()),
+        wave.validation_ms,
+    );
     metrics
         .entry(format!("{prefix}.execution_ms"))
         .or_default()

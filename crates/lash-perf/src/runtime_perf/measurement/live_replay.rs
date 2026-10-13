@@ -345,62 +345,67 @@ pub(super) async fn run_once_trace_jsonl(
         let phase_probe = Arc::new(RuntimePerfPhaseProbe::default());
         runtime.set_turn_phase_probe(phase_probe.clone()).await;
 
-        run.turn_then(
-            turn_index,
-            async {
-                let turn_input = TurnInput::text(benchmark_prompt(scenario, turn_index));
-                let cancel = CancellationToken::new();
-                let turn = runtime_perf_timed(
-                    scenario,
-                    turn_index,
-                    "run_turn",
-                    Some(cancel.clone()),
-                    runtime.run_turn(turn_input, cancel),
-                )
-                .await
-                .with_context(|| {
-                    format!(
-                        "run runtime perf scenario {} turn {}",
-                        scenario.name(),
-                        turn_index + 1
+        let turn = run
+            .turn_then(
+                turn_index,
+                async {
+                    let turn_input = TurnInput::text(benchmark_prompt(scenario, turn_index));
+                    let cancel = CancellationToken::new();
+                    let turn = runtime_perf_timed(
+                        scenario,
+                        turn_index,
+                        "run_turn",
+                        Some(cancel.clone()),
+                        runtime.run_turn(turn_input, cancel),
                     )
-                })?;
-                validate_runtime_perf_turn(
-                    scenario,
-                    turn_index,
-                    &turn,
-                    &runtime.export_state().await?,
-                )?;
-                Ok(TurnRun {
-                    value: (),
-                    tail: TurnTail {
-                        turn_usage: turn.usage,
-                        ..TurnTail::default()
-                    },
-                })
-            },
-            async {
-                runtime_perf_timed(
-                    scenario,
-                    turn_index,
-                    "await_background_work",
-                    None,
-                    runtime.await_background_work(),
-                )
-                .await
-                .with_context(|| {
-                    format!(
-                        "await background work for {} turn {}",
-                        scenario.name(),
-                        turn_index + 1
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "run runtime perf scenario {} turn {}",
+                            scenario.name(),
+                            turn_index + 1
+                        )
+                    })?;
+                    Ok(TurnRun {
+                        tail: TurnTail {
+                            turn_usage: turn.usage.clone(),
+                            ..TurnTail::default()
+                        },
+                        value: turn,
+                    })
+                },
+                async {
+                    runtime_perf_timed(
+                        scenario,
+                        turn_index,
+                        "await_background_work",
+                        None,
+                        runtime.await_background_work(),
                     )
-                })
-            },
-            |_, _, tail| {
-                tail.phase_profile = phase_probe.take_completed();
-                Ok(())
-            },
-        )
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "await background work for {} turn {}",
+                            scenario.name(),
+                            turn_index + 1
+                        )
+                    })
+                },
+                |_, _, tail| {
+                    tail.phase_profile = phase_probe.take_completed();
+                    Ok(())
+                },
+            )
+            .await?;
+        run.validation(async {
+            validate_runtime_perf_turn(
+                scenario,
+                turn_index,
+                &turn,
+                &runtime.export_state().await?,
+            )?;
+            Ok(())
+        })
         .await?;
     }
 

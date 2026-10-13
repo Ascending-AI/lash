@@ -73,7 +73,7 @@ builds remain available.
 ## Reading a receipt
 
 The receipt (`lash-perf-replay-receipt/1`) carries the identity every
-comparison checks: commit, dirty flag, build (`debug` or `release`),
+comparison checks: commit, dirty flag, build (`debug` or `release`), build profile,
 allocator, host, CPU count and 1-minute load at start. Each workload records
 its script digest (SHA-256), backend, sessions and turns.
 
@@ -114,8 +114,10 @@ work shows as a positive history slope; O(frame) work in a compacting
 session as a frame slope with a near-zero history slope. Theil-Sen ignores
 the odd sweep or retention turn that moves least squares.
 
-Counted metrics compare across hosts. Allocation counts differ between
-`debug` and `release` builds. Timed metrics (`*_ms`) compare only within one
+Counted metrics compare across hosts within the same build, build profile
+and allocator. The counted gate refuses missing or mismatched identity before
+comparing any metrics, including SQL-only populations. Allocation counts differ
+between `debug` and `release` builds. Timed metrics (`*_ms`) compare only within one
 host and build and are never gated.
 
 ## Code-mode control (optional)
@@ -202,6 +204,8 @@ test's debug build. It fails when:
 - a depth slope listed under `baseline_tolerance.depth_slope` rises more than
   `relative * |baseline| + absolute` above its blessed value; a
   `<workload>/<metric>` key loosens one noisier workload;
+- the receipt or baseline has missing or mismatched build, build profile or
+  allocator identity;
 - a gate workload did not run, or its baseline names another script digest,
   backend or length.
 
@@ -224,7 +228,8 @@ stating why in the commit body. The gate compiles `budgets.json` and
 `baseline.json` in, so a rebuilt test reads the new baseline. The gate prints `improved ...` lines when a
 median or slope falls below its tolerance band; re-bless then to ratchet the
 gain. Re-bless only from a clean tree at the change's commit: the baseline
-records `blessed_from`.
+records `blessed_from`, build profile and allocator. Blessing refuses missing
+identity; an optimized evaluator refuses the committed debug baseline.
 
 ## Main's trend
 

@@ -267,6 +267,27 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
     };
 
     write_runtime_perf_report(&out_path, &report)?;
+    // Preserve the directly measured windows before any summary or guard
+    // consumes them; validation is evidence, never part of operation latency.
+    let windows: Vec<_> = report.results.iter().map(|run| serde_json::json!({
+        "scenario": run.scenario,
+        "turns": run.turns.iter().map(|turn| serde_json::json!({
+            "turn_index": turn.turn_index,
+            "operation": turn.stage(stage::RUN_TURN),
+            "background": turn.stage(stage::AWAIT_BACKGROUND_WORK),
+            "validation": turn.stage(stage::VALIDATION),
+        })).collect::<Vec<_>>(),
+        "contention": run.metric_samples_ms.iter().filter(|(name, _)| name.starts_with("writer_contention.")).collect::<BTreeMap<_, _>>(),
+    })).collect();
+    std::fs::write(
+        out_path.with_file_name("operation-validation-ledger.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "allocation_mode": report.allocation_mode,
+            "phase_observation_mode": report.phase_observation_mode,
+            "experiments": report.experiments,
+            "windows": windows,
+        }))? + "\n",
+    )?;
 
     println!(
         "{}",
