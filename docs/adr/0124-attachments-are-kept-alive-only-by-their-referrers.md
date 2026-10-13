@@ -66,6 +66,25 @@ has an edge or a pending write.** There is no age predicate and no
 owner-death predicate. `AttachmentReclamationPolicy::grace_period_ms` bounds
 only the delete-time freshness re-check.
 
+Upload expiry and sweep are ordered operations. A guarded put arms cleanup;
+the upload deadline makes artifact-cleanup relay delivery eligible. Delivery
+fences and ends the upload referrer, removing its edges and pending writes.
+Expiry alone removes no hold or bytes. A later sweep may reclaim the digest
+only when no other referrer or pending write protects it, subject to its
+freshness policy. Sweeping does not deliver upload cleanup obligations.
+
+For a deterministic host test, use the core's `lash::testing::TestClock`,
+advance it past the upload deadline, then settle the real relay before the
+sweep assertion:
+
+```rust,ignore
+clock.advance(upload_expiry_ms + 1);
+let cleanup = lash::testing::quiesce_artifact_cleanup(&core).await;
+cleanup.settle().await?;
+// Run the attachment sweep and assert its result. Account for other holders
+// and explicitly select the sweep's freshness grace period.
+```
+
 An attachment URI is derived from its digest; the store keeps no second
 copy of it.
 

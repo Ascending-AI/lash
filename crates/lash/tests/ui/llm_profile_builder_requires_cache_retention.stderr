@@ -1,0 +1,12 @@
+error[E0599]: no method named `build` found for struct `LlmProfileMetadataBuilder` in the current scope
+ --> tests/ui/llm_profile_builder_requires_cache_retention.rs:4:10
+  |
+2 |       let _metadata = lash::LlmProfileMetadata::builder("provider/model")
+  |  _____________________-
+3 | |         .context_window_tokens(8_192)
+4 | |         .build();
+  | |         -^^^^^ method not found in `LlmProfileMetadataBuilder`
+  | |_________|
+  |
+  |
+  = note: the method was found for `LlmProfileMetadataBuilder<CacheRetention>`

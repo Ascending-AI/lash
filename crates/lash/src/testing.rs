@@ -1,3 +1,32 @@
+/// Build a settled report for tests of report readers and host projections.
+///
+/// The caller supplies the outcome; cancellation evidence and error causes in
+/// it are retained unchanged. This fixture uses [`crate::ReportSource::Durable`],
+/// whose observation fields may be incomplete and whose execution metrics are
+/// defaulted. It supplies no acceptance receipt, call ledgers, failure evidence,
+/// observed errors, omissions or affected-input observations; usage and execution
+/// metrics are zero/default. Empty evidence means no observations were supplied,
+/// not proof that no calls, failures or cancellation effects occurred. Tests that
+/// project those fields must populate them explicitly.
+///
+/// This constructs no durable runtime evidence and chooses no successful outcome.
+/// It is available only through the testing facade.
+pub fn settled_turn_report(outcome: crate::TurnOutcome) -> crate::TurnReport {
+    crate::TurnReport {
+        outcome,
+        usage: Default::default(),
+        llm_calls: Vec::new(),
+        failure_evidence: Vec::new(),
+        tool_calls: Vec::new(),
+        omitted: None,
+        execution: Default::default(),
+        errors: Vec::new(),
+        acceptance: None,
+        cancel_input_outcome: Default::default(),
+        source: crate::ReportSource::Durable,
+    }
+}
+
 /// Derives a durable frame-node identity through the runtime's canonical
 /// producer for integration fixtures that need to enqueue frame-scoped work.
 pub use lash_core::facade_support::frame_node_id;
@@ -323,6 +352,21 @@ pub struct ArtifactCleanupFence {
 
 /// Wait for any active periodic cleanup pass, then hold later passes until
 /// the returned guard is dropped. Use one guard for the whole replay.
+///
+/// Upload expiry only makes the cleanup obligation eligible. For deterministic
+/// expiry/sweep tests, use the same [`TestClock`] as the core, advance it past
+/// the upload deadline, then settle cleanup before sweeping:
+///
+/// ```ignore
+/// clock.advance(upload_expiry_ms + 1);
+/// let cleanup = lash::testing::quiesce_artifact_cleanup(&core).await;
+/// cleanup.settle().await?;
+/// // Now run the attachment sweep and assert its result, accounting for any
+/// // other referrers, pending writes and the sweep's freshness grace period.
+/// ```
+///
+/// Relay delivery ends the upload hold; it deletes no blob bytes. Other holders
+/// continue to protect the blob until they end.
 pub async fn quiesce_artifact_cleanup(core: &crate::LashCore) -> ArtifactCleanupFence {
     let guard = core.recovery.quiesce_cleanup().await;
     ArtifactCleanupFence {

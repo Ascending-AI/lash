@@ -145,6 +145,12 @@ pub struct ArtifactCleanupPorts {
 }
 
 /// The `ArtifactCleanup` relay.
+///
+/// A guarded attachment put arms upload cleanup. Its expiry deadline makes
+/// delivery eligible; delivery fences and ends the upload referrer, removing
+/// its attachment edges and pending writes. A later attachment sweep may reclaim
+/// the bytes only if no other referrer or pending write protects them. Expiry
+/// alone removes no hold, and relay delivery itself deletes no blob bytes.
 pub struct ArtifactCleanupRelay {
     ports: ArtifactCleanupPorts,
     policy: RelayPolicy,

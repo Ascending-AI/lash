@@ -74,6 +74,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     // FIG-4374: models are selected by registry key, and a recorded model is
     // minted by the registry alone.
     t.compile_fail("tests/ui/llm_profiles_are_selected_by_key.rs");
+    t.compile_fail("tests/ui/llm_profile_builder_requires_cache_retention.rs");
     t.compile_fail("tests/ui/recorded_llm_profile_is_minted_by_the_registry.rs");
     t.compile_fail("tests/ui/root_tool_provider_is_not_public.rs");
     t.compile_fail("tests/ui/session_admin_flat_methods_are_not_public.rs");

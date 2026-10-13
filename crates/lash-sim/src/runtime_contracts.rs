@@ -795,7 +795,21 @@ mod tests {
             ]
         );
 
-        let mut totals = RuntimeUsageTotals::new(i64::MAX - 2, 1, 1, 1, i64::MAX);
+        let mut report = lash::testing::settled_turn_report(lash::TurnOutcome::Finished(
+            lash::TurnFinish::AssistantMessage {
+                text: "answer".into(),
+            },
+        ));
+        report.usage = lash::usage::LlmUsage {
+            input_tokens: i64::MAX - 2,
+            output_tokens: 1,
+            cache_read_input_tokens: 1,
+            cache_write_input_tokens: 1,
+            reasoning_output_tokens: i64::MAX,
+        };
+        let facts = runtime_usage_invariant_facts(&report, &[]);
+        assert!(facts.non_negative);
+        let mut totals = facts.turn_usage;
         assert_eq!(totals.total_tokens, i64::MAX);
 
         totals.saturating_add_assign(&RuntimeUsageTotals::new(3, i64::MAX, 0, 0, 1));
@@ -807,27 +821,12 @@ mod tests {
 
     #[test]
     fn final_value_builder_derives_pass_and_fail_from_real_outcomes_and_events() {
-        fn result(outcome: lash_core::facade_support::TurnOutcome) -> lash::TurnReport {
-            lash::TurnReport {
-                cancel_input_outcome: Default::default(),
-                acceptance: None,
-                outcome,
-                usage: Default::default(),
-                llm_calls: Vec::new(),
-                failure_evidence: Vec::new(),
-                tool_calls: Vec::new(),
-                omitted: None,
-                execution: Default::default(),
-                errors: Vec::new(),
-                source: lash::ReportSource::Live,
-            }
-        }
-
-        let prose_only = result(lash_core::facade_support::TurnOutcome::Finished(
-            lash_core::facade_support::TurnFinish::AssistantMessage {
-                text: "looks final".to_string(),
-            },
-        ));
+        let prose_only =
+            lash::testing::settled_turn_report(lash_core::facade_support::TurnOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage {
+                    text: "looks final".to_string(),
+                },
+            ));
         let failed = runtime_final_value_invariant_facts(
             &prose_only,
             &[lash::TurnActivity::independent(
@@ -842,12 +841,13 @@ mod tests {
         assert!(failed.transcript_inference_required());
 
         let value = serde_json::json!({"answer": 42});
-        let semantic = result(lash_core::facade_support::TurnOutcome::Finished(
-            lash_core::facade_support::TurnFinish::Finished {
-                tool_name: "finish".into(),
-                value: value.clone(),
-            },
-        ));
+        let semantic =
+            lash::testing::settled_turn_report(lash_core::facade_support::TurnOutcome::Finished(
+                lash_core::facade_support::TurnFinish::Finished {
+                    tool_name: "finish".into(),
+                    value: value.clone(),
+                },
+            ));
         let mismatched = runtime_final_value_invariant_facts(
             &semantic,
             &[lash::TurnActivity::independent(lash::TurnEvent::Finished {

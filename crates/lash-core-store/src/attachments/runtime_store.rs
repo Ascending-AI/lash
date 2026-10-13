@@ -144,9 +144,17 @@ pub struct AttachmentPolicy {
     pub max_attachment_bytes: Option<u64>,
     /// The bytes one read and one request may materialize.
     pub read: AttachmentReadPolicy,
-    /// How long an attachment put outside any turn stays held by its upload
-    /// before cleanup may reclaim it, in milliseconds, unless a turn, process
-    /// or session acquires it first.
+    /// Milliseconds before a session put outside any turn becomes eligible
+    /// for upload-referrer cleanup. The guarded put arms an artifact-cleanup
+    /// obligation. Passing its deadline does not remove the upload hold or
+    /// delete bytes: the artifact-cleanup relay must deliver the obligation,
+    /// fencing and ending that referrer, before a later attachment sweep may
+    /// reclaim the blob. Other referrers and pending writes still protect it.
+    ///
+    /// For deterministic host tests, advance the core's test clock past the
+    /// deadline, then await `lash::testing::quiesce_artifact_cleanup(&core)`
+    /// and its `settle().await` before asserting sweep reclamation. Account
+    /// separately for other holders and the sweep's freshness grace period.
     pub upload_expiry_ms: u64,
     /// Which outputs leave history for a retained attachment, and the
     /// witness history keeps in their place (FIG-1643).

@@ -24,6 +24,20 @@ use std::collections::HashSet;
 /// and accumulated report ids remain separate memory limits. Concurrent inserts
 /// behind the cursor are deferred to the next sweep.
 ///
+/// # Upload expiry requires cleanup delivery
+///
+/// A guarded put arms an upload cleanup obligation. Its deadline, selected by
+/// [`AttachmentPolicy::upload_expiry_ms`], makes relay delivery eligible; it
+/// removes no root itself. The artifact-cleanup relay fences and ends the upload
+/// referrer. Only a later sweep may reclaim the bytes, provided no other referrer
+/// or pending write protects them and the freshness policy permits deletion.
+/// Sweep does not deliver those obligations or interpret upload deadlines.
+///
+/// In host tests, advance the core's test clock past the upload deadline, await
+/// `lash::testing::quiesce_artifact_cleanup(&core)` and its `settle().await`, then
+/// run the sweep and assert reclamation. Set the sweep's freshness grace period
+/// explicitly and account for other holders.
+///
 /// # Two reconciliation windows, one grace period
 ///
 /// `grace_period_ms` gates two independent hazards, both keyed off the same
