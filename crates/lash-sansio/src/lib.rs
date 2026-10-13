@@ -77,9 +77,9 @@ pub use llm::capability::{
 };
 pub use llm::types::{LlmTerminalReason, ProviderFailureKind};
 pub use plugin::{
-    CheckpointKind, PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginMessage,
-    PluginOperationFailure, PluginRuntimeEvent, ToolCheckConflict, ToolCheckPhase, ToolCheckReply,
-    ToolCheckVerdictKind,
+    CheckpointKind, ControlPhaseExpired, PluginFailureClass, PluginFailureOrigin,
+    PluginHookFailure, PluginMessage, PluginOperationFailure, PluginRuntimeEvent,
+    ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind,
 };
 pub use redacted::Redacted;
 pub use retained_output::{OutputRetentionPolicy, OutputValue, RetainedOutput, RetainedValue};

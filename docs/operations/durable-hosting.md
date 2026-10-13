@@ -819,7 +819,8 @@ backs the preset's values. `ExecutionBudgets::new(config)` validates an
 | Field | `recommended()` | Bounds |
 | --- | --- | --- |
 | `model_total` | 10 min | One model call, over throttle, backoff and every provider attempt. |
-| `control_phase` | 60 s | One admission or checkpoint phase, all its checks together. |
+| `tool_check_phase` | 10 s | One tool call's argument or result transforms and checks, together, within its member execution deadline. |
+| `turn_hook_phase` | 60 s | One before-turn, checkpoint or after-turn phase, all callbacks together. |
 | `stop_grace` | 2 s | Spent once after a stretch ends at its limit or on cancel, to collect evidence. |
 | `provider` | see below | `ProviderAttemptLimits` |
 | `agent_frame_switch_limit` | 16 | A chain of agent frame switches; the follow-on at this depth stops with `AgentFrameSwitchLimit` before calling the model. |

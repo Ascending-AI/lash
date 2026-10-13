@@ -14,7 +14,8 @@ fn default_budgets_construct_and_every_refusal_fires() {
     let defaults = ExecutionBudgets::new(config()).expect("the defaults are valid");
     assert_eq!(defaults, ExecutionBudgets::recommended());
     assert_eq!(defaults.model_total(), 10 * MIN);
-    assert_eq!(defaults.control_phase(), MIN);
+    assert_eq!(defaults.tool_check_phase(), Duration::from_secs(10));
+    assert_eq!(defaults.turn_hook_phase(), MIN);
     assert_eq!(defaults.stop_grace(), Duration::from_secs(2));
     let provider = defaults.provider();
     assert_eq!(
@@ -32,9 +33,10 @@ fn default_budgets_construct_and_every_refusal_fires() {
     };
     for (field, value) in [
         ("stop_grace", Duration::ZERO),
+        ("turn_hook_phase", Duration::ZERO),
         ("model_total", Duration::from_micros(999)),
         (
-            "control_phase",
+            "tool_check_phase",
             MAX_EXECUTION_BUDGET + Duration::from_millis(1),
         ),
     ] {
@@ -42,7 +44,8 @@ fn default_budgets_construct_and_every_refusal_fires() {
         match field {
             "stop_grace" => config.stop_grace = value,
             "model_total" => config.model_total = value,
-            _ => config.control_phase = value,
+            "tool_check_phase" => config.tool_check_phase = value,
+            _ => config.turn_hook_phase = value,
         }
         assert!(
             matches!(refused(config), ExecutionBudgetsError::OutOfRange { field: found, .. } if found == field),
@@ -72,6 +75,17 @@ fn default_budgets_construct_and_every_refusal_fires() {
             ..
         }
     ));
+
+    for field in ["tool_check_phase", "turn_hook_phase"] {
+        let mut overflowing = config();
+        match field {
+            "tool_check_phase" => overflowing.tool_check_phase = MAX_EXECUTION_BUDGET,
+            _ => overflowing.turn_hook_phase = MAX_EXECUTION_BUDGET,
+        }
+        assert!(
+            matches!(refused(overflowing), ExecutionBudgetsError::SumOverflows { left, right: "stop_grace", .. } if left == field)
+        );
+    }
 
     for attempts in [0, MAX_PROVIDER_ATTEMPTS + 1, u32::MAX] {
         assert_eq!(
@@ -119,33 +133,4 @@ fn a_nested_model_call_is_clipped_to_the_enclosing_remaining_time() {
 
     let roomy = ExecutionLimit::starting_at(start, 60 * MIN, 60 * MIN);
     assert_eq!(budgets.model_call_limit(start, Some(&roomy)), own);
-}
-
-/// L-C3: one admission phase is bounded by one `control_phase`, however
-/// many checks it runs; no check gets a bound of its own.
-#[test]
-fn one_control_phase_bound_covers_every_check_in_the_phase() {
-    let budgets = ExecutionBudgets::recommended();
-    let start = 5_000;
-    let phase = budgets.control_phase_limit(start);
-    let check_cost_ms = 7_000;
-    let mut now = start;
-    let mut checks_run = 0;
-    while !phase.is_expired(now) {
-        assert_eq!(
-            phase.remaining(now),
-            MIN - Duration::from_millis(now - start),
-            "check {checks_run} reads the phase's one bound"
-        );
-        now += check_cost_ms;
-        checks_run += 1;
-    }
-    assert_eq!(
-        checks_run, 9,
-        "60 s of 7 s checks: the ninth ends past the phase"
-    );
-    assert!(
-        Duration::from_millis(check_cost_ms) < budgets.control_phase(),
-        "every check alone fits a per-check bound the phase does not grant"
-    );
 }

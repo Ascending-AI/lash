@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolFailureCause {
+    /// A host-configured aggregate callback deadline passed without an answer.
+    ControlPhaseExpired {
+        expiry: Box<crate::ControlPhaseExpired>,
+    },
     Interrupted,
     /// The host body panicked. It may already have performed outside work;
     /// this terminal is never retried or sent back to the model for repair.

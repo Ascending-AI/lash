@@ -42,6 +42,8 @@ pub struct ToolHookContext {
     pub config: super::OwnerConfigView,
     pub argument_projection: crate::ToolArgumentProjectionPolicy,
     pub turn_context: crate::TurnContext,
+    pub(crate) check_phase: super::ControlPhaseDeadline,
+    pub(crate) clock: Arc<dyn crate::Clock>,
     pub(crate) sessions: Arc<dyn SessionStateService>,
 }
 
@@ -177,7 +179,7 @@ pub struct ToolResultCheckInput {
 /// data only: it carries no intents, resolver, process start or Run control,
 /// and it runs through the result transforms and after-checks like a body
 /// result.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct CachedToolSuccess {
     pub value: crate::ToolValue,
     pub view: Option<crate::ToolView>,
@@ -203,7 +205,8 @@ impl CachedToolSuccess {
 }
 
 /// A before-check's one verdict over the prepared call.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(tag = "verdict", content = "value", rename_all = "snake_case")]
 pub enum BeforeToolDecision {
     Allow,
     /// Serve this success instead of running the body.
@@ -219,7 +222,8 @@ pub enum BeforeToolDecision {
 /// An after-check's one verdict over the final result. It has no variant
 /// that carries a result: an after-check cannot replace one, and recovery
 /// belongs in a result transform.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+#[serde(tag = "verdict", content = "value", rename_all = "snake_case")]
 pub enum AfterToolDecision {
     #[default]
     Allow,
@@ -311,6 +315,13 @@ pub(crate) fn failed_check(
         ),
     );
     failure.source = crate::ToolFailureSource::Plugin;
+    if let PluginError::Runtime(error) = error
+        && let Some(crate::RuntimeErrorCause::ControlPhaseExpired { expiry }) = &error.cause
+    {
+        failure = failure.with_cause(crate::ToolFailureCause::ControlPhaseExpired {
+            expiry: expiry.clone(),
+        });
+    }
     failure
 }
 
@@ -333,6 +344,13 @@ pub(crate) fn failed_transform(
         ),
     );
     failure.source = crate::ToolFailureSource::Plugin;
+    if let PluginError::Runtime(error) = error
+        && let Some(crate::RuntimeErrorCause::ControlPhaseExpired { expiry }) = &error.cause
+    {
+        failure = failure.with_cause(crate::ToolFailureCause::ControlPhaseExpired {
+            expiry: expiry.clone(),
+        });
+    }
     failure
 }
 
@@ -376,12 +394,61 @@ pub(crate) enum BeforeSelection {
     Terminal(crate::ToolCallOutput),
 }
 
+fn expiry_evidence(failure: &crate::ToolFailure) -> Option<crate::ToolValue> {
+    matches!(
+        failure.cause.as_deref(),
+        Some(crate::ToolFailureCause::ControlPhaseExpired { .. })
+    )
+    .then(|| failure.raw.clone())
+    .flatten()
+}
+
+pub(crate) fn before_expiry_evidence(
+    record: &CheckRecord<BeforeToolDecision>,
+) -> Option<crate::ToolValue> {
+    record
+        .replies()
+        .iter()
+        .find_map(|reply| match &reply.verdict {
+            BeforeToolDecision::Deny(failure) => expiry_evidence(failure),
+            _ => None,
+        })
+}
+
+pub(crate) fn after_expiry_evidence(
+    record: &CheckRecord<AfterToolDecision>,
+) -> Option<crate::ToolValue> {
+    record
+        .replies()
+        .iter()
+        .find_map(|reply| match &reply.verdict {
+            AfterToolDecision::Deny(failure) => expiry_evidence(failure),
+            _ => None,
+        })
+}
+
+/// Keep the selected error and Run control, with every original verdict as
+/// the recorded evidence of the timed-out phase, even if expiry lost reduction.
+pub(crate) fn with_expiry_evidence(
+    mut output: crate::ToolCallOutput,
+    evidence: Option<crate::ToolValue>,
+) -> crate::ToolCallOutput {
+    if let Some(evidence) = evidence {
+        match &mut output.outcome {
+            crate::ToolCallOutcome::Failure(failure) => failure.raw = Some(evidence),
+            crate::ToolCallOutcome::Cancelled(cancellation) => cancellation.raw = Some(evidence),
+            crate::ToolCallOutcome::Success(_) => {}
+        }
+    }
+    output
+}
+
 pub(crate) fn before_selection(record: &CheckRecord<BeforeToolDecision>) -> BeforeSelection {
     let Some(AttributedVerdict { callback, verdict }) = record.winner() else {
         return BeforeSelection::Execute;
     };
     let plugin_id = callback.owner.as_str();
-    match verdict {
+    let selected = match verdict {
         BeforeToolDecision::Allow => BeforeSelection::Execute,
         BeforeToolDecision::Cached(cached) => {
             BeforeSelection::Cached(cached.clone().into_candidate())
@@ -396,6 +463,12 @@ pub(crate) fn before_selection(record: &CheckRecord<BeforeToolDecision>) -> Befo
         BeforeToolDecision::AbortRun(abort) => {
             BeforeSelection::Terminal(terminal_output(plugin_id, TerminalVerdict::AbortRun(abort)))
         }
+    };
+    match selected {
+        BeforeSelection::Terminal(output) => {
+            BeforeSelection::Terminal(with_expiry_evidence(output, before_expiry_evidence(record)))
+        }
+        selected => selected,
     }
 }
 
@@ -411,7 +484,7 @@ pub(crate) fn after_resolution(
         return candidate.into_output(control);
     };
     let plugin_id = callback.owner.as_str();
-    match verdict {
+    let output = match verdict {
         AfterToolDecision::Allow => candidate.into_output(control),
         AfterToolDecision::Deny(failure) => {
             terminal_output(plugin_id, TerminalVerdict::Deny(failure))
@@ -422,7 +495,8 @@ pub(crate) fn after_resolution(
         AfterToolDecision::AbortRun(abort) => {
             terminal_output(plugin_id, TerminalVerdict::AbortRun(abort))
         }
-    }
+    };
+    with_expiry_evidence(output, after_expiry_evidence(record))
 }
 
 /// The attributed terminal replies a reduction did not select, as

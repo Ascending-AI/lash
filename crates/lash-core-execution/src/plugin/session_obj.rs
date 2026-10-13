@@ -47,13 +47,23 @@ where
     O: ProposesState,
     F: Fn(&H, C) -> PluginFuture<O>,
 {
+    let clock = session.host.trace_runtime().clock();
+    let deadline = super::ControlPhaseDeadline::new(
+        clock.as_ref(),
+        hook_kind,
+        session.execution_budgets().turn_hook_phase(),
+    );
     let mut out = Vec::new();
     for registered in hooks {
         let phase_name = plugin_hook_phase_name(hook_kind, &registered.identity.owner);
         if let Some(probe) = phase_probe {
             probe.begin_named(&phase_name);
         }
-        let result = invoke(&registered.hook, ctx.clone()).await;
+        let result = deadline
+            .run(clock.as_ref(), &registered.identity, || {
+                invoke(&registered.hook, ctx.clone())
+            })
+            .await;
         if let Some(probe) = phase_probe {
             probe.end_named(&phase_name);
         }

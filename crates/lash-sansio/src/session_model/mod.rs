@@ -825,6 +825,9 @@ impl TurnErrorCode {
 /// discard foreign text and render the typed classification instead.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnErrorCause {
+    /// Typed timeout evidence for an unanswered plugin callback phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_phase_expired: Option<Box<crate::ControlPhaseExpired>>,
     pub code: TurnErrorCode,
     #[serde(deserialize_with = "deserialize_turn_error_detail")]
     detail: Option<String>,
@@ -837,6 +840,7 @@ impl TurnErrorCause {
         Self {
             code,
             detail: Some(code.detail().to_owned()),
+            control_phase_expired: None,
         }
     }
 

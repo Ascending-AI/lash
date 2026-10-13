@@ -97,6 +97,23 @@ not recorded execution configuration. Hosts can filter custom payloads with a
 wrapping `TraceSink` at their exporter, as shown in the
 [tracing contract](../architecture/tracing.md#plugin-custom-payloads-and-host-filtering).
 
+### Callback deadlines
+
+The host configures `ExecutionBudgetsConfig::tool_check_phase` for all
+transforms and checks in one argument or result phase (10 s in the recommended
+preset), and `turn_hook_phase` for all callbacks in one before-turn, checkpoint
+or after-turn phase (60 s). Plugins cannot extend these aggregate bounds.
+An unanswered callback fails with `lash::plugins::ControlPhaseExpired`,
+retaining its phase, bound, plugin and callback key. Tool checks refuse and
+retain all received verdicts and missing checks; contributors fail through
+the ordinary hook error path. The recorded outcome is served on replay.
+
+A timer cannot pre-empt native code that never yields: the deadline guarantees
+that the turn moves on when callbacks yield, not that the plugin's work stopped.
+Yield cooperatively and bound spawned or external work independently. See
+[ADR 0128](0128-tool-hooks-compose-as-transforms-then-checks.md) for composition
+and recording.
+
 ### Read-only handles
 
 `DurableSession::read` returns settled `SessionReadView` data without opening a

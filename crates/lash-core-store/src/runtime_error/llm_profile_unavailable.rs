@@ -24,7 +24,8 @@ impl RuntimeErrorCause {
             | Self::StreamStateFormatUnreadable { .. }
             | Self::PluginStatePublicationFenced { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
-            Self::ToolRunCutRefused { .. }
+            Self::ControlPhaseExpired { .. }
+            | Self::ToolRunCutRefused { .. }
             | Self::ToolRunIsolationRefused { .. }
             | Self::ToolRunControl { .. }
             | Self::ToolRunAdmissionRefused { .. }

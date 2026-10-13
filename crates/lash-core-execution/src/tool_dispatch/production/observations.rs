@@ -72,6 +72,7 @@ impl ProductionToolHandlers<'_> {
                 &presented.intent_outcomes,
             );
         }
+        output = self.with_expiry_evidence(call_id, output);
         Ok(ToolCallRecord {
             call_id: call_id.clone(),
             provider_call_id: prepared.call.provider_call_id,

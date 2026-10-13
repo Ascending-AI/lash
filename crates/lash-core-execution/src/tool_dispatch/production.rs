@@ -28,6 +28,7 @@ pub(crate) struct ProductionToolHandlers<'run> {
     calls: Mutex<BTreeMap<crate::ToolCallId, CallInput>>,
     prepared: Mutex<BTreeMap<crate::ToolCallId, Prepared>>,
     inline_stops: Mutex<BTreeMap<crate::ToolCallId, InlineStop>>,
+    expiry_evidence: Mutex<BTreeMap<crate::ToolCallId, crate::ToolValue>>,
     contributions: Mutex<BTreeMap<crate::ToolCallId, Vec<CheckContribution>>>,
     declarations: Mutex<BTreeMap<crate::ToolCallId, Vec<crate::ToolIntentExecutionOutcome>>>,
     /// The process each admitted isolated call's provider bound it to.
@@ -89,6 +90,7 @@ struct CallInput {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Prepared {
+    check_phase: crate::plugin::ControlPhaseDeadline,
     input: CallInput,
     original_args: Option<serde_json::Value>,
     call: PreparedToolCall,
@@ -97,6 +99,7 @@ struct Prepared {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Captured {
+    check_phase: Option<crate::plugin::ControlPhaseDeadline>,
     original: Option<ToolCallOutput>,
     output: ToolCallOutput,
     occurrence: crate::plugin::ToolHookOccurrence,
@@ -175,6 +178,7 @@ impl<'run> ProductionToolHandlers<'run> {
             calls: Mutex::default(),
             prepared: Mutex::default(),
             inline_stops: Mutex::default(),
+            expiry_evidence: Mutex::default(),
             contributions: Mutex::default(),
             declarations: Mutex::default(),
             isolated: Mutex::default(),
@@ -185,6 +189,17 @@ impl<'run> ProductionToolHandlers<'run> {
             accepted_stop: None,
         }
     }
+    fn with_expiry_evidence(
+        &self,
+        call: &crate::ToolCallId,
+        output: ToolCallOutput,
+    ) -> ToolCallOutput {
+        crate::plugin::with_expiry_evidence(
+            output,
+            self.expiry_evidence.lock_recover().get(call).cloned(),
+        )
+    }
+
     /// The start of an isolated call in `engine`, the process engine its
     /// manifest names, on the payload, environment and settings its
     /// executable provider states (D6). The environment is held under the
@@ -329,6 +344,7 @@ impl<'run> ProductionToolHandlers<'run> {
         // Host panic evidence is terminal, not a plugin result candidate.
         if output.tool_panic_stop().is_some() {
             return Ok(Captured {
+                check_phase: None,
                 original: None,
                 output,
                 occurrence,
@@ -338,7 +354,12 @@ impl<'run> ProductionToolHandlers<'run> {
         }
         let dispatch = self.dispatch(&prepared.input);
         let view = crate::plugin::PreparedCallReadView::new(prepared.call.clone());
-        let hook = hooks::context(&dispatch, &prepared);
+        let mut hook = hooks::context(&dispatch, &prepared);
+        hook.check_phase = crate::plugin::ControlPhaseDeadline::new(
+            dispatch.clock.as_ref(),
+            "tool_result",
+            dispatch.execution_budgets.tool_check_phase(),
+        );
         let (original, control) = crate::plugin::ToolResultCandidate::split(output.clone());
         let transformed = dispatch
             .composition
@@ -362,6 +383,7 @@ impl<'run> ProductionToolHandlers<'run> {
         )
         .await;
         Ok(Captured {
+            check_phase: Some(hook.check_phase),
             original: (outcome.record.output != output).then_some(output),
             output: outcome.record.output,
             occurrence,
@@ -583,6 +605,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         }
         let original_args = (original_args != prepared.args).then_some(original_args);
         let prepared = Prepared {
+            check_phase: hook.check_phase,
             input,
             original_args,
             call: prepared,
@@ -745,6 +768,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             });
             cancellation.source = crate::ToolFailureSource::Cancellation;
             let capture = Captured {
+                check_phase: None,
                 original: None,
                 output: ToolCallOutput::cancelled(cancellation.with_origin(origin)),
                 occurrence: crate::plugin::ToolHookOccurrence::Attempt {

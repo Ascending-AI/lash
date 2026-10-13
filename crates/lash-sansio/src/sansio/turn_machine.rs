@@ -646,6 +646,16 @@ impl<M: TurnProtocol> TurnMachine<M> {
             SessionStreamEvent::Error(failure) => failure.envelope.as_ref(),
             _ => None,
         });
+        self.fail_turn_with_cause(event, cause);
+    }
+
+    /// Fail through the ordinary runtime-error path while retaining the
+    /// controller's typed terminal cause for hosts and replay.
+    pub fn fail_turn_with_cause(
+        &mut self,
+        event: SessionStreamEvent,
+        cause: crate::TurnErrorCause,
+    ) {
         self.emit(event);
         self.finish(TurnOutcome::Stopped(TurnStop::RuntimeError { cause }));
     }

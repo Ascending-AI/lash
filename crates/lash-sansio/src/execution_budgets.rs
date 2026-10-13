@@ -1,7 +1,7 @@
 //! Execution budgets and execution limits (spec v3 Part C; ADR 0132 §7).
 //!
 //! One validated [`ExecutionBudgets`] is the only source of lash's own
-//! execution bounds: the model call's hard total, the control-phase bound,
+//! execution bounds: the model call's hard total, the tool-check and turn-hook phase bounds,
 //! the stop grace and the provider attempt limits. A tool's bounds are its
 //! host's ([`ToolManifest::execution`](crate::ToolManifest::execution) and
 //! [`ToolManifest::park`](crate::ToolManifest::park)), as is every engine
@@ -196,8 +196,16 @@ pub struct ExecutionBudgetsConfig {
     /// The hard cap on one model call, over throttle, backoff and every
     /// provider attempt.
     pub model_total: Duration,
-    /// One admission or checkpoint phase, all of its checks together.
-    pub control_phase: Duration,
+    /// One tool call's argument or result phase: all transforms and checks
+    /// share this bound, inside the member's execution deadline. Plugins
+    /// cannot extend it. A timer cannot pre-empt native code that never
+    /// yields: expiry moves the turn on, but does not prove work stopped.
+    pub tool_check_phase: Duration,
+    /// One before-turn, checkpoint or after-turn phase: all callbacks share
+    /// this bound. Plugins cannot extend it. A timer cannot pre-empt native
+    /// code that never yields: expiry moves the turn on, but does not prove
+    /// work stopped.
+    pub turn_hook_phase: Duration,
     /// Spent once, after a stretch ends at its limit or on cancellation, to
     /// collect evidence.
     pub stop_grace: Duration,
@@ -208,8 +216,8 @@ pub struct ExecutionBudgetsConfig {
 }
 
 impl ExecutionBudgetsConfig {
-    /// The named preset a host may choose: a 10 min model total, a 60 s
-    /// control phase, a 2 s stop grace,
+    /// The named preset a host may choose: a 10 min model total, a 10 s
+    /// tool-check phase, a 60 s turn-hook phase, a 2 s stop grace,
     /// [`ProviderAttemptLimits::recommended`] and 16 agent frame switches.
     /// No measurement backs these values; they are lash's long-standing
     /// shipped numbers. Execution budgets are a spend decision, so nothing
@@ -218,7 +226,8 @@ impl ExecutionBudgetsConfig {
     pub const fn recommended() -> Self {
         Self {
             model_total: Duration::from_secs(10 * 60),
-            control_phase: Duration::from_secs(60),
+            tool_check_phase: Duration::from_secs(10),
+            turn_hook_phase: Duration::from_secs(60),
             stop_grace: Duration::from_secs(2),
             provider: ProviderAttemptLimits::recommended(),
             agent_frame_switch_limit: NonZeroU32::MIN.saturating_add(15),
@@ -250,13 +259,15 @@ impl ExecutionBudgets {
     pub fn new(config: ExecutionBudgetsConfig) -> Result<Self, ExecutionBudgetsError> {
         let ExecutionBudgetsConfig {
             model_total,
-            control_phase,
+            tool_check_phase,
+            turn_hook_phase,
             stop_grace,
             provider,
             agent_frame_switch_limit: _,
         } = config;
         bounded("model_total", model_total)?;
-        bounded("control_phase", control_phase)?;
+        bounded("tool_check_phase", tool_check_phase)?;
+        bounded("turn_hook_phase", turn_hook_phase)?;
         bounded("stop_grace", stop_grace)?;
         // Construction through `ProviderAttemptLimits::new` is the only
         // way to a value, so it is already in range.
@@ -265,7 +276,14 @@ impl ExecutionBudgets {
             ("model_total", model_total),
         )?;
         bounded_sum(("model_total", model_total), ("stop_grace", stop_grace))?;
-        bounded_sum(("control_phase", control_phase), ("stop_grace", stop_grace))?;
+        bounded_sum(
+            ("tool_check_phase", tool_check_phase),
+            ("stop_grace", stop_grace),
+        )?;
+        bounded_sum(
+            ("turn_hook_phase", turn_hook_phase),
+            ("stop_grace", stop_grace),
+        )?;
         Ok(Self(std::sync::Arc::new(config)))
     }
 
@@ -281,8 +299,13 @@ impl ExecutionBudgets {
     }
 
     #[must_use]
-    pub fn control_phase(&self) -> Duration {
-        self.0.control_phase
+    pub fn tool_check_phase(&self) -> Duration {
+        self.0.tool_check_phase
+    }
+
+    #[must_use]
+    pub fn turn_hook_phase(&self) -> Duration {
+        self.0.turn_hook_phase
     }
 
     #[must_use]
@@ -311,14 +334,6 @@ impl ExecutionBudgets {
             Some(enclosing) => enclosing.nested(now_ms, own),
             None => own,
         }
-    }
-
-    /// The limit of one admission or checkpoint phase starting at `now_ms`.
-    /// It bounds the whole phase, every check, store read and write inside it
-    /// together, never each check alone (spec v3 L-C3).
-    #[must_use]
-    pub fn control_phase_limit(&self, now_ms: u64) -> ExecutionLimit {
-        ExecutionLimit::starting_at(now_ms, self.0.control_phase, self.0.control_phase)
     }
 }
 

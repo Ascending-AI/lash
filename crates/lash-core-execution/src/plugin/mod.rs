@@ -1,3 +1,5 @@
+mod control_phase;
+pub(crate) use control_phase::ControlPhaseDeadline;
 mod formats;
 mod transition;
 use std::future::Future;
@@ -17,7 +19,9 @@ pub use lash_core_store::store::plugin_writers::{
 
 pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginConfigNamespace};
 
-pub use lash_sansio::{CheckpointKind, PluginMessage, PluginRuntimeEvent, ToolCatalogContribution};
+pub use lash_sansio::{
+    CheckpointKind, ControlPhaseExpired, PluginMessage, PluginRuntimeEvent, ToolCatalogContribution,
+};
 
 mod actions;
 mod composition;
@@ -168,8 +172,9 @@ pub use tool_hooks::{
     ToolResultCheckInput, ToolResultTransformHook, ToolResultTransformInput,
 };
 pub(crate) use tool_hooks::{
-    AttributedContributions, BeforeSelection, ResultChecks, after_resolution, before_selection,
-    displaced_terminals, failed_check, failed_transform,
+    AttributedContributions, BeforeSelection, ResultChecks, after_expiry_evidence,
+    after_resolution, before_expiry_evidence, before_selection, displaced_terminals, failed_check,
+    failed_transform, with_expiry_evidence,
 };
 pub(crate) fn builtin_plugin_declarations() -> Vec<PluginDeclaration> {
     let declarations: Vec<PluginDeclaration> = Vec::new();

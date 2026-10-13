@@ -732,7 +732,7 @@ pub(super) fn member_pin(
             .with_declaration(manifest.declaration().clone())
             .with_binding(binding);
     }
-    let control = context.dispatch().execution_budgets.control_phase();
+    let control = context.dispatch().execution_budgets.tool_check_phase();
     MemberPin {
         tool,
         policy: ExecutionPolicy::Once,

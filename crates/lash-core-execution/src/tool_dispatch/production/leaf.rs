@@ -117,6 +117,7 @@ impl ProductionToolHandlers<'_> {
                 let output = ToolCallOutput::success(
                     decode::<serde_json::Value>(presentation).map_err(encoding)?,
                 );
+                let output = self.with_expiry_evidence(call_id, output);
                 let model_return =
                     crate::ModelToolReturn::from_output(prepared.call.tool_name.clone(), &output);
                 (output, model_return, Vec::new())
@@ -154,6 +155,7 @@ impl ProductionToolHandlers<'_> {
             CallEnd::Withheld { decision, cause } => {
                 let output = super::observations::terminal_output(decision, cause.as_ref(), None)
                     .map_err(encoding)?;
+                let output = self.with_expiry_evidence(call_id, output);
                 let model_return =
                     crate::ModelToolReturn::from_output(prepared.call.tool_name.clone(), &output);
                 (output, model_return, Vec::new())

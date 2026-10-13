@@ -195,19 +195,23 @@ impl ExecutionComposition {
         let original = Arc::new(args);
         let mut current = (*original).clone();
         for registered in &self.tool_args_transforms {
-            current = (registered.hook)(ToolArgsTransformInput {
-                context: context.clone(),
-                original: Arc::clone(&original),
-                current,
-            })
-            .await
-            .map_err(|error| {
-                Box::new(failed_transform(
-                    ToolHookPhase::ArgsTransform,
-                    &registered.identity,
-                    &error,
-                ))
-            })?;
+            current = context
+                .check_phase
+                .run(context.clock.as_ref(), &registered.identity, || {
+                    (registered.hook)(ToolArgsTransformInput {
+                        context: context.clone(),
+                        original: Arc::clone(&original),
+                        current,
+                    })
+                })
+                .await
+                .map_err(|error| {
+                    Box::new(failed_transform(
+                        ToolHookPhase::ArgsTransform,
+                        &registered.identity,
+                        &error,
+                    ))
+                })?;
         }
         Ok(current)
     }
@@ -222,24 +226,32 @@ impl ExecutionComposition {
     ) -> Result<CheckRecord<BeforeToolDecision>, Box<crate::ToolFailure>> {
         let mut replies = Vec::with_capacity(self.tool_args_checks.len());
         for registered in &self.tool_args_checks {
-            let verdict = (registered.hook)(ToolArgsCheckInput {
-                context: context.clone(),
-                original_args: Arc::clone(original_args),
-                prepared: prepared.clone(),
-            })
-            .await
-            .unwrap_or_else(|error| {
-                BeforeToolDecision::Deny(failed_check(
-                    ToolHookPhase::ArgsCheck,
-                    &registered.identity,
-                    &error,
-                ))
-            });
+            let verdict = context
+                .check_phase
+                .run(context.clock.as_ref(), &registered.identity, || {
+                    (registered.hook)(ToolArgsCheckInput {
+                        context: context.clone(),
+                        original_args: Arc::clone(original_args),
+                        prepared: prepared.clone(),
+                    })
+                })
+                .await
+                .unwrap_or_else(|error| {
+                    BeforeToolDecision::Deny(failed_check(
+                        ToolHookPhase::ArgsCheck,
+                        &registered.identity,
+                        &error,
+                    ))
+                });
             replies.push(AttributedVerdict {
                 callback: registered.identity.clone(),
                 verdict,
             });
         }
+        retain_expiry_evidence(&mut replies, |verdict| match verdict {
+            BeforeToolDecision::Deny(failure) => Some(failure),
+            _ => None,
+        })?;
         Ok(CheckRecord::reduce(replies))
     }
 
@@ -254,21 +266,25 @@ impl ExecutionComposition {
     ) -> Result<ToolResultCandidate, Box<crate::ToolFailure>> {
         let mut current = (**original).clone();
         for registered in &self.tool_result_transforms {
-            current = (registered.hook)(ToolResultTransformInput {
-                context: context.clone(),
-                occurrence,
-                prepared: prepared.clone(),
-                original: Arc::clone(original),
-                current,
-            })
-            .await
-            .map_err(|error| {
-                Box::new(failed_transform(
-                    ToolHookPhase::ResultTransform,
-                    &registered.identity,
-                    &error,
-                ))
-            })?;
+            current = context
+                .check_phase
+                .run(context.clock.as_ref(), &registered.identity, || {
+                    (registered.hook)(ToolResultTransformInput {
+                        context: context.clone(),
+                        occurrence,
+                        prepared: prepared.clone(),
+                        original: Arc::clone(original),
+                        current,
+                    })
+                })
+                .await
+                .map_err(|error| {
+                    Box::new(failed_transform(
+                        ToolHookPhase::ResultTransform,
+                        &registered.identity,
+                        &error,
+                    ))
+                })?;
         }
         Ok(current)
     }
@@ -287,14 +303,18 @@ impl ExecutionComposition {
         let mut contributions = Vec::new();
         let mut proposals = Vec::new();
         for registered in &self.tool_result_checks {
-            let reply = (registered.hook)(ToolResultCheckInput {
-                context: context.clone(),
-                occurrence,
-                prepared: prepared.clone(),
-                original: Arc::clone(original),
-                final_result: Arc::clone(final_result),
-            })
-            .await;
+            let reply = context
+                .check_phase
+                .run(context.clock.as_ref(), &registered.identity, || {
+                    (registered.hook)(ToolResultCheckInput {
+                        context: context.clone(),
+                        occurrence,
+                        prepared: prepared.clone(),
+                        original: Arc::clone(original),
+                        final_result: Arc::clone(final_result),
+                    })
+                })
+                .await;
             let verdict = match reply {
                 Ok(AfterToolContributions {
                     verdict,
@@ -334,6 +354,10 @@ impl ExecutionComposition {
                 verdict,
             });
         }
+        retain_expiry_evidence(&mut replies, |verdict| match verdict {
+            AfterToolDecision::Deny(failure) => Some(failure),
+            _ => None,
+        })?;
         Ok(ResultChecks {
             record: CheckRecord::reduce(replies),
             contributions,
@@ -345,6 +369,44 @@ impl ExecutionComposition {
         !self.tool_result_transforms.is_empty() || !self.tool_result_checks.is_empty()
     }
 }
+/// FIG-6092: the refusal's recorded raw evidence retains every verdict,
+/// including answered Allows and one typed expiry for each unanswered check.
+fn retain_expiry_evidence<
+    V: Clone + serde::Serialize + lash_core_store::tool_run::RankedVerdict,
+>(
+    replies: &mut [AttributedVerdict<V>],
+    failure: impl Fn(&mut V) -> Option<&mut crate::ToolFailure>,
+) -> Result<(), Box<crate::ToolFailure>> {
+    let expires = |failure: &crate::ToolFailure| {
+        matches!(
+            failure.cause.as_deref(),
+            Some(crate::ToolFailureCause::ControlPhaseExpired { .. })
+        )
+    };
+    if !replies
+        .iter_mut()
+        .any(|reply| failure(&mut reply.verdict).is_some_and(|cause| expires(cause)))
+    {
+        return Ok(());
+    }
+    let evidence =
+        serde_json::to_value(CheckRecord::reduce(replies.to_vec())).map_err(|error| {
+            Box::new(crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Internal,
+                "tool_check_evidence_encode_failed",
+                error.to_string(),
+            ))
+        })?;
+    for reply in replies {
+        if let Some(cause) = failure(&mut reply.verdict)
+            && expires(cause)
+        {
+            cause.raw = Some(crate::ToolValue::untrusted_json(evidence.clone()));
+        }
+    }
+    Ok(())
+}
+
 struct ResolvedPresentationPlan<'a> {
     presenter: Option<&'a RegisteredHook<ToolPresentationPresenter>>,
     steps: Vec<&'a RegisteredHook<ToolPresentationStep>>,

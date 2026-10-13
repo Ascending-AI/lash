@@ -1072,7 +1072,8 @@ impl RuntimeError {
     pub fn deleted_session_id(&self) -> Option<&crate::SessionId> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
-            RuntimeErrorCause::ToolRunCutRefused { .. }
+            RuntimeErrorCause::ControlPhaseExpired { .. }
+            | RuntimeErrorCause::ToolRunCutRefused { .. }
             | RuntimeErrorCause::ToolRunIsolationRefused { .. }
             | RuntimeErrorCause::ToolRunControl { .. }
             | RuntimeErrorCause::ToolRunAdmissionRefused { .. }

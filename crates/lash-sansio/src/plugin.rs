@@ -134,6 +134,16 @@ mod message_body_tests {
     }
 }
 
+/// An unanswered callback at its host-configured aggregate phase deadline.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ControlPhaseExpired {
+    pub phase: String,
+    pub bound_ms: u64,
+    pub plugin: String,
+    pub callback: String,
+}
+
 /// How a declared plugin failure settles, independent of its display text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]

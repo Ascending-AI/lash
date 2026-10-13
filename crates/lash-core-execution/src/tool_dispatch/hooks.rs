@@ -30,6 +30,12 @@ pub(super) fn hook_context(
         config: context.config.clone(),
         argument_projection,
         turn_context: context.turn_context.clone(),
+        check_phase: crate::plugin::ControlPhaseDeadline::new(
+            context.clock.as_ref(),
+            "tool_args",
+            context.execution_budgets.tool_check_phase(),
+        ),
+        clock: Arc::clone(&context.clock),
         sessions: Arc::clone(&context.sessions),
     }
 }
@@ -88,12 +94,17 @@ pub async fn finalize_tool_result_with_execution_context(
         super::preparation::resolve_callable_manifest_by_id(context, prepared.tool_id())
             .map(|manifest| manifest.argument_projection)
             .unwrap_or_default();
-    let hook_context = hook_context(
+    let mut hook_context = hook_context(
         context,
         prepared.call_id(),
         prepared.tool_id(),
         prepared.tool_name(),
         argument_projection,
+    );
+    hook_context.check_phase = crate::plugin::ControlPhaseDeadline::new(
+        context.clock.as_ref(),
+        "tool_result",
+        context.execution_budgets.tool_check_phase(),
     );
     let original = Arc::new(original);
     let candidate = match context

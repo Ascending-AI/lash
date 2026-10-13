@@ -93,6 +93,24 @@ transforms have no valid input. A check failure is a restrictive reply
 (`tool_args_check_failed`, `tool_result_check_failed`); it never becomes
 Allow, and the other checks still run on the unchanged candidate.
 
+### Host-configured phase deadlines
+
+`ExecutionBudgetsConfig::tool_check_phase` bounds each argument or result
+phase's transforms and checks together (10 s in `recommended()`). A call's
+member execution deadline still applies: whichever expires first wins.
+`turn_hook_phase` bounds each before-turn, checkpoint or after-turn phase's
+callbacks together (60 s in `recommended()`). Plugins cannot extend either.
+An unanswered callback fails with typed `ControlPhaseExpired`, naming the
+phase, configured bound and callback identity, through the existing failure
+path. Every answered check verdict is retained; unanswered checks deny and
+are named in the recorded evidence. Contributor expiry fails the phase as a
+plugin error does, without inventing a contribution. Replay reads the
+recorded outcome and never re-invokes a completed callback phase.
+
+A timer cannot pre-empt native code that never yields: the deadline guarantees
+that the turn moves on when callbacks yield, not that plugin work stopped.
+Authors must yield and bound independently spawned or external work themselves.
+
 ### 5. Keyed registrations
 
 Every composable callback is registered under a `HookKey`: 1 to 64 bytes of

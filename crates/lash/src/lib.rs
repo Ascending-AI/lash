@@ -706,10 +706,10 @@ pub mod plugins {
         AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform, BeforeTurnHook,
         CheckpointHook, CheckpointHookContext, CompactionContext, ContextCompaction,
         ContextCompactor, ContextError, ContextPressureContext, ContextPressureDecision,
-        ContextPressureHook, HookKey, PluginExtensionContribution, PluginRecordContribution,
-        PluginSessionMaterialization, PluginSpecBuilder, PluginTraceEmitter, SessionContributions,
-        StaticPluginFactory, ToolCatalogContext, ToolPresentationPresenter,
-        ToolResultProjectionContext, TurnContributions, TurnHookReport,
+        ContextPressureHook, ControlPhaseExpired, HookKey, PluginExtensionContribution,
+        PluginRecordContribution, PluginSessionMaterialization, PluginSpecBuilder,
+        PluginTraceEmitter, SessionContributions, StaticPluginFactory, ToolCatalogContext,
+        ToolPresentationPresenter, ToolResultProjectionContext, TurnContributions, TurnHookReport,
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{

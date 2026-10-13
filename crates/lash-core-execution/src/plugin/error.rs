@@ -1023,6 +1023,16 @@ impl PluginError {
                         source,
                     })
             }
+            Self::Runtime(error)
+                if matches!(
+                    error.cause,
+                    Some(crate::RuntimeErrorCause::ControlPhaseExpired { .. })
+                ) =>
+            {
+                let mut refused = crate::RuntimeError::new(refusal, error.message);
+                refused.cause = error.cause;
+                refused
+            }
             Self::Runtime(error) if keeps_its_code(&error) => error,
             Self::RuntimeEffectController(error)
                 if error.turn_failure_cause().aborts_invocation()
@@ -1101,7 +1111,8 @@ fn keeps_its_code(error: &crate::RuntimeError) -> bool {
         || matches!(
             error.cause.as_ref(),
             Some(
-                crate::RuntimeErrorCause::ProviderFailure { .. }
+                crate::RuntimeErrorCause::ControlPhaseExpired { .. }
+                    | crate::RuntimeErrorCause::ProviderFailure { .. }
                     | crate::RuntimeErrorCause::ModuleArtifactRefused { .. }
                     | crate::RuntimeErrorCause::PluginFormat { .. }
                     | crate::RuntimeErrorCause::SchemaRefused { .. }

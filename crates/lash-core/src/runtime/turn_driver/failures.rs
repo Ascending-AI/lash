@@ -20,13 +20,23 @@ impl RuntimeTurnDriver<'_> {
             .summary
             .as_ref()
             .and_then(|summary| serde_json::to_string(summary).ok());
-        machine.fail_turn(make_error_event(
+        let expiry = match &err.cause {
+            Some(crate::RuntimeErrorCause::ControlPhaseExpired { expiry }) => Some(expiry.clone()),
+            _ => None,
+        };
+        let event = make_error_event(
             crate::TurnFailureKind::RuntimeEffectController,
             Some(crate::FailureCode::from(&err.code)),
             err.message,
             raw,
             self.host.core.control.output_cuts,
-        ));
+        );
+        let mut cause = crate::TurnErrorCause::runtime(match &event {
+            SessionStreamEvent::Error(failure) => failure.envelope.as_ref(),
+            _ => None,
+        });
+        cause.control_phase_expired = expiry;
+        machine.fail_turn_with_cause(event, cause);
         Ok(())
     }
 

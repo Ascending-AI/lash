@@ -7,7 +7,7 @@ pub(super) fn context(
     dispatch: &ToolDispatchContext<'_>,
     prepared: &Prepared,
 ) -> crate::plugin::ToolHookContext {
-    super::super::hooks::hook_context(
+    let mut context = super::super::hooks::hook_context(
         dispatch,
         &prepared.call.call_id,
         &prepared.call.tool_id,
@@ -18,7 +18,9 @@ pub(super) fn context(
             .manifest
             .argument_projection
             .clone(),
-    )
+    );
+    context.check_phase = prepared.check_phase.clone();
+    context
 }
 
 impl ProductionToolHandlers<'_> {
@@ -62,6 +64,11 @@ impl ProductionToolHandlers<'_> {
                 }]);
             }
         };
+        if let Some(evidence) = crate::plugin::before_expiry_evidence(&record) {
+            self.expiry_evidence
+                .lock_recover()
+                .insert(prepared.call.call_id.clone(), evidence);
+        }
         let winner = record.winner().map(|reply| reply.callback.clone());
         let mut answers = Vec::new();
         for reply in record.replies().iter().cloned() {
@@ -93,6 +100,7 @@ impl ProductionToolHandlers<'_> {
                         .await
                     } else {
                         Ok(Captured {
+                            check_phase: None,
                             output,
                             original: None,
                             occurrence: crate::plugin::ToolHookOccurrence::Cached,
@@ -156,10 +164,18 @@ impl ProductionToolHandlers<'_> {
         let original = captured.original.unwrap_or_else(|| captured.output.clone());
         let (original, _) = ToolResultCandidate::split(original);
         let (candidate, _) = ToolResultCandidate::split(captured.output);
+        let mut hook = context(&dispatch, &prepared);
+        hook.check_phase = captured.check_phase.unwrap_or_else(|| {
+            crate::plugin::ControlPhaseDeadline::new(
+                dispatch.clock.as_ref(),
+                "tool_result",
+                dispatch.execution_budgets.tool_check_phase(),
+            )
+        });
         let checked = dispatch
             .composition
             .check_tool_result(
-                &context(&dispatch, &prepared),
+                &hook,
                 captured.occurrence,
                 &PreparedCallReadView::new(prepared.call.clone()),
                 &Arc::new(original),
@@ -177,6 +193,11 @@ impl ProductionToolHandlers<'_> {
                 }]);
             }
         };
+        if let Some(evidence) = crate::plugin::after_expiry_evidence(&checks.record) {
+            self.expiry_evidence
+                .lock_recover()
+                .insert(call_id.clone(), evidence);
+        }
         self.contributions.lock_recover().insert(
             call_id.clone(),
             checks
@@ -235,6 +256,7 @@ impl ProductionToolHandlers<'_> {
         let captured: Captured = match capture.output() {
             Some(output) => decode(output).map_err(fault)?,
             None => Captured {
+                check_phase: None,
                 original: None,
                 output: observations::terminal_output(
                     &CallDecision::Final {

@@ -9,7 +9,8 @@ use lash_sansio::SessionId;
 fn stated_budgets() -> crate::ExecutionBudgets {
     let budgets = crate::ExecutionBudgets::new(crate::ExecutionBudgetsConfig {
         model_total: std::time::Duration::from_secs(90),
-        control_phase: std::time::Duration::from_secs(7),
+        tool_check_phase: std::time::Duration::from_secs(7),
+        turn_hook_phase: std::time::Duration::from_secs(9),
         stop_grace: std::time::Duration::from_secs(1),
         provider: crate::ProviderAttemptLimits::new(
             std::time::Duration::from_secs(30),

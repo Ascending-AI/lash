@@ -454,7 +454,7 @@ impl ProcessSteps for WorkerSteps {
                             .runtime_host
                             .control
                             .execution_budgets
-                            .control_phase();
+                            .tool_check_phase();
                         let effect = effect.to_string();
                         let (code, cause) = match kind {
                             crate::ToolSurfaceDriftKind::Missing => (

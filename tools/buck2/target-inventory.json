@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
   "cargo_package_count": 70,
-  "cargo_target_count": 219,
+  "cargo_target_count": 220,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_969a08f2__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_d3926888__metadata[check]",
@@ -59993,7 +59993,7 @@
       "//crates/lash:lash__fv_e4912c35"
     ]
   },
-  "generated_label_count": 302,
+  "generated_label_count": 303,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -60079,6 +60079,7 @@
     "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:config_change_observer_laws__test",
     "//crates/lash-durable-test:context_budget_warning__test",
+    "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -60625,6 +60626,7 @@
     "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:config_change_observer_laws__test",
     "//crates/lash-durable-test:context_budget_warning__test",
+    "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -61114,7 +61116,7 @@
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
-  "metadata_target_count": 1240,
+  "metadata_target_count": 1241,
   "packages": [
     {
       "declared_features": [
@@ -62030,6 +62032,15 @@
           "tags": [
             "hermetic-postgres"
           ]
+        },
+        {
+          "build_label": "//crates/lash-durable-test:control_phase_expiry__test",
+          "cargo": "control_phase_expiry",
+          "check_label": "//crates/lash-durable-test:control_phase_expiry__test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-durable-test:control_phase_expiry__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-durable-test:control_phase_expiry__test",
+          "tags": []
         },
         {
           "build_label": "//crates/lash-durable-test:core_node_processes__test",
@@ -66396,6 +66407,7 @@
     "//crates/lash-durable-test:committed_turns__test": 300,
     "//crates/lash-durable-test:config_change_observer_laws__test": 300,
     "//crates/lash-durable-test:context_budget_warning__test": 300,
+    "//crates/lash-durable-test:control_phase_expiry__test": 300,
     "//crates/lash-durable-test:core_node_processes__test": 300,
     "//crates/lash-durable-test:declared_start__test": 300,
     "//crates/lash-durable-test:declared_start_crash_laws__test": 900,
@@ -66943,6 +66955,7 @@
     "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:config_change_observer_laws__test",
     "//crates/lash-durable-test:context_budget_warning__test",
+    "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -67260,6 +67273,7 @@
     "//crates/lash-durable-test:committed_turns__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:config_change_observer_laws__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:context_budget_warning__test__rust_test__metadata[check]",
+    "//crates/lash-durable-test:control_phase_expiry__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:core_node_processes__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:declared_start__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:declared_start_crash_laws__test__rust_test__metadata[check]",
@@ -67593,6 +67607,7 @@
     "//crates/lash-durable-test:committed_turns__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:config_change_observer_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:context_budget_warning__test__clippy[clippy.txt]",
+    "//crates/lash-durable-test:control_phase_expiry__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:core_node_processes__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:declared_start__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:declared_start_crash_laws__test__clippy[clippy.txt]",
@@ -67894,6 +67909,7 @@
     "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:config_change_observer_laws__test",
     "//crates/lash-durable-test:context_budget_warning__test",
+    "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -68196,6 +68212,7 @@
     "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:config_change_observer_laws__test",
     "//crates/lash-durable-test:context_budget_warning__test",
+    "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -68477,6 +68494,7 @@
     "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:config_change_observer_laws__test",
     "//crates/lash-durable-test:context_budget_warning__test",
+    "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -68648,6 +68666,7 @@
     "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:config_change_observer_laws__test",
     "//crates/lash-durable-test:context_budget_warning__test",
+    "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -68837,6 +68856,7 @@
     "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:config_change_observer_laws__test",
     "//crates/lash-durable-test:context_budget_warning__test",
+    "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -69251,6 +69271,7 @@
     "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:config_change_observer_laws__test",
     "//crates/lash-durable-test:context_budget_warning__test",
+    "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -69443,6 +69464,7 @@
     "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:config_change_observer_laws__test",
     "//crates/lash-durable-test:context_budget_warning__test",
+    "//crates/lash-durable-test:control_phase_expiry__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
