@@ -247,12 +247,22 @@ type CommitRefusal = Arc<
 /// its label and its domain writes.
 pub type CommitObserver = Arc<dyn Fn(CommitLabel, &lash_durable::ActorTx) + Send + Sync>;
 
+type ActorReceiptObserver =
+    Arc<dyn Fn(CommitLabel, &lash_durable::ActorTx, &lash_durable::ActorCommit) + Send + Sync>;
+type MailReceiptObserver = Arc<dyn Fn(CommitLabel, &lash_durable::MailCommit) + Send + Sync>;
+type ActorReplyObserver = Arc<
+    dyn Fn(CommitLabel, &ActorKey, &Result<lash_durable::ActorCommit, DurableError>) + Send + Sync,
+>;
+
 #[derive(Default)]
 pub(crate) struct Shared {
     state: Mutex<State>,
     recorded: tokio::sync::Notify,
     observer: Mutex<Option<CommitObserver>>,
     refusal: Mutex<Option<CommitRefusal>>,
+    pub(crate) actor_receipt: Mutex<Option<ActorReceiptObserver>>,
+    pub(crate) mail_receipt: Mutex<Option<MailReceiptObserver>>,
+    pub(crate) actor_reply: Mutex<Option<ActorReplyObserver>>,
 }
 
 /// A write about to enter the store, numbered and matched against the rules.
@@ -434,6 +444,43 @@ impl Script {
     /// law counts of what each commit submits.
     pub fn observe_commits(&self, observer: CommitObserver) -> &Self {
         *self.shared.observer.lock_recover() = Some(observer);
+        self
+    }
+
+    /// Observe successful owner writes at the database boundary, before a
+    /// fault can hide the receipt or kill its caller. The transaction is
+    /// the one actually submitted; a refused or unentered write emits none.
+    pub fn observe_actor_receipts(
+        &self,
+        observer: impl Fn(CommitLabel, &lash_durable::ActorTx, &lash_durable::ActorCommit)
+        + Send
+        + Sync
+        + 'static,
+    ) -> &Self {
+        *self.shared.actor_receipt.lock_recover() = Some(Arc::new(observer));
+        self
+    }
+
+    /// Observe accepted mail identities even when their caller loses the
+    /// acknowledgement. Failed and unentered writes emit no receipt.
+    pub fn observe_mail_receipts(
+        &self,
+        observer: impl Fn(CommitLabel, &lash_durable::MailCommit) + Send + Sync + 'static,
+    ) -> &Self {
+        *self.shared.mail_receipt.lock_recover() = Some(Arc::new(observer));
+        self
+    }
+
+    /// Observe the answer an owner is about to receive, after reply faults.
+    /// A killed caller emits none; a hidden acknowledgement emits AckLost.
+    pub fn observe_actor_replies(
+        &self,
+        observer: impl Fn(CommitLabel, &ActorKey, &Result<lash_durable::ActorCommit, DurableError>)
+        + Send
+        + Sync
+        + 'static,
+    ) -> &Self {
+        *self.shared.actor_reply.lock_recover() = Some(Arc::new(observer));
         self
     }
 

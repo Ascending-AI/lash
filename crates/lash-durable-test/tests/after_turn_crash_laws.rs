@@ -488,10 +488,9 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
     violations
 }
 
-/// The matrix over `tier`: the uncut turn alone with `cut: false`, and
-/// otherwise cut at every labelled write of its uncut run, which must cut
-/// the writes around `turn.commit`.
-async fn prove(tier: Tier, cut: bool) {
+/// The matrix over `tier` includes the uncut baseline and every labelled
+/// write of that run, including the writes around `turn.commit`.
+async fn prove(tier: Tier) {
     let (dialect, postgres_url) = match tier {
         Tier::SqliteMemory => (Dialect::SqliteMemory, None),
         Tier::SqliteFile => (Dialect::SqliteFile, None),
@@ -503,12 +502,7 @@ async fn prove(tier: Tier, cut: bool) {
             (Dialect::Postgres, Some(url))
         }
     };
-    let matrix = if cut {
-        Matrix::new()
-    } else {
-        Matrix::new().labels(&[])
-    };
-    let report = matrix
+    let report = Matrix::new()
         .faults(&[
             Fault::FailBefore,
             Fault::AckHidden,
@@ -525,21 +519,12 @@ async fn prove(tier: Tier, cut: bool) {
         report.labels()
     );
     report.assert_held();
-    if cut {
-        for label in [CommitLabel::MODEL_START, CommitLabel::TURN_COMMIT] {
-            assert!(
-                report.labels().contains(&label),
-                "the matrix never cut {label}"
-            );
-        }
+    for label in [CommitLabel::MODEL_START, CommitLabel::TURN_COMMIT] {
+        assert!(
+            report.labels().contains(&label),
+            "the matrix never cut {label}"
+        );
     }
-}
-
-/// An after-turn callback's record, graph append and state change are the
-/// session's once its turn commits: all three the value of the run whose
-/// decision the commit recorded (FIG-5283).
-async fn an_after_turn_callbacks_record_and_state_change_commit_with_its_turn(tier: Tier) {
-    prove(tier, false).await;
 }
 
 /// Cut at every labelled write of the turn, those around `turn.commit`
@@ -548,7 +533,7 @@ async fn an_after_turn_callbacks_record_and_state_change_commit_with_its_turn(ti
 /// once, the value of one run, and no run starts after its decision
 /// committed (FIG-5283).
 async fn an_after_turn_callbacks_effects_apply_once_however_its_turn_is_cut(tier: Tier) {
-    prove(tier, true).await;
+    prove(tier).await;
 }
 
 /// The standard compaction plugin's after-turn callback appends its pending
@@ -604,7 +589,6 @@ async fn compaction_recovery_records_a_context_overflow_with_its_turn(tier: Tier
 
 tiered_laws!(
     current_thread:
-    an_after_turn_callbacks_record_and_state_change_commit_with_its_turn,
     an_after_turn_callbacks_effects_apply_once_however_its_turn_is_cut,
     compaction_recovery_records_a_context_overflow_with_its_turn,
 );

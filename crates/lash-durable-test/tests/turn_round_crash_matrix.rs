@@ -414,6 +414,14 @@ fn render_output(output: &ToolCallOutput) -> String {
     serde_json::to_string(&output.outcome).unwrap()
 }
 
+#[derive(Debug)]
+enum PublicationEvent {
+    Submitted(CommitLabel),
+    Stored(CommitLabel),
+    Replied(CommitLabel, Result<(), DurableError>),
+    Published,
+}
+
 /// What every node's drive saw, kept across nodes.
 #[derive(Debug, Default)]
 struct Seen {
@@ -428,6 +436,7 @@ struct Seen {
     answered_after_request: usize,
     /// How many times a drive published what its turn held for its commit.
     published: usize,
+    publication: Vec<PublicationEvent>,
     /// The completion key each approval handed the host, by call.
     approvals: Vec<(ToolCallId, String)>,
 }
@@ -748,7 +757,9 @@ impl TurnDrive for L4Drive {
 
     /// The turn publishes what it held for its commit.
     async fn committed(&mut self) {
-        self.services.seen.lock_recover().published += 1;
+        let mut seen = self.services.seen.lock_recover();
+        seen.published += 1;
+        seen.publication.push(PublicationEvent::Published);
     }
 }
 
@@ -1009,6 +1020,39 @@ impl Scenario for L4 {
             .lock_recover()
             .clone()
             .expect("the database is built first");
+        let terminal =
+            |label| [CommitLabel::TURN_COMMIT, CommitLabel::TURN_CANCEL].contains(&label);
+        let seen = Arc::clone(&self.seen);
+        nodes.script().observe_commits(Arc::new(move |label, _tx| {
+            if terminal(label) {
+                seen.lock_recover()
+                    .publication
+                    .push(PublicationEvent::Submitted(label));
+            }
+        }));
+        let seen = Arc::clone(&self.seen);
+        nodes
+            .script()
+            .observe_actor_receipts(move |label, _tx, _receipt| {
+                if terminal(label) {
+                    seen.lock_recover()
+                        .publication
+                        .push(PublicationEvent::Stored(label));
+                }
+            });
+        let seen = Arc::clone(&self.seen);
+        nodes
+            .script()
+            .observe_actor_replies(move |label, _actor, answer| {
+                if terminal(label) {
+                    seen.lock_recover()
+                        .publication
+                        .push(PublicationEvent::Replied(
+                            label,
+                            answer.as_ref().map(|_| ()).map_err(Clone::clone),
+                        ));
+                }
+            });
         seed::send_turn(&backend, &session(), &run(), "use the tools").await?;
         nodes.start("a");
         nodes.quiesce().await;
@@ -1257,14 +1301,49 @@ fn publication_laws(seen: &Seen, cut: Option<&Cut>, commits: usize) -> Vec<Strin
             && cut.fault == Fault::FailBefore
     });
     let must_publish = commits == 1 && (cut.is_none() || refused_commit);
+    let mut violations = Vec::new();
+    let mut submitted = None;
+    let mut stored = None;
+    let mut acknowledged = None;
+    for event in &seen.publication {
+        match event {
+            PublicationEvent::Submitted(label) => {
+                submitted = Some(*label);
+                stored = None;
+                acknowledged = None;
+            }
+            PublicationEvent::Stored(label) => {
+                if submitted != Some(*label) {
+                    violations.push(format!(
+                        "publication: receipt without submission: {event:?}"
+                    ));
+                }
+                stored = Some(*label);
+            }
+            PublicationEvent::Replied(label, result) => {
+                acknowledged = if result.is_ok() && stored == Some(*label) {
+                    Some(*label)
+                } else {
+                    None
+                };
+            }
+            PublicationEvent::Published => {
+                if acknowledged.take().is_none() {
+                    violations.push(format!(
+                        "publication: terminal published before a successful acknowledgement: {:?}",
+                        seen.publication
+                    ));
+                }
+            }
+        }
+    }
     if seen.published > commits || (must_publish && seen.published != 1) {
-        vec![format!(
+        violations.push(format!(
             "publication: the turn published its held terminal {} times over {commits} commits",
             seen.published
-        )]
-    } else {
-        Vec::new()
+        ));
     }
+    violations
 }
 
 /// The calls of the round, in declared order, as the fold holds them.
@@ -1378,6 +1457,24 @@ fn mixed_laws(
     violations
 }
 
+/// Read the results from the model's actual message text. The request's
+/// JSON encoding escapes that text, so comparing against its wire spelling
+/// would miss a correct resolution.
+fn presented_results(request: &str) -> Option<Vec<String>> {
+    let request: LlmRequest = serde_json::from_str(request).expect("a recorded model request");
+    request
+        .messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .find_map(|block| {
+            let lash_sansio::llm::types::LlmContentBlock::Text { text, .. } = block else {
+                return None;
+            };
+            text.strip_prefix(&format!("{RESULTS_MARKER}: "))
+                .map(|results| results.split("; ").map(str::to_owned).collect())
+        })
+}
+
 /// F2 and Pending over the parking round: the parked `Once` is entered at
 /// most once and settles from its key's resolution, or `Interrupted` when
 /// its owner died before its park committed; the model's next call sees
@@ -1400,7 +1497,15 @@ fn pending_laws(
             view.presented()
         ));
     }
-    for (tool, member) in mode.tools().iter().zip(view.members()) {
+    let tools = mode.tools();
+    if view.members().len() != tools.len() {
+        return vec![format!(
+            "Pending: expected {} members, got {}",
+            tools.len(),
+            view.members().len()
+        )];
+    }
+    for (tool, member) in tools.iter().zip(view.members()) {
         let call = member.call();
         let entries: usize = member
             .starts()
@@ -1424,9 +1529,16 @@ fn pending_laws(
             (Tool::Defer | Tool::Approve, Some(SettledOutput::Completed(material)))
                 if !writes.is_empty() && material.payload() == answered =>
             {
-                let seen_answer = seen.requests.iter().any(|request| {
-                    request.contains(RESULTS_MARKER) && request.contains("answered")
-                });
+                let expected = format!(
+                    "{}={}",
+                    tool.name(),
+                    render_output(&ToolCallOutput::success(answered.as_str()))
+                );
+                let seen_answer = seen
+                    .requests
+                    .iter()
+                    .filter_map(|request| presented_results(request))
+                    .any(|results| results.len() == tools.len() && results.contains(&expected));
                 if !seen_answer && !seen.requests.is_empty() {
                     violations.push(format!("Pending: the model never saw {call}'s resolution"));
                 }
@@ -1603,6 +1715,18 @@ async fn prove(mode: Mode, labels: &[CommitLabel]) {
             .collect::<Vec<_>>()
     );
     report.assert_held();
+    for label in labels
+        .iter()
+        .filter(|label| [CommitLabel::TURN_COMMIT, CommitLabel::TURN_CANCEL].contains(label))
+    {
+        assert!(
+            report
+                .cells
+                .iter()
+                .any(|cell| { cell.point.label == *label && cell.fault == Fault::FailBefore }),
+            "the matrix never refused {label}"
+        );
+    }
     for label in labels {
         assert!(
             report.labels().contains(label),
@@ -1640,23 +1764,6 @@ async fn a_cancel_while_a_member_runs_ends_the_round_and_the_turn() {
         &[CommitLabel::MODEL_DONE, CommitLabel::TURN_CANCEL],
     )
     .await;
-}
-
-/// A turn whose `turn.commit` the store refuses publishes none of what it
-/// held for it; the attempt that commits publishes it once (FIG-5229).
-#[tokio::test]
-async fn a_refused_turn_commit_publishes_no_terminal_event() {
-    let report = matrix()
-        .labels(&[CommitLabel::TURN_COMMIT])
-        .run_test(|| L4::new(Mode::Mixed))
-        .await;
-    report.assert_held();
-    assert!(
-        report.cells.iter().any(|cell| {
-            cell.point.label == CommitLabel::TURN_COMMIT && cell.fault == Fault::FailBefore
-        }),
-        "the matrix never refused the turn's commit"
-    );
 }
 
 /// An `AfterStep` cancel requested while the model streams keeps the

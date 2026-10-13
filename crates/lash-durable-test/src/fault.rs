@@ -570,21 +570,35 @@ impl DurableStore for FaultStore {
                 _ => None,
             })
             .collect();
-        self.write_carrying(
-            WriteKind::Actor,
-            label,
-            Some(&actor),
-            starts,
-            self.call(|store| async move {
-                if let Some(refusal) = refusal {
-                    Err(DurableError::Domain(refusal))
-                } else {
-                    store.commit(tx, label).await
-                }
-            }),
-            keep,
-        )
-        .await
+        let observer = self.script.actor_receipt.lock_recover().clone();
+        let observed = observer.as_ref().map(|_| tx.clone());
+        let answer = self
+            .write_carrying(
+                WriteKind::Actor,
+                label,
+                Some(&actor),
+                starts,
+                self.call(|store| async move {
+                    if let Some(refusal) = refusal {
+                        Err(DurableError::Domain(refusal))
+                    } else {
+                        let answer = store.commit(tx, label).await;
+                        if let (Some(observer), Some(observed), Ok(receipt)) =
+                            (&observer, &observed, &answer)
+                        {
+                            observer(label, observed, receipt);
+                        }
+                        answer
+                    }
+                }),
+                keep,
+            )
+            .await;
+        let observer = self.script.actor_reply.lock_recover().clone();
+        if let Some(observer) = observer {
+            observer(label, &actor, &answer);
+        }
+        answer
     }
 
     async fn commit_mail(
@@ -592,12 +606,19 @@ impl DurableStore for FaultStore {
         tx: MailTx,
         label: CommitLabel,
     ) -> Result<MailCommit, DurableError> {
+        let observer = self.script.mail_receipt.lock_recover().clone();
         let commit = self
             .write(
                 WriteKind::Mail,
                 label,
                 None,
-                self.call(|store| async move { store.commit_mail(tx, label).await }),
+                self.call(|store| async move {
+                    let answer = store.commit_mail(tx, label).await;
+                    if let (Some(observer), Ok(receipt)) = (&observer, &answer) {
+                        observer(label, receipt);
+                    }
+                    answer
+                }),
                 |commit: &mut MailCommit| commit.woken.clear(),
             )
             .await?;

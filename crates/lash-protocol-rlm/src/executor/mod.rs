@@ -964,6 +964,7 @@ async fn end_cell(
     if host.ctx.holds_cell_end()
         && let Some(held) = snapshots.held_end(&ledger).await?
     {
+        state.parked_nodes_stored(snapshots.stored_nodes());
         return Ok(lash_core::EndedCell {
             exec: snapshots.exec().clone(),
             root: held.root,

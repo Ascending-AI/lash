@@ -359,6 +359,29 @@ impl Scenario for DeletedSession {
             other => violations.push(format!("the session's actor did not end: {other:?}")),
         }
 
+        let backend = self.backend();
+        match backend
+            .session_store_factory()
+            .lookup_session(&session())
+            .await
+        {
+            Ok(lash_core::store::SessionLookup::Deleted) => {}
+            other => violations.push(format!("the session's storage is not deleted: {other:?}")),
+        }
+        let cleanup = lash_core::store::ObligationKey::ArtifactCleanup {
+            referrer: lash_core_execution::ArtifactReferrer::Session(session()),
+        };
+        let standing = backend
+            .obligation_ledger(lash_core::store::ObligationKind::ArtifactCleanup)
+            .standing(&cleanup.id())
+            .await;
+        if !matches!(standing, Ok(Some(ref row)) if row.state == lash_core::store::ObligationState::Due)
+        {
+            violations.push(format!(
+                "the session's ArtifactCleanup is not owed: {standing:?}"
+            ));
+        }
+
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
         }
@@ -410,28 +433,26 @@ async fn prove(dialect: Dialect, postgres_url: Option<String>) {
         labels.join(", ")
     );
     report.assert_held();
+    for fault in [Fault::AckHidden, Fault::CommitThenAbort] {
+        assert!(
+            report.cells.iter().any(|cell| {
+                cell.point.label == CommitLabel::SESSION_CLOSE_ARTIFACTS && cell.fault == fault
+            }),
+            "the matrix never cut artifact cleanup after commit with {fault}"
+        );
+    }
     for label in [
         CommitLabel::TURN_ADMIT,
         CommitLabel::MODEL_START,
         CommitLabel::SESSION_CLOSE_BEGIN,
         CommitLabel::SESSION_CLOSE_TOMBSTONE,
+        lash_durable::domain::SessionCloseStep::Artifacts.label(),
     ] {
         assert!(
             report.labels().contains(&label),
             "the matrix never cut {label}"
         );
     }
-}
-
-/// The uncut run: the turn's commit lands first, then the close it
-/// requested ends the session at its tombstone.
-#[tokio::test]
-async fn a_session_deleted_mid_turn_ends_its_run_once_and_closes() {
-    let report = Matrix::new()
-        .faults(&[])
-        .run_test(|| DeletedSession::new(Dialect::SqliteMemory, None))
-        .await;
-    report.assert_held();
 }
 
 /// On SQLite in memory: a run its session's deletion meets, killed at every

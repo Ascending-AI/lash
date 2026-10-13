@@ -911,6 +911,13 @@ impl CodeModeExecutionState {
         Ok(capture)
     }
 
+    /// A cell's last acknowledged park protects these nodes until the
+    /// consuming phase adopts its state. Its working capture need only
+    /// send nodes produced after that park, including the cell's end.
+    pub(super) fn parked_nodes_stored(&mut self, nodes: BTreeSet<NodeId>) {
+        self.installed.extend(nodes);
+    }
+
     /// The session's complete SessionExecution graph (FIG-5887 §6): the
     /// root, and every node it reaches that no acknowledged capture
     /// installed. Its nodes are kept until the capture is acknowledged; a

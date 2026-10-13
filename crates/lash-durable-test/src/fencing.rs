@@ -47,7 +47,7 @@ const ROUND_EVERY: Duration = Duration::from_secs(2);
 /// How long an owner keeps a drained actor hot before releasing it.
 const HOT_FOR: Duration = Duration::from_secs(3);
 
-/// One mail an owner consumed with a commit it saw succeed.
+/// One mail consumed by a successful database commit, including hidden replies.
 #[derive(Clone, Debug)]
 struct Consumed {
     actor: ActorKey,
@@ -61,14 +61,13 @@ struct Consumed {
 #[derive(Default)]
 struct Ledger {
     consumed: Mutex<Vec<Consumed>>,
+    accepted: Mutex<Vec<(ActorKey, MailSeq)>>,
     producer_done: Mutex<bool>,
 }
 
 /// Drains each claimed actor's mail, keeps it hot for a while, then
 /// releases it; drops it at once on a fence refusal.
-struct Drain {
-    ledger: Arc<Ledger>,
-}
+struct Drain;
 
 #[async_trait::async_trait]
 impl Activation for Drain {
@@ -95,22 +94,9 @@ impl Activation for Drain {
                     Err(_) => continue,
                 }
             }
-            let mail = tx.mail().to_vec();
             tx.ack_seen();
             match owned.commit(tx, ACK).await {
-                Ok(commit) => {
-                    let at_ms = SimClock::timestamp_ms_at(sim_ms(&clock)) as i64;
-                    self.ledger
-                        .consumed
-                        .lock_recover()
-                        .extend(mail.iter().map(|mail| Consumed {
-                            actor: owned.actor().clone(),
-                            seq: mail.seq,
-                            appended_ms: mail.appended_at.0,
-                            epoch: owned.epoch(),
-                            revision: commit.revision,
-                            at_ms,
-                        }));
+                Ok(_) => {
                     hot_until = clock.now() + HOT_FOR;
                 }
                 Err(DurableError::OwnershipLost(_)) => return Exit::Released,
@@ -118,12 +104,6 @@ impl Activation for Drain {
             }
         }
     }
-}
-
-/// Virtual milliseconds on a node's clock.
-fn sim_ms(clock: &Arc<dyn lash_core_ids::clock::Clock>) -> u64 {
-    let wall = clock.timestamp_datetime().timestamp_millis();
-    u64::try_from(wall).unwrap_or_default() - SimClock::timestamp_ms_at(0)
 }
 
 /// The fencing scenario over one database.
@@ -164,12 +144,40 @@ impl Scenario for Fencing {
     }
 
     fn activation(&self) -> Arc<dyn Activation> {
-        Arc::new(Drain {
-            ledger: Arc::clone(&self.ledger),
-        })
+        Arc::new(Drain)
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        let ledger = Arc::clone(&self.ledger);
+        nodes.script().observe_mail_receipts(move |label, receipt| {
+            if label == MAIL {
+                ledger
+                    .accepted
+                    .lock_recover()
+                    .extend(receipt.appended.clone());
+            }
+        });
+        let ledger = Arc::clone(&self.ledger);
+        let clock = Arc::clone(nodes.clock());
+        nodes
+            .script()
+            .observe_actor_receipts(move |label, tx, receipt| {
+                if label == ACK {
+                    ledger.consumed.lock_recover().extend(
+                        tx.mail()
+                            .iter()
+                            .filter(|mail| Some(mail.seq) <= tx.ack())
+                            .map(|mail| Consumed {
+                                actor: tx.actor().clone(),
+                                seq: mail.seq,
+                                appended_ms: mail.appended_at.0,
+                                epoch: tx.epoch(),
+                                revision: receipt.revision,
+                                at_ms: SimClock::timestamp_ms_at(clock.logical_ms()) as i64,
+                            }),
+                    );
+                }
+            });
         for node in NODES {
             nodes.start(node);
         }
@@ -208,6 +216,30 @@ impl Scenario for Fencing {
         let consumed = self.ledger.consumed.lock_recover().clone();
         no_stale_write(&consumed, &mut violations);
         let writes = nodes.script().trace();
+        let mut accepted = self.ledger.accepted.lock_recover().clone();
+        let expected = writes
+            .iter()
+            .filter(|write| write.point.label == MAIL && write.committed())
+            .count()
+            * actors().len();
+        if accepted.len() != expected {
+            violations.push(format!(
+                "O1: accepted ledger has {} mails for {expected} committed appends",
+                accepted.len()
+            ));
+        }
+        let mut effects: Vec<_> = consumed
+            .iter()
+            .map(|mail| (mail.actor.clone(), mail.seq))
+            .collect();
+        accepted.sort();
+        effects.sort();
+        if effects != accepted {
+            violations.push(format!(
+                "F1/O1: consumed ledger {effects:?} differs from accepted mail {accepted:?}"
+            ));
+        }
+
         if let Some(cut) = cut {
             let cut_write = writes.iter().find(|write| write.cut.is_some());
             match (cut.fault, cut.kind, cut_write) {

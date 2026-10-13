@@ -164,8 +164,10 @@ impl DurableSnapshotStore {
     }
 
     /// The nodes the execution's latest root reaches, as this activation
-    /// knows them.
-    pub(crate) fn stored_nodes(&self) -> std::collections::BTreeSet<NodeId> {
+    /// knows them. They remain protected by that root until its consumer
+    /// publishes the state it carries and retires the root in one commit.
+    #[must_use]
+    pub fn stored_nodes(&self) -> std::collections::BTreeSet<NodeId> {
         self.stored
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

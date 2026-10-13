@@ -1531,27 +1531,47 @@ async fn a_turn_resumed_at_any_checkpoint_commits_messages_and_protocol_records_
     }
 }
 
-/// The graph nodes earlier commits installed, and the bytes of each park's
-/// nodes that none of them did: what the park newly installs.
-#[derive(Default)]
-struct Installs {
-    installed: std::collections::BTreeSet<lash_core_store::checkpoint_graph::NodeId>,
+/// Bytes actually staged on each park, including repeated node IDs. A
+/// content address deduplicates storage, not transmission to the store.
+struct Transmissions {
+    expected: std::collections::BTreeSet<String>,
     parks: Vec<usize>,
+    large: BTreeMap<lash_core_store::checkpoint_graph::NodeId, Vec<CommitLabel>>,
 }
 
-impl Installs {
-    /// Observes the uncut run's commit `tx`, labelled `label`.
+impl Transmissions {
+    fn new(pad: Pad) -> Self {
+        let text = "x".repeat(PAD);
+        let mut expected = std::collections::BTreeSet::from([text.clone()]);
+        if pad == Pad::Fresh {
+            expected.extend((0..AWAITS).map(|i| format!("{text}{i}")));
+        }
+        Self {
+            expected,
+            parks: Vec::new(),
+            large: BTreeMap::new(),
+        }
+    }
+
     fn observe(&mut self, label: CommitLabel, tx: &lash_durable::ActorTx) {
-        let mut new = 0;
+        let bytes = tx.graph().values().map(|node| node.bytes.len()).sum();
         for (id, node) in tx.graph() {
-            if self.installed.insert(*id) {
-                new += node.bytes.len();
+            if node.bytes.len() >= PAD {
+                use lash_core_store::checkpoint_graph::{NodeKind, TokenReader, parse_envelope};
+                let envelope = parse_envelope(&node.bytes, Some(*id)).expect("a staged envelope");
+                if envelope.kind == NodeKind::TEXT_LEAF {
+                    let mut reader = TokenReader::new(envelope.body);
+                    let text = reader.text().expect("a text leaf");
+                    if self.expected.contains(text) {
+                        self.large.entry(*id).or_default().push(label);
+                    }
+                }
             }
         }
         if label == CommitLabel::CELL_SNAPSHOT_ADMIT
             || label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
         {
-            self.parks.push(new);
+            self.parks.push(bytes);
         }
     }
 }
@@ -1560,7 +1580,7 @@ impl Installs {
 /// [`PAD`]-byte text across each of [`AWAITS`] awaits. Every park installs
 /// what changed since the last, never again the large text an earlier one
 /// installed: a repeated text is installed once, a fresh one once per
-/// await, and no park's new nodes hold an earlier park's large text. After
+/// await, and no park transmits an earlier park's large text again. After
 /// the turn and an immediate collection, the session's execution state
 /// hydrates whole.
 async fn large_values_install_once(pad: Pad) {
@@ -1568,7 +1588,7 @@ async fn large_values_install_once(pad: Pad) {
     let clock = SimClock::new();
     let database = uncut.database(Arc::clone(&clock)).await;
     let script = Script::new();
-    let installs = Arc::new(Mutex::new(Installs::default()));
+    let installs = Arc::new(Mutex::new(Transmissions::new(pad)));
     script.observe_commits({
         let installs = Arc::clone(&installs);
         Arc::new(move |label, tx| installs.lock_recover().observe(label, tx))
@@ -1601,7 +1621,22 @@ async fn large_values_install_once(pad: Pad) {
     }
     nodes.quiesce().await;
 
-    let parks = installs.lock_recover().parks.clone();
+    let (parks, large) = {
+        let sent = installs.lock_recover();
+        (sent.parks.clone(), sent.large.clone())
+    };
+    // Fresh retains both the original pad and each pad+i, including the
+    // last one captured at the cell's end after its final await.
+    let expected_large = if pad == Pad::Repeated { 1 } else { AWAITS + 1 };
+    assert_eq!(
+        large.len(),
+        expected_large,
+        "{pad:?}: the fixture stages its known large texts: {large:?}"
+    );
+    assert!(
+        large.values().all(|labels| labels.len() == 1),
+        "{pad:?}: each large text is transmitted once, including non-park commits: {large:?}"
+    );
     assert_eq!(
         parks.len(),
         AWAITS,
@@ -1652,8 +1687,9 @@ async fn large_values_install_once(pad: Pad) {
             })
         }
     };
+    let before_gc = execution("after the turn").await;
     assert!(
-        execution("after the turn").await.is_some(),
+        before_gc.is_some(),
         "{pad:?}: the cell's globals are the session's execution state"
     );
     lash_core::StoreMaintenance::gc_unreachable(catalog.as_ref())
@@ -1661,7 +1697,8 @@ async fn large_values_install_once(pad: Pad) {
         .expect("the collection runs");
     assert_eq!(
         execution("after an immediate collection").await,
-        execution("after an immediate collection").await,
+        before_gc,
+        "{pad:?}: collection preserves the pre-GC execution state",
     );
 }
 

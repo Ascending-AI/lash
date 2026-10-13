@@ -271,9 +271,11 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
             open,
         })
     };
-    // The text bodies one commit bound: the rows its text insert stored,
-    // each a bound pair, as the insert binds only unheld texts and skips
-    // none.
+    // Measure every INSERT binding, including bodies submitted again that
+    // INSERT would ignore. SQLite reports SQL literal bytes: each fixture
+    // pair ["hash-N", "text N"] costs 17 + 2*len(N), plus array commas,
+    // brackets and the SQL string's quotes. The expected names below are
+    // the fixture's missing bodies, independent of RETURNING rows.
     let bound = |writes: Vec<DomainWrite>, label: &'static str| {
         let (store, actor) = (&store, &actor);
         async move {
@@ -289,13 +291,17 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
                         .expect("commit");
                 })
                 .await;
+            assert_eq!(
+                receipt.unmeasured_bound_statements, 0,
+                "every binding is measured"
+            );
             receipt
                 .shapes
                 .iter()
                 .filter(|(shape, _)| {
                     shape.starts_with("insert into") && shape.contains("prompt_texts ")
                 })
-                .map(|(_, shape)| shape.rows_returned)
+                .map(|(_, shape)| shape.bound_bytes)
                 .sum::<u64>()
         }
     };
@@ -310,7 +316,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
             "model.start"
         )
         .await,
-        5,
+        155,
         "the first call binds every body"
     );
     assert_eq!(
@@ -322,21 +328,21 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
             "model.start"
         )
         .await,
-        2,
+        63,
         "the second call binds only its changed section text and its body tail"
     );
     assert_eq!(bound(vec![settle(None)], "model.done").await, 0);
     assert_eq!(
         bound(
             vec![record(
-                3,
+                97,
                 &["intro", "memo-2"],
                 &["prefix", "tail-3", "contract"]
             )],
             "model.start"
         )
         .await,
-        3,
+        97,
         "after the settlement the next call binds its body chunks and contract, \
          not the section texts the snapshots hold"
     );
