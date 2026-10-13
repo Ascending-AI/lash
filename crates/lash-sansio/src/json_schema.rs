@@ -1,6 +1,6 @@
 //! Admitted JSON schemas and typed value mismatches.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serde_json::Value;
 
@@ -76,6 +76,13 @@ impl JsonSchema {
         } else {
             value
         };
+        if value.as_object().is_some_and(serde_json::Map::is_empty) {
+            return Ok(Self::any());
+        }
+        Self::compile(value)
+    }
+
+    fn compile(value: Value) -> Result<Self, SchemaAdmissionError> {
         let validator = jsonschema::options()
             .offline()
             .with_draft(jsonschema::Draft::Draft7.detect(&value))
@@ -108,7 +115,12 @@ impl JsonSchema {
         reason = "the empty object is a compilable schema"
     )]
     pub fn any() -> Self {
-        Self::admit(Value::Object(Default::default())).expect("empty object is a valid JSON schema")
+        static ANY: OnceLock<JsonSchema> = OnceLock::new();
+        ANY.get_or_init(|| {
+            Self::compile(Value::Object(Default::default()))
+                .expect("empty object is a valid JSON schema")
+        })
+        .clone()
     }
 
     pub fn as_value(&self) -> &Value {
@@ -203,3 +215,44 @@ impl std::fmt::Display for ValueMismatch {
     }
 }
 impl std::error::Error for ValueMismatch {}
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::*;
+
+    /// The canonical unconstrained schema has one immutable preparation,
+    /// including defaults and decoding its equivalent spellings.
+    #[test]
+    fn unconstrained_schema_preparation_is_shared() {
+        let first = JsonSchema::any();
+        for repeated in [
+            JsonSchema::default(),
+            JsonSchema::admit(serde_json::json!({})).unwrap(),
+            JsonSchema::admit(Value::Bool(true)).unwrap(),
+            serde_json::from_str::<JsonSchema>("{}").unwrap(),
+        ] {
+            assert!(Arc::ptr_eq(&first.value, &repeated.value));
+            assert!(Arc::ptr_eq(&first.validator, &repeated.validator));
+            assert_eq!(serde_json::to_string(&repeated).unwrap(), "{}");
+            for value in [
+                Value::Null,
+                serde_json::json!(123),
+                serde_json::json!({"a": [true, "x"]}),
+            ] {
+                repeated.validate(&value).unwrap();
+            }
+        }
+        assert_eq!(
+            JsonSchema::admit(Value::Null).unwrap_err(),
+            SchemaAdmissionError::InvalidKind {
+                actual: InvalidSchemaKind::Null
+            }
+        );
+        assert!(
+            JsonSchema::admit(Value::Bool(false))
+                .unwrap()
+                .validate(&Value::Null)
+                .is_err()
+        );
+    }
+}

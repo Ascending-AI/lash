@@ -28,7 +28,7 @@ use std::cell::Cell;
 
 use lash_core_store::checkpoint_graph::{
     DecodeLimits, GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, TokenCodec,
-    TokenError, TokenReader, TokenWriter,
+    TokenError, TokenReader, TokenWriter, TypedBody,
 };
 use lash_core_store::tool_run::{
     AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, KnownFailureReason,
@@ -600,19 +600,26 @@ impl CallOutcome {
     /// Any refusal of the staging area.
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
         let answer = match &self.output.outcome {
-            crate::ToolCallOutcome::Success(value) => Some(
-                staging.encode_value(NodeKind::FROZEN_VALUE, &FrozenToolValue(value.clone()))?,
-            ),
+            crate::ToolCallOutcome::Success(value) => {
+                let mut body = TokenWriter::new();
+                body.sum(lash_sansio::tool_output::graph::FROZEN_TOOL_VALUE, 1);
+                value.encode(&mut body);
+                Some(staging.encode(
+                    NodeKind::FROZEN_VALUE,
+                    TypedBody::logical(&body.into_bytes()),
+                )?)
+            }
             crate::ToolCallOutcome::Failure(_) | crate::ToolCallOutcome::Cancelled(_) => None,
         };
         let presentation = staging.encode_value(NodeKind::PRESENTATION, &self.presentation)?;
-        staging.encode_value(
+        let answer = RefAnswer {
+            node: Cell::new(answer),
+        };
+        let mut body = TokenWriter::new();
+        encode_outcome_body(self, &answer, presentation, &mut body);
+        staging.encode(
             NodeKind::CALL_OUTCOME,
-            &StoredOutcome {
-                outcome: self.clone(),
-                answer,
-                presentation,
-            },
+            TypedBody::logical(&body.into_bytes()),
         )
     }
 
@@ -692,8 +699,14 @@ pub fn stage_value(
     staging: &mut GraphStaging,
     value: &serde_json::Value,
 ) -> Result<MaterialNode, GraphRefusal> {
+    let mut body = TokenWriter::new();
+    body.sum(lash_sansio::tool_output::graph::FROZEN_JSON, 1);
+    encode_json(value, &mut body);
     staging
-        .encode_value(NodeKind::FROZEN_VALUE, &FrozenJson(value.clone()))
+        .encode(
+            NodeKind::FROZEN_VALUE,
+            TypedBody::logical(&body.into_bytes()),
+        )
         .map(MaterialNode::Value)
 }
 

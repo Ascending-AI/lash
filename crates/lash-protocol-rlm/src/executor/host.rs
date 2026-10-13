@@ -641,8 +641,8 @@ impl KernelEffects for CellHost<'_> {
     ) -> Result<HostParts, ParentFault> {
         let fault =
             |error: lash_core_store::checkpoint_graph::GraphRefusal| ParentFault(error.to_string());
-        let ledgers = self.ledgers();
-        let prints = self.prints.lock_recover().clone();
+        let ledgers = self.ledgers.lock_recover();
+        let prints = self.prints.lock_recover();
         let mut graph = self.graph.lock_recover();
         // A park whose commit was not acknowledged staged nothing the store
         // holds: this one stages it again.
@@ -689,12 +689,14 @@ impl KernelEffects for CellHost<'_> {
         }
         graph.state.tool_call_limit = ledgers.tool_call_limit;
         graph.state.reads = ledgers.reads;
+        drop(ledgers);
         for value in prints
             .iter()
             .skip(usize::try_from(graph.state.prints.len()).unwrap_or(usize::MAX))
         {
             graph.state.prints.push(PrintEvent(value.clone()));
         }
+        drop(prints);
         for process in self
             .ctx
             .started_process_ids()

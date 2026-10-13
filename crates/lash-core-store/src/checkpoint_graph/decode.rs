@@ -11,6 +11,7 @@
 //! block boundaries. The final check re-encodes the decoded body and
 //! requires the node's own identity back.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::graph_tokens::{
@@ -228,7 +229,7 @@ impl<'s> GraphDecoder<'s> {
         id: NodeId,
         expected: NodeKind,
     ) -> Result<T, GraphRefusal> {
-        let logical = self.logical_body(id, expected)?;
+        let logical = self.materialized_body(id, expected)?;
         let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(expected.0));
         let mut reader = TokenReader::new(&logical).with_data_limits(self.limits.kernel_data);
         let value = T::decode(&mut reader).map_err(refuse)?;
@@ -249,6 +250,14 @@ impl<'s> GraphDecoder<'s> {
         id: NodeId,
         expected: NodeKind,
     ) -> Result<Vec<u8>, GraphRefusal> {
+        self.materialized_body(id, expected).map(Cow::into_owned)
+    }
+
+    fn materialized_body(
+        &mut self,
+        id: NodeId,
+        expected: NodeKind,
+    ) -> Result<Cow<'s, [u8]>, GraphRefusal> {
         let envelope = self.envelope(id)?;
         if envelope.kind != expected {
             return Err(GraphRefusal::KindMismatch {
@@ -300,9 +309,12 @@ impl<'s> GraphDecoder<'s> {
                     {
                         return Err(non_canonical(id, CanonicalFault::InvalidBodyForm));
                     }
-                    placed
+                    Cow::Owned(placed)
                 };
-                let logical = self.unplace(id, &placed)?;
+                let logical = match self.unplace(id, &placed)? {
+                    Cow::Borrowed(_) => placed,
+                    Cow::Owned(logical) => Cow::Owned(logical),
+                };
                 let mut check = verifier();
                 if check.encode(expected, TypedBody::logical(&logical))? != id {
                     return Err(non_canonical(id, CanonicalFault::InvalidBodyForm));
@@ -319,7 +331,7 @@ impl<'s> GraphDecoder<'s> {
     /// A wrong kind, a non-canonical chunking, or any node read's refusal.
     pub fn text(&mut self, id: NodeId) -> Result<String, GraphRefusal> {
         let bytes = self.placed(id, Family::Text)?;
-        String::from_utf8(bytes).map_err(|_| GraphRefusal::InvalidUtf8)
+        String::from_utf8(bytes.into_owned()).map_err(|_| GraphRefusal::InvalidUtf8)
     }
 
     /// The bytes placed at `id`, a BytesLeaf or BytesIndex.
@@ -328,14 +340,27 @@ impl<'s> GraphDecoder<'s> {
     ///
     /// A wrong kind, a non-canonical chunking, or any node read's refusal.
     pub fn bytes(&mut self, id: NodeId) -> Result<Vec<u8>, GraphRefusal> {
-        self.placed(id, Family::Bytes)
+        self.placed(id, Family::Bytes).map(Cow::into_owned)
     }
 
     /// A placed value, assembled and then required to be exactly what
     /// placing it again stages.
-    fn placed(&mut self, id: NodeId, family: Family) -> Result<Vec<u8>, GraphRefusal> {
-        let mut value = Vec::new();
-        self.assemble(id, family, 0, &mut value)?;
+    fn placed(&mut self, id: NodeId, family: Family) -> Result<Cow<'s, [u8]>, GraphRefusal> {
+        self.limit(DecodeDimension::Depth, 0, self.limits.depth)?;
+        let envelope = self.envelope(id)?;
+        let value = if Family::of(envelope.kind) == Some((family, true)) {
+            let payload = leaf_payload(&envelope, family, id)?;
+            self.limit(
+                DecodeDimension::LogicalBytes,
+                payload.len() as u64,
+                self.limits.logical_bytes,
+            )?;
+            Cow::Borrowed(payload)
+        } else {
+            let mut value = Vec::new();
+            self.assemble_envelope(id, family, 0, envelope, &mut value)?;
+            Cow::Owned(value)
+        };
         let mut check = verifier();
         let again = match family {
             Family::Text => {
@@ -360,6 +385,17 @@ impl<'s> GraphDecoder<'s> {
     ) -> Result<u64, GraphRefusal> {
         self.limit(DecodeDimension::Depth, depth, self.limits.depth)?;
         let envelope = self.envelope(id)?;
+        self.assemble_envelope(id, family, depth, envelope, out)
+    }
+
+    fn assemble_envelope(
+        &mut self,
+        id: NodeId,
+        family: Family,
+        depth: u64,
+        envelope: NodeEnvelope<'s>,
+        out: &mut Vec<u8>,
+    ) -> Result<u64, GraphRefusal> {
         let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(envelope.kind.0));
         let (found, leaf) = Family::of(envelope.kind).ok_or(GraphRefusal::KindMismatch {
             node: id,
@@ -374,11 +410,7 @@ impl<'s> GraphDecoder<'s> {
         }
         let mut reader = envelope.reader();
         if leaf {
-            let payload = match family {
-                Family::Text => reader.text().map_err(refuse)?.as_bytes(),
-                Family::Bytes => reader.bytes().map_err(refuse)?,
-            };
-            reader.finish().map_err(refuse)?;
+            let payload = leaf_payload(&envelope, family, id)?;
             self.grow(out, payload)?;
             return Ok(payload.len() as u64);
         }
@@ -533,10 +565,10 @@ impl<'s> GraphDecoder<'s> {
 
     /// Puts every placed value of `placed` back inline, refusing an inline
     /// value over the bound and a placed one under it.
-    fn unplace(&mut self, id: NodeId, placed: &[u8]) -> Result<Vec<u8>, GraphRefusal> {
+    fn unplace<'p>(&mut self, id: NodeId, placed: &'p [u8]) -> Result<Cow<'p, [u8]>, GraphRefusal> {
         let refuse = |error| GraphRefusal::from_token(error, Some(id), None);
         let mut reader = TokenReader::new(placed);
-        let mut out = TokenWriter::with_capacity(placed.len());
+        let mut out: Option<TokenWriter> = None;
         while !reader.is_empty() {
             let start = reader.position();
             match reader.next_event().map_err(refuse)? {
@@ -562,37 +594,60 @@ impl<'s> GraphDecoder<'s> {
                             if token_len(value.len()) <= INLINE_TOKEN_MAX {
                                 return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
                             }
+                            let writer = out.get_or_insert_with(|| {
+                                let capacity = placed.len() - (reader.position() - start)
+                                    + token_len(value.len()) as usize;
+                                let mut writer = TokenWriter::with_capacity(capacity);
+                                writer.raw(&placed[..start]);
+                                writer
+                            });
                             match family {
-                                Family::Text => out.text(
+                                Family::Text => writer.text(
                                     std::str::from_utf8(&value)
                                         .map_err(|_| GraphRefusal::InvalidUtf8)?,
                                 ),
-                                Family::Bytes => out.bytes(&value),
+                                Family::Bytes => writer.bytes(&value),
                             }
                         }
-                        None => out.child(child.child_ref()),
+                        None => {
+                            if let Some(writer) = &mut out {
+                                writer.raw(&placed[start..reader.position()]);
+                            }
+                        }
                     }
                 }
-                _ => out.raw(&placed[start..reader.position()]),
+                _ => {
+                    if let Some(writer) = &mut out {
+                        writer.raw(&placed[start..reader.position()]);
+                    }
+                }
             }
             self.limit(
                 DecodeDimension::LogicalBytes,
-                out.len() as u64,
+                out.as_ref().map_or(reader.position(), TokenWriter::len) as u64,
                 self.limits.logical_bytes,
             )?;
         }
-        Ok(out.into_bytes())
+        Ok(out.map_or(Cow::Borrowed(placed), |writer| {
+            Cow::Owned(writer.into_bytes())
+        }))
     }
 }
 
 /// A physical body's logical form: each slot its child's digest.
-fn to_logical(
+fn to_logical<'b>(
     envelope: &NodeEnvelope<'_>,
-    body: &[u8],
+    body: &'b [u8],
     id: NodeId,
-) -> Result<Vec<u8>, GraphRefusal> {
+) -> Result<Cow<'b, [u8]>, GraphRefusal> {
     let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(envelope.kind.0));
     let mut reader = TokenReader::with_form(body, RefForm::Physical);
+    if envelope.children.is_empty() {
+        while !reader.is_empty() {
+            reader.next_event().map_err(refuse)?;
+        }
+        return Ok(Cow::Borrowed(body));
+    }
     let mut out = TokenWriter::with_capacity(body.len() + 32 * envelope.children.len());
     while !reader.is_empty() {
         let start = reader.position();
@@ -607,5 +662,20 @@ fn to_logical(
             _ => out.raw(&body[start..reader.position()]),
         }
     }
-    Ok(out.into_bytes())
+    Ok(Cow::Owned(out.into_bytes()))
+}
+
+fn leaf_payload<'s>(
+    envelope: &NodeEnvelope<'s>,
+    family: Family,
+    id: NodeId,
+) -> Result<&'s [u8], GraphRefusal> {
+    let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(envelope.kind.0));
+    let mut reader = envelope.reader();
+    let payload = match family {
+        Family::Text => reader.text().map_err(refuse)?.as_bytes(),
+        Family::Bytes => reader.bytes().map_err(refuse)?,
+    };
+    reader.finish().map_err(refuse)?;
+    Ok(payload)
 }

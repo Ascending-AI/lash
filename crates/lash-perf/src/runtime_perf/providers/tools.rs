@@ -23,13 +23,13 @@ impl BenchmarkEchoTool {
 
 #[derive(Clone)]
 pub(crate) struct BenchmarkLargeToolCatalog {
-    cache: Arc<BenchmarkLargeToolCatalogCache>,
+    cache: Arc<BenchmarkToolCatalogCache>,
 }
 
 #[derive(Default)]
 pub(crate) struct BenchmarkObliqueTools;
 
-struct BenchmarkLargeToolCatalogCache {
+struct BenchmarkToolCatalogCache {
     manifests: Vec<ToolManifest>,
     contracts: HashMap<String, Arc<ToolContract>>,
 }
@@ -153,28 +153,46 @@ impl Default for BenchmarkLargeToolCatalog {
     }
 }
 
-fn large_tool_catalog_cache() -> &'static Arc<BenchmarkLargeToolCatalogCache> {
-    static CACHE: OnceLock<Arc<BenchmarkLargeToolCatalogCache>> = OnceLock::new();
+fn large_tool_catalog_cache() -> &'static Arc<BenchmarkToolCatalogCache> {
+    static CACHE: OnceLock<Arc<BenchmarkToolCatalogCache>> = OnceLock::new();
     CACHE.get_or_init(|| {
         let definitions = BenchmarkLargeToolCatalog::build_tool_definitions();
-        let manifests = definitions
-            .iter()
-            .map(ToolDefinition::manifest)
-            .collect::<Vec<_>>();
-        let contracts = definitions
+        Arc::new(prepare_tool_catalog(definitions))
+    })
+}
+
+// These providers' definitions are immutable and ignore configuration.
+// Retain their admitted schemas and prompt projections with the catalog,
+// as the large catalog already does, rather than rebuilding on each lookup.
+fn echo_tool_catalog() -> &'static BenchmarkToolCatalogCache {
+    static CATALOG: OnceLock<BenchmarkToolCatalogCache> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        prepare_tool_catalog(vec![
+            benchmark_echo_tool_definition(),
+            benchmark_slow_tool_definition(),
+            benchmark_async_tool_definition(),
+        ])
+    })
+}
+
+fn oblique_tool_catalog() -> &'static BenchmarkToolCatalogCache {
+    static CATALOG: OnceLock<BenchmarkToolCatalogCache> = OnceLock::new();
+    CATALOG.get_or_init(|| prepare_tool_catalog(benchmark_oblique_tool_definitions()))
+}
+
+fn prepare_tool_catalog(definitions: Vec<ToolDefinition>) -> BenchmarkToolCatalogCache {
+    BenchmarkToolCatalogCache {
+        manifests: definitions.iter().map(ToolDefinition::manifest).collect(),
+        contracts: definitions
             .iter()
             .map(|definition| {
                 (
                     definition.name().to_string(),
-                    Arc::new(definition.contract()) as Arc<ToolContract>,
+                    Arc::new(definition.contract()),
                 )
             })
-            .collect::<HashMap<_, _>>();
-        Arc::new(BenchmarkLargeToolCatalogCache {
-            manifests,
-            contracts,
-        })
-    })
+            .collect(),
+    }
 }
 
 #[async_trait::async_trait]
@@ -183,32 +201,15 @@ impl ToolProvider for BenchmarkEchoTool {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
-        Ok({
-            vec![
-                benchmark_echo_tool_definition().manifest(),
-                benchmark_slow_tool_definition().manifest(),
-                benchmark_async_tool_definition().manifest(),
-            ]
-        })
+        Ok(echo_tool_catalog().manifests.clone())
     }
 
     fn resolve_contract(
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<std::sync::Arc<ToolContract>> {
-        match name {
-            "benchmark_echo" => Some(std::sync::Arc::new(
-                benchmark_echo_tool_definition().contract(),
-            )),
-            "benchmark_slow" => Some(std::sync::Arc::new(
-                benchmark_slow_tool_definition().contract(),
-            )),
-            "benchmark_async" => Some(std::sync::Arc::new(
-                benchmark_async_tool_definition().contract(),
-            )),
-            _ => None,
-        }
+    ) -> Option<Arc<ToolContract>> {
+        echo_tool_catalog().contracts.get(name).cloned()
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
@@ -236,12 +237,7 @@ impl ToolProvider for BenchmarkObliqueTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
-        Ok({
-            benchmark_oblique_tool_definitions()
-                .into_iter()
-                .map(|definition| definition.manifest())
-                .collect()
-        })
+        Ok(oblique_tool_catalog().manifests.clone())
     }
 
     fn resolve_contract(
@@ -249,8 +245,7 @@ impl ToolProvider for BenchmarkObliqueTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<ToolContract>> {
-        benchmark_oblique_tool_definition_for(name)
-            .map(|definition| Arc::new(definition.contract()))
+        oblique_tool_catalog().contracts.get(name).cloned()
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
@@ -466,15 +461,6 @@ pub(super) fn benchmark_oblique_tool_definitions() -> Vec<ToolDefinition> {
         benchmark_oblique_judge_tool_definition(),
         benchmark_oblique_list_handles_tool_definition(),
     ]
-}
-
-fn benchmark_oblique_tool_definition_for(name: &str) -> Option<ToolDefinition> {
-    match name {
-        "oblique_search" => Some(benchmark_oblique_search_tool_definition()),
-        "oblique_judge_candidates" => Some(benchmark_oblique_judge_tool_definition()),
-        "oblique_list_async_handles" => Some(benchmark_oblique_list_handles_tool_definition()),
-        _ => None,
-    }
 }
 
 #[expect(
@@ -1176,3 +1162,44 @@ pub(super) const GMAIL_LIKE_TOOL_NAMES: &[&str] = &[
     "GMAIL_UPDATE_USER_ATTRIBUTES_VALUES",
     "GMAIL_UPDATE_VACATION_SETTINGS",
 ];
+
+/// Immutable host tool contracts are prepared once per provider catalog,
+/// including across bindings; resolution does not rebuild their schemas.
+#[cfg(test)]
+mod preparation_tests {
+    use super::*;
+
+    #[test]
+    fn oblique_tool_resolution_reuses_prepared_contracts() {
+        let tools = BenchmarkObliqueTools;
+        let config = lash_core::OwnerConfigView::default();
+        for name in [
+            "oblique_search",
+            "oblique_judge_candidates",
+            "oblique_list_async_handles",
+        ] {
+            let first = tools.resolve_contract(name, &config).unwrap();
+            let repeated = BenchmarkObliqueTools
+                .resolve_contract(name, &config)
+                .unwrap();
+            assert!(Arc::ptr_eq(&first, &repeated), "{name} was prepared again");
+            let definition = benchmark_oblique_tool_definitions()
+                .into_iter()
+                .find(|definition| definition.name() == name)
+                .unwrap();
+            assert_eq!(*first, definition.contract());
+        }
+
+        for definition in [
+            benchmark_echo_tool_definition(),
+            benchmark_slow_tool_definition(),
+            benchmark_async_tool_definition(),
+        ] {
+            let name = definition.name();
+            let first = echo_tool_catalog().contracts.get(name).unwrap();
+            let repeated = echo_tool_catalog().contracts.get(name).unwrap();
+            assert!(Arc::ptr_eq(first, repeated));
+            assert_eq!(**first, definition.contract());
+        }
+    }
+}

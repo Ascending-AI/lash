@@ -300,7 +300,10 @@ impl MaterialPayload {
         &self,
         location: MaterialLocation,
     ) -> Result<MaterialRef, crate::runtime_error::RuntimeEffectControllerError> {
-        let bytes = serde_json::to_vec(self).map_err(|error| {
+        let mut writer = MaterialHash(lash_sansio::core_support::Blake3DomainHasher::new(
+            MATERIAL_DOMAIN,
+        ));
+        serde_json::to_writer(&mut writer, self).map_err(|error| {
             crate::runtime_error::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RecordEncodingFailed,
                 error.to_string(),
@@ -310,10 +313,7 @@ impl MaterialPayload {
             owner: self.owner.clone(),
             role: self.role,
             location,
-            digest: MaterialDigest(lash_sansio::core_support::blake3_domain_hash_hex(
-                MATERIAL_DOMAIN,
-                &bytes,
-            )),
+            digest: MaterialDigest(writer.0.finalize_hex()),
         })
     }
 
@@ -365,5 +365,19 @@ impl From<MaterialRefusal> for crate::runtime_error::RuntimeEffectControllerErro
         // A failed read of recorded work must never grant a fresh body retry.
         error.journaled = true;
         error
+    }
+}
+
+/// Consume the exact serde JSON stream without retaining a second payload.
+struct MaterialHash(lash_sansio::core_support::Blake3DomainHasher);
+
+impl std::io::Write for MaterialHash {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }

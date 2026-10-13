@@ -27,7 +27,9 @@
 //! memory lease first.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+
+use lash_sansio::sync::MutexExt;
 
 use lash_kernel_doc::graph_tokens::{
     CanonicalFault, ChildRef, TokenCodec, TokenEvent, TokenReader, TokenWriter, encode_body,
@@ -64,6 +66,108 @@ impl<'a> TypedBody<'a> {
 pub struct GraphStaging {
     nodes: BTreeMap<NodeId, EncodedNode>,
     budget: EncodeBudget,
+    cache: Arc<Mutex<EncodingCache>>,
+    recorded: Option<Vec<EncodedNode>>,
+}
+
+// Canonical encoding depends only on the operation and its complete input,
+// never on a store, owner, release catalog or decoder. Keep its immutable
+// envelopes across captures and canonical read checks. Runtime reads still
+// fetch and check every supplied envelope before deriving their logical body.
+const CACHE_BYTES: usize = 32 << 20;
+const CACHE_ENTRIES: usize = 256;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum EncodingKind {
+    Node(NodeKind),
+    Text,
+    Bytes,
+}
+
+type EncodingKey = (EncodingKind, [u8; 32]);
+
+struct PreparedEncoding {
+    input: Box<[u8]>,
+    root: NodeId,
+    // In insertion order, including repeats: replaying this order preserves
+    // partial staging and the first memory-lease refusal.
+    nodes: Vec<EncodedNode>,
+    bytes: usize,
+}
+
+#[derive(Default)]
+struct EncodingCache {
+    entries: BTreeMap<EncodingKey, (Arc<PreparedEncoding>, u64)>,
+    bytes: usize,
+    clock: u64,
+}
+
+impl std::fmt::Debug for EncodingCache {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("EncodingCache")
+            .field("entries", &self.entries.len())
+            .field("bytes", &self.bytes)
+            .finish()
+    }
+}
+
+impl EncodingCache {
+    fn get(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<PreparedEncoding>> {
+        let (prepared, used) = self.entries.get_mut(key)?;
+        if prepared.input.as_ref() != input {
+            return None;
+        }
+        self.clock = self.clock.wrapping_add(1);
+        *used = self.clock;
+        Some(Arc::clone(prepared))
+    }
+
+    fn insert(&mut self, key: EncodingKey, input: &[u8], root: NodeId, nodes: Vec<EncodedNode>) {
+        let bytes = input.len().saturating_add(
+            nodes
+                .iter()
+                .map(|node| node.bytes.len() + std::mem::size_of::<EncodedNode>())
+                .sum::<usize>(),
+        );
+        if bytes > CACHE_BYTES {
+            return;
+        }
+        if let Some((previous, _)) = self.entries.remove(&key) {
+            self.bytes -= previous.bytes;
+        }
+        while self.entries.len() >= CACHE_ENTRIES || self.bytes + bytes > CACHE_BYTES {
+            let Some(oldest) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
+            if let Some((removed, _)) = self.entries.remove(&oldest) {
+                self.bytes -= removed.bytes;
+            }
+        }
+        self.clock = self.clock.wrapping_add(1);
+        self.entries.insert(
+            key,
+            (
+                Arc::new(PreparedEncoding {
+                    input: input.into(),
+                    root,
+                    nodes,
+                    bytes,
+                }),
+                self.clock,
+            ),
+        );
+        self.bytes += bytes;
+    }
+}
+
+fn encoding_cache() -> Arc<Mutex<EncodingCache>> {
+    static CACHE: OnceLock<Arc<Mutex<EncodingCache>>> = OnceLock::new();
+    Arc::clone(CACHE.get_or_init(|| Arc::new(Mutex::new(EncodingCache::default()))))
 }
 
 /// Encodes one node of `kind` into `staging` and returns it. Placed leaves,
@@ -95,6 +199,24 @@ impl GraphStaging {
         Self {
             nodes: BTreeMap::new(),
             budget,
+            cache: encoding_cache(),
+            recorded: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn isolated(budget: EncodeBudget) -> Self {
+        Self {
+            cache: Arc::new(Mutex::new(EncodingCache::default())),
+            ..Self::new(budget)
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn sharing_cache(&self, budget: EncodeBudget) -> Self {
+        Self {
+            cache: Arc::clone(&self.cache),
+            ..Self::new(budget)
         }
     }
 
@@ -110,8 +232,13 @@ impl GraphStaging {
     /// [`GraphRefusal::RootTooLarge`] for a direct body over its bound;
     /// [`GraphRefusal::EncodeMemoryLimit`] past the lease.
     pub fn encode(&mut self, kind: NodeKind, body: TypedBody<'_>) -> Result<NodeId, GraphRefusal> {
+        self.memoized(EncodingKind::Node(kind), body.as_bytes(), |staging| {
+            staging.encode_body(kind, body.as_bytes())
+        })
+    }
+
+    fn encode_body(&mut self, kind: NodeKind, logical: &[u8]) -> Result<NodeId, GraphRefusal> {
         let spec = kind.spec().ok_or(GraphRefusal::UnsupportedKind(kind.0))?;
-        let logical = body.as_bytes();
         match spec.shape {
             BodyShape::Direct => {
                 if kind != NodeKind::STRUCTURE_BLOCK {
@@ -228,17 +355,58 @@ impl GraphStaging {
         }
         let bytes = write_envelope(kind, children, &body);
         let id = NodeId::of_envelope(&bytes);
-        if !self.nodes.contains_key(&id) {
-            self.budget.charge(len)?;
-            self.nodes.insert(
-                id,
-                EncodedNode {
-                    id,
-                    bytes: Arc::from(bytes),
-                },
-            );
-        }
+        self.stage_prepared(EncodedNode {
+            id,
+            bytes: Arc::from(bytes),
+        })?;
         Ok(id)
+    }
+
+    fn stage_prepared(&mut self, node: EncodedNode) -> Result<(), GraphRefusal> {
+        if !self.nodes.contains_key(&node.id) {
+            self.budget.charge(node.len())?;
+            self.nodes.insert(node.id, node.clone());
+        }
+        if let Some(recorded) = &mut self.recorded {
+            recorded.push(node);
+        }
+        Ok(())
+    }
+
+    fn memoized(
+        &mut self,
+        kind: EncodingKind,
+        input: &[u8],
+        encode: impl FnOnce(&mut Self) -> Result<NodeId, GraphRefusal>,
+    ) -> Result<NodeId, GraphRefusal> {
+        if input.len() > CACHE_BYTES {
+            return encode(self);
+        }
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_hash_pass(input.len());
+        let key = (kind, crate::store::BlobRef::digest_for_content(input));
+        let prepared = self.cache.lock_recover().get(&key, input);
+        if let Some(prepared) = prepared {
+            for node in &prepared.nodes {
+                self.stage_prepared(node.clone())?;
+            }
+            return Ok(prepared.root);
+        }
+        let outermost = self.recorded.is_none();
+        let start = self.recorded.get_or_insert_with(Vec::new).len();
+        let result = encode(self);
+        if let Ok(root) = result {
+            let nodes = self
+                .recorded
+                .as_ref()
+                .map(|nodes| nodes[start..].to_vec())
+                .unwrap_or_default();
+            self.cache.lock_recover().insert(key, input, root, nodes);
+        }
+        if outermost {
+            self.recorded = None;
+        }
+        result
     }
 
     /// Replaces every text and bytes token over the inline bound with a
@@ -269,6 +437,12 @@ impl GraphStaging {
     /// Stages `text`'s leaves and index and returns its root, whatever its
     /// length: the caller has decided it is placed.
     pub(crate) fn place_text(&mut self, text: &str) -> Result<NodeId, GraphRefusal> {
+        self.memoized(EncodingKind::Text, text.as_bytes(), |staging| {
+            staging.encode_text(text)
+        })
+    }
+
+    fn encode_text(&mut self, text: &str) -> Result<NodeId, GraphRefusal> {
         let mut leaves = Vec::new();
         let mut rest = text;
         while !rest.is_empty() {
@@ -277,9 +451,10 @@ impl GraphStaging {
                 end -= 1;
             }
             let (chunk, tail) = rest.split_at(end);
-            let mut body = TokenWriter::new();
+            let mut body = TokenWriter::with_capacity(token_len(chunk.len()) as usize);
             body.text(chunk);
-            let leaf = self.insert(NodeKind::TEXT_LEAF, &[], body.into_bytes())?;
+            let logical = body.into_bytes();
+            let leaf = self.encode(NodeKind::TEXT_LEAF, TypedBody::logical(&logical))?;
             leaves.push((leaf, chunk.len() as u64));
             rest = tail;
         }
@@ -288,11 +463,18 @@ impl GraphStaging {
 
     /// Stages `bytes`' leaves and index and returns its root.
     pub(crate) fn place_bytes(&mut self, bytes: &[u8]) -> Result<NodeId, GraphRefusal> {
+        self.memoized(EncodingKind::Bytes, bytes, |staging| {
+            staging.encode_bytes(bytes)
+        })
+    }
+
+    fn encode_bytes(&mut self, bytes: &[u8]) -> Result<NodeId, GraphRefusal> {
         let mut leaves = Vec::new();
         for chunk in bytes.chunks(LEAF_PAYLOAD_MAX) {
-            let mut body = TokenWriter::new();
+            let mut body = TokenWriter::with_capacity(token_len(chunk.len()) as usize);
             body.bytes(chunk);
-            let leaf = self.insert(NodeKind::BYTES_LEAF, &[], body.into_bytes())?;
+            let logical = body.into_bytes();
+            let leaf = self.encode(NodeKind::BYTES_LEAF, TypedBody::logical(&logical))?;
             leaves.push((leaf, chunk.len() as u64));
         }
         self.value_index(NodeKind::BYTES_INDEX, leaves)
@@ -527,4 +709,38 @@ fn longest_block(events: &[Event], start: usize) -> usize {
         }
     }
     low
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    /// Preparation residency is bounded by both retained bytes and entries;
+    /// eviction cannot change an encoding and an oversized input runs uncached.
+    #[test]
+    fn graph_preparation_residency_is_bounded() {
+        let mut cache = EncodingCache::default();
+        let root = NodeId([0; 32]);
+        let key = |n: u32| (EncodingKind::Node(NodeKind(n)), [0; 32]);
+        for n in 0..=CACHE_ENTRIES as u32 {
+            cache.insert(key(n), b"input", root, Vec::new());
+        }
+        assert_eq!(cache.entries.len(), CACHE_ENTRIES);
+        assert!(cache.get(&key(0), b"input").is_none());
+        assert!(cache.get(&key(1), b"different").is_none());
+        assert_eq!(cache.get(&key(1), b"input").unwrap().root, root);
+        cache.insert(key(300), b"input", root, Vec::new());
+        assert!(
+            cache.get(&key(1), b"input").is_some(),
+            "a hit updates recency"
+        );
+        assert!(cache.get(&key(2), b"input").is_none());
+
+        cache.insert(key(301), &vec![0; CACHE_BYTES], root, Vec::new());
+        assert_eq!(cache.entries.len(), 1);
+        assert_eq!(cache.bytes, CACHE_BYTES);
+        cache.insert(key(302), &vec![0; CACHE_BYTES + 1], root, Vec::new());
+        assert_eq!(cache.entries.len(), 1);
+        assert!(cache.bytes <= CACHE_BYTES);
+    }
 }

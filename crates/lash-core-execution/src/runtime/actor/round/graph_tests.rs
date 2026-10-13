@@ -85,6 +85,38 @@ fn a_settled_call_is_one_outcome_node_that_rebuilds_its_presentation_after_colle
     let mut staging = staging();
     let outcome = CallOutcome::of(&call, None, 3);
     let node = outcome.stage(&mut staging).unwrap();
+    // The borrowed encoder keeps the owned codec's complete canonical graph.
+    let mut expected = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let crate::ToolCallOutcome::Success(value) = &outcome.output.outcome else {
+        panic!("successful fixture")
+    };
+    let answer_node = expected
+        .encode_value(NodeKind::FROZEN_VALUE, &FrozenToolValue(value.clone()))
+        .unwrap();
+    let presentation_node = expected
+        .encode_value(NodeKind::PRESENTATION, &outcome.presentation)
+        .unwrap();
+    let expected_root = expected
+        .encode_value(
+            NodeKind::CALL_OUTCOME,
+            &StoredOutcome {
+                outcome: outcome.clone(),
+                answer: Some(answer_node),
+                presentation: presentation_node,
+            },
+        )
+        .unwrap();
+    assert_eq!(node, expected_root);
+    assert_eq!(staging.nodes(), expected.nodes());
+    let json = serde_json::json!({"value": "encoded by borrow"});
+    assert_eq!(
+        stage_value(&mut expected, &json).unwrap(),
+        MaterialNode::Value(
+            expected
+                .encode_value(NodeKind::FROZEN_VALUE, &FrozenJson(json))
+                .unwrap()
+        ),
+    );
     assert_eq!(
         outcome.stage(&mut staging).unwrap(),
         node,

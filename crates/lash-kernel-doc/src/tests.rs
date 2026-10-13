@@ -724,3 +724,28 @@ fn a_native_version_is_part_of_the_identity_and_only_a_native_states_one() {
         Err(InvalidReason::NativeVersionZero)
     ));
 }
+
+/// Immutable helper identities are prepared once by content; changing a
+/// definition changes its identity before any preparation can be reused.
+#[test]
+fn immutable_helper_identity_is_prepared_once_by_content() {
+    let first = definition("fig6157.identity_fixture", false);
+    crate::function::with_fresh_identity_preparations(|| {
+        crate::function::IDENTITY_PREPARATIONS.with(|count| count.set(0));
+        let identity = first.identity().unwrap();
+        assert_eq!(first.identity().unwrap(), identity);
+        assert_eq!(first.clone().identity().unwrap(), identity);
+        crate::function::IDENTITY_PREPARATIONS.with(|count| assert_eq!(count.get(), 1));
+        let mut changed = first.clone();
+        changed.charge = Formula::Constant(2);
+        assert_ne!(changed.identity().unwrap(), identity);
+        assert_eq!(first.identity().unwrap(), identity);
+        crate::function::IDENTITY_PREPARATIONS.with(|count| assert_eq!(count.get(), 2));
+        assert_eq!(
+            identity,
+            FunctionId::from_bytes(
+                crate::canonical::digest("lash-kernel-function", &first).unwrap()
+            )
+        );
+    });
+}

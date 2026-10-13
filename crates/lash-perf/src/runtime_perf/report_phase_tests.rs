@@ -16,15 +16,15 @@ use lash_core::runtime::RuntimeTurnPhaseProbe;
 use lash_core::store::QueuedWorkStore as _;
 use lash_core::{SessionCatalogStore as _, SessionListFilter};
 
-/// GRAPH-WORK: the witness counts each envelope actually encoded and hashed,
-/// including repeated encodes whose identical result is deduplicated.
+/// GRAPH-WORK: a reused canonical image materializes no envelope, while
+/// every cache-key hash and every adoption hash remains measured work.
 #[test]
-fn checkpoint_graph_work_counts_real_envelopes() {
+fn prepared_graph_work_counts_materialization_and_lookup() {
     use lash_core_store::checkpoint_graph::*;
     let witness = lash_core::perf_witness::Collector::install().expect("graph witness");
     let mut graph = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(1 << 20)));
     let mut body = TokenWriter::new();
-    body.text("graph work");
+    body.text("FIG-6157 prepared graph work witness");
     let body = body.into_bytes();
     let root = graph
         .encode(NodeKind::TEXT_LEAF, TypedBody::logical(&body))
@@ -34,27 +34,24 @@ fn checkpoint_graph_work_counts_real_envelopes() {
         .encode(NodeKind::TEXT_LEAF, TypedBody::logical(&body))
         .unwrap();
     let encoded_work = witness.snapshot();
+    assert_eq!(encoded_work.graph_envelopes, 1);
+    assert_eq!(encoded_work.graph_encoded_bytes, bytes);
     assert_eq!(
-        encoded_work.hash_passes, 2,
-        "both actual envelope hashes count"
+        encoded_work.hash_passes, 3,
+        "two lookups and one materialization"
     );
-    eprintln!(
-        "GRAPH_WORK {}",
-        serde_json::json!({"encodes": encoded_work.graph_envelopes,
-        "encoded_bytes": encoded_work.graph_encoded_bytes, "hash_passes": encoded_work.hash_passes,
-        "hashed_bytes": encoded_work.hashed_bytes, "unique_staged_nodes": graph.nodes().len()})
-    );
+    assert_eq!(encoded_work.hashed_bytes, 2 * body.len() as u64 + bytes);
     graph.adopt(graph.nodes()[&root].clone()).unwrap();
     let work = witness.snapshot();
     assert_eq!(
-        work.hash_passes, 3,
-        "encoding and adoption both hash the envelope"
+        work.hash_passes, 4,
+        "adoption still hashes the supplied envelope"
     );
-    assert_eq!(work.hashed_bytes, 3 * bytes);
+    assert_eq!(work.hashed_bytes, 2 * body.len() as u64 + 2 * bytes);
     assert_eq!(work.graph_adopt_attempts, 1);
     assert_eq!(work.graph_adopt_bytes, bytes);
-    assert_eq!(work.graph_envelopes, 2);
-    assert_eq!(work.graph_encoded_bytes, 2 * bytes);
+    assert_eq!(work.graph_envelopes, 1);
+    assert_eq!(work.graph_encoded_bytes, bytes);
 }
 
 fn high_traffic_config() -> HighTrafficConfig {
@@ -677,4 +674,39 @@ fn served_phase_inventory_tracks_current_producers() {
             }
         }
     }
+}
+
+/// Material-reference preparation streams its canonical bytes: allocations
+/// remain small when the immutable payload grows, and the digest stays exact.
+#[test]
+fn material_reference_preparation_does_not_copy_the_complete_encoding() {
+    use lash_core_store::tool_run::{
+        MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole,
+    };
+    let payload = MaterialPayload::new(
+        MaterialOwner::Run {
+            opener: lash_core_store::effect_opener::EffectOpener::turn("perf", "material-stream"),
+        },
+        MaterialRole::AttemptOutput,
+        "unicode é\nquote \" slash \\ ".repeat(16_384),
+    );
+    let expected = lash_sansio::core_support::blake3_domain_hash_hex(
+        "lash-tool-material/v1",
+        serde_json::to_vec(&payload).unwrap(),
+    );
+    let before = crate::GLOBAL_ALLOCATOR.stats();
+    let reference = payload.reference(MaterialLocation::JournalLocal).unwrap();
+    let after = crate::GLOBAL_ALLOCATOR.stats();
+    let allocated = after.bytes_allocated.saturating_sub(before.bytes_allocated)
+        + after
+            .bytes_reallocated
+            .saturating_sub(before.bytes_reallocated)
+            .max(0) as usize;
+    assert!(
+        allocated < payload.text.len() / 4,
+        "material hashing allocated {allocated} bytes for {} payload bytes",
+        payload.text.len()
+    );
+    assert_eq!(reference.digest.as_str(), expected);
+    payload.verify(&reference, &payload.owner).unwrap();
 }

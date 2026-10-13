@@ -31,11 +31,16 @@ pub(crate) fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, Encode
 }
 
 pub(crate) fn digest<T: Serialize>(domain: &str, value: &T) -> Result<[u8; 32], EncodeError> {
+    Ok(digest_bytes(domain, &canonical_bytes(value)?))
+}
+
+/// Hash already prepared canonical bytes under the same identity domain.
+pub(crate) fn digest_bytes(domain: &str, bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(domain.as_bytes());
     hasher.update([0u8]);
-    hasher.update(canonical_bytes(value)?);
-    Ok(hasher.finalize().into())
+    hasher.update(bytes);
+    hasher.finalize().into()
 }
 
 fn write_value(value: &Value, out: &mut String) {

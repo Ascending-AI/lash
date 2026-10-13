@@ -1152,3 +1152,169 @@ fn a_deployment_graph_read_policy_refuses_its_configured_byte_budget() {
         Err(GraphRefusal::DecodeLimit { limit: 1, .. })
     ));
 }
+
+/// Repeated captures materialize only changed nodes: immutable envelopes
+/// keep their allocation, including an unchanged placed subtree of a new root.
+#[test]
+fn repeated_captures_share_unchanged_graph_materialization() {
+    use std::sync::Arc;
+
+    let body = |suffix: &str| {
+        let mut out = TokenWriter::new();
+        out.seq(2);
+        out.text(&"FIG-6157 unchanged subtree ".repeat(100));
+        out.text(&suffix.repeat(100));
+        out.into_bytes()
+    };
+    let first_body = body("first capture ");
+    let mut first = GraphStaging::isolated(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let root = first
+        .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&first_body))
+        .unwrap();
+    let mut repeated = first.sharing_cache(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    assert_eq!(
+        repeated
+            .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&first_body))
+            .unwrap(),
+        root
+    );
+    for (id, node) in first.nodes() {
+        assert!(
+            Arc::ptr_eq(&node.bytes, &repeated.get(id).unwrap().bytes),
+            "unchanged node {id} was materialized again"
+        );
+    }
+    let mut changed = first.sharing_cache(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let changed_body = body("second capture ");
+    let changed_root = changed
+        .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&changed_body))
+        .unwrap();
+    assert_ne!(changed_root, root);
+    let mut newly_materialized = 0;
+    for (id, node) in changed.nodes() {
+        match first.get(id) {
+            Some(previous) => assert!(Arc::ptr_eq(&previous.bytes, &node.bytes)),
+            None => newly_materialized += 1,
+        }
+    }
+    assert_eq!(newly_materialized, 2, "only the changed leaf and its root");
+    assert_eq!(
+        logical(&changed, changed_root, NodeKind::FROZEN_VALUE).unwrap(),
+        changed_body
+    );
+    // Sharing cannot change the committed baseline's bytes or identities.
+    assert_eq!(
+        serde_json::to_string_pretty(&grammar_vectors()).unwrap(),
+        vectors::GRAMMAR_VECTORS
+    );
+    assert_eq!(changed.budget().spent(), changed.staged_bytes());
+    // Changing a large value's tail keeps its earlier chunks too.
+    let prefix = format!(
+        "{}{}",
+        "a".repeat(LEAF_PAYLOAD_MAX),
+        "b".repeat(LEAF_PAYLOAD_MAX)
+    );
+    let mut before = first.sharing_cache(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let mut after = first.sharing_cache(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    before
+        .encode(
+            NodeKind::FROZEN_VALUE,
+            TypedBody::logical(&text_body(&format!("{prefix}first"))),
+        )
+        .unwrap();
+    after
+        .encode(
+            NodeKind::FROZEN_VALUE,
+            TypedBody::logical(&text_body(&format!("{prefix}second"))),
+        )
+        .unwrap();
+    let mut changed_nodes = 0;
+    let mut shared_nodes = 0;
+    for (id, node) in after.nodes() {
+        match before.get(id) {
+            Some(previous) => {
+                assert!(Arc::ptr_eq(&previous.bytes, &node.bytes));
+                shared_nodes += 1;
+            }
+            None => changed_nodes += 1,
+        }
+    }
+    assert_eq!(
+        (shared_nodes, changed_nodes),
+        (2, 3),
+        "two unchanged chunks, one changed chunk and its two ancestors"
+    );
+    // Cached replay preserves the original insertion order and partial writes
+    // when the host's lease refuses at any node boundary.
+    let mut boundaries = vec![0, first.staged_bytes()];
+    let mut spent = 0;
+    for node in first.nodes().values() {
+        spent += node.len();
+        boundaries.extend([spent - 1, spent]);
+    }
+    for limit in boundaries {
+        let budget = EncodeBudget::new(ExplicitLimit::new(limit));
+        let mut cold = GraphStaging::isolated(budget);
+        let mut warm = first.sharing_cache(budget);
+        assert_eq!(
+            cold.encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&first_body)),
+            warm.encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&first_body))
+        );
+        assert_eq!(cold.nodes(), warm.nodes());
+        assert_eq!(cold.budget().spent(), warm.budget().spent());
+    }
+    let mut refused = first.sharing_cache(EncodeBudget::new(ExplicitLimit::new(1)));
+    assert_eq!(
+        refused.encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&first_body)),
+        Err(GraphRefusal::EncodeMemoryLimit),
+        "shared encoding still charges each new staging area"
+    );
+}
+
+/// Decoding a checked, unplaced body reads its authoritative bytes, rather
+/// than materializing another complete copy before the typed decoder runs.
+#[test]
+fn checked_unplaced_bodies_are_borrowed_by_typed_decoders() {
+    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError};
+
+    struct ReadText {
+        address: usize,
+        text: String,
+    }
+    impl TokenCodec for ReadText {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.text(&self.text);
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            let text = input.text()?;
+            Ok(Self {
+                address: text.as_ptr() as usize,
+                text: text.to_owned(),
+            })
+        }
+    }
+    let body = text_body("FIG-6157 checked borrowed text");
+    for kind in [NodeKind::TEXT_LEAF, NodeKind::FROZEN_VALUE] {
+        let mut nodes = staging();
+        let root = nodes.encode(kind, TypedBody::logical(&body)).unwrap();
+        let envelope = nodes.get(&root).unwrap().envelope().unwrap();
+        let physical = if kind == NodeKind::TEXT_LEAF {
+            envelope.body
+        } else {
+            &envelope.body[3..]
+        };
+        let address = TokenReader::new(physical).text().unwrap().as_ptr() as usize;
+        let mut decoder = GraphDecoder::new(&nodes, limits());
+        let read: ReadText = decoder.decode(root, kind).unwrap();
+        assert_eq!(read.text, "FIG-6157 checked borrowed text");
+        assert_eq!(
+            read.address, address,
+            "the checked source body was copied before decoding"
+        );
+        assert_eq!(decoder.read(), (1, nodes.get(&root).unwrap().len()));
+    }
+    assert_eq!(
+        serde_json::to_string_pretty(&grammar_vectors()).unwrap(),
+        vectors::GRAMMAR_VECTORS
+    );
+}
