@@ -356,6 +356,7 @@ impl<'a> Collector<'a> {
             Pattern::Object { properties, rest } => {
                 for property in properties {
                     if let PropertyKey::Computed(key) = &property.key {
+                        self.plain.escape(key);
                         self.expr(key);
                     }
                     self.pattern(&property.value, role);
@@ -391,7 +392,12 @@ impl<'a> Collector<'a> {
             Stmt::Spanned(_, inner) | Stmt::Labeled { stmt: inner, .. } => self.statement(inner),
             Stmt::Empty | Stmt::Break | Stmt::Continue => {}
             Stmt::TypeAlias { name, ty } => self.aliases.push((name, ty)),
-            Stmt::Expr(expr) | Stmt::Throw(expr) => self.expr(expr),
+            Stmt::Expr(expr) => self.expr(expr),
+            Stmt::Throw(expr) => {
+                // A catch binding can expose the same guest heap value.
+                self.plain.escape(expr);
+                self.expr(expr);
+            }
             Stmt::Return(value) => {
                 if let Some(value) = value {
                     self.expr(value);
@@ -596,6 +602,7 @@ impl<'a> Collector<'a> {
                     match property {
                         ObjectProperty::KeyValue(key, value) => {
                             if let PropertyKey::Computed(key) = key {
+                                self.plain.escape(key);
                                 self.expr(key);
                             }
                             self.expr(value);

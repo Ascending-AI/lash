@@ -38,6 +38,7 @@ pub(super) struct Collector<'a> {
     excluded: BTreeSet<String>,
     mutated: BTreeSet<String>,
     dynamic: bool,
+    representation_written: bool,
     escapes: Vec<&'a Expr>,
     calls: Vec<(&'a Expr, &'a [CallArg])>,
     awaits: Vec<&'a Expr>,
@@ -65,6 +66,11 @@ impl Facts {
                     let ObjectProperty::KeyValue(PropertyKey::Static(key), value) = property else {
                         return None;
                     };
+                    // Opaque/restored kernel data can contain the empty
+                    // tuple marker even though guest literals cannot.
+                    if key == "__ts_brand" {
+                        return None;
+                    }
                     // Duplicate keys use the last definition, including an
                     // opaque one. Never retain a superseded field proof.
                     fields.remove(key);
@@ -99,6 +105,12 @@ impl<'a> Collector<'a> {
     }
 
     pub(super) fn write(&mut self, property: &MemberProperty) {
+        // An unknown key might be the internal brand field. Such a write
+        // can change representation, not just a nested value, through any
+        // alias; conservatively retain admission throughout this source.
+        if property_name(property).is_none_or(|name| name == "__ts_brand") {
+            self.representation_written = true;
+        }
         match property_name(property) {
             Some(name) => {
                 self.mutated.insert(name.to_string());
@@ -120,6 +132,9 @@ impl<'a> Collector<'a> {
     }
 
     pub(super) fn finish(mut self, session: &BTreeSet<Name>, terminal: &BTreeSet<String>) -> Facts {
+        if self.representation_written {
+            return Facts::default();
+        }
         let terminal_call = |callee: &Expr| {
             global_path(callee).is_some_and(|(root, path)| {
                 terminal.contains(&path)
@@ -186,6 +201,12 @@ impl<'a> Collector<'a> {
             for value in definitions.iter().flatten() {
                 escaped_fields(value, &self.mutated, self.dynamic, &mut self.excluded);
             }
+        }
+        // An escaped member can expose an alias inside a fresh, unnamed
+        // literal too: `call(({ inner: local }).inner)` has no wrapper
+        // definition for the pass above to inspect.
+        for value in &self.escapes {
+            escaped_fields(value, &self.mutated, self.dynamic, &mut self.excluded);
         }
         loop {
             let before = self.excluded.len();
@@ -355,8 +376,10 @@ fn escaped_fields(
     dynamic: bool,
     names: &mut BTreeSet<String>,
 ) {
-    if let Expr::As { value, .. } = expr {
+    if let Expr::As { value, .. } | Expr::Assign { value, .. } = expr {
         escaped_fields(value, fields, dynamic, names);
+    } else if let Expr::Member { object, .. } = expr {
+        escaped_fields(object, fields, dynamic, names);
     } else if let Expr::Conditional {
         consequent,
         alternate,

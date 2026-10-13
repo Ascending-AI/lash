@@ -542,3 +542,89 @@ fn plain_record_implicit_calls_and_hidden_aliases_keep_admission() {
         "const r = { next: { child: {} } }; let alias; ({ next: alias } = r); Object.assign(alias, { child: new Date(7) }); await finish(r.next.child.__ts_brand === undefined);",
     );
 }
+
+/// TS-PLAIN-OBJECT-KEY: A computed literal key may coerce and mutate its receiver before a later member path reads it.
+#[test]
+fn plain_record_computed_object_keys_keep_admission() {
+    let source = "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'key'; } }; const keyed = { [r]: 1 }; await finish(r.next.__ts_brand === undefined);";
+    let guarded = super::machine::end(&source.replace("const r =", "var r ="));
+    assert_eq!(
+        guarded,
+        super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+    assert_eq!(super::machine::end(source), guarded);
+}
+
+/// TS-PLAIN-PATTERN-KEY: Destructuring key coercion has the same escape semantics as computed member access.
+#[test]
+fn plain_record_computed_pattern_keys_keep_admission() {
+    let source = "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'key'; } }; const { [r]: ignored } = {}; await finish(r.next.__ts_brand === undefined);";
+    let guarded = super::machine::end(&source.replace("const r =", "var r ="));
+    assert_eq!(
+        guarded,
+        super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+    assert_eq!(super::machine::end(source), guarded);
+}
+
+/// TS-PLAIN-THROW: A catch binding aliases the thrown value, so a call on that binding can invalidate the original nested facts.
+#[test]
+fn plain_record_thrown_aliases_keep_admission() {
+    let source = "const r = { next: {} }; try { throw r; } catch (caught) { Object.assign(caught, { next: new Date(7) }); } await finish(r.next.__ts_brand === undefined);";
+    let guarded = super::machine::end(&source.replace("const r =", "var r ="));
+    assert_eq!(
+        guarded,
+        super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+    assert_eq!(super::machine::end(source), guarded);
+}
+
+/// TS-PLAIN-FRESH-FIELD-ESCAPE: A field of an unnamed literal can expose a local alias to a mutating call.
+#[test]
+fn plain_record_fresh_literal_field_aliases_keep_admission() {
+    let source = "const r = { next: {} }; Object.assign(({ inner: r }).inner, { next: new Date(7) }); await finish(r.next.__ts_brand === undefined);";
+    let guarded = super::machine::end(&source.replace("const r =", "var r ="));
+    assert_eq!(
+        guarded,
+        super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+    assert_eq!(super::machine::end(source), guarded);
+}
+
+/// TS-PLAIN-BRAND: restored kernel data can carry the internal marker.
+/// Neither a literal nor a static/computed field write may certify it plain.
+#[test]
+fn plain_record_restored_brand_markers_keep_admission() {
+    let bindings = lash_kernel_vm::Bindings {
+        variables: BTreeMap::from([(
+            lash_kernel_doc::Name::new("marker"),
+            lash_kernel_doc::Value::Tuple(std::sync::Arc::from([])),
+        )]),
+        ..Default::default()
+    };
+    let sources = [
+        "const r = {}; r.__ts_type = 'brand:date'; r.__ts_brand = marker; await finish(r.__ts_brand === undefined);",
+        "const r = {}; r.__ts_type = 'brand:date'; const key = '__ts_brand'; r[key] = marker; await finish(r.__ts_brand === undefined);",
+        "const r = { __ts_brand: marker, __ts_type: 'brand:date' }; await finish(({ __ts_brand: marker, __ts_type: 'brand:date' }).__ts_brand === undefined);",
+    ];
+    let observed: Vec<_> = sources
+        .iter()
+        .map(|source| {
+            let guarded = source
+                .replace("const r =", "var r =")
+                .replace("finish(({", "finish(opaque({");
+            let guarded = format!("function opaque(x) {{ return x; }} {guarded}");
+            assert_eq!(
+                super::machine::end_with_bindings(&guarded, bindings.clone()),
+                super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+            );
+            super::machine::end_with_bindings(source, bindings.clone())
+        })
+        .collect();
+    assert_eq!(
+        observed,
+        (0..sources.len())
+            .map(|_| super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true)))
+            .collect::<Vec<_>>()
+    );
+}
