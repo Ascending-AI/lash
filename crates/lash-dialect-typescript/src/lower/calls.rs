@@ -911,11 +911,23 @@ impl Lowerer<'_> {
             ast::Expr::Member {
                 object, property, ..
             } => {
+                let proven = self.facts.primitive(object);
                 let object = self.lower_expr(object)?;
-                let object = self.pin(object);
+                let mut object = self.pin(object);
+                // Representation proof can refine unknown data, but a
+                // contradictory trusted kind still owns its typed refusal.
+                let proven = proven.filter(|ty| {
+                    declared_receiver(&object.ty).is_none_or(|(receiver, _)| {
+                        declared_receiver(ty).is_some_and(|(kind, _)| kind == receiver)
+                    })
+                });
+                if let Some(ty) = &proven {
+                    object.ty = ty.clone();
+                }
                 let key = self.lower_key(property)?;
                 if let Key::Static(name) = &key
-                    && let Some(called) = self.call_declared(&object, name, args, discard_result)?
+                    && let Some(called) =
+                        self.call_declared(&object, name, args, discard_result, proven.is_some())?
                 {
                     return Ok(called);
                 }
@@ -1003,6 +1015,7 @@ impl Lowerer<'_> {
         name: &str,
         args: &[ast::CallArg],
         discard_result: bool,
+        proven: bool,
     ) -> Lowering<Option<Operand>> {
         let Some((receiver, check)) = declared_receiver(&object.ty) else {
             return Ok(None);
@@ -1016,6 +1029,9 @@ impl Lowerer<'_> {
         else {
             return Ok(None);
         };
+        if let Some(result) = self.call_primitive_method(object, name, args, proven)? {
+            return Ok(Some(result));
+        }
         let fresh = crate::types::FRESH_LIST_METHODS.contains(&name);
         if object.ty == Ty::Array {
             // A list the source built takes its row without the test.

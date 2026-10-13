@@ -176,6 +176,10 @@ impl Facts {
         self.plain.of(expr)
     }
 
+    pub(crate) fn primitive(&self, expr: &Expr) -> Option<Ty> {
+        self.plain.primitive(expr)
+    }
+
     /// The type of the source's bindings named `name`, or `None` when the
     /// source declares no such name.
     pub(crate) fn of(&self, name: &str) -> Option<&Ty> {

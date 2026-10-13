@@ -40,6 +40,7 @@ mod expressions;
 mod functions;
 mod patterns;
 mod positional;
+mod primitive_methods;
 mod process;
 mod statements;
 mod walk;
@@ -52,13 +53,18 @@ pub(crate) type Lowering<T> = Result<T, Diagnostic>;
 pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "bool.not",
     "eq",
+    "error.new",
+    "float.to_int",
     "list.check",
     "list.get",
     "list.len",
+    "list.slice",
     "num.add",
     "num.div",
     "num.le",
     "num.lt",
+    "num.max",
+    "num.min",
     "num.mul",
     "num.neg",
     "num.rem_trunc",
@@ -68,6 +74,10 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "text.concat",
     "text.join",
     "text.len",
+    "text.split",
+    "text.trim_set",
+    "text.utf16_find",
+    "text.utf16_len",
     "ts.add",
     "ts.arguments",
     "ts.await",
@@ -111,6 +121,7 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.spread",
     "ts.strict_equals",
     "ts.strict_not_equals",
+    "ts.string.slice_units",
     "ts.sub",
     "ts.tdz",
     "ts.to_boolean",

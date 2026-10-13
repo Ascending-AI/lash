@@ -536,3 +536,274 @@ fn direct_map_calls_account_for_their_work_and_resume_at_every_statement() {
     assert_eq!(straight.charged, work.charged);
     assert_eq!(observe(program, true), straight);
 }
+
+/// K-DIALECT-001, K-CHG-007: a proven primitive method needs no receiver,
+/// callable or argument-list admission; the remaining native work is charged
+/// exactly once, including across every statement export and effect park.
+#[test]
+fn primitive_method_regions_charge_only_executed_work_and_resume_exactly() {
+    let source = r#"
+        const fields = { text: ' a😀beta ', items: [1, , 3, 4] };
+        const a = fields.text.includes('beta');
+        const b = fields.text.startsWith(' a');
+        const c = fields.text.endsWith(' ');
+        const d = fields.text.trim();
+        const e = fields.text.slice(1, 4);
+        const f = fields.items.slice(1, 3);
+        const text = 'old';
+        await finish([a, b, c, d, e, f, text.trim('ignored')]);
+    "#;
+    let program = lowered(after(), source);
+    let mut machine = KernelMachine::start(
+        program.clone(),
+        BOUNDS,
+        Start {
+            target: Target::Main,
+            args: Vec::new(),
+            bindings: Bindings::default(),
+        },
+    )
+    .unwrap();
+    machine.count_work();
+    let mut console = Console::default();
+    loop {
+        match machine.run(&mut console, u64::MAX).unwrap() {
+            Step::Ended(End::Finished(_)) => break,
+            Step::Parked(park) => {
+                for request in park.requests {
+                    let Request::Effect(effect) = request else {
+                        panic!("effect expected")
+                    };
+                    let answer = effect.args.first().cloned().unwrap_or(Datum::Null);
+                    machine
+                        .deliver(effect.wait, Outcome::Completed(answer))
+                        .unwrap();
+                }
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    let work = machine.work().unwrap();
+    assert_eq!(work.charged, machine.meters().charged);
+    assert_eq!(work.residual(), 0);
+    assert_eq!(work.unattributed_charge, 0);
+    assert_eq!(work.insertion_residual(), 0);
+    for name in [
+        "ts.receiver",
+        "ts.callable",
+        "ts.string.includes",
+        "ts.string.startsWith",
+        "ts.string.endsWith",
+        "ts.string.trim",
+        "ts.string.slice",
+        "ts.array.slice",
+    ] {
+        assert!(
+            !work.codes.iter().any(|code| code.symbol.name == name),
+            "proven primitive regions must omit admission helper {name}: {work:?}"
+        );
+    }
+    let straight = observe(program.clone(), false);
+    assert_eq!(straight.charged, work.charged);
+    assert_eq!(observe(program, true), straight);
+}
+
+fn same_method_observation(direct: &str, generic: &str) {
+    let describe = |call: &str| {
+        format!(
+            "try {{ const out = {call}; console.log(JSON.stringify(out)); }} \
+         catch (error) {{ console.log(error.name, error.message); }}"
+        )
+    };
+    let direct = observe(lowered(after(), &describe(direct)), false);
+    let generic = observe(lowered(after(), &describe(generic)), false);
+    assert_eq!(ending(&direct.end), ending(&generic.end));
+    assert_eq!(direct.printed, generic.printed);
+    assert_eq!(direct.requests, generic.requests);
+}
+
+/// K-DIALECT-001, K-VAL-007: lowering-time primitive regions and the
+/// guarded receiver/callable path agree on UTF-16, absent/NaN/infinite and
+/// relative bounds, typed refusals, whitespace and nonempty splitting.
+#[test]
+fn primitive_method_regions_match_guarded_utf16_and_bound_semantics() {
+    let positions = [
+        "undefined",
+        "NaN",
+        "Infinity",
+        "-Infinity",
+        "-2.9",
+        "1.9",
+        "99",
+        "+undefined",
+    ];
+    let mut pairs = 0;
+    for text in ["", "a😀beta", "😀😀", "éλ中", "\u{feff} a \u{0085}"] {
+        let text = serde_json::to_string(text).unwrap();
+        for name in ["includes", "indexOf", "startsWith", "endsWith"] {
+            for needle in ["", "a", "😀", "λ"] {
+                let needle = serde_json::to_string(needle).unwrap();
+                for position in positions {
+                    let direct = format!("{text}.{name}({needle}, {position})");
+                    let generic =
+                        format!("((s, n, p) => s.{name}(n, p))({text}, {needle}, {position})");
+                    same_method_observation(&direct, &generic);
+                    pairs += 1;
+                }
+            }
+        }
+        for lower in positions {
+            for upper in ["undefined", "0", "3", "Infinity", "-2.9"] {
+                let direct = format!("{text}.slice({lower}, {upper})");
+                let generic = format!("((s, a, b) => s.slice(a, b))({text}, {lower}, {upper})");
+                same_method_observation(&direct, &generic);
+                pairs += 1;
+            }
+        }
+        for name in ["trim", "trimStart", "trimEnd"] {
+            same_method_observation(
+                &format!("{text}.{name}()"),
+                &format!("((s) => s.{name}())({text})"),
+            );
+            pairs += 1;
+        }
+        for separator in ["a", "😀", "λ", " "] {
+            let separator = serde_json::to_string(separator).unwrap();
+            same_method_observation(
+                &format!("{text}.split({separator})"),
+                &format!("((s, n) => s.split(n))({text}, {separator})"),
+            );
+            pairs += 1;
+        }
+    }
+    for lower in positions {
+        for upper in ["undefined", "0", "3", "Infinity", "-2.9"] {
+            same_method_observation(
+                &format!("[1, , undefined, 4].slice({lower}, {upper})"),
+                &format!("((s, a, b) => s.slice(a, b))([1, , undefined, 4], {lower}, {upper})"),
+            );
+            pairs += 1;
+        }
+    }
+    println!("primitive method region differential pairs={pairs}");
+}
+
+/// K-STMT-005, K-DIALECT-001: replacement invalidates field proof, while
+/// passing the old primitive value keeps its representation. Unknown/borrowed
+/// methods, callbacks, spreads and coercion retain their original order.
+#[test]
+fn primitive_method_regions_keep_alias_invalidation_and_argument_order() {
+    // Keep the field-write case independent of the other conservative escape
+    // exclusions: dropping write invalidation must make this case fail.
+    let field_write = "const holder = { text: 'original' }; const writer = holder; \
+        writer.text = { trim() { return 'own'; } }; console.log(holder.text.trim());";
+    let actual = observe(lowered(after(), field_write), false);
+    assert_eq!(actual.printed, [Datum::Text("own".into())]);
+    let generic = field_write.replace("holder.text.trim()", "((v) => v.trim())(holder.text)");
+    let generic = observe(lowered(after(), &generic), false);
+    assert_eq!(ending(&actual.end), ending(&generic.end));
+    assert_eq!(actual.printed, generic.printed);
+    let source = r#"
+        let text = ' old ';
+        const change = () => { text = 'new'; return 'ignored'; };
+        console.log(text.trim(change()), text);
+        const root = { text: 'original', items: [1, , 3, 4] };
+        const alias = root;
+        alias.text = { trim() { return 'own'; } };
+        alias.items = { slice() { return 'own slice'; } };
+        console.log(root.text.trim(), root.items.slice(0));
+        const inner = { value: 1 };
+        const list = [inner, , undefined, 4];
+        const copy = list.slice(0, 3, list.push(9));
+        copy[0].value = 7;
+        console.log(copy.length, copy[0] === inner, inner.value, 1 in copy, 2 in copy, list.length);
+        let order = '';
+        const position = { valueOf() { order += 'c'; return 1; } };
+        const argument = () => { order += 'a'; return position; };
+        console.log(' abc '.slice(argument()), order);
+        const borrowed = 'source'.slice;
+        console.log(borrowed.call('target', 1, 4), 'target'.slice(...[1, 4]));
+        console.log([1, 2].map(x => x + 1).slice(1)[0]);
+        function typed(typedReceiver: string) { return typedReceiver.trim((order += 'bad')); }
+        try { typed(null); } catch (error) { console.log(error.name, order); }
+        function replaced(o) { o.text = { trim() { return 'captured'; } }; }
+        const captured = { text: 'value' };
+        replaced(captured);
+        console.log(captured.text.trim());
+    "#;
+    let actual = observe(lowered(after(), source), false);
+    assert_eq!(
+        actual.printed,
+        [
+            "old new",
+            "own own slice",
+            "3 true 7 false true 5",
+            "abc  ac",
+            "arg arg",
+            "3",
+            "TypeError ac",
+            "captured"
+        ]
+        .map(|line| Datum::Text(line.into()))
+    );
+    // Erasing types at a wrapper parameter forces the guarded path without
+    // changing the receiver or the arguments evaluated by the source.
+    let generic = source
+        .replace(
+            "text.trim(change())",
+            "((s, x) => s.trim(x))(text, change())",
+        )
+        .replace("root.text.trim()", "((s) => s.trim())(root.text)")
+        .replace(
+            "root.items.slice(0)",
+            "((s, x) => s.slice(x))(root.items, 0)",
+        )
+        .replace("captured.text.trim()", "((s) => s.trim())(captured.text)")
+        .replace(
+            "list.slice(0, 3, list.push(9))",
+            "((s, a, b, x) => s.slice(a, b, x))(list, 0, 3, list.push(9))",
+        )
+        .replace(
+            "' abc '.slice(argument())",
+            "((s, a) => s.slice(a))(' abc ', argument())",
+        );
+    let generic = observe(lowered(after(), &generic), false);
+    assert_eq!(ending(&actual.end), ending(&generic.end));
+    assert_eq!(actual.printed, generic.printed);
+    assert_eq!(actual.requests, generic.requests);
+    assert_eq!(observe(lowered(after(), source), true), actual);
+    let source = "let awaited = ' before '; console.log(awaited.trim(await echo((awaited = 'after'))), awaited);";
+    let generic = source.replace(
+        "awaited.trim(await echo((awaited = 'after')))",
+        "((s, x) => s.trim(x))(awaited, await echo((awaited = 'after')))",
+    );
+    let actual = observe(lowered(after(), source), false);
+    let generic = observe(lowered(after(), &generic), false);
+    assert_eq!(ending(&actual.end), ending(&generic.end));
+    assert_eq!(actual.printed, generic.printed);
+    assert_eq!(actual.requests, generic.requests);
+    assert_eq!(observe(lowered(after(), source), true), actual);
+}
+
+/// TS_TYPED_STRING_METHOD / TS_TYPED_ARRAY_METHOD: representation facts do
+/// not override a contradictory annotation's receiver check. That check still
+/// precedes every argument, including ignored arguments with effects.
+#[test]
+fn primitive_method_regions_keep_annotation_receiver_checks_before_arguments() {
+    let source = r#"
+        let calls = 0;
+        try { ([] as string).slice(0, 1, calls++); }
+        catch (error) { console.log(error.name, calls); }
+        try { ('abc' as number[]).slice(0, 1, calls++); }
+        catch (error) { console.log(error.name, calls); }
+    "#;
+    let actual = observe(lowered(after(), source), false);
+    assert_eq!(
+        actual.printed,
+        [
+            Datum::Text("TypeError 0".into()),
+            Datum::Text("TypeError 0".into())
+        ]
+    );
+    assert_eq!(observe(lowered(after(), source), true), actual);
+}

@@ -1,4 +1,5 @@
-//! Closed plain-record definitions, alongside the ordinary (trusted) types.
+//! Closed plain-record definitions and their primitive fields, alongside the
+//! ordinary (trusted) types.
 //! Facts are compiler-only. Mutated property names are deliberately global:
 //! a write through an unknown alias must invalidate the same nested proof.
 
@@ -6,10 +7,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use lash_kernel_doc::Name;
 
+use super::Ty;
 use crate::adapter::{CallArg, Expr, MemberProperty, ObjectProperty, PropertyKey};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct PlainRecord(BTreeMap<String, PlainRecord>, usize);
+pub(crate) struct PlainRecord(BTreeMap<String, PlainRecord>, usize, BTreeMap<String, Ty>);
 
 // A small source can describe exponentially many paths through aliases.
 // Bound the compiler's expanded proof independently of runtime heap size.
@@ -27,8 +29,14 @@ impl PlainRecord {
                     .map(|other| (key.clone(), value.meet(other)))
             })
             .collect();
-        let nodes = 1 + fields.values().map(|value| value.1).sum::<usize>();
-        Self(fields, nodes)
+        let primitives = self
+            .2
+            .iter()
+            .filter(|(key, ty)| other.2.get(*key) == Some(*ty))
+            .map(|(key, ty)| (key.clone(), ty.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let nodes = 1 + primitives.len() + fields.values().map(|value| value.1).sum::<usize>();
+        Self(fields, nodes, primitives)
     }
 }
 
@@ -48,7 +56,9 @@ pub(super) struct Collector<'a> {
 pub(super) struct Facts {
     enabled: bool,
     names: HashMap<String, PlainRecord>,
+    primitives: HashMap<String, Ty>,
     mutated: BTreeSet<String>,
+    written: BTreeSet<String>,
     dynamic: bool,
     definitions: HashMap<String, Expr>,
 }
@@ -67,6 +77,7 @@ impl Facts {
             Expr::As { value, .. } => self.of(value),
             Expr::Object(properties) => {
                 let mut fields = BTreeMap::new();
+                let mut primitives = BTreeMap::new();
                 for property in properties {
                     let ObjectProperty::KeyValue(PropertyKey::Static(key), value) = property else {
                         return None;
@@ -79,22 +90,51 @@ impl Facts {
                     // Duplicate keys use the last definition, including an
                     // opaque one. Never retain a superseded field proof.
                     fields.remove(key);
+                    primitives.remove(key);
+                    // Passing a primitive field's value cannot replace that
+                    // field. A write to the field itself still invalidates it;
+                    // escaped parents and record spines are rejected below.
+                    if !self.dynamic
+                        && !self.written.contains(key)
+                        && let Some(ty) = self.primitive(value)
+                    {
+                        primitives.insert(key.clone(), ty);
+                    }
                     if !self.dynamic
                         && !self.mutated.contains(key)
                         && let Some(plain) = self.of(value)
                     {
                         fields.insert(key.clone(), plain);
-                        if fields.values().map(|value| value.1).sum::<usize>() >= MAX_SHAPE_NODES {
-                            return None;
-                        }
+                    }
+                    if primitives.len() + fields.values().map(|value| value.1).sum::<usize>()
+                        >= MAX_SHAPE_NODES
+                    {
+                        return None;
                     }
                 }
-                let nodes = 1 + fields.values().map(|value| value.1).sum::<usize>();
-                Some(PlainRecord(fields, nodes))
+                let nodes =
+                    1 + primitives.len() + fields.values().map(|value| value.1).sum::<usize>();
+                Some(PlainRecord(fields, nodes, primitives))
             }
             Expr::Member {
                 object, property, ..
             } => self.of(object)?.0.get(property_name(property)?).cloned(),
+            _ => None,
+        }
+    }
+
+    pub(super) fn primitive(&self, expr: &Expr) -> Option<Ty> {
+        if !self.enabled {
+            return None;
+        }
+        match expr {
+            Expr::String(_) => Some(Ty::Text),
+            Expr::Array(_) => Some(Ty::Array),
+            Expr::Ident(name, _) => self.primitives.get(name).cloned(),
+            Expr::As { value, .. } => self.primitive(value),
+            Expr::Member {
+                object, property, ..
+            } => self.of(object)?.2.get(property_name(property)?).cloned(),
             _ => None,
         }
     }
@@ -140,6 +180,7 @@ impl<'a> Collector<'a> {
         if self.representation_written {
             return Facts::default();
         }
+        let written = self.mutated.clone();
         let terminal_call = |callee: &Expr| {
             global_path(callee).is_some_and(|(root, path)| {
                 terminal.contains(&path)
@@ -228,7 +269,9 @@ impl<'a> Collector<'a> {
         let mut facts = Facts {
             enabled: true,
             names: HashMap::new(),
+            primitives: HashMap::new(),
             mutated: self.mutated,
+            written,
             dynamic: self.dynamic,
             definitions: self
                 .definitions
@@ -250,9 +293,26 @@ impl<'a> Collector<'a> {
         // themselves; the bound refuses recursively growing shapes.
         for _ in 0..32 {
             let mut next = HashMap::new();
+            let mut primitives = HashMap::new();
             for (name, definitions) in &self.definitions {
                 if self.excluded.contains(*name) {
                     continue;
+                }
+                let mut primitive = None;
+                for value in definitions {
+                    let part = value.and_then(|value| facts.primitive(value));
+                    if part.is_none()
+                        || primitive
+                            .as_ref()
+                            .is_some_and(|ty| Some(ty) != part.as_ref())
+                    {
+                        primitive = None;
+                        break;
+                    }
+                    primitive = part;
+                }
+                if let Some(ty) = primitive {
+                    primitives.insert((*name).to_string(), ty);
                 }
                 let mut shape: Option<PlainRecord> = None;
                 let mut proven = true;
@@ -267,10 +327,11 @@ impl<'a> Collector<'a> {
                     next.insert((*name).to_string(), shape);
                 }
             }
-            if next == facts.names {
+            if next == facts.names && primitives == facts.primitives {
                 return facts;
             }
             facts.names = next;
+            facts.primitives = primitives;
         }
         Facts::default()
     }
