@@ -43,6 +43,9 @@ pub(super) enum GuardedSpan {
 struct RuntimeScenarioBudget {
     guarded_span: GuardedSpan,
     enforced_allocation: EnforcedAllocationBudget,
+    // Review evidence beside an attributed ceiling change, never an enforcement exemption.
+    #[serde(default, rename = "allocation_attribution")]
+    _allocation_attribution: Option<String>,
     advisory_duration: AdvisoryDurationBudget,
 }
 

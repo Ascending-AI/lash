@@ -143,19 +143,11 @@ impl RemoteMachines {
                 binding,
             ))),
         };
-        let reservation = start.document.0.len()
-            + match &start.from {
-                StartFrom::Fresh(payload) => payload.0.len(),
-                StartFrom::ParkedGraph(parked) => {
-                    parked.state.byte_len() as usize
-                        + parked
-                            .admissions
-                            .iter()
-                            .map(|admission| admission.0.len())
-                            .sum::<usize>()
-                }
-            }
-            + 4096;
+        let reservation = start_reservation(
+            &start,
+            &lash_vm_protocol::FrameCodec::new(self.service.config().protocol.decode),
+        )
+        .map_err(worker)?;
         let service = self.service.clone();
         let (owner_epoch, frame_epoch) = (self.owner_epoch, self.frame_epoch);
         let document = self.document.to_string();
@@ -447,4 +439,70 @@ async fn blocking<T: Send + 'static>(
             ))
         })?
         .map_err(worker)
+}
+
+/// Count the complete Start as it crosses alone. A checkout has not chosen its
+/// lease or sequence yet, and a retained lease can have advanced its sequence,
+/// so every header integer is counted at its maximum encoded width. Clamping
+/// the unsigned run bounds at checkout can only make the frame smaller.
+fn start_reservation(
+    start: &lash_vm_protocol::Start,
+    codec: &lash_vm_protocol::FrameCodec,
+) -> Result<usize, PoolError> {
+    use lash_vm_protocol::{
+        BorrowedParentFrame, BorrowedParentMessage, ExecutionLease, MessageHeader,
+        TransportSequence,
+    };
+    let bytes = codec.borrowed_frame_len(&BorrowedParentFrame {
+        header: MessageHeader {
+            lease: ExecutionLease(u64::MAX),
+            owner_epoch: OwnerEpoch(u64::MAX),
+            frame_epoch: FrameEpoch(u64::MAX),
+            sequence: TransportSequence(u64::MAX),
+        },
+        message: BorrowedParentMessage::Start(start),
+    })?;
+    usize::try_from(bytes).map_err(|_| PoolError::QueueFull { bytes: usize::MAX })
+}
+
+#[cfg(test)]
+mod reservation_tests {
+    use super::*;
+    use lash_vm_protocol::{
+        ExecutionLease, MessageHeader, ParentFrame, ParentMessage, TransportSequence,
+    };
+
+    /// START-RESERVATION-IDENTITY: admission counts the complete encoded input,
+    /// including its export binding and the widest possible transport header.
+    #[test]
+    fn start_reservation_counts_the_complete_encoded_frame() {
+        let codec = lash_vm_protocol::FrameCodec::new(lash_vm_protocol::DecodeLimits::standard());
+        let start = lash_vm_protocol::Start {
+            owner: VmOwner::new("reservation-law"),
+            dialect: "typescript".to_owned(),
+            document: EncodedPayload(vec![0; 16]),
+            from: StartFrom::Fresh(EncodedPayload(vec![0; 16])),
+            bounds: RunBounds {
+                charge: u64::MAX,
+                memory: u64::MAX,
+                call_depth: u32::MAX,
+                live_tasks: u32::MAX,
+                requests_per_park: u32::MAX,
+                join_members: u32::MAX,
+            },
+            export: Some(EncodedPayload(vec![0; 16 * 1024])),
+        };
+        let actual = codec
+            .encode_parent(&ParentFrame {
+                header: MessageHeader {
+                    lease: ExecutionLease(u64::MAX),
+                    owner_epoch: OwnerEpoch(u64::MAX),
+                    frame_epoch: FrameEpoch(u64::MAX),
+                    sequence: TransportSequence(u64::MAX),
+                },
+                message: ParentMessage::Start(Box::new(start.clone())),
+            })
+            .unwrap();
+        assert_eq!(start_reservation(&start, &codec).unwrap(), actual.len());
+    }
 }

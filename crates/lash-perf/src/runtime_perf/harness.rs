@@ -312,6 +312,10 @@ impl BenchmarkRuntime {
         if let Some(session) = self.session.take() {
             session.close().await?;
         }
+        // Dropping the last core only requests node cancellation. Await its
+        // shutdown so this fixture cannot free actor state inside the next
+        // scenario's process-wide allocator window.
+        self.core.core().shutdown().await?;
         Ok(())
     }
 

@@ -577,6 +577,10 @@ fn turn_scenarios_require_the_typed_commit_phase_metrics() {
         RuntimePerfScenario::RlmProcessHandles,
         RuntimePerfScenario::RlmGlobals,
         RuntimePerfScenario::Standard,
+        RuntimePerfScenario::DurableStandardToolTurnSqlite,
+        RuntimePerfScenario::DurableRlmCheckpointTurnSqlite,
+        RuntimePerfScenario::DurableAgentChildTurnSqlite,
+        RuntimePerfScenario::SqliteStoreReopen,
     ] {
         let phases = required_phases(scenario);
         for expected in ["prepared_turn", "committed_turn", "post_commit_delivery"] {
@@ -586,8 +590,8 @@ fn turn_scenarios_require_the_typed_commit_phase_metrics() {
                 scenario.name()
             );
         }
-        // A turn commits in its own phase transaction, so the in-process
-        // lane never takes local commit admission.
+        // Turns on both SQLite lanes commit in engine phase transactions.
+        // Local commit admission belongs to the session-command path.
         assert!(
             !phases.contains(&"commit_admission.product_attempt"),
             "{} requires local commit admission on the durable lane",
@@ -605,18 +609,5 @@ fn turn_scenarios_require_the_typed_commit_phase_metrics() {
                 scenario.name()
             );
         }
-    }
-    // The durable SQLite lanes admit their commits locally.
-    for scenario in [
-        RuntimePerfScenario::DurableStandardToolTurnSqlite,
-        RuntimePerfScenario::DurableRlmCheckpointTurnSqlite,
-        RuntimePerfScenario::DurableAgentChildTurnSqlite,
-        RuntimePerfScenario::SqliteStoreReopen,
-    ] {
-        assert!(
-            required_phases(scenario).contains(&"commit_admission.product_attempt"),
-            "{} is missing required phase commit_admission.product_attempt",
-            scenario.name()
-        );
     }
 }

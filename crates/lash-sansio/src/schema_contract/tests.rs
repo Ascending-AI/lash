@@ -460,3 +460,22 @@ fn bedrock_projection_strips_array_constraints_from_wire_schema_only() {
             .is_some_and(|description| description.contains("minItems=3"))
     );
 }
+
+/// ADMITTED-SCHEMA-IDENTITY: cloning an immutable contract shares its admitted body.
+#[test]
+fn admitted_schema_clones_share_the_canonical_body() {
+    let body = json!({"type": "object", "properties": {"count": {"type": "integer"}}, "required": ["count"]});
+    let schema = JsonSchema::admit(body.clone()).unwrap();
+    let cloned = schema.clone();
+    assert!(std::ptr::eq(schema.as_value(), cloned.as_value()));
+    assert_eq!(serde_json::to_value(&cloned).unwrap(), body);
+    assert_eq!(
+        schema.validate(&json!({"count": "wrong"})),
+        cloned.validate(&json!({"count": "wrong"}))
+    );
+    let mut owned = cloned.into_value();
+    owned["required"] = json!([]);
+    assert_eq!(schema.as_value(), &body);
+    assert!(schema.validate(&json!({})).is_err());
+    assert!(schema.validate(&json!({"count": 1})).is_ok());
+}

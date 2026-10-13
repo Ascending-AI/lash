@@ -187,3 +187,19 @@ async fn embed_core_lives_until_the_engine_answers_every_sent_turn() {
             .expect("embed fixture finishes");
     }
 }
+// PERF-FIXTURE-SETTLEMENT: a closed fixture cannot leave its serving node
+// allocating or releasing state during the next scenario's allocator window.
+#[tokio::test]
+async fn closed_benchmark_runtime_has_stopped_its_node() {
+    let mut runtime = build_runtime(RuntimePerfScenario::Standard, None)
+        .await
+        .expect("build SQLite benchmark runtime");
+    let core = runtime.core();
+    runtime.close().await.expect("close benchmark fixture");
+    let stopped = tokio::time::timeout(std::time::Duration::from_secs(1), core.node_stopped())
+        .await
+        .expect("closed benchmark fixture must have stopped its serving node");
+    stopped
+        .expect("benchmark core serves a node")
+        .expect("benchmark node stopped cleanly");
+}

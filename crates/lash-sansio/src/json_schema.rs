@@ -50,10 +50,11 @@ pub struct ValueMismatch {
 }
 
 /// A schema admitted before it can enter a tool, payload, or wire contract.
-/// Clones retain the compiled validator; it never enters serialized state.
+/// Clones share the immutable JSON body and compiled validator. Serialization
+/// contains only the JSON body; extracting an owned value leaves other clones intact.
 #[derive(Clone)]
 pub struct JsonSchema {
-    value: Value,
+    value: Arc<Value>,
     validator: Arc<jsonschema::Validator>,
 }
 
@@ -97,7 +98,7 @@ impl JsonSchema {
                 }
             })?;
         Ok(Self {
-            value,
+            value: Arc::new(value),
             validator: Arc::new(validator),
         })
     }
@@ -115,7 +116,7 @@ impl JsonSchema {
     }
 
     pub fn into_value(self) -> Value {
-        self.value
+        Arc::unwrap_or_clone(self.value)
     }
 
     pub fn validate(&self, value: &Value) -> Result<(), ValueMismatch> {
@@ -159,7 +160,7 @@ impl Eq for JsonSchema {}
 
 impl std::fmt::Debug for JsonSchema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.value.fmt(f)
+        self.value.as_ref().fmt(f)
     }
 }
 

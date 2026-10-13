@@ -181,10 +181,6 @@
               "budget_ms": 1.0,
               "required": true
             },
-            "commit_admission.product_attempt": {
-              "budget_ms": 25.824,
-              "required": true
-            },
             "committed_turn": {
               "budget_ms": 1.09,
               "required": true
@@ -381,10 +377,6 @@
               "budget_ms": 0.972,
               "required": true
             },
-            "commit_admission.product_attempt": {
-              "budget_ms": 22.332,
-              "required": true
-            },
             "committed_turn": {
               "budget_ms": 1.084,
               "required": true
@@ -431,9 +423,10 @@
       "durable_standard_tool_turn_sqlite": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 55435642,
-          "steady_state_turn_alloc_bytes_max": 5257420
+          "alloc_bytes_max": 110000000,
+          "steady_state_turn_alloc_bytes_max": 7492000
         },
+        "allocation_attribution": "FIG-6133: c647027a83 pinned the durable fixture from runs=3, turns=8; the full guard uses turns=12. 6bc0ef141a added schema admission/compiled validators, including canonical provider-body decoding (203398827d) and tool definitions. A 12-turn heaptrack capture attributes 17,873,502 requested bytes to schema admission outside cold helper assembly and native SQLite allocations. Preserve the prior 1.5x allocation policy: total ceiling = ceil(55,435,642 * 12/8 + 17,873,502 * 1.5) rounded up to 110,000,000; steady ceiling = ceil(5,257,420 + 17,873,502 / 12 * 1.5) rounded up to 7,492,000. Deep schema copies are removed rather than budgeted. Served phase/checkpoint work (aacd900fbe), complete schema shapes (67e5d4a45d), recorded run configuration (115c9e688d), and recorded provider surfaces (4be8dba66e) account for the remaining changed durable path; no separate ceiling increase is assigned to them.",
         "advisory_duration": {
           "ms_max": 206.733,
           "phases": {
@@ -441,12 +434,12 @@
               "budget_ms": 0.916,
               "required": true
             },
-            "commit_admission.product_attempt": {
-              "budget_ms": 19.738,
-              "required": true
-            },
             "committed_turn": {
               "budget_ms": 0.998,
+              "required": true
+            },
+            "context_transform": {
+              "budget_ms": 0.916,
               "required": true
             },
             "effect_loop": {
@@ -455,6 +448,10 @@
             },
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.76,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 0.749,
               "required": true
             },
             "post_commit_delivery": {
@@ -1837,10 +1834,6 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 5.3,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 22.74,
               "required": true
             },
             "committed_turn": {
