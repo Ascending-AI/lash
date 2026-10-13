@@ -672,7 +672,6 @@ pub mod plugins {
     /// start's launch is held through (FIG-6034).
     pub use lash_core::ProcessEnvPorts;
     pub use lash_core::RegistryKind;
-    pub use lash_core::SurfaceTools;
     /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
     pub use lash_core::TurnDriverConfig;
     /// A turn's prepared request history, as its prelude records it.

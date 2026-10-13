@@ -174,19 +174,27 @@ impl<T: Send + Sync + 'static> PluginRegistrar<T> {
     fn add(
         &mut self,
         kind: ContributionKind,
-        key: ContributionKey,
+        mut key: ContributionKey,
         priority: Option<i32>,
         details: ContributionDetails,
         bind: EntryBinder<T>,
     ) -> Result<(), PluginError> {
+        if let Some(owner) = &self.owner {
+            key.set_owner(owner);
+        }
         if self
             .entries
             .iter()
             .any(|entry| entry.descriptor.kind == kind && entry.descriptor.key == key)
         {
-            return Err(PluginError::Registration(format!(
-                "duplicate registration {key:?}"
-            )));
+            // Every operation kind shares one name space: a query and a task
+            // of one name are the same declared address.
+            return Err(PluginError::Registration(match &details {
+                ContributionDetails::Operation(def) => {
+                    format!("duplicate plugin operation name `{}`", def.name)
+                }
+                _ => format!("duplicate registration {key:?}"),
+            }));
         }
         let registration_order = u32::try_from(self.entries.len())
             .map_err(|_| PluginError::Registration("too many registrations".into()))?;

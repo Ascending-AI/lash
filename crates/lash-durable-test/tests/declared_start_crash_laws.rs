@@ -669,15 +669,19 @@ fn dialect_of(tier: Tier) -> Option<(Dialect, Option<String>)> {
 }
 
 /// Where the parent launches its child: the model step that declares the
-/// spawn, then the call's park. Its settle commits with the result's
-/// presentation ([`SETTLED_LABELS`]).
+/// spawn, then the call's park. Its settle commits after the child ended
+/// ([`SETTLED_LABELS`]).
 const LAUNCH_LABELS: &[CommitLabel] = &[CommitLabel::MODEL_DONE, CommitLabel::ROUND_OUTCOME];
 
-/// Where the parent goes on once its child ended: the call's settle, the
-/// result's presentation and the next model step, fused; and the turn's
-/// commit.
+/// Where the parent goes on once its child ended: the call's settle, then
+/// the result's presentation with the next model step, and the turn's
+/// commit. The settle commits alone: the delegation plugin's prompt section
+/// is installed in every session, and a section of a plugin other than the
+/// protocol may read the round's outcomes while the next call is prepared,
+/// so no outcome rides the next model start.
 const SETTLED_LABELS: &[CommitLabel] = &[
-    CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+    CommitLabel::ROUND_OUTCOME,
+    CommitLabel::ROUND_PRESENT_MODEL_START,
     CommitLabel::TURN_COMMIT,
 ];
 
@@ -689,12 +693,12 @@ const CHILD_LABELS: &[CommitLabel] = &[
     CommitLabel::CASCADE_BATCH,
 ];
 
-/// Where a batch of spawns settles: its members' park commits, and their
-/// settle with the presentation of both children's answers and the
-/// parent's next model step.
+/// Where a batch of spawns settles: its members' park and settle commits,
+/// and the presentation of both children's answers with the parent's next
+/// model step.
 const BATCH_LABELS: &[CommitLabel] = &[
     CommitLabel::ROUND_OUTCOME,
-    CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+    CommitLabel::ROUND_PRESENT_MODEL_START,
 ];
 
 /// Cut a parent spawning `width` children at every write under `labels` of
@@ -868,22 +872,16 @@ async fn declared_start_retention_hold_blocks_prune_until_consumed(tier: Tier) {
 /// recorded terminal: the wait's committed winner answers it, and the
 /// redrive neither registers nor runs the child again.
 ///
-/// The parent's settle of the resolved call, which commits with the
-/// result's presentation and the next model start, is the cut: its hold is
-/// released, A dies before the settle commits, and the survey prunes the
-/// child.
+/// The parent's settle of the resolved call, its second `round.outcome`
+/// after the call's park, is the cut: its hold is released, A dies before
+/// the settle commits, and the survey prunes the child.
 async fn declared_start_prune_after_hold_release_before_settlement_replays_terminal(tier: Tier) {
     let Some((dialect, postgres_url)) = dialect_of(tier) else {
         return;
     };
     let spawn = Spawn::new(1, dialect, postgres_url);
     let script = Script::new();
-    script.cut_on(
-        "a",
-        CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
-        1,
-        Fault::Abort,
-    );
+    script.cut_on("a", CommitLabel::ROUND_OUTCOME, 2, Fault::Abort);
     let ((child, pruned, after), violations, _) =
         Box::pin(run_cut(spawn, script, async |backend| {
             let children = registered(backend).await;

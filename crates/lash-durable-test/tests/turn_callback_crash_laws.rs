@@ -182,7 +182,7 @@ impl lash::plugins::PluginFactory for CallbackPlugin {
         let mut reg = lash_core::plugin::PluginRegistrar::<CallbackPlugin>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
-        CallbackPlugin::declare(&mut reg)?;
+        CallbackPlugin::declare(&mut reg, self.world.phase)?;
         let id = self.id();
         Ok(lash_core::plugin::PluginRecipe::new(
             id,
@@ -198,41 +198,49 @@ impl lash::plugins::SessionPlugin for CallbackPlugin {
     }
 }
 impl CallbackPlugin {
+    /// Declare the one callback that contributes in `phase`: the other
+    /// phase's callback is not installed, so it never runs.
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+        phase: Phase,
     ) -> std::result::Result<(), lash_core::plugin::PluginError> {
-        reg.turn()
-            .before(lash::hook_key!("contribute"), move |this, _state| {
-                let world = Arc::clone(&this.world);
-                Ok(Arc::new(move |_| {
-                    let session = world.enter();
-                    Box::pin(async move {
-                        Ok(lash_core::plugin::TurnContributions {
-                            session,
-                            ..Default::default()
-                        })
+        match phase {
+            Phase::BeforeTurn => {
+                reg.turn()
+                    .before(lash::hook_key!("contribute"), move |this, _state| {
+                        let world = Arc::clone(&this.world);
+                        Ok(Arc::new(move |_| {
+                            let session = world.enter();
+                            Box::pin(async move {
+                                Ok(lash_core::plugin::TurnContributions {
+                                    session,
+                                    ..Default::default()
+                                })
+                            })
+                        }))
                     })
-                }))
-            })?;
-
-        reg.turn()
-            .checkpoint(lash::hook_key!("contribute"), move |this, _state| {
-                let world = Arc::clone(&this.world);
-                Ok(Arc::new(move |ctx| {
-                    let session = if ctx.checkpoint == lash_core::CheckpointKind::BeforeCompletion {
-                        world.enter()
-                    } else {
-                        Default::default()
-                    };
-                    Box::pin(async move {
-                        Ok(lash_core::plugin::TurnContributions {
-                            session,
-                            ..Default::default()
-                        })
+            }
+            Phase::BeforeCompletion => {
+                reg.turn()
+                    .checkpoint(lash::hook_key!("contribute"), move |this, _state| {
+                        let world = Arc::clone(&this.world);
+                        Ok(Arc::new(move |ctx| {
+                            let session =
+                                if ctx.checkpoint == lash_core::CheckpointKind::BeforeCompletion {
+                                    world.enter()
+                                } else {
+                                    Default::default()
+                                };
+                            Box::pin(async move {
+                                Ok(lash_core::plugin::TurnContributions {
+                                    session,
+                                    ..Default::default()
+                                })
+                            })
+                        }))
                     })
-                }))
-            })?;
-        Ok(())
+            }
+        }
     }
 }
 
