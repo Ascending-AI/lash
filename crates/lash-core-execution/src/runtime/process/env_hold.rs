@@ -182,8 +182,8 @@ fn publish_error(error: ArtifactStoreError, env: &ProcessEnv) -> HoldEnvError {
 
 /// Hold the environment `choice` states under the execution claim of
 /// `scope`, with its settings checked against the `kind` engine for
-/// `payload`: the sealed launch of a start declared or bound inside that
-/// execution. `Restrict` holds `enclosing`'s environment restricted to the
+/// `payload`, and its links checked under `choice.fits` against the engine's
+/// performed effects and serving components before sealing the launch. `Restrict` holds `enclosing`'s environment restricted to the
 /// effects `payload` performs, and is refused outside a process.
 pub(crate) async fn hold_launch(
     engines: &super::ProcessEngineRegistry,
@@ -193,6 +193,13 @@ pub(crate) async fn hold_launch(
     kind: &str,
     payload: &serde_json::Value,
 ) -> Result<super::EngineLaunch, HoldEnvError> {
+    engines
+        .check_settings(kind, payload, choice.engine_settings.as_ref())
+        .map_err(|error| settings_error(kind, error))?;
+    let performed = engines
+        .performed_effects(kind, payload)
+        .await
+        .map_err(HoldEnvError::Refused)?;
     let selection = match &choice.env {
         super::ProcessEnvChoice::Restrict => {
             let Some(enclosing) = enclosing else {
@@ -200,10 +207,6 @@ pub(crate) async fn hold_launch(
                     reason: "a start outside a process has no environment to restrict".into(),
                 }));
             };
-            let performed = engines
-                .performed_effects(kind, payload)
-                .await
-                .map_err(HoldEnvError::Refused)?;
             if performed.keys().eq(enclosing.env.effects().keys()) {
                 ProcessEnvSelection::Published(enclosing.env_ref.clone())
             } else {
@@ -220,16 +223,38 @@ pub(crate) async fn hold_launch(
         }
         super::ProcessEnvChoice::New(env) => ProcessEnvSelection::New(env.clone()),
     };
+    let ports = || {
+        engines.env_ports().ok_or_else(|| {
+            HoldEnvError::Fault(PluginError::Session(
+                "a process start requires the runtime's artifact stores".into(),
+            ))
+        })
+    };
+    let (env, held) = match &selection {
+        ProcessEnvSelection::New(env) => (env.clone(), None),
+        ProcessEnvSelection::Published(env_ref) => {
+            let ports = ports()?;
+            let claim = crate::session::execution_claim_of(scope).map_err(HoldEnvError::Fault)?;
+            let held = hold_process_env(&ports, &claim, &selection).await?;
+            let env = super::model::load_process_env(ports.store, env_ref)
+                .await
+                .map_err(|error| HoldEnvError::Fault(error.into()))?;
+            (env, Some(held))
+        }
+    };
+    super::check_links(&env, &performed, &choice.fits).map_err(HoldEnvError::Refused)?;
     engines
-        .check_settings(kind, payload, choice.engine_settings.as_ref())
-        .map_err(|error| settings_error(kind, error))?;
-    let ports = engines.env_ports().ok_or_else(|| {
-        HoldEnvError::Fault(PluginError::Session(
-            "a process start requires the runtime's artifact stores".into(),
-        ))
-    })?;
-    let claim = crate::session::execution_claim_of(scope).map_err(HoldEnvError::Fault)?;
-    let env_ref = hold_process_env(&ports, &claim, &selection).await?;
+        .components()
+        .check_served(&std::sync::Arc::new(env))
+        .map_err(HoldEnvError::Refused)?;
+    let env_ref = match held {
+        Some(env_ref) => env_ref,
+        None => {
+            let ports = ports()?;
+            let claim = crate::session::execution_claim_of(scope).map_err(HoldEnvError::Fault)?;
+            hold_process_env(&ports, &claim, &selection).await?
+        }
+    };
     Ok(super::EngineLaunch::new(
         env_ref,
         choice.engine_settings.clone(),

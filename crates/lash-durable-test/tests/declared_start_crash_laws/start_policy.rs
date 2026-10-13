@@ -99,6 +99,7 @@ impl lash_core::ProcessEnvPolicy for CountingPolicy {
             }
         };
         Ok(lash_core::ProcessStartChoice {
+            fits: Default::default(),
             env: lash_core::ProcessEnvChoice::New(limited(limit)),
             engine_settings: cx.engine_defaults()?.map(stated_settings),
         })

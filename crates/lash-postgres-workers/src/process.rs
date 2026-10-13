@@ -46,23 +46,19 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
     ProcessInfraError::new(lash_core_execution::PluginError::Session(error.to_string()))
 }
 
-/// The tool the runbook's steps record: the step's own name, standing in
-/// for the tool a linked env would name.
+/// The admitted identity of the engine's own witness body.
 fn step_tool(step: &StepRequest) -> ToolId {
     match step {
-        StepRequest::Tool { effect, .. } => ToolId::new(effect.as_str()),
+        StepRequest::Tool { .. } => unreachable!("the worker engine issues only engine steps"),
         StepRequest::Engine { kind, .. } => kind.admitted_tool(KIND),
     }
 }
 
 fn step(name: &str) -> StepRequest {
-    StepRequest::Tool {
+    StepRequest::Engine {
         step: StepName(name.to_owned()),
-        effect: lash_core_execution::EffectName::new(name)
-            .unwrap_or_else(|_| unreachable!("a step name is an effect name")),
+        kind: lash_core_execution::EngineStepKind::new(name),
         input: json!({ "step": name }),
-        site: None,
-        matched: None,
     }
 }
 
@@ -265,7 +261,13 @@ impl ProcessSteps for WorkerSteps {
         step: &StepRequest,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
-        let _ = step;
+        if !matches!(step, StepRequest::Engine { kind, .. } if [BEFORE, AFTER].contains(&kind.0.as_str()))
+        {
+            return Err(StepRefusal::Refused {
+                step: step.step().0.clone(),
+                reason: "the worker's witness bodies are its before and after engine steps".into(),
+            });
+        }
         Ok(StepAdmission::new(
             step_tool(step),
             ExecutionPolicy::Once,
@@ -299,7 +301,7 @@ impl ProcessSteps for WorkerSteps {
             let call = execution.call();
             let witness = self.witness.clone();
             let process = process.id.clone();
-            let tool = step_tool(step).as_str().to_owned();
+            let tool = step.step().0.clone();
             let call = call.to_string();
             Box::new(move |_token| {
                 Box::pin(async move {
@@ -332,5 +334,20 @@ impl ProcessSteps for WorkerSteps {
                 })
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// P3: the witness workload's own steps never bypass an empty effect declaration.
+    #[test]
+    fn worker_witness_steps_are_engine_steps() {
+        for name in [BEFORE, AFTER] {
+            assert!(
+                matches!(step(name), StepRequest::Engine { .. }),
+                "{name} is the engine's own witness body"
+            );
+        }
     }
 }

@@ -2304,3 +2304,60 @@ async fn a_host_carries_a_process_onto_a_successor_pair_and_its_admitted_step_ke
     );
     second.shutdown().await.expect("the node stops");
 }
+
+/// Law 9: takeover checks an already admitted call before its body is resumed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_admitted_call_on_a_changed_surface_settles_typed_without_restarting() {
+    let stores: Arc<dyn StoreSet> =
+        Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let seen = Arc::new(Holds::default());
+    let env = hold_environment();
+    let (backend, first) = with_components(
+        &stores,
+        "admitted-before",
+        vec![hold_component(true, &seen)],
+    );
+    let text = SLEEPING_HOLD_WORKER.replace("  do sleep 4000\n", "");
+    let payload = payload_under(&first, &backend, &env, &text).await;
+    let process = start_under(&first, &env, payload).await;
+    tokio::time::timeout(Duration::from_secs(60), seen.entered.notified())
+        .await
+        .unwrap();
+    first.shutdown().await.unwrap();
+    drop(first);
+    unowned(&backend, &process).await;
+    let changed = hold_definition().with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(3).unwrap(),
+        1,
+        1,
+    ));
+    let (_, later) = with_components(
+        &stores,
+        "admitted-changed",
+        vec![hold_component_of(changed, false, &seen)],
+    );
+    let output = tokio::time::timeout(
+        Duration::from_secs(60),
+        later.processes().await_output(&process),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("{output:?}")
+    };
+    assert!(output.is_success(), "{output:?}");
+    assert!(
+        output
+            .value_for_projection()
+            .to_string()
+            .contains("linked_tool_changed"),
+        "{output:?}"
+    );
+    assert_eq!(
+        seen.deliveries.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the drifted admitted body never restarts"
+    );
+    later.shutdown().await.unwrap();
+}

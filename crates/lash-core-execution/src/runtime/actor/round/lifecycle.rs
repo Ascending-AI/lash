@@ -404,6 +404,11 @@ impl Lifecycle {
         }
     }
 
+    /// The attempt is running here, or its outcome awaits this owner's commit.
+    pub(crate) fn holds_execution(&self, id: &AdmittedId) -> bool {
+        self.in_flight.contains(id) || self.finished.contains_key(id)
+    }
+
     /// Whether it runs a body or holds an outcome not yet committed.
     #[must_use]
     pub fn busy(&self) -> bool {

@@ -912,7 +912,7 @@ fn with_contract_processes(
                 lash_core::testing::tool_component(CONTRACT_TOOLS, Arc::clone(&tools)),
                 CONTRACT_TOOLS,
             )
-            .tools(lash::hook_key!("tools"), tools);
+            .plugin(lash_core::testing::tool_plugin(CONTRACT_TOOLS, tools));
     }
     if let Some(delegation) = delegation {
         builder = builder

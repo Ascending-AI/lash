@@ -465,12 +465,12 @@ impl Law {
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .tools(
-            lash::hook_key!("tools"),
+        .plugin(lash_core::testing::tool_plugin(
+            BLOB_COMPONENT,
             Arc::new(BlobTools {
                 witness: Arc::clone(witness),
             }),
-        )
+        ))
         .process_component(
             lash_core::testing::tool_component(
                 BLOB_COMPONENT,

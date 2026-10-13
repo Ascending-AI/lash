@@ -62,7 +62,7 @@ pub fn check_links(
         let at_endpoint = effect.as_str() == crate::CALL_DYNAMIC_EFFECT;
         let endpoint = link.kind == LinkKind::Dynamic
             && link.surface == crate::ProcessSurface::of(&crate::call_dynamic_endpoint());
-        if at_endpoint != endpoint {
+        if (link.kind == LinkKind::Dynamic) != at_endpoint || (at_endpoint && !endpoint) {
             return Err(ProcessEnvRefusal::EffectUnfit {
                 effect: effect.to_string(),
                 tool: link.tool().to_string(),

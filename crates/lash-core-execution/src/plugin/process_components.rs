@@ -723,6 +723,13 @@ impl ProcessComposition {
             tool: link.tool().clone(),
             kind,
         };
+        let dynamic = link.kind == crate::LinkKind::Dynamic;
+        if dynamic != (effect.as_str() == crate::CALL_DYNAMIC_EFFECT)
+            || (dynamic
+                && link.surface != crate::ProcessSurface::of(&crate::call_dynamic_endpoint()))
+        {
+            return drifted(crate::ToolSurfaceDriftKind::Changed);
+        }
         // The `call_dynamic` endpoint is no provider's advertisement: it is
         // served wherever the deferred provider it links is registered.
         if link.kind == crate::LinkKind::Dynamic {
@@ -827,8 +834,14 @@ impl ProcessComposition {
     ) -> Result<crate::DeferredMatch, PluginError> {
         let link = env
             .effects()
-            .values()
-            .find(|link| link.kind == crate::LinkKind::Dynamic)
+            .get(
+                &lash_kernel_doc::EffectName::new(crate::CALL_DYNAMIC_EFFECT)
+                    .map_err(|error| PluginError::Registration(error.to_string()))?,
+            )
+            .filter(|link| {
+                link.kind == crate::LinkKind::Dynamic
+                    && link.surface == crate::ProcessSurface::of(&crate::call_dynamic_endpoint())
+            })
             .ok_or_else(|| {
                 PluginError::Registration("the process env links no call_dynamic endpoint".into())
             })?;

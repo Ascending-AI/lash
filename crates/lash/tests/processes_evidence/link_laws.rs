@@ -458,3 +458,24 @@ async fn an_env_links_exactly_what_its_entry_performs() {
         })
     );
 }
+
+/// R9/P6: Dynamic may only implement the fixed endpoint, even with another surface.
+#[test]
+fn dynamic_links_cannot_disguise_ordinary_effects() {
+    let tool = search_a();
+    let effect = lash_core::EffectName::new("search.run").unwrap();
+    let mut encoded = serde_json::to_value(env(SEARCH_A, &[tool.clone()])).unwrap();
+    encoded["effects"]["search.run"]["kind"] = serde_json::json!("dynamic");
+    let forged: ProcessEnv = serde_json::from_value(encoded).unwrap();
+    let performed = BTreeMap::from([(
+        effect,
+        lash_kernel_check::tool_signature(
+            tool.contract.input_schema.canonical(),
+            tool.contract.output_schema.canonical(),
+        ),
+    )]);
+    assert!(
+        matches!(lash_core::check_links(&forged, &performed, &BTreeMap::new()),
+        Err(ProcessEnvRefusal::EffectUnfit { effect, .. }) if effect == "search.run")
+    );
+}

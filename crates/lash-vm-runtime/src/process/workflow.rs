@@ -5,8 +5,8 @@
 //! view `lash-kernel-check` derives from it: node ids, edges, scopes, type
 //! facets, effect sets and execution sites. Nothing else is stored and
 //! nothing the document says about itself is trusted: the view is derived
-//! again on every read. Publication is the checker's admission against the
-//! effects the definition's processes would be offered.
+//! again on every read. Publication checks the document structurally, then
+//! admits only the selected entry's called and spawned effects against its offering.
 
 use std::sync::Arc;
 
@@ -61,8 +61,9 @@ impl WorkflowDocument {
     }
 
     /// Admit an unstored document against a workflow environment and retain
-    /// the view that admission derives. This publishes nothing and runs no
-    /// effect. The supplied entry must exist unless it selects `main`.
+    /// the view that admission derives. An entry requires only its called and
+    /// spawned effects; main uses the session-style document admission. This
+    /// publishes nothing and runs no effect. The supplied entry must exist.
     ///
     /// # Errors
     ///
@@ -72,15 +73,13 @@ impl WorkflowDocument {
         entry: WorkflowDocumentEntry,
         environment: &Environment<'_>,
     ) -> Result<Self, WorkflowAdmissionRefusal> {
-        let admitted = lash_kernel_check::admit(&document, environment)
-            .map_err(WorkflowAdmissionRefusal::Document)?;
-        if let WorkflowDocumentEntry::Entry { function } = &entry
-            && !document.entries.contains_key(function)
-        {
-            return Err(WorkflowAdmissionRefusal::NoSuchEntry {
-                entry: function.clone(),
-            });
-        }
+        let admitted = match &entry {
+            WorkflowDocumentEntry::Entry { function } => {
+                admit_entry(&document, function, environment)?
+            }
+            WorkflowDocumentEntry::Main => lash_kernel_check::admit(&document, environment)
+                .map_err(WorkflowAdmissionRefusal::Document)?,
+        };
         Ok(Self {
             reference: WorkflowDocumentRef {
                 document: admitted.identity,
@@ -232,6 +231,8 @@ pub enum WorkflowAdmissionRefusal {
     /// function identity the environment does not hold, an unbound
     /// variable, a statement the statement rule refuses.
     Document(Refusal),
+    /// The selected entry's called/spawned effect closure cannot be certified.
+    EntryEffects(lash_kernel_check::EntryEffectsRefusal),
     /// The document does not list the entry.
     NoSuchEntry { entry: Name },
     /// The catalog cannot be stated as effects.
@@ -246,6 +247,7 @@ impl WorkflowAdmissionRefusal {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Document(_) => "document",
+            Self::EntryEffects(_) => "entry_effects",
             Self::NoSuchEntry { .. } => "no_such_entry",
             Self::Boundary { .. } => "boundary",
         }
@@ -256,6 +258,7 @@ impl std::fmt::Display for WorkflowAdmissionRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Document(refusal) => write!(f, "{refusal}"),
+            Self::EntryEffects(refusal) => write!(f, "{refusal}"),
             Self::NoSuchEntry { entry } => write!(f, "the document lists no entry `{entry}`"),
             Self::Boundary { message } => f.write_str(message),
         }
@@ -413,11 +416,11 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         let admission = {
             let mut environment = Environment::new(self.engine.functions.as_ref());
             environment.effects = boundary.signatures();
-            lash_kernel_check::admit(&request.document, &environment)
+            admit_entry(&request.document, &request.entry, &environment)
         };
         let admitted = match admission {
             Ok(admitted) => admitted,
-            Err(refusal) => return refused(WorkflowAdmissionRefusal::Document(refusal)),
+            Err(refusal) => return refused(refusal),
         };
         let Some(signature) = request.document.entries.get(&request.entry) else {
             return refused(WorkflowAdmissionRefusal::NoSuchEntry {
@@ -467,4 +470,55 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
             })),
         ))
     }
+}
+
+/// A definition is an entry template: other entries and main need no tool
+/// offering here. They are structurally checked, and linked at their own start.
+fn admit_entry(
+    document: &Document,
+    entry: &Name,
+    environment: &Environment<'_>,
+) -> Result<lash_kernel_check::Admitted, WorkflowAdmissionRefusal> {
+    if !document.entries.contains_key(entry) {
+        return Err(WorkflowAdmissionRefusal::NoSuchEntry {
+            entry: entry.clone(),
+        });
+    }
+    let graph = lash_kernel_check::derive(document, environment.functions)
+        .map_err(WorkflowAdmissionRefusal::Document)?;
+    let effects = lash_kernel_check::entry_effects(document, &graph, environment.functions, entry)
+        .map_err(WorkflowAdmissionRefusal::EntryEffects)?;
+    let mut errors = Vec::new();
+    for (effect, expected) in effects {
+        let reason = match environment.effects.get(&effect) {
+            None => Some(lash_kernel_check::RefusalReason::MissingEffect { effect }),
+            Some(provided) if !lash_kernel_check::signature_serves(provided, &expected) => {
+                Some(lash_kernel_check::RefusalReason::EffectSignature {
+                    effect,
+                    expected,
+                    provided: provided.clone(),
+                })
+            }
+            Some(_) => None,
+        };
+        if let Some(reason) = reason {
+            errors.push(lash_kernel_check::Refused { site: None, reason });
+        }
+    }
+    if !errors.is_empty() {
+        return Err(WorkflowAdmissionRefusal::Document(Refusal { errors }));
+    }
+    let identity = document.identity().map_err(|error| {
+        WorkflowAdmissionRefusal::Document(Refusal {
+            errors: vec![lash_kernel_check::Refused {
+                site: None,
+                reason: lash_kernel_check::RefusalReason::Invalid(
+                    lash_kernel_doc::InvalidReason::Identity {
+                        message: error.message,
+                    },
+                ),
+            }],
+        })
+    })?;
+    Ok(lash_kernel_check::Admitted { identity, graph })
 }

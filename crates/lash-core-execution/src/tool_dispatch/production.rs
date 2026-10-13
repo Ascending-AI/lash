@@ -237,6 +237,7 @@ impl<'run> ProductionToolHandlers<'run> {
             self.context.dispatch().effect_controller.execution_scope(),
             enclosing.as_deref(),
             &crate::ProcessStartChoice {
+                fits: Default::default(),
                 env: start.env,
                 engine_settings: start.engine_settings,
             },

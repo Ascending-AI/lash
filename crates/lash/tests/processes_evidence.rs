@@ -898,6 +898,7 @@ mod named_component_laws {
                 }
             };
             Ok(lash::process::ProcessStartChoice {
+                fits: Default::default(),
                 env: lash::process::ProcessEnvChoice::New(env),
                 engine_settings: cx.engine_defaults()?,
             })
@@ -979,7 +980,11 @@ mod named_component_laws {
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
-            .tools(lash::hook_key!("tools"), a_provider())
+            .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+                lash::plugins::PluginDeclaration::initial(A.component()),
+                lash::plugins::PluginSpec::new()
+                    .with_tool_provider(lash::hook_key!("record"), a_provider()),
+            )))
             .plugin(Arc::new(CountingPlugin(Arc::clone(&witness))))
             .plugin(Arc::new(
                 lash::process_controls::SessionProcessAdminPluginFactory::new(

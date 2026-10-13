@@ -1109,7 +1109,7 @@ const handle = await processes.start({ definition: lookup });
 const result = await handle;
 await control.finish(result);"#,
     )]), mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), Arc::clone(&tools))
+    .plugin(lash_core::testing::tool_plugin(APP_TOOLS, Arc::clone(&tools)))
     .process_component(lash_core::testing::tool_component(APP_TOOLS, tools), APP_TOOLS)
     // ADR 0095: `processes` is catalogue presence, so a scripted cell that
     // authors `processes.start` needs this factory installed. Its process

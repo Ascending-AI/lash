@@ -578,15 +578,48 @@ impl ProcessActivation {
         }
         let rows = reads.run_facts(&OwnerKey::Process(process.clone())).await?;
         let mut policies = Vec::with_capacity(driver.steps.len());
+        let mut link_failures = BTreeMap::new();
         for step in driver.steps.values() {
             if let Ok(admission) = self.steps.admit(&record, &step.request, millis(now)).await {
                 policies.push((admission.tool, admission.policy));
+                if let Some(output) = admission.settled {
+                    link_failures.insert(step.call.clone(), (&step.request, output));
+                }
             }
         }
         let policies = PolicyView::new(policies);
         let waits = round::PinnedWaits::read(reads, &rows).await?;
         let fold = round::fold(&rows, &policies, &waits)
             .map_err(|error| corrupt("a process's run records", error))?;
+        // A previously admitted call can drift on takeover or before a retry.
+        // Settle at its existing ordinal; do not turn the drift into a policy
+        // veto, restart a body, or write a new x_start. Admitted waits and
+        // bodies already running under this owner's match keep their outcomes.
+        // A started Once still interrupts: outside work may already have happened.
+        let mut settled_links = false;
+        for view in fold.rounds() {
+            for member in view.members() {
+                if member.outcome().is_some()
+                    || matches!(member.draft().policy(), crate::ExecutionPolicy::Once)
+                    || matches!(member.state(), round::MemberState::Waiting { .. })
+                    || live.lifecycle.holds_execution(&view.id_of(member))
+                {
+                    continue;
+                }
+                if let Some((request, output)) = link_failures.remove(member.call()) {
+                    let output =
+                        self.steps
+                            .admitted_output(process, request, member.call(), output);
+                    round::settle(&mut tx, &view.execution(member), output, Vec::new())
+                        .map_err(|error| corrupt("a drifted process step", error))?;
+                    settled_links = true;
+                }
+            }
+        }
+        if settled_links {
+            owned.commit(tx, CommitLabel::STEP_OUTCOME).await?;
+            return Ok(Pass::Again);
+        }
         live.lifecycle.declare(policies);
         live.bodies.saw(&record, &driver);
         // A draining node advances nothing more: it waits for the steps

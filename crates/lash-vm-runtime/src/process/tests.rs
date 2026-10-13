@@ -868,3 +868,33 @@ mod format_carry {
         );
     }
 }
+
+/// P2: admitting an entry does not require the effects of main or siblings.
+#[test]
+fn workflow_admission_checks_only_the_selected_entry() {
+    let document = lash_kernel_doc::parse_document(
+        r#"kernel 1
+numbers float
+effect a.run(input: Any) -> Any
+effect b.run(input: Any) -> Any
+entry worker() -> Any
+fn worker() { let got = perform b.run(null) as Any return got }
+main { let got = perform a.run(null) as Any finish got }
+"#,
+    )
+    .unwrap();
+    let functions = BTreeMap::new();
+    let mut environment = lash_kernel_check::Environment::new(&functions);
+    environment.effects.insert(
+        lash_kernel_doc::EffectName::new("b.run").unwrap(),
+        document.manifest.effects[&lash_kernel_doc::EffectName::new("b.run").unwrap()].clone(),
+    );
+    super::WorkflowDocument::admit(
+        document,
+        lash_trace::WorkflowDocumentEntry::Entry {
+            function: lash_kernel_doc::Name::new("worker"),
+        },
+        &environment,
+    )
+    .expect("only worker's performed effect must be offered");
+}

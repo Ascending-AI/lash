@@ -266,9 +266,9 @@ impl Holding {
                         ),
                         PROBE_COMPONENT,
                     )
-                    .tools(lash::hook_key!("tools"), Arc::new(Probe {
+                    .plugin(lash_core::testing::tool_plugin(PROBE_COMPONENT, Arc::new(Probe {
                         world: Arc::clone(&self.world),
-                    }))
+                    })))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(lash::persistence::LeaseOwnerId::new("process-holding-deployment"), lash::persistence::LeaseIncarnationId::new("process-holding-boot")))
                     .expect("the core builds")
             })

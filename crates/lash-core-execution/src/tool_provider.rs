@@ -568,9 +568,9 @@ impl<'run> AttemptContext<'run> {
     }
 
     /// Hold the environment `choice` states under this attempt's execution
-    /// claim and check its settings against `target`'s engine: the sealed
-    /// launch a declaration carries (D9, D10). An `Inherit` choice holds the
-    /// enclosing process's own environment.
+    /// claim, checking its links under `choice.fits`, its serving components,
+    /// and its settings against `target`'s engine before sealing the launch
+    /// a declaration carries (D9, D10). `Restrict` derives the enclosing env.
     ///
     /// # Errors
     ///

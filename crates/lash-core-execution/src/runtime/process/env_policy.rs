@@ -113,7 +113,8 @@ impl<'a> ProcessEnvCx<'a> {
 
     /// Capture (R8): the env of the starting turn's recorded `run` with
     /// `components`, linking each effect the target performs to the tool the
-    /// run's recorded surface matched it to, served by one of `components`.
+    /// run's recorded surface matched it to, served with that same surface by
+    /// its recorded provider among `components`.
     /// Nothing is re-resolved: an effect the surface does not offer (one the
     /// run met only through a deferred match, say) is refused, as is one no
     /// component serves.
@@ -147,24 +148,25 @@ impl<'a> ProcessEnvCx<'a> {
                     effect: effect.to_string(),
                 })?;
             let tool = entry.tool();
-            let (provider, served) = composition
+            let served = composition
                 .registry
-                .keys()
-                .find_map(|key| {
-                    composition
-                        .registry
-                        .served(key, tool, &config)
-                        .map(|served| (key.clone(), served))
-                })
+                .served(&entry.provider, tool, &config)
                 .ok_or_else(|| ProcessEnvRefusal::CaptureMissing {
                     effect: effect.to_string(),
                     tool: tool.to_string(),
                 })?;
+            let retained = crate::ProcessSurface::of(&entry.definition);
+            if crate::ProcessSurface::of(&served) != retained {
+                return Err(ProcessEnvRefusal::LinkedSurfaceChanged {
+                    effect: effect.to_string(),
+                    tool: tool.to_string(),
+                });
+            }
             effects.insert(
                 effect.clone(),
                 crate::EffectLink {
-                    provider,
-                    surface: crate::ProcessSurface::of(&served),
+                    provider: entry.provider.clone(),
+                    surface: retained,
                     kind: crate::LinkKind::Tool,
                 },
             );
@@ -187,6 +189,7 @@ impl<'a> ProcessEnvCx<'a> {
             }));
         };
         Ok(ProcessStartChoice {
+            fits: Default::default(),
             env: ProcessEnvChoice::Restrict,
             engine_settings: (enclosing.engine_kind == self.target.engine_kind)
                 .then(|| enclosing.settings.clone())
@@ -233,6 +236,8 @@ impl ProcessEngineRegistry {
 /// A policy's decision: the environment and the engine settings.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessStartChoice {
+    /// Per-effect fit checked before holding the launch; never stored.
+    pub fits: std::collections::BTreeMap<crate::EffectName, crate::FitPolicy>,
     pub env: ProcessEnvChoice,
     pub engine_settings: Option<EngineSettings>,
 }
@@ -307,6 +312,7 @@ pub mod policy {
                 .await
                 .map_err(ProcessEnvPolicyError::Refused)?;
             Ok(ProcessStartChoice {
+                fits: Default::default(),
                 env: ProcessEnvChoice::New(env),
                 engine_settings: cx.engine_defaults()?,
             })
@@ -347,6 +353,7 @@ pub mod policy {
             _cx: &ProcessEnvCx<'_>,
         ) -> Result<ProcessStartChoice, ProcessEnvPolicyError> {
             Ok(ProcessStartChoice {
+                fits: Default::default(),
                 env: ProcessEnvChoice::Published(self.0.env.clone()),
                 engine_settings: self.0.settings.clone(),
             })
@@ -372,3 +379,7 @@ pub mod policy {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "env_policy_tests.rs"]
+mod tests;

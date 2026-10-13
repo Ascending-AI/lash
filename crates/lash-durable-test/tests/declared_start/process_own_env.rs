@@ -24,7 +24,7 @@ const CHANGED_MODEL: &str = "own-env-changed-model";
 const SESSION: &str = "own-env-session";
 
 const PROBE: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("own-env-probe", lash_core::FormatVersion::ONE);
+    lash_core::ProcessConfigKey::new(SESSION_TOOLS, lash_core::FormatVersion::ONE);
 /// Holds the process's first step on the first worker.
 const WAIT: &str = "probe_wait";
 /// Records what the step reads.
@@ -216,7 +216,7 @@ impl lash::process::ProcessComponentFactory for ProbeComponent {
         }
         let mut spec = lash::process::ProcessComponentSpec::default();
         spec.tool_providers
-            .push((lash::hook_key!("probe"), Arc::clone(&self.tools)));
+            .push((lash::hook_key!("tools"), Arc::clone(&self.tools)));
         Ok(spec)
     }
 }
@@ -232,7 +232,7 @@ struct Policy;
 fn new_environment() -> lash::process::ProcessEnv {
     lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(7))
         .component(PROBE, &())
-        .link_tool(PROBE.tool_provider("probe"), &probe_definition(READ))
+        .link_tool(PROBE.tool_provider("tools"), &probe_definition(READ))
         .build()
         .expect("the environment builds")
 }
@@ -246,6 +246,7 @@ impl lash_core::ProcessEnvPolicy for Policy {
         match cx.label {
             Some("inherit") => cx.restrict(),
             Some("new") => Ok(lash_core::ProcessStartChoice {
+                fits: Default::default(),
                 env: lash_core::ProcessEnvChoice::New(new_environment()),
                 engine_settings: cx.engine_defaults()?,
             }),
@@ -261,6 +262,7 @@ impl lash_core::ProcessEnvPolicy for Policy {
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(lash_core::ProcessEnvPolicyError::Refused)?;
                 Ok(lash_core::ProcessStartChoice {
+                    fits: Default::default(),
                     env: lash_core::ProcessEnvChoice::New(
                         cx.capture(run, surface, entries)
                             .await

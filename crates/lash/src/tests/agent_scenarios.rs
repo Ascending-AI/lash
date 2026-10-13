@@ -234,7 +234,10 @@ await control.finish(await handle);"#,
         ),
         &[RETRYING_DIRECT_COMPONENT],
     )
-    .tools(crate::hook_key!("tools"), Arc::new(RetryingDirectTools))
+    .plugin(lash_core::testing::tool_plugin(
+        RETRYING_DIRECT_COMPONENT,
+        Arc::new(RetryingDirectTools),
+    ))
     .process_component(
         lash_core::testing::tool_component(
             RETRYING_DIRECT_COMPONENT,

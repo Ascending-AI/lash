@@ -203,7 +203,7 @@ async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
             lash_core::testing::tool_component(PROBE_COMPONENT, Arc::clone(&probe)),
             PROBE_COMPONENT,
         )
-        .tools(lash::hook_key!("tools"), probe)
+        .plugin(lash_core::testing::tool_plugin(PROBE_COMPONENT, probe))
     })
     .await
 }
@@ -723,7 +723,7 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
             lash_core::testing::tool_component(PROBE_COMPONENT, Arc::clone(&probe)),
             PROBE_COMPONENT,
         )
-        .tools(lash::hook_key!("tools"), probe)
+        .plugin(lash_core::testing::tool_plugin(PROBE_COMPONENT, probe))
     })
     .await
     else {

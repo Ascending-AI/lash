@@ -231,7 +231,10 @@ await control.finish("must not finish");"#
     let core =
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(model, mock_llm_profile_spec())
-            .tools(crate::hook_key!("tools"), tool.clone())
+            .plugin(lash_core::testing::tool_plugin(
+                PANIC_COMPONENT,
+                tool.clone(),
+            ))
             .process_component(
                 lash_core::testing::tool_component(PANIC_COMPONENT, tool.clone()),
                 PANIC_COMPONENT,

@@ -129,3 +129,108 @@ main {
         Err(EntryEffectsRefusal::ValueCall { template, .. }) if template == Name::new("worker")
     ));
 }
+
+/// P2: indirect callbacks of body and Both helpers cannot hide a held template.
+#[test]
+fn helper_callbacks_through_values_are_certified_or_refused() {
+    for both in [false, true] {
+        for argument in ["&worker", "g", "items"] {
+            let body = if argument == "items" {
+                "for callback in f { let got = apply callback() } return null"
+            } else {
+                "let got = apply f() return got"
+            };
+            let mut helper = lash_kernel_doc::parse_definition(&format!(
+                "function helper.run(f: Any) -> Any\nkernel 1\ncharge 1\nbody {{ {body} }}\n"
+            ))
+            .unwrap();
+            if both {
+                let body = helper.body().unwrap().clone();
+                helper.implementation = lash_kernel_doc::Implementation::Both(body);
+            }
+            let id = helper.identity().unwrap();
+            let catalog = BTreeMap::from([(id, helper)]);
+            let text = format!(
+                r#"kernel 1
+numbers float
+use helper.run = @{id}
+effect search.run(input: Any) -> Any
+entry start() -> Any
+fn worker() {{ let got = perform search.run(null) as Any return got }}
+fn start() {{
+  let g = &worker
+  let items = [g]
+  let got = invoke helper.run({argument})
+  return got
+}}
+main {{ finish null }}
+"#
+            );
+            let spellings = if both {
+                vec![
+                    text.clone(),
+                    text.replace("invoke helper.run(", "helper.run("),
+                ]
+            } else {
+                vec![text]
+            };
+            for text in spellings {
+                let document = parse_document(&text).unwrap();
+                let graph = match derive(&document, &catalog) {
+                    Ok(graph) => graph,
+                    Err(refusal) if both => {
+                        assert!(!refusal.errors.is_empty());
+                        assert!(
+                            refusal.errors.iter().all(|refused| matches!(
+                                refused.reason,
+                                crate::RefusalReason::Invalid(
+                                    lash_kernel_doc::InvalidReason::NativeBodyMayWait { .. }
+                                )
+                            )),
+                            "{refusal:?}"
+                        );
+                        continue;
+                    }
+                    Err(refusal) => panic!("{refusal:?}"),
+                };
+                let effects = entry_effects(&document, &graph, &catalog, &Name::new("start"));
+                assert!(
+                    matches!(&effects, Ok(effects) if effects.contains_key(&EffectName::new("search.run").unwrap()))
+                        || matches!(effects, Err(EntryEffectsRefusal::ValueCall { template, .. }) if template == Name::new("worker")),
+                    "helper callback {argument}, Both={both}, must link or refuse worker"
+                );
+            }
+        }
+    }
+    // A helper that only carries a template does not call it, with either implementation.
+    for both in [false, true] {
+        let mut helper = lash_kernel_doc::parse_definition(
+            "function helper.keep(f: Any) -> Any\nkernel 1\ncharge 1\nbody { return f }\n",
+        )
+        .unwrap();
+        if both {
+            helper.implementation =
+                lash_kernel_doc::Implementation::Both(helper.body().unwrap().clone());
+        }
+        let id = helper.identity().unwrap();
+        let catalog = BTreeMap::from([(id, helper)]);
+        let document = parse_document(&format!(
+            r#"kernel 1
+numbers float
+use helper.keep = @{id}
+effect search.run(input: Any) -> Any
+entry start() -> Any
+fn worker() {{ let got = perform search.run(null) as Any return got }}
+fn start() {{ let held = invoke helper.keep(&worker) return held }}
+main {{ finish null }}
+"#
+        ))
+        .unwrap();
+        let graph = derive(&document, &catalog).unwrap();
+        assert!(
+            entry_effects(&document, &graph, &catalog, &Name::new("start"))
+                .unwrap()
+                .is_empty()
+        );
+    }
+}

@@ -20,7 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    Document, EffectName, FunctionCatalog, Literal, Name, Signature, Site, Unit,
+    Document, EffectName, FunctionCatalog, Literal, Name, Signature, Site, Type, Unit,
 };
 
 use crate::graph::{
@@ -74,11 +74,40 @@ pub fn entry_effects(
         });
     }
     let closures = closure_bindings(graph);
+    let targets = function_targets(graph);
     let mut runs: BTreeMap<Unit, Runs> = BTreeMap::new();
+    let mut callback_helpers = BTreeMap::new();
     for node in &graph.nodes {
         let unit = runs.entry(node.site.unit.clone()).or_default();
         let action = match &node.kind {
             NodeKind::Action(action) => action,
+            NodeKind::Expr(ExprNode::Call { function, args }) => {
+                if *callback_helpers
+                    .entry(*function)
+                    .or_insert_with(|| library_calls_values(catalog, function))
+                {
+                    for argument in args {
+                        let argument = graph.node(*argument);
+                        let known = targets_of(graph, argument.id, &targets);
+                        if !known.is_empty() {
+                            unit.calls.extend(known);
+                            continue;
+                        }
+                        match &argument.kind {
+                            NodeKind::Expr(ExprNode::Literal(Literal::Function(name))) => {
+                                unit.calls.insert(name.clone());
+                            }
+                            NodeKind::Expr(ExprNode::Variable(Reference::Binding(binding)))
+                                if closures.contains(binding) => {}
+                            _ if argument.facet.as_ref().is_none_or(may_hold_function) => {
+                                unit.value_call.get_or_insert_with(|| node.site.clone());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                continue;
+            }
             NodeKind::Expr(ExprNode::Literal(Literal::Function(name))) => {
                 unit.held.insert(name.clone());
                 continue;
@@ -106,15 +135,36 @@ pub fn entry_effects(
                 // functions it is passed: a declared function passed to it
                 // by name is called.
                 CalleeNode::Library(function) => {
-                    if catalog
-                        .definition(function)
-                        .is_none_or(|definition| !definition.has_native())
+                    if *callback_helpers
+                        .entry(*function)
+                        .or_insert_with(|| library_calls_values(catalog, function))
                     {
-                        unit.calls
-                            .extend(atoms_of(action).filter_map(|atom| match atom {
-                                AtomNode::Literal(Literal::Function(name)) => Some(name.clone()),
-                                _ => None,
-                            }));
+                        for argument in atoms_of(action) {
+                            let known = targets_of_atom(argument, &targets);
+                            if !known.is_empty() {
+                                unit.calls.extend(known);
+                                continue;
+                            }
+                            match argument {
+                                AtomNode::Literal(Literal::Function(name)) => {
+                                    unit.calls.insert(name.clone());
+                                }
+                                AtomNode::Variable(Reference::Binding(binding))
+                                    if closures.contains(binding) => {}
+                                AtomNode::Variable(reference) => {
+                                    let callable = match reference {
+                                        Reference::Binding(binding) => {
+                                            may_hold_function(&graph.binding(*binding).facet)
+                                        }
+                                        Reference::Session(_) => true,
+                                    };
+                                    if callable {
+                                        unit.value_call.get_or_insert_with(|| node.site.clone());
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                 }
             },
@@ -184,4 +234,129 @@ fn closure_bindings(graph: &Graph) -> BTreeSet<BindingId> {
 
 fn atoms_of(action: &ActionNode) -> impl Iterator<Item = &AtomNode> {
     crate::flow::atoms(action)
+}
+
+/// A helper may receive a callback directly or inside a collection. Unknown
+/// facets cannot certify that a held template stays uncalled.
+fn may_hold_function(ty: &Type) -> bool {
+    match ty {
+        Type::Function(_) => true,
+        Type::Tuple(items) | Type::Union(items) => items.iter().any(may_hold_function),
+        Type::List(item) | Type::Set(item) | Type::Task(item) => may_hold_function(item),
+        Type::Map(map) => may_hold_function(&map.key) || may_hold_function(&map.value),
+        Type::Record(record) => {
+            record
+                .fields
+                .iter()
+                .any(|field| may_hold_function(&field.ty))
+                || record.rest.as_deref().is_some_and(may_hold_function)
+        }
+        _ => false,
+    }
+}
+
+/// Pure helpers that only carry a reference do not run its template (P2).
+/// The derived body's value-call flag also follows body-backed helper calls.
+fn library_calls_values(
+    catalog: &dyn FunctionCatalog,
+    function: &lash_kernel_doc::FunctionId,
+) -> bool {
+    let Some(definition) = catalog.definition(function) else {
+        return true;
+    };
+    if definition.body().is_none() {
+        return false;
+    }
+    crate::derive_definition(definition, catalog).map_or(true, |graph| {
+        graph.units().iter().any(|unit| unit.effects.through_values)
+    })
+}
+
+/// Possible declared targets carried through values. A tool result does not
+/// carry the templates passed to that tool: a child handle stays a handle.
+fn function_targets(graph: &Graph) -> BTreeMap<BindingId, BTreeSet<Name>> {
+    let mut targets = BTreeMap::<BindingId, BTreeSet<Name>>::new();
+    loop {
+        let mut changed = false;
+        for node in graph.nodes() {
+            let (binding, value) = match &node.kind {
+                NodeKind::Stmt(StmtNode::Let { binding, value })
+                | NodeKind::Stmt(StmtNode::Assign {
+                    place: PlaceNode::Variable(Reference::Binding(binding)),
+                    value,
+                }) => (*binding, *value),
+                NodeKind::Stmt(StmtNode::For {
+                    binding, iterable, ..
+                }) => (*binding, *iterable),
+                _ => continue,
+            };
+            let carried = targets_of(graph, value, &targets);
+            let entry = targets.entry(binding).or_default();
+            let previous = entry.len();
+            entry.extend(carried);
+            changed |= entry.len() != previous;
+        }
+        if !changed {
+            return targets;
+        }
+    }
+}
+
+fn targets_of_atom(
+    atom: &AtomNode,
+    targets: &BTreeMap<BindingId, BTreeSet<Name>>,
+) -> BTreeSet<Name> {
+    match atom {
+        AtomNode::Literal(Literal::Function(name)) => BTreeSet::from([name.clone()]),
+        AtomNode::Variable(Reference::Binding(binding)) => {
+            targets.get(binding).cloned().unwrap_or_default()
+        }
+        _ => BTreeSet::new(),
+    }
+}
+
+fn targets_of(
+    graph: &Graph,
+    value: crate::graph::NodeId,
+    targets: &BTreeMap<BindingId, BTreeSet<Name>>,
+) -> BTreeSet<Name> {
+    let union = |children: &[crate::graph::NodeId]| {
+        children
+            .iter()
+            .flat_map(|child| targets_of(graph, *child, targets))
+            .collect()
+    };
+    match &graph.node(value).kind {
+        NodeKind::Expr(ExprNode::Literal(Literal::Function(name))) => {
+            BTreeSet::from([name.clone()])
+        }
+        NodeKind::Expr(ExprNode::Variable(Reference::Binding(binding))) => {
+            targets.get(binding).cloned().unwrap_or_default()
+        }
+        NodeKind::Expr(ExprNode::Tuple(items) | ExprNode::List(items) | ExprNode::Set(items)) => {
+            union(items)
+        }
+        NodeKind::Expr(ExprNode::Record(fields)) => fields
+            .iter()
+            .flat_map(|field| targets_of(graph, field.value, targets))
+            .collect(),
+        NodeKind::Expr(ExprNode::Map(entries)) => entries
+            .iter()
+            .flat_map(|entry| [entry.key, entry.value])
+            .flat_map(|value| targets_of(graph, value, targets))
+            .collect(),
+        NodeKind::Expr(ExprNode::Member(member)) => {
+            let target = match member {
+                crate::graph::MemberNode::Field { target, .. }
+                | crate::graph::MemberNode::Index { target, .. } => target,
+            };
+            targets_of(graph, *target, targets)
+        }
+        NodeKind::Expr(ExprNode::Call { args, .. }) => union(args),
+        NodeKind::Action(ActionNode::Call { args, .. } | ActionNode::Spawn { args, .. }) => args
+            .iter()
+            .flat_map(|arg| targets_of_atom(arg, targets))
+            .collect(),
+        _ => BTreeSet::new(),
+    }
 }
