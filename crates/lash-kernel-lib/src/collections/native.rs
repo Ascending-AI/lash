@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{
     Element, Float, FunctionDefinition, Identity, Integer, NativeCall, NativeError, NativeFunction,
-    NativeHeap, Object, ObjectId, Value, parse_definition,
+    NativeHeap, Object, ObjectId, PreparedNative, Value, parse_definition,
 };
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -280,20 +280,36 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
             functions.push((definition, Arc::new(Native { kind, op }) as _));
         }
     }
-    for (name, function, result, error) in [
+    for (name, function, entry, result, error) in [
         (
             "collection.unordered",
             unordered as fn(&[Value]) -> Result<Value, NativeError>,
+            None,
             "Number",
             "unordered",
         ),
-        ("collection.zero_step", zero_step, "Int", "zero_step"),
-        ("collection.int_check", int_check, "Int", "type_error"),
+        ("collection.zero_step", zero_step, None, "Int", "zero_step"),
+        (
+            "collection.int_check",
+            int_check,
+            Some((|args: &[Value]| int_check(args).ok()) as fn(&[Value]) -> Option<Value>),
+            "Int",
+            "type_error",
+        ),
     ] {
         let definition = parse_definition(&format!(
             "function {name}(x: Any) -> {result}\nkernel 1\nerrors \"{error}\"\ncharge sum(1, size(x))\nnative\n"
         )).map_err(CollectionError::Parse)?;
-        functions.push((definition, Arc::new(Aux(function)) as _));
+        functions.push((
+            definition,
+            Arc::new(Aux(
+                function,
+                entry.map(|entry| PreparedNative {
+                    entry,
+                    operation: name,
+                }),
+            )) as _,
+        ));
     }
     // Range and NaN equivalence are explicit caller choices. No dialect's
     // coercion, missing-slot convention or index normalization lives here.
@@ -301,20 +317,23 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
         "function list.index_of_range(xs: List(Any), value: Any, start: Number, end: Number, reverse: Bool, nan_equal: Bool) -> Int\nkernel 1\nerrors \"type_error\", \"index_out_of_range\"\ncharge sum(8, deep(xs), product(size(xs), deep(value)), size(start), size(end))\nnative\n",
     ).map_err(CollectionError::Parse)?;
     functions.push((definition, Arc::new(IndexOfRange) as _));
-    for (signature, function, charge) in [
+    for (signature, function, entry, charge) in [
         (
             "bool.not(x: Bool) -> Bool",
             bool_not as fn(&[Value]) -> Result<Value, NativeError>,
+            (|args: &[Value]| bool_not(args).ok()) as fn(&[Value]) -> Option<Value>,
             "1",
         ),
         (
             "error.new(kind: Text, message: Text, data?: Any) -> Error",
             error_new,
+            |args| error_new(args).ok(),
             "sum(1, size(kind), size(message), size(result))",
         ),
         (
             "collection.function_check(x: Any) -> Any",
             function_check,
+            |args| function_check(args).ok(),
             "1",
         ),
     ] {
@@ -322,7 +341,16 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
             "function {signature}\nkernel 1\nerrors \"type_error\"\ncharge {charge}\nnative\n"
         ))
         .map_err(CollectionError::Parse)?;
-        functions.push((definition, Arc::new(Aux(function)) as _));
+        functions.push((
+            definition,
+            Arc::new(Aux(
+                function,
+                Some(PreparedNative {
+                    entry,
+                    operation: signature,
+                }),
+            )) as _,
+        ));
     }
     let definition = parse_definition(
         "function collection.holds_none(value: Any, kinds: Set(Text)) -> Bool\nkernel 1\n\
@@ -366,14 +394,17 @@ impl NativeFunction for HoldsNone {
     }
 }
 /// A function of its arguments alone.
-struct Aux(fn(&[Value]) -> Result<Value, NativeError>);
+struct Aux(
+    fn(&[Value]) -> Result<Value, NativeError>,
+    Option<PreparedNative>,
+);
 impl NativeFunction for Aux {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
         (self.0)(call.args)
     }
 
-    fn fast(&self, args: &[Value], _heap: &dyn NativeHeap) -> Option<Value> {
-        (self.0)(args).ok()
+    fn prepare(&self) -> Option<PreparedNative> {
+        self.1
     }
 }
 fn bool_not(args: &[Value]) -> Result<Value, NativeError> {
@@ -740,8 +771,29 @@ impl NativeFunction for Native {
         }
     }
 
-    fn fast(&self, args: &[Value], heap: &dyn NativeHeap) -> Option<Value> {
-        self.read(args, heap)?.ok()
+    fn prepare(&self) -> Option<PreparedNative> {
+        if !matches!(self.op, Op::Check) {
+            return None;
+        }
+        macro_rules! check {
+            ($kind:ident) => {
+                PreparedNative {
+                    operation: concat!(stringify!($kind), ".check"),
+                    entry: |args| {
+                        let value = args.first()?;
+                        object(Kind::$kind, value).ok()?;
+                        Some(value.clone())
+                    },
+                }
+            };
+        }
+        Some(match self.kind {
+            Kind::List => check!(List),
+            Kind::Tuple => check!(Tuple),
+            Kind::Map => check!(Map),
+            Kind::Set => check!(Set),
+            Kind::Record => check!(Record),
+        })
     }
 }
 
@@ -928,9 +980,14 @@ impl NativeFunction for IdentityKey {
         project_identity(&value, &absent, &tag, 0, &mut call)
     }
 
-    fn fast(&self, args: &[Value], _heap: &dyn NativeHeap) -> Option<Value> {
-        field(args.get(2)?).ok()?;
-        scalar_identity(args.first()?, args.get(1)?)
+    fn prepare(&self) -> Option<PreparedNative> {
+        Some(PreparedNative {
+            operation: "collection.identity_key(Any, Any, Text)",
+            entry: |args| {
+                field(args.get(2)?).ok()?;
+                scalar_identity(args.first()?, args.get(1)?)
+            },
+        })
     }
 }
 

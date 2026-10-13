@@ -491,16 +491,9 @@ impl KernelMachine {
             }
             LibRun::Native(native) => {
                 let end = self.regs.len();
-                if let Some(fast) = &function.fast {
-                    let view = NativeView {
-                        heap: &mut self.heap,
-                        bound: self.bounds.memory,
-                        reserved: 0,
-                    };
-                    // A result too deep to keep is the general call's to
-                    // raise.
-                    if let Some(value) = native
-                        .fast(&self.regs[args..end], &view)
+                if let Some((prepared, fast)) = &function.prepared {
+                    // A result too deep to keep is the general call's to raise.
+                    if let Some(value) = (prepared.entry)(&self.regs[args..end])
                         .filter(|value| within_depth(value, self.heap.value_depth))
                     {
                         // What the general call does with its result: keep

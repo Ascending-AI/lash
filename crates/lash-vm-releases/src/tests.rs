@@ -501,3 +501,43 @@ fn a_missing_native_or_helper_refuses_resume() {
             .is_ok()
     );
 }
+
+#[path = "build/probe.rs"]
+mod probe;
+
+/// K-LIB-011: changing only the prepared answer changes the release digest.
+#[test]
+fn native_fingerprint_covers_the_prepared_entry() {
+    use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, PreparedNative, Value};
+    struct Native(bool);
+    impl NativeFunction for Native {
+        fn call(&self, _: NativeCall<'_>) -> Result<Value, NativeError> {
+            Ok(Value::Bool(true))
+        }
+        fn prepare(&self) -> Option<PreparedNative> {
+            Some(PreparedNative {
+                operation: "probe / Bool",
+                entry: if self.0 {
+                    |_| Some(Value::Bool(true))
+                } else {
+                    |_| Some(Value::Bool(false))
+                },
+            })
+        }
+    }
+    let registry = |answer| {
+        let mut registry = lash_kernel_doc::FunctionRegistry::new();
+        let definition = lash_kernel_doc::parse_definition(
+            "function probe() -> Bool\nkernel 1\ncharge 1\nnative\n",
+        )
+        .unwrap();
+        registry
+            .register(definition, Some(std::sync::Arc::new(Native(answer))))
+            .unwrap();
+        registry
+    };
+    assert_ne!(
+        probe::fingerprints(&registry(true)),
+        probe::fingerprints(&registry(false))
+    );
+}

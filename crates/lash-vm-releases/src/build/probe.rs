@@ -59,6 +59,10 @@ fn fingerprint(
 ) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(function.as_bytes());
+    let prepared = native.prepare();
+    if let Some(prepared) = prepared {
+        hasher.update(prepared.operation.as_bytes());
+    }
     let params = &registered.definition.signature.params;
     let mut heap = ProbeHeap::default();
     let choices: Vec<Vec<Value>> = params
@@ -100,6 +104,17 @@ fn fingerprint(
         }
         let _ = writeln!(line, " spent {}", counter.spent());
         hasher.update(line.as_bytes());
+        if let Some(prepared) = prepared {
+            let answer =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (prepared.entry)(&args)));
+            let mut line = String::from("prepared ");
+            match answer {
+                Ok(Some(value)) => heap.write(&value, DEPTH + 4, &mut line),
+                Ok(None) => line.push_str("general"),
+                Err(_) => line.push_str("panicked"),
+            }
+            hasher.update(line.as_bytes());
+        }
     }
     hasher.finalize().to_hex().to_string()
 }

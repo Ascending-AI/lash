@@ -8,7 +8,7 @@
 //! timed loop, as the old `compiled_execute` mode compiled once. A scripted host answers every
 //! tool call at once.
 //!
-//! `kernel_perf <most iterations> [program or file.ts...]` runs each program
+//! `kernel_perf <most iterations> [program or file.ts/file.py...]` runs each program
 //! for about two seconds and prints one tab-separated row: the manifest's
 //! function count, the time per run with and without `start`, the run's
 //! charge, and where it went. The split comes from a second run that stops
@@ -352,10 +352,11 @@ fn main() -> Result<(), String> {
     let context = GuestContext::new();
     let mut work = Vec::new();
     let mut guest = Guest::default();
-    // A name selects a program; a path to a `.ts` file adds one, named by
+    // A name selects a program; a path to a `.ts` or `.py` file adds one, named by
     // its path.
     let (files, only): (Vec<String>, BTreeSet<String>) = {
-        let (files, names): (Vec<String>, Vec<String>) = args.partition(|arg| arg.ends_with(".ts"));
+        let (files, names): (Vec<String>, Vec<String>) =
+            args.partition(|arg| arg.ends_with(".ts") || arg.ends_with(".py"));
         (files, names.into_iter().collect())
     };
     let mut programs: Vec<(String, String)> = programs()
@@ -386,6 +387,16 @@ fn main() -> Result<(), String> {
     let observed_split = !std::env::var("KERNEL_PERF_SPLIT").is_ok_and(|split| split == "0");
     let fixed = std::env::var("KERNEL_PERF_FIXED").is_ok_and(|fixed| fixed == "1");
     let registry = registry();
+    let mut registry = (*registry).clone();
+    let mut names = NamedLibrary::from_registry(&registry).expect("unique library names");
+    for definition in
+        lash_dialect_python::define_helpers(&mut names).unwrap_or_else(|error| panic!("{error}"))
+    {
+        registry
+            .register(definition, None)
+            .unwrap_or_else(|error| panic!("{error}"));
+    }
+    let registry = Arc::new(registry);
     // Prepared once, as a worker prepares its registry: every library body
     // is compiled here; each live document's preparation is reused at start.
     let prepared = PreparedLibrary::new(Arc::clone(&registry));
@@ -411,15 +422,23 @@ fn main() -> Result<(), String> {
     }
     for (name, source) in &programs {
         let name = name.as_str();
-        let lowered = match lash_dialect_typescript::lower(source, &environment) {
+        let lowered = match if name.ends_with(".py") {
+            lash_dialect_python::lower(source, &environment)
+                .map(|lowered| lowered.document)
+                .map_err(|error| format!("{error:?}"))
+        } else {
+            lash_dialect_typescript::lower(source, &environment)
+                .map(|lowered| lowered.document)
+                .map_err(|error| format!("{error:?}"))
+        } {
             Ok(lowered) => lowered,
             Err(diagnostic) => {
                 return Err(format!("{name}: refused: {diagnostic:?}"));
             }
         };
-        let functions = lowered.document.manifest.functions.len();
+        let functions = lowered.manifest.functions.len();
         let program = Program {
-            document: Arc::new(lowered.document),
+            document: Arc::new(lowered),
             library: prepared.clone(),
         };
         match &mode {

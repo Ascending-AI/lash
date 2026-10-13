@@ -62659,6 +62659,7 @@
       "declared_features": [],
       "dependencies": [
         "arbitrary",
+        "lash-dialect-python",
         "lash-ext-date-ecma",
         "lash-ext-regex-ecma",
         "lash-ext-url-whatwg",

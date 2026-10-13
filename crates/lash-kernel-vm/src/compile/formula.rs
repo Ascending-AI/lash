@@ -3,6 +3,7 @@
 
 use lash_kernel_doc as doc;
 use lash_kernel_doc::Value;
+use num_traits::ToPrimitive;
 
 use crate::data::{holds_nothing, size_one};
 
@@ -320,7 +321,8 @@ impl Plan {
 /// answers (`K-CHG-003`). It is derived from the formula when the library is
 /// prepared, so it charges what the formula charges whatever the formula
 /// says: for values that hold nothing a deep size is a size and a nested
-/// size 0, and a formula that measures only values of size 1 is a constant.
+/// size 0, and a formula that measures only scalar sizes is closed over
+/// sizes 1 and 2, including zero and nonzero small integers.
 pub(crate) struct Fast {
     /// The formula as it computes for values that hold nothing
     /// ([`doc::Formula::shallow`]).
@@ -328,6 +330,9 @@ pub(crate) struct Fast {
     /// What `shallow` computes when every value it measures has size 1; for
     /// a formula that measures a magnitude, nothing.
     unit: Option<u64>,
+    /// Every combination of measured sizes 1 and 2. Zero small integers
+    /// have size 1; nonzero small integers have size 2 (K-CHG-004).
+    small: Option<Box<[u64]>>,
     /// The values the formula measures by deep size: `shallow` holds when
     /// none of them holds another value.
     deep: Box<[Source]>,
@@ -351,6 +356,22 @@ impl Fast {
             .iter()
             .all(|(_, measure)| *measure == doc::Measure::Size)
             .then(|| shallow.evaluate(|_, _| 1));
+        let small =
+            (unit.is_some() && shallow.measurements.len() <= KEPT_MEASUREMENTS).then(|| {
+                (0..(1usize << shallow.measurements.len()))
+                    .map(|mask| {
+                        shallow.evaluate(|source, _| {
+                            let index = shallow
+                                .measurements
+                                .iter()
+                                .position(|(held, _)| *held == source)
+                                .unwrap_or(0);
+                            1 + ((mask >> index) & 1) as u64
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            });
         let measured = |kind: doc::Measure| -> Box<[Source]> {
             charge
                 .measurements
@@ -361,6 +382,7 @@ impl Fast {
         };
         Self {
             unit,
+            small,
             deep: measured(doc::Measure::DeepSize),
             nested: measured(doc::Measure::NestedSize),
             shallow,
@@ -392,6 +414,21 @@ impl Fast {
                 .any(|value| matches!(value, Value::Tuple(_) | Value::Error(_)))
         {
             return Charge::Plan(charge);
+        }
+        if let Some(small) = &self.small {
+            let mut mask = 0usize;
+            for (index, (source, _)) in self.shallow.measurements.iter().enumerate() {
+                match value(source) {
+                    Some(Value::Int(integer)) => match integer.to_i64() {
+                        Some(0) => {}
+                        Some(_) => mask |= 1 << index,
+                        None => return Charge::Plan(&self.shallow),
+                    },
+                    Some(value) if size_one(value) => {}
+                    _ => return Charge::Plan(&self.shallow),
+                }
+            }
+            return Charge::Units(small[mask]);
         }
         match self.unit {
             Some(unit)

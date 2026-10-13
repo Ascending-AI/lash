@@ -62,6 +62,7 @@ pub(crate) fn binary(
 
 /// [`binary`] for every operation but an integer power past the 64-bit
 /// word, which counts its work and reserves its room: `None` for that one.
+#[inline]
 pub(crate) fn plain(op: Binary, a: &Value, b: &Value) -> Result<Option<Value>, NativeError> {
     if let (Value::Int(a), Value::Int(b)) = (a, b) {
         if let (Some(a), Some(b)) = (a.to_i64(), b.to_i64())
@@ -269,6 +270,7 @@ fn in_word(op: Binary, a: i64, b: i64) -> Option<i64> {
     }
 }
 
+#[inline]
 pub(crate) fn unary(op: Unary, value: &Value) -> Result<Value, NativeError> {
     if let Value::Int(value) = value {
         let word = value.to_i64();

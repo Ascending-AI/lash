@@ -28,7 +28,7 @@ use std::sync::Arc;
 use lash_kernel_doc as doc;
 use lash_kernel_doc::{
     Document, FunctionDefinition, FunctionId, FunctionRegistry, JoinMode, Name, NativeFunction,
-    Site, Type, Unit, Value,
+    PreparedNative, Site, Type, Unit, Value,
 };
 use lash_kernel_exec::{BoundaryKind, StepEdge};
 
@@ -229,17 +229,21 @@ impl PreparedLibrary {
                     .map(|guard| Plan::new(&guard.limit, params));
                 // A guarded call counts its work, which only the general
                 // call does; an odd layout takes the general call always.
-                let fast = (matches!(run, LibRun::Native(_))
-                    && limit.is_none()
-                    && layout.0.is_multiple_of(2))
-                .then(|| Fast::new(&definition.charge, params, &charge));
+                let prepared = match &run {
+                    LibRun::Native(native) if limit.is_none() && layout.0.is_multiple_of(2) => {
+                        native.prepare()
+                    }
+                    _ => None,
+                };
+                let prepared =
+                    prepared.map(|entry| (entry, Fast::new(&definition.charge, params, &charge)));
                 Lib {
                     id: *function,
                     arity: params.len(),
                     native: definition.has_native(),
                     charge,
                     limit,
-                    fast,
+                    prepared,
                     definition,
                     run,
                 }
@@ -498,10 +502,9 @@ pub(crate) struct Lib {
     /// The definition's charge formula, and its guard's limit.
     pub(crate) charge: Plan,
     pub(crate) limit: Option<Plan>,
-    /// For a native implementation with no guard, the charge of the calls
-    /// its fast path answers ([`NativeFunction::fast`]); nothing when every
-    /// call goes through the implementation's general call.
-    pub(crate) fast: Option<Fast>,
+    /// An unguarded native's prepared entry and its formula-derived charge.
+    /// Odd layouts and heap-dependent natives use the general call.
+    pub(crate) prepared: Option<(PreparedNative, Fast)>,
 }
 
 pub(crate) enum LibRun {

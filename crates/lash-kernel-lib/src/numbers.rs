@@ -7,7 +7,8 @@ use std::sync::{Arc, LazyLock};
 use lash_kernel_doc::{
     ErrorValue, Float, Formula, FunctionDefinition, FunctionRegistry, Guard, Identity,
     Implementation, Integer, KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction,
-    NativeHeap, Operand, Param, QualifiedName, RegistryError, Signature, Type, Value, ValueKind,
+    NativeHeap, Operand, Param, PreparedNative, QualifiedName, RegistryError, Signature, Type,
+    Value, ValueKind,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -16,6 +17,8 @@ use crate::arithmetic::{self, Binary, Unary};
 use crate::comparison::{compare, equal, same};
 use crate::math::Math;
 use crate::numeric::{float_to_integer, integer_to_float};
+
+mod prepared;
 use crate::raised;
 
 #[derive(Clone, Copy, Debug)]
@@ -426,7 +429,7 @@ pub fn register_numbers(registry: &mut FunctionRegistry) -> Result<(), RegistryE
 impl NativeFunction for NumericFunction {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
         self.admit(call.args)?;
-        if let Some(result) = self.plain(call.args, &*call.heap)? {
+        if let Some(result) = plain(self.operation, call.args, Some(&*call.heap))? {
             return Ok(result);
         }
         let a = &call.args[0];
@@ -450,9 +453,8 @@ impl NativeFunction for NumericFunction {
         }
     }
 
-    fn fast(&self, args: &[Value], heap: &dyn NativeHeap) -> Option<Value> {
-        self.admit(args).ok()?;
-        self.plain(args, heap).ok()?
+    fn prepare(&self) -> Option<PreparedNative> {
+        prepared::entry(self.operation, self.domain)
     }
 }
 
@@ -488,92 +490,110 @@ impl NumericFunction {
         }
         Ok(())
     }
+}
 
-    /// The call of admitted arguments, for every operation but two kinds:
-    /// an integer power past the 64-bit word, which counts its work and
-    /// reserves its room, and an integer's text, which reserves its digits.
-    /// `None` for those. It only reads the heap.
-    fn plain(&self, args: &[Value], heap: &dyn NativeHeap) -> Result<Option<Value>, NativeError> {
-        let a = &args[0];
-        Ok(Some(match self.operation {
-            Operation::Binary(op) => return arithmetic::plain(op, a, &args[1]),
-            Operation::Unary(op) => arithmetic::unary(op, a)?,
-            Operation::Math(op) => op.call(args)?,
-            Operation::Eq => Value::Bool(equal(a, &args[1], heap)),
-            Operation::Same => Value::Bool(same(a, &args[1])),
-            Operation::Lt | Operation::Le | Operation::Gt | Operation::Ge | Operation::Compare => {
-                let order = compare(a, &args[1], heap)?;
-                match self.operation {
-                    Operation::Compare => Value::Int(Integer::from(match order {
-                        Some(Ordering::Less) => -1,
-                        Some(Ordering::Equal) => 0,
-                        Some(Ordering::Greater) => 1,
-                        None => return Err(raised("unordered", "NaN has no ordering")),
-                    })),
-                    Operation::Lt => Value::Bool(order == Some(Ordering::Less)),
-                    Operation::Le => {
-                        Value::Bool(matches!(order, Some(Ordering::Less | Ordering::Equal)))
-                    }
-                    Operation::Gt => Value::Bool(order == Some(Ordering::Greater)),
-                    _ => Value::Bool(matches!(order, Some(Ordering::Greater | Ordering::Equal))),
+/// The one implementation of admitted scalar operations. A heap-dependent
+/// comparison leaves a prepared entry for the general call (K-LIB-006).
+#[inline]
+fn plain(
+    operation: Operation,
+    args: &[Value],
+    heap: Option<&dyn NativeHeap>,
+) -> Result<Option<Value>, NativeError> {
+    let a = &args[0];
+    Ok(Some(match operation {
+        Operation::Binary(op) => return arithmetic::plain(op, a, &args[1]),
+        Operation::Unary(op) => arithmetic::unary(op, a)?,
+        Operation::Math(op) => op.call(args)?,
+        Operation::Eq => {
+            let equal = match heap {
+                Some(heap) => equal(a, &args[1], heap),
+                None => match crate::comparison::scalar_equal(a, &args[1]) {
+                    Some(equal) => equal,
+                    None => return Ok(None),
+                },
+            };
+            Value::Bool(equal)
+        }
+        Operation::Same => Value::Bool(same(a, &args[1])),
+        Operation::Lt | Operation::Le | Operation::Gt | Operation::Ge | Operation::Compare => {
+            let order = match heap {
+                Some(heap) => compare(a, &args[1], heap)?,
+                None => match crate::comparison::scalar_compare(a, &args[1]) {
+                    Some(order) => order?,
+                    None => return Ok(None),
+                },
+            };
+            match operation {
+                Operation::Compare => Value::Int(Integer::from(match order {
+                    Some(Ordering::Less) => -1,
+                    Some(Ordering::Equal) => 0,
+                    Some(Ordering::Greater) => 1,
+                    None => return Err(raised("unordered", "NaN has no ordering")),
+                })),
+                Operation::Lt => Value::Bool(order == Some(Ordering::Less)),
+                Operation::Le => {
+                    Value::Bool(matches!(order, Some(Ordering::Less | Ordering::Equal)))
                 }
+                Operation::Gt => Value::Bool(order == Some(Ordering::Greater)),
+                _ => Value::Bool(matches!(order, Some(Ordering::Greater | Ordering::Equal))),
             }
-            Operation::Kind => kind_name(a.kind()),
-            Operation::Ref => Value::Ref(match a {
-                Value::Task(id) => Identity::Task(*id),
-                _ => Identity::Object(
-                    a.object()
-                        .ok_or_else(|| raised("type_error", "ref requires an object or task"))?,
-                ),
-            }),
-            Operation::ToFloat => match a {
-                Value::Int(value) => Value::Float(integer_to_float(value)?),
-                Value::Float(_) => a.clone(),
-                _ => return Err(raised("type_error", "expected a number")),
-            },
-            Operation::ToInt => match a {
-                Value::Float(value) => Value::Int(float_to_integer(*value)?),
-                Value::Int(_) => a.clone(),
-                _ => return Err(raised("type_error", "expected a number")),
-            },
-            Operation::ToText => match a {
-                // Its digits are reserved before they are written.
-                Value::Int(_) => return Ok(None),
-                Value::Float(value) => Value::text(value.to_string()),
-                _ => return Err(raised("type_error", "expected a number")),
-            },
-            Operation::IntText => {
-                // Its digits are reserved before they are written.
-                return Ok(None);
+        }
+        Operation::Kind => kind_name(a.kind()),
+        Operation::Ref => Value::Ref(match a {
+            Value::Task(id) => Identity::Task(*id),
+            _ => Identity::Object(
+                a.object()
+                    .ok_or_else(|| raised("type_error", "ref requires an object or task"))?,
+            ),
+        }),
+        Operation::ToFloat => match a {
+            Value::Int(value) => Value::Float(integer_to_float(value)?),
+            Value::Float(_) => a.clone(),
+            _ => return Err(raised("type_error", "expected a number")),
+        },
+        Operation::ToInt => match a {
+            Value::Float(value) => Value::Int(float_to_integer(*value)?),
+            Value::Int(_) => a.clone(),
+            _ => return Err(raised("type_error", "expected a number")),
+        },
+        Operation::ToText => match a {
+            // Its digits are reserved before they are written.
+            Value::Int(_) => return Ok(None),
+            Value::Float(value) => Value::text(value.to_string()),
+            _ => return Err(raised("type_error", "expected a number")),
+        },
+        Operation::IntText => {
+            // Its digits are reserved before they are written.
+            return Ok(None);
+        }
+        Operation::IntParse => {
+            let radix = radix(&args[1])?;
+            let Value::Text(text) = a else {
+                return Err(raised("type_error", "expected text"));
+            };
+            let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+            if digits.is_empty()
+                || !digits
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() && (byte as char).is_digit(radix))
+            {
+                return Err(raised(
+                    "number_parse",
+                    "expected signed radix digits without whitespace or separators",
+                ));
             }
-            Operation::IntParse => {
-                let radix = radix(&args[1])?;
-                let Value::Text(text) = a else {
-                    return Err(raised("type_error", "expected text"));
-                };
-                let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
-                if digits.is_empty()
-                    || !digits
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() && (byte as char).is_digit(radix))
-                {
-                    return Err(raised(
-                        "number_parse",
-                        "expected signed radix digits without whitespace or separators",
-                    ));
-                }
-                BigInt::parse_bytes(text.as_bytes(), radix)
-                    .map(|value| Value::Int(Integer::new(value)))
-                    .ok_or_else(|| raised("number_parse", "invalid integer text"))?
-            }
-            Operation::FloatParse => {
-                let Value::Text(text) = a else {
-                    return Err(raised("type_error", "expected text"));
-                };
-                Value::Float(Float::new(parse_float(text)?))
-            }
-        }))
-    }
+            BigInt::parse_bytes(text.as_bytes(), radix)
+                .map(|value| Value::Int(Integer::new(value)))
+                .ok_or_else(|| raised("number_parse", "invalid integer text"))?
+        }
+        Operation::FloatParse => {
+            let Value::Text(text) = a else {
+                return Err(raised("type_error", "expected text"));
+            };
+            Value::Float(Float::new(parse_float(text)?))
+        }
+    }))
 }
 
 /// Every kind with the name `kind` answers for it, in the order of

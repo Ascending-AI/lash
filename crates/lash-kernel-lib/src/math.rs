@@ -56,6 +56,7 @@ impl Math {
         }
     }
 
+    #[inline]
     pub(crate) fn call(self, args: &[Value]) -> Result<Value, NativeError> {
         let a = as_float(&args[0])?;
         let b = if self.arity() > 1 {

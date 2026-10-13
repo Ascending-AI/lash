@@ -59,7 +59,8 @@ pub use name::{
 };
 pub use native::{
     Element, FunctionCatalog, FunctionRegistry, GuardExceeded, NativeCall, NativeError,
-    NativeFunction, NativeHeap, RegisteredFunction, RegistryError, ValidatedFunctions, WorkCounter,
+    NativeFunction, NativeHeap, PreparedNative, RegisteredFunction, RegistryError,
+    ValidatedFunctions, WorkCounter,
 };
 pub use number::{
     Float, Integer, InvalidFloat, InvalidInteger, InvalidNumberToken, NumberPolicy, NumberToken,

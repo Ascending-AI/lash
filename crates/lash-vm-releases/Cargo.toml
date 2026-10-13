@@ -53,3 +53,6 @@ lash-ext-regex-ecma = { workspace = true, optional = true }
 lash-ext-url-whatwg = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+blake3 = { workspace = true }

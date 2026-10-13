@@ -12,22 +12,60 @@ use crate::raised;
 
 type Pair = (ValueKind, ObjectId, ObjectId);
 
+/// Heap-independent equality; structural pairs belong to the general walk.
+#[inline]
+pub(crate) fn scalar_equal(a: &Value, b: &Value) -> Option<bool> {
+    match (a, b) {
+        (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => {
+            Some(matches!(number_cmp(a, b), Ok(Some(Ordering::Equal))))
+        }
+        (Value::Tuple(_), Value::Tuple(_))
+        | (Value::Error(_), Value::Error(_))
+        | (Value::List(_), Value::List(_))
+        | (Value::Map(_), Value::Map(_))
+        | (Value::Set(_), Value::Set(_))
+        | (Value::Record(_), Value::Record(_)) => None,
+        _ => Some(a == b),
+    }
+}
+
+/// Heap-independent order, sharing the general walk's scalar semantics.
+#[inline]
+pub(crate) fn scalar_compare(
+    a: &Value,
+    b: &Value,
+) -> Option<Result<Option<Ordering>, NativeError>> {
+    Some(match (a, b) {
+        (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => number_cmp(a, b),
+        (Value::Text(a), Value::Text(b)) => Ok(Some(a.cmp(b))),
+        (Value::Bytes(a), Value::Bytes(b)) => Ok(Some(a.cmp(b))),
+        (Value::Timestamp(a), Value::Timestamp(b)) => Ok(Some(a.cmp(b))),
+        (Value::Bool(a), Value::Bool(b)) => Ok(Some(a.cmp(b))),
+        (Value::Tuple(_), Value::Tuple(_)) | (Value::List(_), Value::List(_)) => return None,
+        _ => Err(raised("type_error", "values have no shared ordering")),
+    })
+}
+
 /// Structural equality (`K-VAL-020..026`), including cyclic objects.
 /// It has no guest error. Numeric NaNs are unequal, even inside one object.
 pub fn equal(a: &Value, b: &Value, heap: &dyn NativeHeap) -> bool {
+    if let Some(equal) = scalar_equal(a, b) {
+        return equal;
+    }
     // The pair in hand is not pushed, so that comparing two values that
     // hold nothing allocates nothing.
     let mut next = Some((a.clone(), b.clone()));
     let mut pending = Vec::new();
     let mut seen = HashSet::new();
     while let Some((a, b)) = next.take().or_else(|| pending.pop()) {
+        if let Some(equal) = scalar_equal(&a, &b) {
+            if !equal {
+                return false;
+            }
+            continue;
+        }
         let kind = a.kind();
         match (&a, &b) {
-            (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => {
-                if !matches!(number_cmp(&a, &b), Ok(Some(Ordering::Equal))) {
-                    return false;
-                }
-            }
             (Value::Tuple(a), Value::Tuple(b)) => {
                 if a.len() != b.len() {
                     return false;
@@ -170,14 +208,14 @@ pub fn compare(
             Step::Member(a, b) if equal(&a, &b, heap) => continue,
             Step::Values(a, b) | Step::Member(a, b) => (a, b),
         };
-        let order = match (&a, &b) {
-            (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => {
-                number_cmp(&a, &b)?
+        if let Some(order) = scalar_compare(&a, &b) {
+            let order = order?;
+            if order != Some(Ordering::Equal) {
+                return Ok(order);
             }
-            (Value::Text(a), Value::Text(b)) => Some(a.cmp(b)),
-            (Value::Bytes(a), Value::Bytes(b)) => Some(a.cmp(b)),
-            (Value::Timestamp(a), Value::Timestamp(b)) => Some(a.cmp(b)),
-            (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
+            continue;
+        }
+        match (&a, &b) {
             (Value::Tuple(a), Value::Tuple(b)) => {
                 pending.push(Step::Length(a.len(), b.len()));
                 for (a, b) in a.iter().zip(b.iter()).rev() {
@@ -203,9 +241,6 @@ pub fn compare(
                 continue;
             }
             _ => return Err(raised("type_error", "values have no shared ordering")),
-        };
-        if order != Some(Ordering::Equal) {
-            return Ok(order);
         }
     }
     Ok(Some(Ordering::Equal))

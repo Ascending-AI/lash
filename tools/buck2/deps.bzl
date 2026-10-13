@@ -123,6 +123,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "arbitrary": "//third-party/rust:p0012",
+            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
@@ -976,7 +977,9 @@ PACKAGE_DEPS = {
             "serde_json": "//third-party/rust:p0320",
             "thiserror": "//third-party/rust:p0373"
         },
-        "dev": {},
+        "dev": {
+            "blake3": "//third-party/rust:p0032"
+        },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "serde": "//third-party/rust:p0315",

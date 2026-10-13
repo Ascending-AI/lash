@@ -1998,6 +1998,7 @@ name = "lash-dialect-typescript"
 version = "0.0.0-dev"
 dependencies = [
  "arbitrary",
+ "lash-dialect-python",
  "lash-ext-date-ecma",
  "lash-ext-regex-ecma",
  "lash-ext-url-whatwg",

@@ -4,20 +4,16 @@
 //! prepared.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_kernel_doc::{
-    self as doc, ErrorValue, Float, FunctionRegistry, Identity, Integer, NativeCall, NativeError,
-    NativeFunction, NativeHeap, ObjectId, TaskId, Timestamp, Value, parse_definition,
-    parse_document,
+    self as doc, ErrorValue, Float, Identity, Integer, ObjectId, TaskId, Timestamp, Value,
+    parse_definition,
 };
 use num_bigint::BigInt;
 
-use super::embedder::{ROOMY, World};
 use crate::compile::{Charge, Fast, Plan, Source};
 use crate::data::{deep_size, magnitude, nested_size, size};
 use crate::heap::{Heap, Obj, Table};
-use crate::{End, KernelMachine, Layout, Machine, PreparedLibrary, Program, Start, Step, Target};
 
 /// What `plan` computes for a call's values, measured as the machine
 /// measures them.
@@ -297,81 +293,24 @@ fn minimum_sum_charges_equal_the_declared_formula() {
     }
 }
 
-/// How many calls `probe.echo` answered through its general call.
-static GENERAL_CALLS: AtomicUsize = AtomicUsize::new(0);
-
-/// Returns its argument, through either path.
-struct Echo;
-
-impl NativeFunction for Echo {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        GENERAL_CALLS.fetch_add(1, Ordering::SeqCst);
-        Ok(call.args[0].clone())
-    }
-
-    fn fast(&self, args: &[Value], _heap: &dyn NativeHeap) -> Option<Value> {
-        Some(args[0].clone())
-    }
-}
-
-/// What a run of `main` that calls `probe.echo`, registered with `charge`,
-/// on `argument` is charged, in the natural layout and in one that takes
-/// every native's general call, with the general calls each made.
-fn echo_charges(charge: &str, argument: &str) -> [(u64, usize); 2] {
-    let mut registry = FunctionRegistry::new();
-    let definition = parse_definition(&format!(
-        "function probe.echo(x: Any) -> Any\nkernel 1\ncharge {charge}\nnative\n"
-    ))
-    .unwrap();
-    let echo = registry.register(definition, Some(Arc::new(Echo))).unwrap();
-    let registry = Arc::new(registry);
-    let document = Arc::new(
-        parse_document(&format!(
-            "kernel 1\nnumbers by_spelling\nuse probe.echo = @{echo}\n\
-             main {{ let x = {argument} return probe.echo(x) }}"
-        ))
-        .unwrap(),
-    );
-    [Layout(0), Layout(1)].map(|layout| {
-        let program = Program {
-            document: Arc::clone(&document),
-            library: PreparedLibrary::with_layout(Arc::clone(&registry), layout),
-        };
-        let before = GENERAL_CALLS.load(Ordering::SeqCst);
-        let start = Start {
-            target: Target::Main,
-            args: Vec::new(),
-            bindings: Default::default(),
-        };
-        let mut machine = KernelMachine::start_with_layout(program, ROOMY, start, layout).unwrap();
-        let step = machine.run(&mut World::default(), u64::MAX).unwrap();
-        assert!(matches!(step, Step::Ended(End::Finished(_))), "{step:?}");
-        (
-            machine.meters().charged,
-            GENERAL_CALLS.load(Ordering::SeqCst) - before,
-        )
-    })
-}
-
-/// `K-CHG-003`: a fast path is charged by the formula of the definition
-/// its library was prepared from. One implementation registered under two
-/// formulas is charged each one's amount, on a scalar and on a nested
-/// argument, and the general call is charged the same.
+/// K-CHG-003/004: a small integer measures one for zero and two otherwise.
+/// Preparation closes over every combination, without evaluating a plan at call time.
 #[test]
-fn a_fast_path_is_charged_by_the_formula_it_was_prepared_from() {
-    let few = "sum(1, deep(x))";
-    let more = "product(3, sum(deep(x), deep(result)))";
-    // 5 is of size 2, and the tuple of deep size 3 + 2 + 3 + 2 + 2 = 12.
-    for (argument, few_units, more_units) in [("5", 3, 12), ("(1, (2, 3))", 13, 72)] {
-        let [(few_fast, few_general_calls), (few_general, one)] = echo_charges(few, argument);
-        let [(more_fast, no_general_calls), (more_general, _)] = echo_charges(more, argument);
-        assert_eq!(
-            (few_general_calls, no_general_calls, one),
-            (0, 0, 1),
-            "the natural layout takes the fast path"
-        );
-        assert_eq!(few_fast, few_general);
-        assert_eq!(more_fast, more_general);
-        assert_eq!(more_fast - few_fast, more_units - few_units, "{argument}");
+fn small_integer_charges_are_closed_and_invariant() {
+    let heap = Heap::new(u64::MAX);
+    let definition = parse_definition("function probe.add(x: Int, y: Int) -> Int\nkernel 1\ncharge sum(1, product(sum(deep(x), deep(y)), sum(deep(x), deep(y))), deep(result))\nnative\n").unwrap();
+    let charge = Plan::new(&definition.charge, &definition.signature.params);
+    let fast = Fast::new(&definition.charge, &definition.signature.params, &charge);
+    for a in [0, 1, -1, i64::MIN, i64::MAX] {
+        for b in [0, 1, -1, i64::MIN, i64::MAX] {
+            let args = [Value::Int(Integer::from(a)), Value::Int(Integer::from(b))];
+            for r in [0, 1, -1, i64::MIN, i64::MAX] {
+                let result = Value::Int(Integer::from(r));
+                let Charge::Units(units) = fast.charge(&charge, &args, &result) else {
+                    panic!("small integers must have a closed charge");
+                };
+                assert_eq!(units, amount(&heap, &charge, &args, &result));
+            }
+        }
     }
 }

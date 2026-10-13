@@ -165,15 +165,29 @@ pub struct NativeCall<'a> {
 pub trait NativeFunction: Send + Sync {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError>;
 
-    /// The call's result when the function computes it from its arguments
-    /// and a read of the heap alone: it counts no work, reserves no room
-    /// and allocates no object. `None` when the call needs more than that,
-    /// or raises; the machine then makes [`NativeFunction::call`]. A value
-    /// it gives is the value `call` returns for the same arguments and
-    /// heap, so a machine may take either path (`K-LIB-006`).
-    fn fast(&self, _args: &[Value], _heap: &dyn NativeHeap) -> Option<Value> {
+    /// Prepares a heap-independent entry once for a library's executable.
+    /// Its admission is part of the entry: an answer must equal `call` for
+    /// the same arguments (K-LIB-006). `None` leaves errors, heap reads,
+    /// reservations and counted work to the general call. Guarded calls
+    /// always use the general call. K-LIB-011 fingerprints both entries.
+    fn prepare(&self) -> Option<PreparedNative> {
         None
     }
+}
+
+/// A native's certified, heap-independent operation and its entry.
+///
+/// The implementation owns admission and semantics; the VM only transports
+/// operands and charges the registered definition. A returned value counts
+/// no work, reserves no room and allocates no heap object. `None` delegates
+/// to the general call, including its error and refusal ordering.
+#[derive(Clone, Copy, Debug)]
+pub struct PreparedNative {
+    /// A plain entry, specialized by the implementation at preparation.
+    pub entry: fn(&[Value]) -> Option<Value>,
+    /// The operation and operand domain this entry implements. It is a
+    /// description for release certification, never a VM dispatch key.
+    pub operation: &'static str,
 }
 
 /// Where a library function's definition is looked up by identity.

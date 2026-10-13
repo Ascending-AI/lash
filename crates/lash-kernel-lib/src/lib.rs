@@ -30,7 +30,7 @@ pub(crate) fn raised(kind: &str, message: &str) -> lash_kernel_doc::NativeError 
 #[cfg(test)]
 mod corpus_tests;
 #[cfg(test)]
-mod fast_tests;
+mod prepared_tests;
 
 mod collections;
 pub use collections::{CollectionError, register_collections};
