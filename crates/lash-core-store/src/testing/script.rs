@@ -12,7 +12,8 @@
 //! in a hand-written `RuntimeStoreDecorator`.
 //!
 //! A rule that never fired fails the law when its script drops, so a law
-//! cannot pass without exercising what it armed.
+//! cannot pass without exercising what it armed. [`Script::finish`] reports
+//! the same check without panicking, for a harness that adds its own context.
 use super::gate::{GATE_DEADLINE, Gate};
 use crate::store::{MaintenanceFailure, StoreError};
 use lash_sansio::sync::MutexExt as _;
@@ -330,6 +331,7 @@ impl Shared {
 #[derive(Default)]
 pub struct Script {
     shared: Arc<Shared>,
+    finished: bool,
 }
 
 impl Script {
@@ -379,6 +381,36 @@ impl Script {
     /// Every phase of every call so far, in the order they happened.
     pub fn trace(&self) -> Vec<Call> {
         self.shared.state.lock_recover().trace.clone()
+    }
+
+    /// Finish the script and open its gates, returning the never-fired
+    /// check instead of panicking. The caller must fail its law on `Err`,
+    /// and can include the run's other evidence in that failure.
+    pub fn finish(mut self) -> Result<(), String> {
+        let result = self.unfired();
+        self.finished = true;
+        result
+    }
+
+    fn unfired(&self) -> Result<(), String> {
+        let unfired: Vec<String> = self
+            .shared
+            .state
+            .lock_recover()
+            .rules
+            .iter()
+            .filter(|rule| rule.fired == 0)
+            .map(|rule| format!("`{rule}`"))
+            .collect();
+        if unfired.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "rule {} never fired; {}",
+                unfired.join(", "),
+                self.shared.rendered_trace()
+            ))
+        }
     }
 
     /// How often `op` was called so far.
@@ -438,26 +470,19 @@ impl Drop for Script {
     /// Opens every gate, so nothing a failed law left held stays held, and
     /// fails the law when a rule it armed never fired.
     fn drop(&mut self) {
-        let unfired: Vec<String> = {
+        {
             let state = self.shared.state.lock_recover();
             for rule in &state.rules {
                 if let Action::Pause(gate) = &rule.action {
                     gate.open_all();
                 }
             }
-            state
-                .rules
-                .iter()
-                .filter(|rule| rule.fired == 0)
-                .map(|rule| format!("`{rule}`"))
-                .collect()
-        };
-        if !unfired.is_empty() && !std::thread::panicking() {
-            panic!(
-                "rule {} never fired; {}",
-                unfired.join(", "),
-                self.shared.rendered_trace()
-            );
+        }
+        if !self.finished
+            && !std::thread::panicking()
+            && let Err(error) = self.unfired()
+        {
+            panic!("{error}");
         }
     }
 }

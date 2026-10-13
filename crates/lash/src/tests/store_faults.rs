@@ -847,7 +847,49 @@ mod sweep {
         applications: Vec<String>,
         inputs: Vec<String>,
         trace: Vec<Call>,
-        parked: bool,
+        settled: bool,
+        finish_serving: std::result::Result<(), String>,
+        actor: Option<lash_core::durable_port::ActorSnapshot>,
+        node_stop: Option<
+            std::result::Result<
+                lash_core::durable_port::runner::Stopped,
+                lash_core::durable_port::DurableError,
+            >,
+        >,
+        serving_shutdown: std::result::Result<(), String>,
+        accepting_shutdown: std::result::Result<(), String>,
+        script: std::result::Result<(), String>,
+    }
+
+    /// FIG-6112: teardown must report an unfired cell without losing the
+    /// answer and the failure that prevented the fault from completing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn an_unfired_cell_retains_its_run_evidence() {
+        let cell = Cell {
+            op: Op::listed("unreachable-sweep-operation"),
+            kind: Kind::Transient,
+        };
+        let run = run(Storage::Memory, Scenario::Open, Some(cell)).await;
+        assert!(matches!(run.answer, Ok(Answer::Success(_))), "{run:?}");
+        let reason = verdict(Scenario::Open, cell, &run, &run)
+            .expect_err("an unfired rule fails even when the answer matched");
+        assert!(reason.contains("never fired"), "{reason}");
+        let evidence = failure(cell, &reason, &run, &run);
+        for required in [
+            "never fired",
+            "did not finish before teardown",
+            "failed_activations",
+            "owner",
+            "park",
+            "node_stop",
+            "settled = true",
+            "answer = Ok(Success",
+        ] {
+            assert!(
+                evidence.contains(required),
+                "missing {required}: {evidence}"
+            );
+        }
     }
 
     async fn start_child(core: &LashCore) -> Result<lash_core::ProcessId> {
@@ -1020,16 +1062,10 @@ mod sweep {
         // Finish the session's background work before inspecting the
         // durable result. A sticky fault that wedges the actor is
         // evidence, not a hung law.
-        let mut answer = answer;
-        if !settled(&serving, ID).await {
-            answer = Err("the session actor did not settle".into());
-        }
-        if let Err(error) = finish_serving(&serving, &script, cell, start).await {
-            answer = Err(error);
-        }
-        let parked = session_actor(&serving, ID).await.is_some_and(|actor| {
-            matches!(actor.state, lash_core::durable_port::ActorState::Parked)
-        });
+        let settled = settled(&serving, ID).await;
+        let finish_serving = finish_serving(&serving, &script, cell, start).await;
+        // Retain the durable row before shutdown releases its owner.
+        let actor = session_actor(&serving, ID).await;
         let trace = script.trace()[start..].to_vec();
         // The oracle reads through the underlying store so sticky faults do
         // not hide the committed evidence they are meant to test.
@@ -1073,16 +1109,31 @@ mod sweep {
             .collect::<Vec<_>>();
         applications.sort();
         inputs.sort();
-        let _ = serving.shutdown().await;
-        let _ = accepting.shutdown().await;
-        drop(script); // An unfired rule fails this cell even if its answer matched.
+        let serving_shutdown = serving
+            .shutdown()
+            .await
+            .map_err(|error| format!("{error:?}"));
+        let node_stop = serving.node_stopped().await;
+        let accepting_shutdown = accepting
+            .shutdown()
+            .await
+            .map_err(|error| format!("{error:?}"));
+        // The verdict remains strict, but an unfired rule cannot panic before
+        // the run's answer, teardown errors and durable row reach its formatter.
+        let script = script.finish();
         Run {
             answer,
             transcript,
             applications,
             inputs,
             trace,
-            parked,
+            settled,
+            finish_serving,
+            actor,
+            node_stop,
+            serving_shutdown,
+            accepting_shutdown,
+            script,
         }
     }
 
@@ -1092,7 +1143,16 @@ mod sweep {
         clean: &Run,
         run: &Run,
     ) -> std::result::Result<(), String> {
-        if run.parked {
+        run.script.as_ref().map_err(Clone::clone)?;
+        if !run.settled {
+            return Err("the session actor did not settle".into());
+        }
+        run.finish_serving.as_ref().map_err(Clone::clone)?;
+        if run
+            .actor
+            .as_ref()
+            .is_some_and(|actor| matches!(actor.state, lash_core::durable_port::ActorState::Parked))
+        {
             return Err("the session actor is parked for an operator".into());
         }
         let answer = run.answer.as_ref().map_err(Clone::clone)?;
@@ -1143,10 +1203,39 @@ mod sweep {
         Ok(())
     }
 
+    fn failure(cell: Cell, reason: &str, clean: &Run, run: &Run) -> String {
+        let trace = run
+            .trace
+            .iter()
+            .map(Call::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "cell = {cell}: {reason}\nanswer = {:?}\nsettled = {:?}\nfinish_serving = {:?}\nnode_stop = {:?}\nactor before stop = {:?}\nserving shutdown = {:?}\naccepting shutdown = {:?}\nscript = {:?}\npass 0 = {:?}\ntranscript = {:?}\npass 0 transcript = {:?}\napplications = {:?}\npass 0 applications = {:?}\ninputs = {:?}\ntrace:\n{trace}",
+            run.answer,
+            run.settled,
+            run.finish_serving,
+            run.node_stop,
+            run.actor,
+            run.serving_shutdown,
+            run.accepting_shutdown,
+            run.script,
+            clean.answer,
+            run.transcript,
+            clean.transcript,
+            run.applications,
+            clean.applications,
+            run.inputs
+        )
+    }
+
     async fn sweep(storage: Storage, scenario: Scenario, kinds: &[Kind]) {
         let clean = run(storage, scenario, None).await;
         assert!(
-            matches!(clean.answer, Ok(Answer::Success(_))),
+            matches!(clean.answer, Ok(Answer::Success(_)))
+                && clean.settled
+                && clean.finish_serving.is_ok()
+                && clean.script.is_ok(),
             "clean run: {clean:?}"
         );
         let keys = if matches!(scenario, Scenario::Admission) {
@@ -1227,22 +1316,7 @@ mod sweep {
                 match result {
                     Ok(run) => {
                         if let Err(reason) = verdict(scenario, cell, &clean, &run) {
-                            let trace = run
-                                .trace
-                                .iter()
-                                .map(Call::to_string)
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            failures.push(format!(
-                                "cell = {cell}: {reason}\nanswer = {:?}\npass 0 = {:?}\ntranscript = {:?}\npass 0 transcript = {:?}\napplications = {:?}\npass 0 applications = {:?}\ninputs = {:?}\ntrace:\n{trace}",
-                                run.answer,
-                                clean.answer,
-                                run.transcript,
-                                clean.transcript,
-                                run.applications,
-                                clean.applications,
-                                run.inputs
-                            ));
+                            failures.push(failure(cell, &reason, &clean, &run));
                         }
                     }
                     Err(panic) => {
