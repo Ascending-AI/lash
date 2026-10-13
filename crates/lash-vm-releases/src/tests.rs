@@ -505,6 +505,65 @@ fn a_missing_native_or_helper_refuses_resume() {
 #[path = "build/probe.rs"]
 mod probe;
 
+/// FIG-6180, K-LIB-006/011: an equivalent prepared entry is the same
+/// native behavior, so installing it must not replace a pinned manifest.
+#[test]
+fn an_equivalent_prepared_entry_keeps_the_native_fingerprint() {
+    use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, PreparedNative, Value};
+    struct Native(Option<PreparedNative>, u64);
+    impl NativeFunction for Native {
+        fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+            call.counter.spend(self.1)?;
+            match call.args[0] {
+                Value::Bool(value) => Ok(Value::Bool(!value)),
+                _ => unreachable!("the probe supplies the declared Bool"),
+            }
+        }
+        fn prepare(&self) -> Option<PreparedNative> {
+            self.0
+        }
+    }
+    let registry = |prepared, counted_work| {
+        let mut registry = lash_kernel_doc::FunctionRegistry::new();
+        let definition = lash_kernel_doc::parse_definition(
+            "function probe(value: Bool) -> Bool\nkernel 1\ncharge 1\nnative\n",
+        )
+        .unwrap();
+        registry
+            .register(
+                definition,
+                Some(std::sync::Arc::new(Native(prepared, counted_work))),
+            )
+            .unwrap();
+        registry
+    };
+    for counted_work in [0, 1] {
+        let general = probe::fingerprints(&registry(None, counted_work));
+        for operation in ["negate / Bool", "equivalent renamed operation"] {
+            let entries = [
+                PreparedNative {
+                    operation,
+                    entry: |args| match args[0] {
+                        Value::Bool(value) => Some(Value::Bool(!value)),
+                        _ => None,
+                    },
+                },
+                PreparedNative {
+                    operation,
+                    entry: |_| None,
+                },
+            ];
+            for prepared in entries {
+                assert_eq!(
+                    general,
+                    probe::fingerprints(&registry(Some(prepared), counted_work)),
+                    "an equivalent answer or delegation keeps the pinned behavior"
+                );
+            }
+        }
+    }
+}
+
 /// K-LIB-011: changing only the prepared answer changes the release digest.
 #[test]
 fn native_fingerprint_covers_the_prepared_entry() {

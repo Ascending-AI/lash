@@ -11,6 +11,12 @@
 //! (`K-LIB-006`), so the digest changes only when its code does, for an
 //! argument the probe tries.
 //!
+//! A prepared entry is another path to that same answer. Probe both paths,
+//! but only add its observation when it differs from the general call:
+//! installing an equivalent entry or delegating to the general call cannot
+//! change a pinned release's identity (FIG-6180). A changed answer or panic
+//! still changes the digest (`K-LIB-011`); operation labels are not behavior.
+//!
 //! The build script includes this file (`build.rs`): it fingerprints the
 //! registry the worker ships and compares the digests with the ones each
 //! released helper set recorded.
@@ -60,9 +66,6 @@ fn fingerprint(
     let mut hasher = blake3::Hasher::new();
     hasher.update(function.as_bytes());
     let prepared = native.prepare();
-    if let Some(prepared) = prepared {
-        hasher.update(prepared.operation.as_bytes());
-    }
     let params = &registered.definition.signature.params;
     let mut heap = ProbeHeap::default();
     let choices: Vec<Vec<Value>> = params
@@ -102,18 +105,29 @@ fn fingerprint(
             Ok(Err(NativeError::Memory)) => line.push_str("memory"),
             Err(_) => line.push_str("panicked"),
         }
+        let general_answer = line.clone();
         let _ = writeln!(line, " spent {}", counter.spent());
         hasher.update(line.as_bytes());
         if let Some(prepared) = prepared {
             let answer =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (prepared.entry)(&args)));
-            let mut line = String::from("prepared ");
+            let mut prepared_line = String::new();
             match answer {
-                Ok(Some(value)) => heap.write(&value, DEPTH + 4, &mut line),
-                Ok(None) => line.push_str("general"),
-                Err(_) => line.push_str("panicked"),
+                Ok(Some(value)) => {
+                    prepared_line.push_str("ok ");
+                    heap.write(&value, DEPTH + 4, &mut prepared_line);
+                }
+                Ok(None) => continue,
+                Err(_) => prepared_line.push_str("panicked"),
             }
-            hasher.update(line.as_bytes());
+            // Guarded calls always take the general entry, whose counted
+            // work remains in the digest above. A prepared entry has no
+            // counter, so compare its answer rather than inventing a zero
+            // guard count (notably for key.identity).
+            if prepared_line != general_answer {
+                hasher.update(b"prepared ");
+                hasher.update(prepared_line.as_bytes());
+            }
         }
     }
     hasher.finalize().to_hex().to_string()
