@@ -444,6 +444,32 @@ impl ProcessActivation {
             .cancel_request
             .as_deref()
             .map(|request| request.origin);
+        // Check the claim before either an engine or a child-turn service
+        // runs (FIG-6129). A pending stop goes first, including at the
+        // budget: it ends from registry state without entering failing code.
+        let at_budget = live.first_pass
+            && activation_loop::reached(
+                live.failed_activations,
+                self.backend.config().settings().activation_loop_budget,
+            );
+        if let Some(origin) = cancel
+            && (live.park.is_some() || row.state_rev == 0 || at_budget)
+        {
+            return self.end_engine_free(owned, tx, process, live, origin).await;
+        }
+        if live.park.is_some() {
+            // Woken without a cancel or a redrive: stay parked.
+            tx.ack_seen().give_up(Release::Parked);
+            owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+            return Ok(Pass::Released);
+        }
+        if at_budget {
+            let reason = ProcessParkReason::ActivationLoop {
+                failed_activations: live.failed_activations,
+            };
+            return self.park(owned, tx, &reason).await;
+        }
+        live.first_pass = false;
         let ProcessInput::Engine { kind, payload, .. } = record.input.as_ref() else {
             // A kernel process (a child session turn) has no engine to
             // advance: its turn is its child session's mail.
@@ -464,28 +490,10 @@ impl ProcessActivation {
         // process with its typed reason, and a cancel ends it unread.
         let driver = Driver::decode(row.driver_json.as_deref());
         if let Some(origin) = cancel
-            && (live.park.is_some() || loaded.is_err() || driver.is_err() || row.state_rev == 0)
+            && (loaded.is_err() || driver.is_err())
         {
             return self.end_engine_free(owned, tx, process, live, origin).await;
         }
-        if live.park.is_some() {
-            // Woken without a cancel or a redrive: stay parked.
-            tx.ack_seen().give_up(Release::Parked);
-            owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-            return Ok(Pass::Released);
-        }
-        if live.first_pass
-            && activation_loop::reached(
-                live.failed_activations,
-                self.backend.config().settings().activation_loop_budget,
-            )
-        {
-            let reason = ProcessParkReason::ActivationLoop {
-                failed_activations: live.failed_activations,
-            };
-            return self.park(owned, tx, &reason).await;
-        }
-        live.first_pass = false;
         let (Some(engine), Ok((state, root))) = (engine, loaded) else {
             let reason = match self.backend.process_engine(kind) {
                 None => ProcessParkReason::UnknownEngine { kind: kind.clone() },

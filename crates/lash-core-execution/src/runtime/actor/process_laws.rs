@@ -68,7 +68,10 @@ pub use engine_keys::{
     a_pinned_engine_key_is_listed_from_its_wait_after_a_restart_and_a_handover,
     an_awaited_engine_key_records_a_waiting_fact,
 };
-pub use panicking::a_panicking_activation_parks_at_its_budget_and_progress_resets_the_count;
+pub use panicking::{
+    a_panicking_activation_parks_at_its_budget_and_progress_resets_the_count,
+    a_panicking_session_turn_process_parks_at_its_budget_and_resumes_or_cancels,
+};
 pub use parked_calls::a_parked_call_is_reopened_from_its_completion_wait_after_a_restart_and_a_handover;
 
 /// The kind every law process runs.
@@ -719,14 +722,27 @@ fn serve_over(
     claimed: Vec<lash_durable::FormatSet>,
     store: Arc<dyn lash_durable::DurableStore>,
 ) -> Serving {
+    serve_activation(
+        backend,
+        node,
+        claimed,
+        store,
+        ProcessActivation::new(backend.clone(), Arc::new(LawSteps), Arc::new(NoProbe)),
+    )
+}
+
+/// Serve a law's process activation with the production runner.
+fn serve_activation(
+    backend: &Backend,
+    node: &str,
+    claimed: Vec<lash_durable::FormatSet>,
+    store: Arc<dyn lash_durable::DurableStore>,
+    activation: ProcessActivation,
+) -> Serving {
     let mut decodes = backend.formats().decodes();
     decodes.extend(claimed);
     let config = RunnerConfig::new(NodeId::new(node), decodes, backend.config());
-    let activation = Arc::new(ProcessActivation::new(
-        backend.clone(),
-        Arc::new(LawSteps),
-        Arc::new(NoProbe),
-    ));
+    let activation = Arc::new(activation);
     let runner =
         Runner::new(store, backend.clock(), config, activation).with_hints(backend.hints().clone());
     let stop = CancellationToken::new();

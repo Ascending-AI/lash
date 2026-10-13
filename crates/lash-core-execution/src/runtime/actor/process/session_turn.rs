@@ -151,12 +151,6 @@ impl ProcessActivation {
                 if let Some(origin) = cancel {
                     return self.end_engine_free(owned, tx, process, live, origin).await;
                 }
-                if live.park.is_some() {
-                    // Woken without a cancel or a redrive: stay parked.
-                    tx.ack_seen().give_up(Release::Parked);
-                    owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-                    return Ok(Pass::Released);
-                }
                 let reason = ProcessParkReason::UndecodableDriver {
                     message: error.to_string(),
                 };
