@@ -895,6 +895,20 @@ pub struct PluginRecipe {
     bind: SessionOwnerBinder,
 }
 impl PluginRecipe {
+    /// Count executable callbacks supplied by this recipe's binders.
+    /// Metadata and the admission/execution path stay the recipe's own.
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn counted(mut self, counts: crate::testing::CallbackCounts) -> Self {
+        let bind = self.bind;
+        self.bind = Arc::new(move |context, state, reg| {
+            let owner = bind(context, state, reg)?;
+            counts.wrap(&mut reg.contributions);
+            Ok(owner)
+        });
+        self
+    }
+
     pub(crate) fn owner(&self) -> &str {
         &self.owner
     }
@@ -1040,11 +1054,24 @@ impl PluginRecipe {
             },
         )
     }
-    pub(crate) fn from_spec(id: &'static str, registrations: PluginRegistrar<()>) -> Self {
-        struct Instance(&'static str);
-        impl SessionPlugin for Instance {
+    /// Bind plain session data to prompt, state, tool and config entries
+    /// without a marker `SessionPlugin` implementation. Use `new` when the
+    /// owner supplies its own readiness callback.
+    pub fn bound<T: Send + Sync + 'static>(
+        id: &'static str,
+        registrations: PluginRegistrar<T>,
+        binder: impl Fn(&PluginSessionContext, &PluginStateView) -> Result<Arc<T>, PluginError>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        struct Instance<T> {
+            id: &'static str,
+            _owner: Arc<T>,
+        }
+        impl<T: Send + Sync> SessionPlugin for Instance<T> {
             fn id(&self) -> &'static str {
-                self.0
+                self.id
             }
         }
         Self {
@@ -1054,11 +1081,16 @@ impl PluginRecipe {
             engines: Vec::new(),
             entries: registrations.descriptors(id, RegistryKind::Session),
             requirements: registrations.requirements.clone(),
-            bind: Arc::new(move |_, state, reg| {
-                registrations.bind(&(), state, reg)?;
-                Ok(Arc::new(Instance(id)))
+            bind: Arc::new(move |context, state, reg| {
+                let owner = binder(context, state)?;
+                registrations.bind(owner.as_ref(), state, reg)?;
+                Ok(Arc::new(Instance { id, _owner: owner }))
             }),
         }
+    }
+    /// A joined registrar whose callbacks need no session-local owner data.
+    pub fn from_registrar(id: &'static str, registrations: PluginRegistrar<()>) -> Self {
+        Self::bound(id, registrations, |_, _| Ok(Arc::new(())))
     }
     pub(crate) fn bind(
         &self,

@@ -15,7 +15,7 @@ fn standard(config: StandardProtocolConfig) -> lash_core::plugin::PluginRecipe {
         config,
         termination: lash_core::TerminationMode::Natural,
     });
-    lash_core::plugin::PluginRecipe::new(STANDARD_PROTOCOL_PLUGIN_ID, reg, move |_, _| {
+    lash_core::plugin::PluginRecipe::bound(STANDARD_PROTOCOL_PLUGIN_ID, reg, move |_, _| {
         Ok(Arc::clone(&owner))
     })
 }

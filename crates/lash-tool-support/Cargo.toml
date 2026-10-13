@@ -27,3 +27,7 @@ lash-core = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+lash = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

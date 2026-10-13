@@ -383,14 +383,6 @@
     "peak_bytes": 30740480,
     "samples": 5
   },
-  "//crates/lash-protocol-standard:test_batch": {
-    "cpu_count": 2,
-    "memory_kb": 786432,
-    "p95_cores": 1.32,
-    "p99_peak_bytes": 551985152,
-    "peak_bytes": 604434432,
-    "samples": 175
-  },
   "//crates/lash-provider-anthropic:charge_safety__test": {
     "cpu_count": 1,
     "memory_kb": 1048576,

@@ -32,6 +32,7 @@ serde_json = { workspace = true }
 default = []
 
 [dev-dependencies]
+lash = { workspace = true, features = ["testing"] }
 # The recording backend a storage-only test builds over a bare store set
 # (D1 F3).
 lash-conformance = { workspace = true }

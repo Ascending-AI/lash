@@ -82,3 +82,6 @@ pub fn object_schema(properties: serde_json::Value, required: &[&str]) -> serde_
         "additionalProperties": false,
     })
 }
+
+#[cfg(test)]
+mod certification;

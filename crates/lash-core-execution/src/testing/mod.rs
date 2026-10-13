@@ -1697,3 +1697,6 @@ mod process_services;
 
 #[cfg(test)]
 pub(crate) use test_protocol_fakes::register_inventory_protocol;
+
+mod callback_counts;
+pub use callback_counts::CallbackCounts;

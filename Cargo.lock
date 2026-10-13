@@ -2365,6 +2365,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-tool-support",
  "lash-internal-vm-runtime",
+ "lash-runtime",
  "libc",
  "rmcp",
  "serde",
@@ -2385,6 +2386,7 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-sansio",
  "lash-internal-tool-support",
+ "lash-runtime",
  "serde_json",
  "tokio",
 ]
@@ -2396,6 +2398,7 @@ dependencies = [
  "async-trait",
  "lash-internal-core",
  "lash-internal-sansio",
+ "lash-runtime",
  "serde",
  "serde_json",
  "tokio",
@@ -2495,6 +2498,7 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-tool-support",
+ "lash-runtime",
  "mutants",
  "serde",
  "serde_json",
@@ -2646,8 +2650,10 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "lash-internal-core",
+ "lash-runtime",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

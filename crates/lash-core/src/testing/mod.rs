@@ -19,8 +19,8 @@
 // serves its own store-backed tests and is not re-exported here.
 pub use lash_core_execution::testing::kernel_internals::prompt_catalog_from_recipes;
 pub use lash_core_execution::testing::{
-    Call, DeploymentOp, FaultKind, GATE_DEADLINE, Gate, Op, Outcome, Phase, Script, Scripted,
-    ScriptedError, StoreOp,
+    Call, CallbackCounts, DeploymentOp, FaultKind, GATE_DEADLINE, Gate, Op, Outcome, Phase, Script,
+    Scripted, ScriptedError, StoreOp,
 };
 pub use lash_core_execution::testing::{
     DurableCommitHook, EmptyToolProvider, FIXTURE_ECHO_TOOL, FixtureProcessEngine, FixtureTools,

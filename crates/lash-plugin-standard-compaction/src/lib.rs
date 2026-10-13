@@ -37,8 +37,7 @@ use lash_core::facade_support::ModelToolReturnPart;
 use lash_core::plugin::{
     AttachmentOmissionContext, AttachmentOmissionPolicy, CompactionContext, ContextCompaction,
     ContextCompactor, ContextError, ContextPressureContext, ContextPressureDecision,
-    ContextPressureHook, HistoryPartId, PluginError, PluginFactory, SessionPlugin,
-    omit_part_attachments,
+    ContextPressureHook, HistoryPartId, PluginError, PluginFactory, omit_part_attachments,
 };
 use lash_core::{LlmUsage, Message, MessageOrigin, MessageRole, Part, PartKind, SessionSnapshot};
 
@@ -768,7 +767,7 @@ impl PluginFactory for StandardCompactionPluginFactory {
         );
         StandardCompactionPlugin::declare(&mut reg)?;
         let id = lash_core::plugin::PluginFactory::id(self.as_ref());
-        Ok(lash_core::plugin::PluginRecipe::new(
+        Ok(lash_core::plugin::PluginRecipe::bound(
             id,
             reg,
             move |_ctx, _state| {
@@ -800,11 +799,6 @@ struct StandardCompactionPlugin {
     config: StandardCompactionConfig,
 }
 
-impl SessionPlugin for StandardCompactionPlugin {
-    fn id(&self) -> &'static str {
-        STANDARD_COMPACTION_PLUGIN_ID
-    }
-}
 impl StandardCompactionPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,

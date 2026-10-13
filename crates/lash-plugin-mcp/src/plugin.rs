@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lash_core::plugin::{PluginError, PluginFactory, SessionPlugin};
+use lash_core::plugin::{PluginError, PluginFactory};
 use lash_core::{ToolCall, ToolContract, ToolId, ToolManifest, ToolOutcome, ToolProvider};
 
 use crate::config::McpServerConfig;
@@ -162,7 +162,7 @@ impl PluginFactory for McpPluginFactory {
             );
             McpSessionPlugin::declare(&mut reg)?;
             let id = lash_core::plugin::PluginFactory::id(self.as_ref());
-            Ok(lash_core::plugin::PluginRecipe::new(
+            Ok(lash_core::plugin::PluginRecipe::bound(
                 id,
                 reg,
                 move |_ctx, _state| {
@@ -213,11 +213,6 @@ struct McpSessionPlugin {
     pool: Arc<McpConnectionPool>,
 }
 
-impl SessionPlugin for McpSessionPlugin {
-    fn id(&self) -> &'static str {
-        "mcp"
-    }
-}
 impl McpSessionPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
@@ -621,5 +616,29 @@ mod tests {
             assert_eq!(error.source, lash_core::ToolFailureSource::Plugin);
             assert_eq!(error.raw.as_ref().unwrap().to_json_value()["kind"], kind);
         }
+    }
+}
+
+#[cfg(test)]
+mod certification {
+    use super::*;
+    /// FIG-6093: no server fixture means explicit partial certification.
+    #[tokio::test]
+    async fn mcp_passes_certification_with_explicit_unavailable_server_scenarios() {
+        let report = lash::testing::certify_plugin(Arc::new(McpPluginFactory::empty()))
+            .await
+            .unwrap();
+        let failures: Vec<_> = report.failures().map(ToString::to_string).collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        assert_eq!(
+            report.verdict(),
+            lash::testing::PluginCertificationVerdict::Partial
+        );
+        assert!(report.reports.iter().any(|report| matches!(
+            report.result,
+            lash::testing::PluginLawResult::Unavailable {
+                reason: lash::testing::CertificationUnavailable::NoScenario
+            }
+        )));
     }
 }

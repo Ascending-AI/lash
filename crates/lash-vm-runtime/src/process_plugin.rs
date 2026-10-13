@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_core::plugin::{PluginError, PluginFactory, SessionPlugin};
+use lash_core::plugin::{PluginError, PluginFactory};
 use lash_vm_client::{RunBounds, service::Service};
 
 /// Registers the kernel process engine and its workflow document provider.
@@ -61,28 +61,14 @@ impl PluginFactory for KernelProcessPluginFactory {
     fn recipe(
         self: Arc<Self>,
     ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
-        let recipe_factory = Arc::clone(&self);
-        let recipe: std::result::Result<
-            lash_core::plugin::PluginRecipe,
-            lash_core::plugin::PluginError,
-        > = {
-            let mut reg = lash_core::plugin::PluginRegistrar::<KernelProcessPlugin>::new(
-                lash_core::plugin::PluginFactory::id(self.as_ref()),
-            );
-            KernelProcessPlugin::declare(&mut reg)?;
-            let id = lash_core::plugin::PluginFactory::id(self.as_ref());
-            Ok(lash_core::plugin::PluginRecipe::new(
-                id,
-                reg,
-                move |_ctx, _state| Ok(Arc::new(KernelProcessPlugin)),
-            ))
-        };
-        let mut recipe = recipe?;
-        let engine_factory = Arc::clone(&recipe_factory);
-        recipe = recipe.with_process_engine(crate::LASH_VM_ENGINE_KIND, move |context| {
-            engine_factory.bind_process_engine(context)
-        });
-        Ok(recipe)
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::from_registrar(
+            id,
+            lash_core::plugin::PluginRegistrar::new(id),
+        )
+        .with_process_engine(crate::LASH_VM_ENGINE_KIND, move |context| {
+            self.bind_process_engine(context)
+        }))
     }
 }
 impl KernelProcessPluginFactory {
@@ -143,20 +129,5 @@ impl KernelProcessPluginFactory {
 impl lash_core::plugin::PluginMetadata for KernelProcessPluginFactory {
     fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
         Self::declaration()
-    }
-}
-
-struct KernelProcessPlugin;
-
-impl SessionPlugin for KernelProcessPlugin {
-    fn id(&self) -> &'static str {
-        "lash-kernel"
-    }
-}
-impl KernelProcessPlugin {
-    fn declare(
-        _reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
-        Ok(())
     }
 }

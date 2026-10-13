@@ -26,7 +26,7 @@ use lash_core::llm::types::{ProviderReasoningReplay, ProviderReplayMeta, Respons
 use lash_core::plugin::{
     CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar, ConfigRegistrationError,
     OwnerChange, PluginError, PluginFactory, ProtocolDriverPlugin, ProtocolSessionContext,
-    ProtocolSessionPlugin, SessionPlugin,
+    ProtocolSessionPlugin,
 };
 use lash_core::sansio::{
     CheckpointResumeAction, CompletedToolCall, PendingToolCall, PendingWork, ProtocolDriverHandle,
@@ -529,7 +529,7 @@ impl PluginFactory for StandardProtocolPluginFactory {
             );
             StandardProtocolPlugin::declare(&mut reg)?;
             let id = lash_core::plugin::PluginFactory::id(self.as_ref());
-            Ok(lash_core::plugin::PluginRecipe::new(
+            Ok(lash_core::plugin::PluginRecipe::bound(
                 id,
                 reg,
                 move |ctx, _state| {
@@ -628,11 +628,6 @@ struct StandardProtocolPlugin {
     termination: lash_core::TerminationMode,
 }
 
-impl SessionPlugin for StandardProtocolPlugin {
-    fn id(&self) -> &'static str {
-        STANDARD_PROTOCOL_PLUGIN_ID
-    }
-}
 impl StandardProtocolPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
@@ -1532,3 +1527,6 @@ mod retention_failure_tests;
 
 #[cfg(test)]
 mod prompt_tests;
+
+#[cfg(test)]
+mod certification;

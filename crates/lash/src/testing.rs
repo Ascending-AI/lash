@@ -363,3 +363,6 @@ impl ArtifactCleanupFence {
 }
 
 pub use lash_core::testing::prompt_catalog_from_recipes;
+
+mod plugin_harness;
+pub use plugin_harness::*;

@@ -63,7 +63,7 @@ impl SessionProcessAdminPluginFactory {
     /// Process controls whose starts take `lifetime`, for example
     /// [`lash_core::lifetime::session_or_starter`], and the environment
     /// `environment` states, for example
-    /// [`lash_core::env_policy::policy::from_run`].
+    /// [`lash_core::runtime::env_policy::policy::from_run`].
     pub fn new(
         lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
         environment: Arc<dyn lash_core::ProcessEnvPolicy>,
@@ -669,5 +669,66 @@ mod tests {
         let minted = lash_core::process_id_for_test("minted");
         let named = serde_json::json!({ "process_id": minted.as_str() });
         assert_eq!(cancel_target(&named), Ok(minted));
+    }
+}
+
+#[cfg(test)]
+mod certification {
+    use super::*;
+    struct List;
+    #[lash::async_trait]
+    impl lash::testing::PluginScenario for List {
+        fn callback(&self) -> lash::plugins::PluginCallbackIdentity {
+            SESSION_PROCESS_CONTROLS_PROVIDER.callback_identity()
+        }
+        async fn prepare(
+            &self,
+            harness: &mut lash::testing::PluginHarness,
+        ) -> Result<(), lash::testing::PluginHarnessError> {
+            harness
+                .create(lash::plugins::PluginOptions::default())
+                .await
+        }
+        fn input(&self) -> lash::TurnInput {
+            lash::TurnInput::text("list processes")
+        }
+        fn responses(&self) -> Vec<lash::provider::LlmResponse> {
+            vec![
+                lash::provider::LlmResponse {
+                    parts: vec![lash::direct::LlmOutputPart::ToolCall {
+                        call_id: "list".into(),
+                        tool_name: "list_process_handles".into(),
+                        input_json: "{}".into(),
+                        replay: None,
+                    }],
+                    ..Default::default()
+                },
+                lash::testing::text_response("done"),
+            ]
+        }
+        fn pause_after_responses(&self) -> usize {
+            1
+        }
+    }
+    /// FIG-6093: an executable process control retains its binding on reopen.
+    #[tokio::test]
+    async fn process_controls_pass_certification() {
+        let factory = SessionProcessAdminPluginFactory::new(
+            lash_core::lifetime::session_or_starter,
+            lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
+        );
+        let scenario: Arc<dyn lash::testing::PluginScenario> = Arc::new(List);
+        let report = lash::testing::certify_plugin_with(
+            Arc::new(factory),
+            lash::testing::HostPolicy::standard(),
+            &[scenario],
+        )
+        .await
+        .unwrap();
+        let failures: Vec<_> = report.failures().map(ToString::to_string).collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        assert!(report.reports.iter().any(|report| report.law
+            == lash::testing::PluginLaw::ReplayInvokesNoRecordedCallback
+            && report.result == lash::testing::PluginLawResult::Passed));
     }
 }

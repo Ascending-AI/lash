@@ -507,6 +507,7 @@ PACKAGE_DEPS = {
     "lash-internal-plugin-mcp": {
         "build": {},
         "dev": {
+            "lash": "//crates/lash:lash",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "tempfile": "//third-party/rust:p0370",
@@ -538,6 +539,7 @@ PACKAGE_DEPS = {
     "lash-internal-plugin-process-controls": {
         "build": {},
         "dev": {
+            "lash": "//crates/lash:lash",
             "lash_core": "//crates/lash-core:lash-core",
             "tokio": "//third-party/rust:p0379"
         },
@@ -552,6 +554,7 @@ PACKAGE_DEPS = {
     "lash-internal-plugin-standard-compaction": {
         "build": {},
         "dev": {
+            "lash": "//crates/lash:lash",
             "lash_core": "//crates/lash-core:lash-core",
             "tokio": "//third-party/rust:p0379"
         },
@@ -660,6 +663,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "insta": "//third-party/rust:p0170",
+            "lash": "//crates/lash:lash",
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
@@ -840,7 +844,10 @@ PACKAGE_DEPS = {
     },
     "lash-internal-tool-support": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "lash": "//crates/lash:lash",
+            "tokio": "//third-party/rust:p0379"
+        },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
             "lash_core": "//crates/lash-core:lash-core",

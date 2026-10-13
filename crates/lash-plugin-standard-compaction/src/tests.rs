@@ -1236,3 +1236,68 @@ async fn pressure_retains_the_latest_physical_turn_with_its_tool_pair() {
         "{prefix}"
     );
 }
+
+struct PressureScenario;
+#[lash::async_trait]
+impl lash::testing::PluginScenario for PressureScenario {
+    fn callback(&self) -> lash::plugins::PluginCallbackIdentity {
+        lash::plugins::PluginCallbackIdentity {
+            owner: STANDARD_COMPACTION_PLUGIN_ID.into(),
+            key: "context_pressure:standard_compaction.context_pressure".into(),
+        }
+    }
+    async fn prepare(
+        &self,
+        harness: &mut lash::testing::PluginHarness,
+    ) -> Result<(), lash::testing::PluginHarnessError> {
+        harness
+            .create(lash::plugins::PluginOptions::default())
+            .await?;
+        let mut response = lash::testing::text_response("a completed history to summarize");
+        response.usage.input_tokens = 190_000;
+        harness.script([response]);
+        harness
+            .send(lash::TurnInput::text("seed pressure history"))
+            .await?
+            .output()
+            .await?;
+        Ok(())
+    }
+    fn input(&self) -> lash::TurnInput {
+        lash::TurnInput::text("continue under pressure")
+    }
+    fn responses(&self) -> Vec<lash::provider::LlmResponse> {
+        vec![
+            lash::testing::text_response("compaction summary"),
+            lash::testing::text_response("done"),
+        ]
+    }
+    fn pause_after_responses(&self) -> usize {
+        1
+    }
+}
+/// FIG-6093: pressure gets a synthetic completed history on durable SQLite.
+/// Non-recorded pressure replay and unavailable branches remain partial evidence.
+#[tokio::test]
+async fn standard_compaction_passes_certification() {
+    let mut config = StandardCompactionConfig::standard();
+    config.keep_recent_tokens = 0;
+    let scenario: Arc<dyn lash::testing::PluginScenario> = Arc::new(PressureScenario);
+    let report = lash::testing::certify_plugin_with(
+        Arc::new(StandardCompactionPluginFactory::new(config)),
+        lash::testing::HostPolicy::standard(),
+        &[scenario],
+    )
+    .await
+    .unwrap();
+    let failures: Vec<_> = report.failures().map(ToString::to_string).collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(
+        report.verdict(),
+        lash::testing::PluginCertificationVerdict::Partial
+    );
+    assert!(report.reports.iter().any(
+        |report| report.callback.key.starts_with("context_pressure:")
+            && report.result == lash::testing::PluginLawResult::Passed
+    ));
+}

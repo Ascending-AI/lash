@@ -53,8 +53,12 @@ lash_rust_unit_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-protocol-standard", "lash_protocol_standard", "//crates/lash-protocol-standard:lash-protocol-standard__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-protocol-standard",
     package_name = "lash-internal-protocol-standard",
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -71,6 +75,10 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-protocol-standard", "embedded_builder", "//crates/lash-protocol-standard:embedded_builder__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-protocol-standard",
     library_crate_name = "lash_protocol_standard",
     manifest_dir = "crates/lash-protocol-standard",
@@ -92,6 +100,10 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-protocol-standard", "native_tools", "//crates/lash-protocol-standard:native_tools__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-protocol-standard",
     library_crate_name = "lash_protocol_standard",
     manifest_dir = "crates/lash-protocol-standard",
@@ -113,6 +125,10 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-protocol-standard", "protocol_scenarios", "//crates/lash-protocol-standard:protocol_scenarios__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-protocol-standard",
     library_crate_name = "lash_protocol_standard",
     manifest_dir = "crates/lash-protocol-standard",
@@ -120,20 +136,6 @@ lash_rust_integration_test(
     rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
-)
-
-load("//tools/buck2:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//crates/lash-protocol-standard:test_batch"),
-    jobs = 2,
-    tests = [
-        ":embedded_builder__test",
-        ":lash-protocol-standard__unit_test",
-        ":native_tools__test",
-        ":protocol_scenarios__test",
-    ],
 )
 
 filegroup(

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash_core::plugin::{
     CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar, ConfigRegistrationError,
-    OwnerChange, PluginDeclaration, PluginError, PluginFactory, SessionPlugin,
+    OwnerChange, PluginDeclaration, PluginError, PluginFactory,
 };
 use lash_core::{
     OwnerConfigView, ToolCall, ToolContract, ToolId, ToolManifest, ToolPrepareCall, ToolProvider,
@@ -160,12 +160,11 @@ impl PluginFactory for SelectedToolsPlugin {
             );
             SelectedToolsSession::declare(&mut reg)?;
             let id = lash_core::plugin::PluginFactory::id(self.as_ref());
-            Ok(lash_core::plugin::PluginRecipe::new(
+            Ok(lash_core::plugin::PluginRecipe::bound(
                 id,
                 reg,
                 move |_ctx, _state| {
                     Ok(Arc::new(SelectedToolsSession {
-                        id: self.id,
                         provider: Arc::new(Selected {
                             owner: self.id,
                             inner: Arc::clone(&self.provider),
@@ -201,15 +200,9 @@ impl SelectedToolsPlugin {
 }
 
 struct SelectedToolsSession {
-    id: &'static str,
     provider: Arc<dyn ToolProvider>,
 }
 
-impl SessionPlugin for SelectedToolsSession {
-    fn id(&self) -> &'static str {
-        self.id
-    }
-}
 impl SelectedToolsSession {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,

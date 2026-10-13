@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use lash_core::plugin::{PluginError, PluginFactory, SessionPlugin};
+use lash_core::plugin::{PluginError, PluginFactory};
 
 use super::registration::register_rlm_protocol_plugin;
 use super::{
@@ -256,7 +256,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
                 }
             }
             let id = lash_core::plugin::PluginFactory::id(self.as_ref());
-            Ok(lash_core::plugin::PluginRecipe::new(
+            Ok(lash_core::plugin::PluginRecipe::bound(
                 id,
                 reg,
                 move |ctx, _state| {
@@ -400,12 +400,6 @@ pub(crate) struct RlmProtocolPlugin {
     pub(crate) code_executor: Arc<super::runtime_state::CodeModeCodeExecutor>,
     pub(crate) protocol_session: Arc<super::protocol_session::RlmProtocolSession>,
     pub(crate) mask: crate::stream_mask::StreamMaskBindings,
-}
-
-impl SessionPlugin for RlmProtocolPlugin {
-    fn id(&self) -> &'static str {
-        RLM_PROTOCOL_PLUGIN_ID
-    }
 }
 
 #[cfg(test)]

@@ -1023,7 +1023,7 @@ impl PluginFactory for StaticPluginFactory {
         if let Some(error) = self.spec.errors.first() {
             return Err(error.clone());
         }
-        Ok(super::PluginRecipe::from_spec(
+        Ok(super::PluginRecipe::from_registrar(
             self.id(),
             self.spec.registrations.clone(),
         ))
