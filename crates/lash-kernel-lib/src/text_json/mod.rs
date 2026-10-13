@@ -41,6 +41,7 @@ impl NativeFunction for Native {
 ///
 /// Definitions charge one plus the deep sizes of their arguments and result;
 /// `format.decimal_parts` adds 64 units for bounded binary64 conversion;
+/// `text.join_or_index` charges two list passes, separator size and twice result size;
 /// `text.trim_set` bounds its membership scan with an input/set size product.
 /// `json.classify` instead charges one plus the work encoded in its result,
 /// so an early refusal never prices the unvisited input.

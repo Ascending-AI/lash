@@ -761,6 +761,8 @@ fn guarded_search_and_join_match_generic_array_semantics() {
         "let xs = [\"\", \"😀\", \"é\"] let args = [\"|\"]",
         "let xs = [\"a\", \"b\"] let args = []",
         "let xs = [\"a\", (), null, absent, 3.0] let args = [\"|\"]",
+        "let xs = [\"a\", \"b\", null, absent, ()] let args = [\"😀\"]",
+        "let xs = [\"😀\", \"é\", {toString: fn(this, args) { print \"late element\" return \"z\" }}] let args = [\"|\"]",
         "let xs = [\"a\", \"b\"] let args = [{toString: fn(this, args) { print \"separator\" do perform echo(1.0) as Any set xs[0] = \"changed\" return \"|\" }}]",
         "let xs = [{toString: fn(this, args) { print \"element\" throw \"bad element\" }}] let args = [{toString: fn(this, args) { print \"separator first\" return \"|\" }}]",
         "let xs = {\"0\": \"a\", length: 2.0} let args = []",

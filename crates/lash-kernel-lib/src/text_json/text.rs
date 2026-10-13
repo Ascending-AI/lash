@@ -123,6 +123,28 @@ pub(super) fn functions() -> Vec<Function> {
         &[],
         join,
     ));
+    let (mut admission, native) = definition(
+        "text.join_or_index",
+        &[
+            ("items", sequence_type(Type::Any)),
+            ("separator", Type::Text),
+        ],
+        Type::Union(vec![Type::Text, Type::Int]),
+        &[],
+        join_or_index,
+    );
+    // Two borrowed list passes, buffer writing and final text copying. The list's
+    // own size never follows a rejected member, even when it holds a cycle.
+    admission.charge = Formula::Sum(vec![
+        Formula::Constant(1),
+        Formula::Product(vec![
+            Formula::Constant(2),
+            Formula::Size(Operand::Param(Name::new("items"))),
+        ]),
+        Formula::Size(Operand::Param(Name::new("separator"))),
+        Formula::Product(vec![Formula::Constant(2), Formula::Size(Operand::Result)]),
+    ]);
+    functions.push((admission, native));
     functions.push(definition(
         "text.replace",
         &[
@@ -589,6 +611,13 @@ fn pieces<'a>(text: &'a str, separator: &'a str) -> impl Iterator<Item = &'a str
 }
 
 fn join(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    match join_or_index(call)? {
+        Value::Int(_) => Err(raise("type_error", "join requires text members")),
+        result => Ok(result),
+    }
+}
+
+fn join_or_index(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let Value::List(id) = arg(call.args, 0)? else {
         return Err(raise("type_error", "expected list"));
     };
@@ -598,18 +627,18 @@ fn join(call: NativeCall<'_>) -> Result<Value, NativeError> {
     }
     let mut count = 0usize;
     let mut bytes = Some(0usize);
-    let mut error = None;
+    let mut mismatch = false;
     call.heap.visit(*id, &mut |element| {
         let Element::Item(Value::Text(text)) = element else {
-            error = Some(raise("type_error", "join requires text members"));
+            mismatch = true;
             return ControlFlow::Break(());
         };
         count += 1;
         bytes = bytes.and_then(|bytes| bytes.checked_add(text.len()));
         ControlFlow::Continue(())
     });
-    if let Some(error) = error {
-        return Err(error);
+    if mismatch {
+        return Ok(int(count));
     }
     if count != len {
         return Err(raise("type_error", "invalid list"));

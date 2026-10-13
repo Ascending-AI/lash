@@ -15,6 +15,7 @@ use sub
 use text.concat
 use text.len
 use text.join
+use text.join_or_index
 use text.split
 use text.replace
 use text.find
@@ -542,16 +543,13 @@ charge sum(4, deep(values), size(result))
 body {
   if same(kind(self), "text") {
     let items = invoke py.to_list(values)
-    let position = 0
-    for item in items {
-      if bool.not(same(kind(item), "text")) {
-        let name = invoke py.type(item)
-        let hoisted5 = text.join(["sequence item ", num.to_text(position), ": expected str instance, ", name, " found"], "")
-        do invoke py.fail("TypeError", hoisted5)
-      }
-      set position = add(position, 1)
-    }
-    return text.join(items, self)
+    let joined = text.join_or_index(items, self)
+    if same(kind(joined), "text") { return joined }
+    let item = items[joined]
+    let name = invoke py.type(item)
+    let message = text.join(["sequence item ", num.to_text(joined), ": expected str instance, ", name, " found"], "")
+    do invoke py.fail("TypeError", message)
+    return ""
   }
   do invoke py.no_attribute(self, "join")
   return ""

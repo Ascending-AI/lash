@@ -4,7 +4,7 @@ These native definitions live in `lash-kernel-lib::text_json` and are installed
 with `register_text_json`. They perform no I/O, invoke no callbacks and mutate
 no existing object (`K-LIB-006`, `K-LIB-007`). All arguments are required. Wrong
 arity raises `arity`; wrong operand or collection-member kinds raise
-`type_error`; nothing coerces. Except for `text.trim_set` and the bounded conversion in `format.decimal_parts`, each definition charges **1 plus the deep size
+`type_error`; nothing coerces. Except for `text.join_or_index`, `text.trim_set` and the bounded conversion in `format.decimal_parts`, each definition charges **1 plus the deep size
 of every argument plus the deep size of the result**, in the units of
 `K-CHG-004` and `K-CHG-005`. No function here uses a cache or a work guard.
 
@@ -80,6 +80,17 @@ the baseline needs a new definition identity (`K-VER-002`).
   two boundary scans probe at most input bytes plus one scalars, each searching
   the set's bytes, then copy the result. Result buffer and text storage are
   reserved before allocation. All boundaries are scalar boundaries.
+
+- **K-LTXT-012.** `text.join_or_index(list, separator)` returns joined text
+  when every slot holds text, or the zero-based index of the first non-text
+  slot (including absent, null and a dialect hole). It does no coercion and
+  reads no member after that mismatch. The dialect owns fallback or the
+  indexed error. Member admission precedes separator validation; accepted
+  output storage is reserved before allocation, and the atomic native ends
+  before the machine charges it. Charge is
+  `1 + 2 * size(list) + size(separator) + 2 * size(result)`, bounding two borrowed
+  list passes, buffer writing and final text copying without recursively pricing rejected values.
+  Scalar contents, including astral UTF-16 pairs, are copied unchanged.
 
 ## Bytes
 

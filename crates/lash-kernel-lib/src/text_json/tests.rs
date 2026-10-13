@@ -1474,6 +1474,18 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             Ok(t("a|😀")),
         ),
         (
+            "K-LTXT-012",
+            "text.join_or_index".to_owned(),
+            vec![Datum::List(vec![t("a"), t("😀")]), t("|")],
+            Ok(t("a|😀")),
+        ),
+        (
+            "K-LTXT-012",
+            "text.join_or_index".to_owned(),
+            vec![Datum::List(vec![t("a"), Datum::Null, t("z")]), t("|")],
+            Ok(i(1)),
+        ),
+        (
             "K-LTXT-005",
             "text.replace".to_owned(),
             vec![t("aaa"), t("aa"), t("x")],
@@ -1778,6 +1790,14 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
                 (Operand::Result, Measure::DeepSize) => result_size,
                 // A value holding no other value has its deep size as size.
                 (Operand::Result, Measure::Size) if result_scalar => result_size,
+                (Operand::Param(param_name), Measure::Size)
+                    if name == "text.join_or_index" && param_name.as_str() == "items" =>
+                {
+                    let Some(Datum::List(items)) = param(param_name) else {
+                        panic!("list input");
+                    };
+                    1 + items.len() as u64
+                }
                 // An omitted optional argument measures nothing.
                 (Operand::Param(name), Measure::DeepSize) => param(name).map_or(0, deep),
                 (Operand::Param(name), Measure::Size) if param(name).is_none_or(scalar) => {
@@ -1787,6 +1807,11 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             });
         let expected_charge = if name == "json.classify" {
             1 + result_magnitude
+        } else if name == "text.join_or_index" {
+            let Datum::List(items) = &args[0] else {
+                panic!("list input");
+            };
+            1 + 2 * (1 + items.len() as u64) + deep(&args[1]) + 2 * result_size
         } else if name == "json.render" {
             1 + args.iter().map(deep).sum::<u64>() + result_size
         } else if name == "text.trim_set" {
@@ -2052,4 +2077,102 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
     )
     .unwrap();
     assert_eq!(result, int(27));
+}
+
+/// K-LTXT-012: admission stops at the first non-text slot without coercion,
+/// and its shallow formula bounds both scans and the reserved output copy.
+#[test]
+fn k_ltxt_012_join_admission_bounds_scan_copy_and_first_mismatch() {
+    use lash_kernel_doc::{Measure, Operand};
+    let mut registry = FunctionRegistry::new();
+    register_text_json(&mut registry).unwrap();
+    let (_, function) = registry
+        .iter()
+        .find(|(_, f)| f.definition.name.as_str() == "text.join_or_index")
+        .expect("the neutral join admission native");
+    for pieces in [vec![], vec![""], vec!["", "😀", "é", ""], vec!["x"; 32]] {
+        for separator in ["", "|", "😀"] {
+            let mut heap = Heap::default();
+            let input = list(&mut heap, pieces.iter().map(|piece| s(piece)).collect());
+            let expected = pieces.join(separator);
+            let result = call(&mut heap, "text.join_or_index", &[input, s(separator)]).unwrap();
+            assert_eq!(result, s(&expected));
+            assert_eq!(heap.1.reserved, 2 * expected.len() as u64);
+            let charge = function
+                .definition
+                .charge
+                .evaluate(&mut |operand, measure| {
+                    assert_eq!(
+                        measure,
+                        Measure::Size,
+                        "admission never walks nested values"
+                    );
+                    match operand {
+                        Operand::Param(name) if name.as_str() == "items" => 1 + pieces.len() as u64,
+                        Operand::Param(_) => 1 + separator.len() as u64,
+                        Operand::Result => 1 + expected.len() as u64,
+                    }
+                });
+            assert_eq!(
+                charge,
+                1 + 2 * (1 + pieces.len() as u64)
+                    + 1
+                    + separator.len() as u64
+                    + 2 * (1 + expected.len() as u64)
+            );
+            assert!(charge >= 2 * pieces.len() as u64 + 2 * expected.len() as u64);
+            if !expected.is_empty() {
+                let input = list(&mut heap, pieces.iter().map(|piece| s(piece)).collect());
+                heap.1 = Room::of(2 * expected.len() as u64 - 1);
+                assert_eq!(
+                    call(&mut heap, "text.join_or_index", &[input, s(separator)]),
+                    Err(NativeError::Memory)
+                );
+                assert_eq!(heap.1.reserved, 0);
+            }
+        }
+    }
+    for index in [0, 1, 31] {
+        for mismatch in [
+            Value::Absent,
+            Value::Null,
+            Value::Tuple(vec![].into()),
+            int(9),
+        ] {
+            let mut heap = Heap::default();
+            let mut pieces = vec![s("😀"); 32];
+            pieces[index] = mismatch;
+            pieces[31] = Value::Null;
+            let input = list(&mut heap, pieces);
+            heap.1 = Room::of(0);
+            assert_eq!(
+                call(&mut heap, "text.join_or_index", &[input, s("|")]).unwrap(),
+                int(index)
+            );
+            assert_eq!(heap.1.reserved, 0);
+        }
+    }
+    let mut heap = Heap::default();
+    let cycle = heap.allocate(Object::List(vec![])).unwrap();
+    heap.0.insert(cycle, Object::List(vec![Value::List(cycle)]));
+    let input = list(&mut heap, vec![s("a"), Value::List(cycle), s("z")]);
+    assert_eq!(
+        call(&mut heap, "text.join_or_index", &[input, s("|")]).unwrap(),
+        int(1)
+    );
+    let input = list(&mut heap, vec![s("a"), Value::Null]);
+    // Native member admission precedes separator validation and allocation.
+    assert_eq!(
+        call(&mut heap, "text.join_or_index", &[input, Value::Null]).unwrap(),
+        int(1)
+    );
+    for args in [
+        vec![Value::Null, s("|")],
+        vec![list(&mut heap, vec![]), Value::Null],
+    ] {
+        assert_eq!(
+            error_kind(call(&mut heap, "text.join_or_index", &args)),
+            "type_error"
+        );
+    }
 }

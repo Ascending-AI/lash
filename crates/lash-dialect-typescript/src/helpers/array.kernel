@@ -20,6 +20,7 @@ use num.max
 use num.is_nan
 use num.to_float
 use text.join
+use text.join_or_index
 use text.utf16_compare
 use list.len
 use list.copy
@@ -1234,14 +1235,10 @@ body {
       if same(kind(input), "text") { set separator = input }
       else { set admitted = false }
     }
-    let index = 0
-    while admitted {
-      if num.lt(index, list.len(this)) {} else { break }
-      let value = this[index]
-      if same(kind(value), "text") {} else { set admitted = false }
-      set index = num.add(index, 1)
+    if admitted {
+      let joined = text.join_or_index(this, separator)
+      if same(kind(joined), "text") { return joined }
     }
-    if admitted { return text.join(this, separator) }
   }
   let output = invoke ts.array.generic_join(this, args)
   return output

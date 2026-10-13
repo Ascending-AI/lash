@@ -941,3 +941,37 @@ f(lambda n: [1.5])
         ["3.5"]
     );
 }
+
+/// K-LTXT-012: Python materializes the iterable before admission, names the
+/// first mismatch, and never coerces a member to str.
+#[test]
+fn join_admission_keeps_materialization_and_indexed_type_errors() {
+    let (lines, end) = output(
+        r#"
+print('|'.join(['', '😀', 'é', '']))
+print('|'.join(('a', 'b')), '-'.join('ab'), ','.join([]))
+for values in [[None, 7], ['a', 7, None], ['a', 'b', None], ['a', []]]:
+    try:
+        print('|'.join(values))
+    except TypeError as error:
+        print(error)
+try:
+    print('|'.join(7))
+except TypeError as error:
+    print(error)
+"#,
+    );
+    assert_eq!(end, "ok");
+    assert_eq!(
+        lines,
+        [
+            "|😀|é|",
+            "a|b a-b ",
+            "sequence item 0: expected str instance, NoneType found",
+            "sequence item 1: expected str instance, int found",
+            "sequence item 2: expected str instance, NoneType found",
+            "sequence item 1: expected str instance, list found",
+            "'int' object is not iterable"
+        ]
+    );
+}
