@@ -11,7 +11,7 @@ impl ProductionToolHandlers<'_> {
         request: &SingletonPreparedRequest,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         let prepared: Prepared =
-            serde_json::from_value(request.prepared.clone()).map_err(|error| {
+            serde::Deserialize::deserialize(&request.prepared).map_err(|error| {
                 crate::RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RecordEncodingFailed,
                     error.to_string(),

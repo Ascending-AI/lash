@@ -781,7 +781,8 @@ impl std::fmt::Display for RunSpecHash {
 #[serde(deny_unknown_fields)]
 pub struct RecordedRender {
     pub renderer_id: String,
-    pub params: serde_json::Value,
+    /// Immutable resolved parameters, shared by every turn and call of the run.
+    pub params: std::sync::Arc<serde_json::Value>,
 }
 
 impl RecordedRender {

@@ -129,7 +129,7 @@ impl RlmRuntimeState {
         let recorded = lash_core::RecordedRender::require_available(recorded, renderer.0.id())
             .map_err(|code| SessionError::Protocol(code.to_string()))?;
         let params: crate::render::ResolvedRlmRender =
-            serde_json::from_value(recorded.params.clone())
+            serde::Deserialize::deserialize(recorded.params.as_ref())
                 .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let read_only_variables = {
             let bindings = self.session_projected_bindings.lock().await;

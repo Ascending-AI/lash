@@ -130,7 +130,7 @@ impl PluginConfig {
     pub fn get(&self, plugin_id: &str) -> Option<&serde_json::Value> {
         self.namespaces
             .get(plugin_id)
-            .map(|namespace| &namespace.value)
+            .map(|namespace| namespace.value.as_ref())
     }
 
     pub fn namespace(&self, plugin_id: &str) -> Option<&PluginConfigNamespace> {
@@ -151,7 +151,7 @@ impl PluginConfig {
             plugin_id.into(),
             PluginConfigNamespace {
                 format_version,
-                value,
+                value: value.into(),
             },
         );
     }
@@ -162,15 +162,14 @@ impl PluginConfig {
         T: DeserializeOwned,
     {
         self.get(plugin_id)
-            .cloned()
-            .map(serde_json::from_value)
+            .map(serde::Deserialize::deserialize)
             .transpose()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&String, &serde_json::Value)> {
         self.namespaces
             .iter()
-            .map(|(id, namespace)| (id, &namespace.value))
+            .map(|(id, namespace)| (id, namespace.value.as_ref()))
     }
 
     /// The session's protocol turn options: a view of the protocol plugin's
@@ -178,9 +177,8 @@ impl PluginConfig {
     pub fn protocol_turn_options(&self) -> crate::ProtocolTurnOptions {
         self.protocol
             .as_deref()
-            .and_then(|protocol| self.get(protocol))
-            .cloned()
-            .map(crate::ProtocolTurnOptions::from_payload)
+            .and_then(|protocol| self.namespace(protocol))
+            .map(|namespace| crate::ProtocolTurnOptions::from_payload(namespace.value.clone()))
             .unwrap_or_default()
     }
 
@@ -293,7 +291,7 @@ impl PluginOptions {
             plugin_id.into(),
             PluginConfigNamespace {
                 format_version,
-                value,
+                value: value.into(),
             },
         );
     }
@@ -311,7 +309,10 @@ impl PluginOptions {
         for (plugin_id, top) in self.plugins {
             match under.plugins.get_mut(&plugin_id) {
                 Some(base) if base.format_version == top.format_version => {
-                    match (&mut base.value, top.value) {
+                    match (
+                        std::sync::Arc::make_mut(&mut base.value),
+                        std::sync::Arc::unwrap_or_clone(top.value),
+                    ) {
                         (serde_json::Value::Object(base), serde_json::Value::Object(top)) => {
                             base.extend(top)
                         }
@@ -332,8 +333,7 @@ impl PluginOptions {
     {
         self.plugins
             .get(plugin_id)
-            .map(|namespace| namespace.value.clone())
-            .map(serde_json::from_value)
+            .map(|namespace| serde::Deserialize::deserialize(namespace.value.as_ref()))
             .transpose()
     }
 }

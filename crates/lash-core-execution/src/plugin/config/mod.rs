@@ -1193,7 +1193,7 @@ impl ConfigRegistry {
                 id.into(),
                 super::PluginConfigNamespace {
                     format_version: writer,
-                    value,
+                    value: value.into(),
                 },
             );
         }

@@ -147,11 +147,13 @@ impl lash_core::plugin::ProtocolDriverPlugin for NativeProtocolDriver {
         );
         Ok(Some(lash_core::RecordedRender {
             renderer_id: self.config.code_renderer.0.id().to_string(),
-            params: serde_json::to_value(resolved).map_err(|error| {
-                lash_core::RenderRefusal::new(&crate::plugin::RlmRenderRefusal::Unencodable {
-                    message: error.to_string(),
-                })
-            })?,
+            params: serde_json::to_value(resolved)
+                .map_err(|error| {
+                    lash_core::RenderRefusal::new(&crate::plugin::RlmRenderRefusal::Unencodable {
+                        message: error.to_string(),
+                    })
+                })?
+                .into(),
         }))
     }
 

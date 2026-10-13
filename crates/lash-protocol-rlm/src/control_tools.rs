@@ -657,7 +657,9 @@ mod tests {
                         ..Default::default()
                     })
                     .expect("valid rlm options")
-                    .payload,
+                    .payload
+                    .as_ref()
+                    .clone(),
                 );
                 snapshot
             },

@@ -68,7 +68,7 @@ pub fn decode_tree<T: Serialize + DeserializeOwned>(
 ) -> Result<T, TokenError> {
     let tree = decode_json(input)?;
     let value: T =
-        serde_json::from_value(tree.clone()).map_err(|error| invalid(error.to_string()))?;
+        serde::Deserialize::deserialize(&tree).map_err(|error| invalid(error.to_string()))?;
     if serde_json::to_value(&value).ok().as_ref() != Some(&tree) {
         return Err(invalid("a payload tree is not its value's one spelling"));
     }

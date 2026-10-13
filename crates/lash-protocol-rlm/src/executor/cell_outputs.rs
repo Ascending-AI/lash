@@ -50,8 +50,10 @@ pub(super) async fn record_cell_outputs(
             code_renderer.0.id(),
         );
         match recorded.and_then(|recorded| {
-            serde_json::from_value::<crate::render::ResolvedRlmRender>(recorded.params.clone())
-                .map_err(|_| lash_core::RuntimeErrorCode::RecordedRendererUnavailable)
+            <crate::render::ResolvedRlmRender as serde::Deserialize>::deserialize(
+                recorded.params.as_ref(),
+            )
+            .map_err(|_| lash_core::RuntimeErrorCode::RecordedRendererUnavailable)
         }) {
             Ok(params) => Some(params),
             Err(code) => {

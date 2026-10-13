@@ -41,7 +41,8 @@ pub(crate) fn recorded_test_render() -> lash_core::RecordedRender {
             .id()
             .to_string(),
         params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
-            .expect("test render params serialize"),
+            .expect("test render params serialize")
+            .into(),
     }
 }
 

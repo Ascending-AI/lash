@@ -628,7 +628,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         self.check_before(request).await
     }
     async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String> {
-        let prepared: Prepared = serde_json::from_value(attempt.request.prepared.clone())
+        let prepared: Prepared = serde::Deserialize::deserialize(&attempt.request.prepared)
             .map_err(|error| error.to_string())?;
         let mut dispatch = self.dispatch(&prepared.input);
         dispatch.observer = attempt.stream.clone();

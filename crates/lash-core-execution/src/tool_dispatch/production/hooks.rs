@@ -28,8 +28,8 @@ impl ProductionToolHandlers<'_> {
         &self,
         request: &SingletonPreparedRequest,
     ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
-        let prepared: Prepared =
-            serde_json::from_value(request.prepared.clone()).map_err(|error| error.to_string())?;
+        let prepared: Prepared = serde::Deserialize::deserialize(&request.prepared)
+            .map_err(|error| error.to_string())?;
         let host = prepared.input.binding.preparation.clone();
         if let Some(failure) = &prepared.failure {
             return Ok(vec![AttributedVerdict {

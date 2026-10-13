@@ -219,7 +219,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         previous_frame_node_id.as_deref()
     );
     assert_eq!(
-        current.protocol_turn_options().payload,
+        *current.protocol_turn_options().payload,
         serde_json::json!({ "mode": "test" })
     );
 

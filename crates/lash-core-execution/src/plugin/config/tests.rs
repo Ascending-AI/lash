@@ -1015,7 +1015,10 @@ fn config_namespaces_are_written_in_the_admissions_recorded_format() {
         let namespace = config
             .namespace(FormattedCounter::ID)
             .expect("the namespace is recorded");
-        (namespace.format_version.get(), namespace.value.clone())
+        (
+            namespace.format_version.get(),
+            namespace.value.as_ref().clone(),
+        )
     };
     let create = |writers: &crate::store::plugin_writers::PluginAdmission| {
         registry

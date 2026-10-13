@@ -165,7 +165,8 @@ pub fn validate_state_key_with_limit(
 pub struct PluginConfigNamespace {
     #[schemars(with = "std::num::NonZeroU32")]
     pub format_version: FormatVersion,
-    pub value: Value,
+    // Immutable canonical JSON, shared by admitted snapshots and their views.
+    pub value: std::sync::Arc<Value>,
 }
 
 /// How a fork treats a plugin namespace: what the plugin declares its state

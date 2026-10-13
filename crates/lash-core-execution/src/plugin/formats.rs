@@ -208,7 +208,7 @@ pub(super) fn decode_config_for(
             let value = factory.migrate_format(
                 namespace.format_version,
                 FormatNamespace::Config,
-                namespace.value.clone(),
+                namespace.value.as_ref().clone(),
             )?;
             decoded.insert_versioned(
                 factory.id(),

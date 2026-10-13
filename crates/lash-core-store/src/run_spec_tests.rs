@@ -159,13 +159,102 @@ fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
 }
 
 #[test]
+fn admitted_runs_share_immutable_config_json() {
+    // FIG-6149: resolving and carrying a run must not deep-copy its owner's
+    // immutable namespace, including the protocol's per-call view of it.
+    let mut base = snapshot();
+    base.plugin_config.insert_versioned(
+        "protocol",
+        crate::plugin_state::FormatVersion::new(7).expect("nonzero format"),
+        serde_json::json!({"schema": "x".repeat(8192)}),
+    );
+    let encoded = serde_json::to_vec(&base).expect("encode config");
+    let run = RunSpec::default()
+        .resolve(&base, None, &catalog(), &MapOwner)
+        .expect("resolve");
+    let carried = run.clone();
+    let value = base.plugin_config.get("protocol").expect("namespace");
+    assert!(
+        std::ptr::eq(
+            value,
+            carried.config().plugin_config.get("protocol").unwrap()
+        ),
+        "carrying an admitted run deep-copied its immutable config JSON"
+    );
+    let options = carried.config().plugin_config.protocol_turn_options();
+    assert!(
+        std::ptr::eq(
+            value.as_object().unwrap(),
+            options.payload.as_object().unwrap()
+        ),
+        "a per-call protocol view deep-copied the recorded namespace"
+    );
+    assert_eq!(serde_json::to_vec(carried.config()).unwrap(), encoded);
+    assert_eq!(
+        carried
+            .config()
+            .plugin_config
+            .namespace("protocol")
+            .unwrap()
+            .format_version
+            .get(),
+        7,
+    );
+    let mut next = base.clone();
+    next.plugin_config
+        .insert("protocol", serde_json::json!({"schema": "next"}));
+    assert_eq!(carried.config().plugin_config.get("protocol"), Some(value));
+    assert_ne!(next.plugin_config, carried.config().plugin_config);
+}
+
+#[test]
+fn admitted_runs_share_recorded_render_json() {
+    // FIG-6149: each turn/call carries the render recorded at admission,
+    // without copying its potentially large per-tool parameter map.
+    let params = serde_json::json!({"per_tool": {"tool": {"schema": "x".repeat(8192)}}});
+    let mut run = ResolvedRun::snapshot(snapshot());
+    run.render = Some(RecordedRender {
+        renderer_id: "lash.ax.v1".into(),
+        params: params.clone().into(),
+    });
+    let carried = run.clone();
+    let recorded = run.render.as_ref().unwrap();
+    let cloned = carried.render.as_ref().unwrap();
+    assert!(
+        std::ptr::eq(
+            recorded.params.as_object().unwrap(),
+            cloned.params.as_object().unwrap()
+        ),
+        "carrying an admitted run deep-copied its immutable render JSON"
+    );
+    #[derive(serde::Serialize)]
+    struct RenderWire<'a> {
+        renderer_id: &'a str,
+        params: &'a serde_json::Value,
+    }
+    let expected = RenderWire {
+        renderer_id: "lash.ax.v1",
+        params: &params,
+    };
+    assert_eq!(
+        serde_json::to_vec(cloned).unwrap(),
+        serde_json::to_vec(&expected).unwrap()
+    );
+    assert_eq!(
+        rmp_serde::to_vec_named(cloned).unwrap(),
+        rmp_serde::to_vec_named(&expected).unwrap()
+    );
+}
+
+#[test]
 fn recorded_render_survives_a_run_round_trip() {
     let record = RecordedRender {
         renderer_id: "lash.ax.v1".to_owned(),
         params: serde_json::json!({
             "print": lash_render::RenderParams::default(),
             "preview": lash_render::RenderParams::preview(),
-        }),
+        })
+        .into(),
     };
     let mut resolved = ResolvedRun::snapshot(snapshot());
     resolved.render = Some(record.clone());
@@ -178,7 +267,7 @@ fn recorded_render_survives_a_run_round_trip() {
 fn unfinished_rendering_requires_the_exact_recorded_renderer() {
     let record = RecordedRender {
         renderer_id: "lash.ax.v1".into(),
-        params: serde_json::json!({"print": {"max_chars": 8000}}),
+        params: serde_json::json!({"print": {"max_chars": 8000}}).into(),
     };
     assert_eq!(
         RecordedRender::require_available(Some(&record), "lash.ax.v1"),
@@ -427,7 +516,7 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
         "the definition's key wins over the snapshot's model"
     );
     assert_eq!(
-        resolved
+        *resolved
             .config()
             .plugin_config
             .protocol_turn_options()

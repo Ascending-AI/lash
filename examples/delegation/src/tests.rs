@@ -214,12 +214,13 @@ async fn a_childs_request_states_only_the_hosts_configuration_and_the_call() {
     assert_eq!(request.reasoning, None);
     assert_eq!(request.prompt_plan, None);
     assert_eq!(
-        request.plugin_options.plugins[DELEGATION_PLUGIN_ID].value,
+        *request.plugin_options.plugins[DELEGATION_PLUGIN_ID].value,
         json!({ "task": "count the chunk" })
     );
     let rlm: lash::rlm::RlmCreateExtras = serde_json::from_value(
         request.plugin_options.plugins[lash::rlm::RLM_PROTOCOL_PLUGIN_ID]
             .value
+            .as_ref()
             .clone(),
     )
     .expect("the RLM extras decode");

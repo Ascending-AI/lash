@@ -13,7 +13,7 @@
 )]
 #[serde(transparent)]
 pub struct ProtocolTurnOptions {
-    pub payload: serde_json::Value,
+    pub payload: std::sync::Arc<serde_json::Value>,
 }
 
 impl Default for ProtocolTurnOptions {
@@ -26,14 +26,16 @@ impl ProtocolTurnOptions {
         Self::from_payload(serde_json::Value::Object(serde_json::Map::new()))
     }
 
-    pub fn from_payload(payload: serde_json::Value) -> Self {
-        Self { payload }
+    pub fn from_payload(payload: impl Into<std::sync::Arc<serde_json::Value>>) -> Self {
+        Self {
+            payload: payload.into(),
+        }
     }
 
     /// Reports empty only for an empty JSON object so protocol implementors do not confuse scalar,
     /// list, or null payloads with absent options.
     pub fn is_empty(&self) -> bool {
-        match &self.payload {
+        match self.payload.as_ref() {
             serde_json::Value::Object(map) => map.is_empty(),
             _ => false,
         }
@@ -52,7 +54,8 @@ impl ProtocolTurnOptions {
     where
         T: serde::de::DeserializeOwned,
     {
-        serde_json::from_value(self.payload.clone()).map_err(ProtocolTurnOptionsError::Decode)
+        serde::Deserialize::deserialize(self.payload.as_ref())
+            .map_err(ProtocolTurnOptionsError::Decode)
     }
 }
 #[derive(Debug, thiserror::Error)]

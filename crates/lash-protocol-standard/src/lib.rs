@@ -768,11 +768,13 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
         .map_err(|refusal| lash_core::RenderRefusal::new(&refusal))?;
         Ok(Some(lash_core::RecordedRender {
             renderer_id: self.config.renderer.0.id().to_string(),
-            params: serde_json::to_value(resolved).map_err(|error| {
-                lash_core::RenderRefusal::new(&StandardRenderRefusal::Unencodable {
-                    message: error.to_string(),
-                })
-            })?,
+            params: serde_json::to_value(resolved)
+                .map_err(|error| {
+                    lash_core::RenderRefusal::new(&StandardRenderRefusal::Unencodable {
+                        message: error.to_string(),
+                    })
+                })?
+                .into(),
         }))
     }
 

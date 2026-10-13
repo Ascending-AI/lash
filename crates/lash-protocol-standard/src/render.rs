@@ -485,13 +485,15 @@ async fn render_present(
     }
     // The run recorded these parameters from this protocol's own resolved
     // type: unreadable, they are corrupt stored data, never a refused shape.
-    let resolved: ResolvedStandardRenderConfig = serde_json::from_value(recorded.params.clone())
-        .map_err(|error| lash_core::StoreError::StoredDataCorrupt {
-            record_kind: "recorded_render",
-            message: format!(
-                "renderer `{}` cannot read its recorded parameters: {error}",
-                recorded.renderer_id
-            ),
+    let resolved: ResolvedStandardRenderConfig =
+        serde::Deserialize::deserialize(recorded.params.as_ref()).map_err(|error| {
+            lash_core::StoreError::StoredDataCorrupt {
+                record_kind: "recorded_render",
+                message: format!(
+                    "renderer `{}` cannot read its recorded parameters: {error}",
+                    recorded.renderer_id
+                ),
+            }
         })?;
     let params = resolved.for_tool(&ctx.tool_id);
     let mut rendered = renderer.0.tool_output(&ctx.output, &ctx.tool_id, params);
@@ -689,7 +691,8 @@ mod tests {
                     defaults: params,
                     per_tool: BTreeMap::new(),
                 })
-                .expect("params"),
+                .expect("params")
+                .into(),
             }),
             args: serde_json::Value::Null,
             output,
@@ -1079,7 +1082,7 @@ mod tests {
             Arc::clone(&artifacts),
         );
         ctx.render.as_mut().expect("record").params =
-            serde_json::json!({ "defaults": "not render parameters" });
+            serde_json::json!({ "defaults": "not render parameters" }).into();
         let error = render_present(baseline(&ctx), &ctx, &ToolOutputRendererSlot::default())
             .await
             .expect_err("corrupt");
