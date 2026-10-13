@@ -1,3 +1,6 @@
+# Match workspace.package.rust-version, including when clippy runs through Buck.
+msrv = "1.90"
+
 # Crate-scoped clippy configuration for lash-core-store. Clippy stops at the
 # first `clippy.toml` it finds walking up from the manifest directory, so this
 # file shadows the workspace one and must repeat its keys. It mirrors

@@ -19,7 +19,7 @@ on:
 
 permissions:
   contents: read
-  # The report step files and closes drift issues.
+  # The report step files and closes canary lint issues.
   issues: write
 
 env:
@@ -83,9 +83,9 @@ jobs:
             echo "- resolved stable: \`${stable}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      # The same battery the pinned lint job runs on pull requests: format,
-      # workspace clippy. Output is
-      # teed so the report step can name the offending lints.
+      # Cargo checks the pinned format and workspace lint policy on stable.
+      # Per-PR clippy runs through Buck; the canary also checks Cargo.
+      # Output is teed so the report step can name the offending lints.
       - name: Lint battery
         run: |
           set -o pipefail
@@ -95,21 +95,31 @@ jobs:
             cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
           } 2>&1 | tee canary.log
 
-      - name: File drift issue on failure
+      - name: File lint issue on failure
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          title="Toolchain canary: lint battery fails on latest stable"
-          lints="$(grep -oE 'clippy::[a-z_]+' canary.log | sort -u || true)"
+          pinned="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+          stable="$(rustc --version | awk '{print $2}')"
+          if [ "${stable}" = "${pinned}" ]; then
+            title="Toolchain canary: lint battery fails on pinned toolchain under Cargo"
+            diagnosis="The weekly toolchain canary's lint battery is red on the pinned toolchain under Cargo."
+            remedy="Fix the Cargo lint failure while preserving the declared MSRV in Cargo.toml. Stable and the pin are identical, so this is not toolchain drift."
+          else
+            title="Toolchain canary: lint battery fails on latest stable"
+            diagnosis="The weekly toolchain canary is red on latest stable."
+            remedy="Fix forward by bumping the pin (rust-toolchain.toml, the rust-toolchain action default, tools/buck2/toolchain-lock.json) and addressing the lint fallout in that PR while preserving the declared MSRV in Cargo.toml."
+          fi
+          lints="$(grep -oE 'clippy::[a-z_-]+' canary.log | tr '-' '_' | sort -u || true)"
           body="$(cat <<EOF | sed 's/^          //'
-          The weekly toolchain canary is red on latest stable.
+          ${diagnosis}
 
           Run: ${run_url}
           Resolved toolchain: $(rustc --version)
-          Pinned toolchain: $(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          Pinned toolchain: ${pinned}
 
           Lints named in the output:
 
@@ -117,33 +127,32 @@ jobs:
           ${lints:-none extracted — see the run log}
           \`\`\`
 
-          Fix forward by bumping the pin (rust-toolchain.toml, the
-          rust-toolchain action default, tools/buck2/toolchain-lock.json) and eating the lint
-          fallout inside that PR, per CONTRIBUTING.md.
+          ${remedy}
           EOF
           )"
-          existing="$(gh issue list --state open --limit 20 \
-            --search "in:title \"${title}\"" --json number \
-            --jq '.[0].number // empty')"
+          existing="$(gh issue list --state open --limit 100 \
+            --search 'in:title "Toolchain canary: lint battery fails"' --json number,title \
+            --jq '[.[] | select(.title == "Toolchain canary: lint battery fails on latest stable" or .title == "Toolchain canary: lint battery fails on pinned toolchain under Cargo")] | .[0].number // empty')"
           if [ -n "${existing}" ]; then
+            gh issue edit "${existing}" --title "${title}"
             gh issue comment "${existing}" --body "${body}"
           else
             gh issue create --title "${title}" --body "${body}"
           fi
           exit 1
 
-      - name: Close drift issue on recovery
+      - name: Close lint issues on recovery
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          title="Toolchain canary: lint battery fails on latest stable"
-          existing="$(gh issue list --state open --limit 20 \
-            --search "in:title \"${title}\"" --json number \
-            --jq '.[0].number // empty')"
-          if [ -n "${existing}" ]; then
-            gh issue comment "${existing}" \
-              --body "Green again on latest stable ($(rustc --version)); closing."
-            gh issue close "${existing}"
-          fi
+          existing="$(gh issue list --state open --limit 100 \
+            --search 'in:title "Toolchain canary: lint battery fails"' --json number,title \
+            --jq '.[] | select(.title == "Toolchain canary: lint battery fails on latest stable" or .title == "Toolchain canary: lint battery fails on pinned toolchain under Cargo") | .number')"
+          while IFS= read -r issue; do
+            [ -n "${issue}" ] || continue
+            gh issue comment "${issue}" \
+              --body "Cargo lint battery is green again on stable ($(rustc --version)); closing."
+            gh issue close "${issue}"
+          done <<< "${existing}"

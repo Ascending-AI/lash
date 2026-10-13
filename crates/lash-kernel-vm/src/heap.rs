@@ -642,7 +642,7 @@ impl Heap {
             }
             let mut rest = chunk.held;
             chunk.objects.retain(|_| {
-                let bit = rest.isolate_lowest_one();
+                let bit = rest & rest.wrapping_neg();
                 rest &= rest - 1;
                 marked & bit != 0
             });

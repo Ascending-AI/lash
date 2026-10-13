@@ -1,3 +1,6 @@
+# Match workspace.package.rust-version, including when clippy runs through Buck.
+msrv = "1.90"
+
 # This example host supplies environment, filesystem and process configuration
 # at its boundary, as the other example hosts do (FIG-2971).
 allow-expect-in-tests = true

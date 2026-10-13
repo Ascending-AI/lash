@@ -20,6 +20,7 @@ the pin.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 import tomllib
 import unittest
@@ -85,6 +86,22 @@ class ToolchainPinTests(unittest.TestCase):
         for site, version in pin_sites().items():
             with self.subTest(site=site):
                 self.assertRegex(version, r"^[0-9]+\.[0-9]+\.[0-9]+$")
+
+    def test_clippy_configs_enforce_the_workspace_msrv(self) -> None:
+        msrv = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))[
+            "workspace"
+        ]["package"]["rust-version"]
+        configs = subprocess.check_output(
+            ["git", "ls-files", "-z", "*clippy.toml"], cwd=ROOT, text=True
+        ).rstrip("\0").split("\0")
+        self.assertIn("clippy.toml", configs)
+        for relative in configs:
+            with self.subTest(config=relative):
+                config = tomllib.loads((ROOT / relative).read_text(encoding="utf-8"))
+                self.assertEqual(
+                    msrv, config.get("msrv"),
+                    f"{relative}: msrv must match workspace.package.rust-version",
+                )
 
     def test_call_sites_inherit_the_pin(self) -> None:
         for path in sorted(WORKFLOWS.glob("*.yml")) + sorted(

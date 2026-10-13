@@ -1,3 +1,6 @@
+# Match workspace.package.rust-version, including when clippy runs through Buck.
+msrv = "1.90"
+
 # Workspace-wide clippy configuration.
 #
 # Clippy reads the nearest `clippy.toml` walking up from each crate's manifest
