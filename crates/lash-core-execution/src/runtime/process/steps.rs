@@ -371,7 +371,13 @@ pub trait ProcessSteps: Send + Sync {
     /// committed, under its limit and the cancel token it is handed; a
     /// store-local effect it answers commits with its outcome. A step
     /// admitted with a wait parks by answering `Waiting` on the wait its
-    /// execution pinned ([`ExecutionDraft::pinned_wait`]).
+    /// execution pinned ([`ExecutionDraft::pinned_wait`]). An engine body the
+    /// host lacked capacity for answers its
+    /// [`CapacityVerdict`](super::CapacityVerdict) in
+    /// [`MemberOutcome::capacity`](crate::runtime::actor::round::MemberOutcome::capacity),
+    /// under the soundness rule the verdict states: honoured for a
+    /// `Repeatable` step, it records nothing and runs again uncounted on a
+    /// later claim.
     ///
     /// [`ExecutionDraft::pinned_wait`]: crate::runtime::actor::round::ExecutionDraft::pinned_wait
     fn body(

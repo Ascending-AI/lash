@@ -189,7 +189,7 @@ impl ProcessSteps for KernelSteps {
         step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
     ) -> lash_core_execution::runtime::actor::round::MemberBody {
-        lash_core_execution::runtime::actor::round::member_body({
+        {
             let StepRequest::Engine { kind, input, .. } = step.clone() else {
                 unreachable!("admit refuses a tool step");
             };
@@ -223,9 +223,9 @@ impl ProcessSteps for KernelSteps {
                 entered
                     .lock_recover()
                     .push(format!("{}:{from}", run.kind.0));
-                Box::pin(async move { steps.run(run, token).await })
+                Box::pin(async move { steps.run(run, token).await.into() })
             })
-        })
+        }
     }
 }
 

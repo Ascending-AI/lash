@@ -27,7 +27,7 @@ mod tests;
 
 use std::sync::Arc;
 
-use lash_core::{EngineStepKind, EngineStepRun, SettledOutput};
+use lash_core::{EngineStepAnswer, EngineStepKind, EngineStepRun};
 use lash_kernel_doc::{Document, DocumentId, Name, Signature};
 use tokio_util::sync::CancellationToken;
 
@@ -237,17 +237,26 @@ pub struct KernelRunPolicy {
     pub attempts: std::num::NonZeroU32,
     pub retry_initial_ms: u64,
     pub retry_max_ms: u64,
+    /// How long a process whose run the worker pool lacked capacity for
+    /// backs off before its next claim, doubled for each claim in a row
+    /// that made no progress ([`lash_core::CapacityVerdict`]). Such a run
+    /// spends none of `attempts`.
+    pub capacity_backoff: std::time::Duration,
 }
 
 impl KernelRunPolicy {
-    /// 120 seconds, three attempts, immediate retries. A run recomputes
-    /// only effect-free work from the last saved state.
+    /// 120 seconds, three attempts, immediate retries, and a 50 ms capacity
+    /// backoff. A run recomputes only effect-free work from the last saved
+    /// state. The backoff has no workload measurement behind it: with the
+    /// standard activation-loop budget of 8, a pool that stays saturated
+    /// parks the process after about 13 seconds of doubling backoff.
     pub const fn standard() -> Self {
         Self {
             execution: std::time::Duration::from_secs(120),
             attempts: std::num::NonZeroU32::MIN.saturating_add(2),
             retry_initial_ms: 0,
             retry_max_ms: 0,
+            capacity_backoff: std::time::Duration::from_millis(50),
         }
     }
 }
@@ -637,7 +646,7 @@ impl lash_core::EngineSteps for KernelEngineSteps {
         )
     }
 
-    async fn run(&self, run: EngineStepRun, cancel: CancellationToken) -> SettledOutput {
+    async fn run(&self, run: EngineStepRun, cancel: CancellationToken) -> EngineStepAnswer {
         run::run_kernel_step(&self.engine, run, cancel).await
     }
 }

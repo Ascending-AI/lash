@@ -21,6 +21,13 @@
 //! - a `Repeatable` failure the pinned contract repeats records a retry with
 //!   its due time (`round.retry`); once due, the next attempt's `x_start`
 //!   commits (`round.start`) before its body runs;
+//! - a member whose body answered a capacity verdict
+//!   ([`CapacityVerdict`]) from a `Repeatable` call the current declaration
+//!   still repeats records nothing: the lifecycle holds it aside, never
+//!   starts it again on this activation, and reports it in [`Idle::capacity`]
+//!   so its owner backs off and ends the activation; the next claim reruns
+//!   it at its ordinal, uncounted. A verdict from any other call records
+//!   `Interrupted`;
 //! - a member whose body parked records `Waiting` and races its waits: the
 //!   tool completion wait its admission pinned, and the process terminal
 //!   its resolver awaits; whichever ends first settles it, and its body is
@@ -90,6 +97,7 @@ use super::{
     SettledOutput, Stop, StoreLocalEffect, ToolBody, run_bounded, settle, settle_retry,
     start_retry,
 };
+use crate::runtime::process::{CapacityVerdict, EngineStepAnswer};
 
 /// What a member's body answers: its output, and the store-local effects
 /// its completion or its park commits with.
@@ -102,6 +110,10 @@ pub struct MemberOutcome {
     /// For a park, the process whose terminal the call also awaits: its
     /// `process_terminal` wait is pinned with the park.
     pub terminal: Option<crate::ProcessId>,
+    /// The host lacked capacity for the attempt
+    /// ([`CapacityVerdict`]): honoured, nothing is recorded and the
+    /// member runs again uncounted; refused, `output` is recorded.
+    pub capacity: Option<CapacityVerdict>,
 }
 
 impl From<SettledOutput> for MemberOutcome {
@@ -110,6 +122,22 @@ impl From<SettledOutput> for MemberOutcome {
             output,
             store_local: Vec::new(),
             terminal: None,
+            capacity: None,
+        }
+    }
+}
+
+impl From<EngineStepAnswer> for MemberOutcome {
+    /// An engine step's answer: its output, or its capacity verdict, whose
+    /// output when the lifecycle refuses it is `Interrupted`, an attempt
+    /// that started and never settled.
+    fn from(answer: EngineStepAnswer) -> Self {
+        match answer {
+            EngineStepAnswer::Settled(output) => (*output).into(),
+            EngineStepAnswer::Capacity(verdict) => Self {
+                capacity: Some(verdict),
+                ..SettledOutput::Interrupted.into()
+            },
         }
     }
 }
@@ -257,6 +285,7 @@ pub struct Idle {
     parked: Vec<Parked>,
     retry_due: Option<DurableInstant>,
     busy: bool,
+    capacity: Option<CapacityVerdict>,
 }
 
 impl Idle {
@@ -264,7 +293,15 @@ impl Idle {
     /// retry due: nothing of the owner's members is open.
     #[must_use]
     pub fn quiet(&self) -> bool {
-        !self.busy && self.parked.is_empty() && self.retry_due.is_none()
+        !self.busy && self.parked.is_empty() && self.retry_due.is_none() && self.capacity.is_none()
+    }
+
+    /// A capacity verdict this activation holds a member on, with the
+    /// longest `retry_after` of those it holds: the member has no outcome,
+    /// and runs again on a later claim ([`CapacityVerdict`]).
+    #[must_use]
+    pub fn capacity(&self) -> Option<&CapacityVerdict> {
+        self.capacity.as_ref()
     }
 
     /// Whether it runs no body and holds no outcome, so all it waits on is
@@ -306,6 +343,9 @@ pub struct Lifecycle {
     running: JoinSet<Finished>,
     in_flight: BTreeSet<AdmittedId>,
     finished: BTreeMap<AdmittedId, Result<MemberOutcome, Stop>>,
+    /// Members whose attempt met a capacity verdict this lifecycle
+    /// honoured: no outcome, and never started again on this activation.
+    capacity: BTreeMap<AdmittedId, CapacityVerdict>,
     batch_opened: Option<Instant>,
     /// The process-terminal waits this lifecycle checked against their
     /// process's recorded end.
@@ -341,6 +381,7 @@ impl Lifecycle {
             running: JoinSet::new(),
             in_flight: BTreeSet::new(),
             finished: BTreeMap::new(),
+            capacity: BTreeMap::new(),
             batch_opened: None,
             checked: HashSet::new(),
             published: BTreeSet::new(),
@@ -406,7 +447,9 @@ impl Lifecycle {
 
     /// The attempt is running here, or its outcome awaits this owner's commit.
     pub(crate) fn holds_execution(&self, id: &AdmittedId) -> bool {
-        self.in_flight.contains(id) || self.finished.contains_key(id)
+        self.in_flight.contains(id)
+            || self.finished.contains_key(id)
+            || self.capacity.contains_key(id)
     }
 
     /// Whether it runs a body or holds an outcome not yet committed.
@@ -421,6 +464,7 @@ impl Lifecycle {
         self.running.abort_all();
         self.in_flight.clear();
         self.finished.clear();
+        self.capacity.clear();
         self.batch_opened = None;
     }
 
@@ -505,6 +549,14 @@ impl Lifecycle {
                     if self.in_flight.contains(&id) || self.finished.contains_key(&id) {
                         continue;
                     }
+                    // A member held on a capacity verdict runs again on a
+                    // later claim; a cancel settles it now.
+                    if self.capacity.contains_key(&id) {
+                        if !cancelled {
+                            continue;
+                        }
+                        self.capacity.remove(&id);
+                    }
                     let execution = view.execution(member);
                     if self.fresh.remove(&id) && !cancelled {
                         self.spawn(execution);
@@ -577,6 +629,11 @@ impl Lifecycle {
             parked,
             retry_due: next_due,
             busy: !self.running.is_empty() || !self.finished.is_empty(),
+            capacity: self
+                .capacity
+                .values()
+                .max_by_key(|verdict| verdict.retry_after)
+                .cloned(),
         }))
     }
 
@@ -638,7 +695,7 @@ impl Lifecycle {
                 && self.running.is_empty()
                 && self.finished.values().all(|result| {
                     matches!(result,
-                    Ok(MemberOutcome { store_local, terminal: None, output })
+                    Ok(MemberOutcome { store_local, terminal: None, output, capacity: None })
                         if store_local.is_empty() && !matches!(output, SettledOutput::Waiting(_)))
                 })
                 && folded.rounds().all(|view| {
@@ -654,6 +711,7 @@ impl Lifecycle {
                     parked: Vec::new(),
                     retry_due: None,
                     busy: false,
+                    capacity: None,
                 })));
             }
             let act = self.commit(tx, label).await?;
@@ -756,6 +814,12 @@ impl Lifecycle {
                 // owner retries from its rows.
                 if let Err(Stop::Durable(error)) = &done.result {
                     return Err(error.clone().into());
+                }
+                // An honoured capacity verdict: no outcome is held or
+                // recorded, and the member waits for a later claim.
+                if let Err(Stop::Capacity(verdict)) = done.result {
+                    self.capacity.insert(done.id, verdict);
+                    return Ok(());
                 }
                 self.finished.insert(done.id, done.result);
                 self.batch_opened.get_or_insert_with(|| clock.now());
@@ -896,29 +960,45 @@ impl Lifecycle {
         let stop_grace = self.bodies.stop_grace();
         let cx = self.cx.clone();
         let cancel = self.token(execution.id().run);
+        // Only a step that may run again from its committed start can drop
+        // an attempt: a capacity verdict from any other records the
+        // attempt's `Interrupted`.
+        let pinned = execution.policy();
+        let honours_capacity = matches!(pinned, lash_sansio::ExecutionPolicy::Repeatable { .. })
+            && self
+                .policies
+                .permits_repeat(execution.draft().tool(), pinned);
         self.in_flight.insert(execution.id().clone());
         let attempt = async move {
-            type Carried = (Vec<StoreLocalEffect>, Option<crate::ProcessId>);
+            type Carried = (
+                Vec<StoreLocalEffect>,
+                Option<crate::ProcessId>,
+                Option<CapacityVerdict>,
+            );
             let carried: Arc<Mutex<Carried>> = Arc::default();
             let slot = Arc::clone(&carried);
             let tool_body: ToolBody = Box::new(move |token| {
                 Box::pin(async move {
                     let result = body(token).await;
                     *slot.lock().unwrap_or_else(PoisonError::into_inner) =
-                        (result.store_local, result.terminal);
+                        (result.store_local, result.terminal, result.capacity);
                     result.output
                 })
             });
             let result = run_bounded(&cx, &execution, tool_body, &cancel, stop_grace)
                 .await
-                .map(|output| {
-                    let (store_local, terminal) = std::mem::take(
+                .and_then(|output| {
+                    let (store_local, terminal, capacity) = std::mem::take(
                         &mut *carried.lock().unwrap_or_else(PoisonError::into_inner),
                     );
-                    MemberOutcome {
-                        output,
-                        store_local,
-                        terminal,
+                    match capacity {
+                        Some(verdict) if honours_capacity => Err(Stop::Capacity(verdict)),
+                        _ => Ok(MemberOutcome {
+                            output,
+                            store_local,
+                            terminal,
+                            capacity: None,
+                        }),
                     }
                 });
             Finished {
@@ -953,6 +1033,9 @@ impl Lifecycle {
                 (cancelled_outcome(), Vec::new(), None)
             }
             Err(Stop::Durable(error)) => return Err(error.into()),
+            // Never held as finished: the lifecycle keeps an honoured
+            // verdict's member aside, without an outcome.
+            Err(Stop::Capacity(_)) => (SettledOutput::Interrupted, Vec::new(), None),
         };
         // A park whose resolver awaits a process waits on its terminal too:
         // the wait is pinned with the park, under the park's own deadline.

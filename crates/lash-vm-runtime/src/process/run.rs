@@ -11,7 +11,10 @@
 use std::sync::Arc;
 
 use lash_core::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
-use lash_core::{EngineStepRun, Material, ProcessId, SettledOutput};
+use lash_core::{
+    CapacityCause, CapacityVerdict, EngineStepAnswer, EngineStepRun, Material, ProcessId,
+    SettledOutput,
+};
 use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle, Integer, Name, Timestamp};
 use lash_kernel_vm::{Bounds, End, Request, RunError, Start, Step, Target};
 use lash_vm_broker::ParentFault;
@@ -19,6 +22,7 @@ use lash_vm_broker::kernel::{
     DrivenMachine, KernelFailure, Machines, datum_from_json, datum_to_json,
 };
 use lash_vm_client::{FrameEpoch, InfrastructureOutcome, OwnerEpoch, RunHost, VmOwner};
+use lash_vm_protocol::{PoolFault, ProtocolBreach};
 use tokio_util::sync::CancellationToken;
 
 use super::state::{
@@ -36,19 +40,44 @@ use crate::{HostBoundary, ProjectionCatalog};
 #[error("{0}")]
 pub(crate) struct RunFault(pub(crate) String);
 
-/// Runs the `kernel_run` step `run` to its outcome.
+/// Why a `kernel_run` answers no output of its own.
+enum Unsettled {
+    /// A fault of this attempt, failed within the step's attempts.
+    Fault(RunFault),
+    /// The host lacked capacity for the run. The run recomputes from the
+    /// process's committed state and performed nothing, so recording
+    /// nothing is sound: it runs again, uncounted.
+    Capacity(CapacityCause, String),
+}
+
+impl From<RunFault> for Unsettled {
+    fn from(fault: RunFault) -> Self {
+        Self::Fault(fault)
+    }
+}
+
+/// Runs the `kernel_run` step `run` to its outcome, or answers the host's
+/// capacity verdict on it.
 pub(crate) async fn run_kernel_step(
     engine: &KernelProcessEngine,
     run: EngineStepRun,
     stop: CancellationToken,
-) -> SettledOutput {
+) -> EngineStepAnswer {
     let process = run.process.clone();
     match kernel_run(engine, run, stop).await {
         Ok(output) => match serde_json::to_string(&output) {
-            Ok(text) => SettledOutput::Completed(material(&process, text)),
-            Err(error) => failed(&process, &RunFault(error.to_string())),
+            Ok(text) => SettledOutput::Completed(material(&process, text)).into(),
+            Err(error) => failed(&process, &RunFault(error.to_string())).into(),
         },
-        Err(fault) => failed(&process, &fault),
+        Err(Unsettled::Fault(fault)) => failed(&process, &fault).into(),
+        Err(Unsettled::Capacity(cause, detail)) => {
+            tracing::debug!(process_id = %process, %cause, %detail, "kernel_run met a capacity verdict");
+            EngineStepAnswer::Capacity(CapacityVerdict::new(
+                cause,
+                engine.policy.capacity_backoff,
+                detail,
+            ))
+        }
     }
 }
 
@@ -107,7 +136,7 @@ impl RunHost for StepHost {
     }
 }
 
-fn ended(outcome: lash_core::ProcessOutcome) -> Result<KernelRunOutput, RunFault> {
+fn ended(outcome: lash_core::ProcessOutcome) -> Result<KernelRunOutput, Unsettled> {
     Ok(KernelRunOutput::Ended {
         outcome: Box::new(outcome),
     })
@@ -117,7 +146,7 @@ async fn kernel_run(
     engine: &KernelProcessEngine,
     run: EngineStepRun,
     stop: CancellationToken,
-) -> Result<KernelRunOutput, RunFault> {
+) -> Result<KernelRunOutput, Unsettled> {
     let input: KernelRunInput = serde_json::from_value(run.input)
         .map_err(|error| RunFault(format!("kernel_run input: {error}")))?;
     let process_input = match KernelProcessInput::from_payload(&input.payload) {
@@ -139,7 +168,7 @@ async fn kernel_run(
                 None,
             ));
         }
-        Err(error) => return Err(RunFault(error.to_string())),
+        Err(error) => return Err(RunFault(error.to_string()).into()),
     };
     let settings: KernelRecordedSettings = match run
         .engine_settings
@@ -236,10 +265,10 @@ async fn kernel_run(
             }
             ended(outcome)
         }
-        Step::Slice => Err(RunFault("the run was stopped mid-slice".to_owned())),
+        Step::Slice => Err(RunFault("the run was stopped mid-slice".to_owned()).into()),
         Step::Parked(park) => {
             let Some(state) = state else {
-                return Err(RunFault("the run parked without a state".to_owned()));
+                return Err(RunFault("the run parked without a state".to_owned()).into());
             };
             let withdrawn: Vec<u64> = park.withdrawn.iter().map(|wait| wait.0).collect();
             let issued = park
@@ -327,9 +356,15 @@ async fn drive(
 }
 
 /// What a failure to drive the machine is to the process: its terminal
-/// when every attempt would meet it the same way, or a fault of this
-/// attempt, which is asked again.
-fn worker_failure(failure_: KernelFailure) -> Result<KernelRunOutput, RunFault> {
+/// when every attempt would meet it the same way, the host's capacity
+/// verdict, which records nothing and runs again uncounted, or a fault of
+/// this attempt, which is asked again within the step's attempts.
+fn worker_failure(failure_: KernelFailure) -> Result<KernelRunOutput, Unsettled> {
+    if let KernelFailure::Worker { outcome } = &failure_
+        && let Some(cause) = capacity_cause(outcome)
+    {
+        return Err(Unsettled::Capacity(cause, failure_.to_string()));
+    }
     match &failure_ {
         KernelFailure::Start(_) | KernelFailure::Import(_) | KernelFailure::Document(_) => {
             ended(failure(
@@ -352,7 +387,37 @@ fn worker_failure(failure_: KernelFailure) -> Result<KernelRunOutput, RunFault> 
             format!("worker execution bound exhausted: {limit}"),
             Some(serde_json::json!({ "worker_limit": limit })),
         )),
-        _ => Err(RunFault(failure_.to_string())),
+        _ => Err(RunFault(failure_.to_string()).into()),
+    }
+}
+
+/// The capacity verdict a worker failure is, by its typed outcome: the
+/// pool's queue, checkout wait or restart window, or retryable worker
+/// infrastructure (FIG-4451). A refusal of the run, a limit of the run
+/// itself and a deployment or configuration fault are none.
+fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
+    match outcome {
+        InfrastructureOutcome::ProtocolViolation {
+            breach: ProtocolBreach::Pool { fault },
+        } => match fault {
+            PoolFault::QueueFull { .. } => Some(CapacityCause::QueueFull),
+            PoolFault::CheckoutTimedOut => Some(CapacityCause::CheckoutTimedOut),
+            PoolFault::RestartStorm => Some(CapacityCause::RestartStorm),
+            PoolFault::Recovery
+            | PoolFault::InvalidConfiguration
+            | PoolFault::UnsupportedPlatform
+            | PoolFault::Io { .. } => None,
+        },
+        InfrastructureOutcome::WorkerLimitExceeded { limit } => limit
+            .is_host_verdict()
+            .then_some(CapacityCause::RetryableInfrastructure),
+        InfrastructureOutcome::WorkerCrashed { .. }
+        | InfrastructureOutcome::WorkerUnresponsive { .. }
+        | InfrastructureOutcome::ProtocolViolation { .. } => {
+            Some(CapacityCause::RetryableInfrastructure)
+        }
+        InfrastructureOutcome::RunRefused { .. }
+        | InfrastructureOutcome::WorkerDeployment { .. } => None,
     }
 }
 

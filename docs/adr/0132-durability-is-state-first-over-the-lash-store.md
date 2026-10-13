@@ -318,6 +318,20 @@ enum EngineAction {
   `Started`, the immediate answer to `PinKey` (`KeyPinned`),
   a step's `AttemptOutcome` under the §5 recovery rules, a resolved or
   timed-out wait, a process terminal, a sleep's end.
+- An engine's own step bodies (`EngineSteps`) run the same way under the
+  retry policy their kind declares. A body the host lacked capacity for (a
+  full worker queue, a timed-out checkout, a restart storm, or retryable
+  worker infrastructure) answers a typed `CapacityVerdict` instead of an
+  outcome (FIG-6155). The lifecycle honours it only from a `Repeatable` step
+  that the current declaration still repeats. Such a step's body performed
+  nothing outside it, or recomputes from committed state. Honoured, the
+  attempt records nothing and spends none of the step's attempts. The
+  activation backs off by the verdict's `retry_after`, doubled for each
+  claim in a row without progress, and ends without committing. The next
+  claim counts a failed activation (§11) and reruns the step at its same
+  ordinal. Persistent saturation therefore parks the process with
+  `ActivationLoop`, which is redrivable, and never ends it. From any other
+  step the verdict is refused, and the attempt records `Interrupted`.
 - There is no opaque `run`, no `await_terminal` and no re-invocation of host
   code from the top. No trait method has a default body.
 - Cancellation is cooperative first. A running or waiting process receives

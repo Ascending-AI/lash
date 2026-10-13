@@ -267,6 +267,92 @@ pub struct EngineStepRun {
     pub input: serde_json::Value,
 }
 
+/// Which host capacity an engine step's attempt did not get: the closed set
+/// of verdicts a [`CapacityVerdict`] names. Each is the host's, read live,
+/// and a replay, a later attempt or another node with capacity decides it
+/// otherwise (FIG-4451); none is a fault of the step's input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CapacityCause {
+    /// The host's worker queue refused the attempt at its item or byte bound.
+    QueueFull,
+    /// No worker came free within the host's checkout wait.
+    CheckoutTimedOut,
+    /// Repeated worker failures exhausted the host's restart window.
+    RestartStorm,
+    /// Retryable worker infrastructure failed the attempt: a crashed,
+    /// unresponsive or protocol-breaking worker, or a deadline or budget of
+    /// the host's rather than of the run.
+    RetryableInfrastructure,
+}
+
+impl std::fmt::Display for CapacityCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::QueueFull => "the worker queue is full",
+            Self::CheckoutTimedOut => "no worker came free within the checkout wait",
+            Self::RestartStorm => "worker failures exhausted the restart window",
+            Self::RetryableInfrastructure => "retryable worker infrastructure failed",
+        })
+    }
+}
+
+/// An engine step's attempt the host lacked capacity for (FIG-6155): the
+/// attempt has no outcome, and nothing of it is recorded. The lifecycle
+/// keeps the step's start, the process's activation backs off for
+/// `retry_after`, doubled for each activation in a row that made no
+/// progress, and ends without committing; the next claim runs the step
+/// again at its same ordinal, uncounted, as after a crash. A process whose
+/// claims keep meeting the verdict parks with
+/// [`ProcessParkReason::ActivationLoop`](crate::ProcessParkReason::ActivationLoop)
+/// once the activation-loop budget is reached; a redrive runs it again. A
+/// capacity verdict never ends a process.
+///
+/// **Soundness.** Recording nothing is sound only when the attempt produced
+/// no effect anyone outside it could see: the verdict came before the body
+/// started its work (a full queue, a checkout that timed out), or the body
+/// is a recomputation from committed state, which its next run repeats. A
+/// body answers it only then. The lifecycle honours it only from a step whose
+/// pinned policy is `Repeatable` and that the current declaration still
+/// repeats; from any other step it records `Interrupted`, the outcome of
+/// an attempt that started and never settled.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{cause}: {detail}")]
+pub struct CapacityVerdict {
+    /// Which capacity the attempt did not get.
+    pub cause: CapacityCause,
+    /// How long the activation waits before it ends, before doubling.
+    pub retry_after: Duration,
+    /// The host's own account of the verdict, for diagnostics.
+    pub detail: String,
+}
+
+impl CapacityVerdict {
+    /// The verdict `cause`, retried after `retry_after`, with `detail`.
+    #[must_use]
+    pub fn new(cause: CapacityCause, retry_after: Duration, detail: impl Into<String>) -> Self {
+        Self {
+            cause,
+            retry_after,
+            detail: detail.into(),
+        }
+    }
+}
+
+/// What one engine step's body answers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EngineStepAnswer {
+    /// Its outcome, recorded as the attempt's.
+    Settled(Box<SettledOutput>),
+    /// The host lacked capacity for the attempt; see [`CapacityVerdict`].
+    Capacity(CapacityVerdict),
+}
+
+impl From<SettledOutput> for EngineStepAnswer {
+    fn from(output: SettledOutput) -> Self {
+        Self::Settled(Box::new(output))
+    }
+}
+
 /// An engine's own step bodies, declared at registration
 /// ([`ProcessEngineRegistration::with_engine_steps`](super::ProcessEngineRegistration::with_engine_steps)).
 /// Each runs under the retry policy its kind declares, pinned at admission:
@@ -274,7 +360,10 @@ pub struct EngineStepRun {
 /// the same input and a failure is retried within the policy's attempts, so
 /// such a body must be a recomputation from that input, with no effect of
 /// its own; under `Once`, a crash settles it `Interrupted` and a failure is
-/// its outcome.
+/// its outcome. A body that the host lacked capacity for answers a
+/// [`CapacityVerdict`] instead of a failure: under `Repeatable` it runs
+/// again uncounted and records nothing, so its attempts are spent only on
+/// failures of its own.
 #[async_trait::async_trait]
 pub trait EngineSteps: Send + Sync {
     /// The kinds of body this engine runs.
@@ -291,12 +380,13 @@ pub trait EngineSteps: Send + Sync {
     /// Lash holds no retry default.
     fn retry(&self, kind: &EngineStepKind) -> lash_sansio::ExecutionPolicy;
 
-    /// Run one body to its outcome, observing `cancel`.
+    /// Run one body to its outcome, observing `cancel`: its settled output,
+    /// or a [`CapacityVerdict`] when the host lacked capacity for it.
     async fn run(
         &self,
         run: EngineStepRun,
         cancel: tokio_util::sync::CancellationToken,
-    ) -> SettledOutput;
+    ) -> EngineStepAnswer;
 }
 
 /// Why an engine step was refused before admission.

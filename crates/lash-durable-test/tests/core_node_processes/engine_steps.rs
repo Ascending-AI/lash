@@ -69,7 +69,7 @@ impl lash_core::EngineSteps for Double {
         &self,
         run: lash_core::EngineStepRun,
         _cancel: tokio_util::sync::CancellationToken,
-    ) -> lash_core::SettledOutput {
+    ) -> lash_core::EngineStepAnswer {
         use lash_core::tool_run::{MaterialOwner, MaterialRole};
         self.runs.fetch_add(1, Ordering::SeqCst);
         let text = (run.input.as_i64().unwrap_or_default() * 2).to_string();
@@ -80,6 +80,7 @@ impl lash_core::EngineSteps for Double {
             MaterialRole::AttemptOutput,
             text,
         ))
+        .into()
     }
 }
 
@@ -258,7 +259,7 @@ impl lash_core::EngineSteps for Flaky {
         &self,
         run: lash_core::EngineStepRun,
         _cancel: tokio_util::sync::CancellationToken,
-    ) -> lash_core::SettledOutput {
+    ) -> lash_core::EngineStepAnswer {
         use lash_core::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
         self.runs.fetch_add(1, Ordering::SeqCst);
         let output = lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
@@ -276,6 +277,7 @@ impl lash_core::EngineSteps for Flaky {
             )
             .failure(KnownFailureReason::Reported, None),
         )
+        .into()
     }
 }
 

@@ -871,20 +871,21 @@ pub mod plugins {
         AppendSessionNodesOutcome, AppendSessionNodesRequest, PluginExtensions, SessionAppendNode,
         SessionGraphService, SessionStateService,
     };
+    /// A host process engine's state machine (ADR 0132 §6): the state it
+    /// keeps, the events lash delivers to `advance`, and the action it
+    /// answers with.
+    pub use lash_core::{
+        CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,
+        EngineStateMigration, EngineStateRefusal, EngineStepAnswer, EngineStepKind,
+        EngineStepRefusal, EngineStepRun, EngineSteps, KeyName, Material, NamesMaterial,
+        SettledOutput, SettledOutputRefusal, StepName, StepRequest,
+    };
     /// Code-executor request, response, and runtime capability context.
     pub use lash_core::{
         CellDefect, CellFailure, CellFailureKind, ExecRequest, ExecResponse,
         RuntimeExecutionContext,
     };
     pub use lash_core::{CompletedToolCall, PluginOptions};
-    /// A host process engine's state machine (ADR 0132 §6): the state it
-    /// keeps, the events lash delivers to `advance`, and the action it
-    /// answers with.
-    pub use lash_core::{
-        EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStateMigration,
-        EngineStateRefusal, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, KeyName,
-        Material, NamesMaterial, SettledOutput, SettledOutputRefusal, StepName, StepRequest,
-    };
     /// How a host process engine carries a process onto a successor pair its
     /// host names (FIG-6121, D2).
     pub use lash_core::{EngineSuccession, SuccessionError, SuccessorCarry};

@@ -51,7 +51,7 @@ use lash_durable::domain::{
     CANCEL_MAIL, ExecRootRow, OwnerKey, ProcessActorRow, ProcessWrite, RunSeq, ScopeKey, WaitState,
     WaitWrite,
 };
-use lash_durable::runner::{Activation, Exit, Owned};
+use lash_durable::runner::{Activation, Exit, Owned, Wake};
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, DurableReads,
     Release, StoreFailure, StoreFailureKind,
@@ -74,7 +74,9 @@ use crate::runtime::actor::round::{
 use crate::runtime::actor::waits::{
     self, ParkDeadline, Resolution, WaitDeadline, WaitKind, WaitPurpose, WaitSpec,
 };
-use crate::runtime::process::engine_state::{EngineAction, EngineEvent, EngineState, StepRequest};
+use crate::runtime::process::engine_state::{
+    CapacityVerdict, EngineAction, EngineEvent, EngineState, StepRequest,
+};
 use crate::runtime::process::steps::{ProcessSteps, StepRefusal, StepRuntime};
 use crate::{
     ActorContext, AdmittedScope, Backend, CancelOrigin, ProcessEngine, ProcessId, ProcessInput,
@@ -163,6 +165,11 @@ pub(super) enum Pass {
     /// Steps run and nothing else is due: wait for what their lifecycle
     /// waits on, for mail or for the next due time.
     Wait(Idle, Option<DurableInstant>),
+    /// Nothing runs or is held but a step the host lacked capacity for:
+    /// back off, then end the activation without committing, so the next
+    /// claim counts it against the activation-loop budget and runs the
+    /// step again ([`CapacityVerdict`]).
+    Backoff(CapacityVerdict),
     /// The actor was released or ended.
     Released,
 }
@@ -221,6 +228,13 @@ pub(super) fn registry_failure(error: &crate::PluginError) -> DurableError {
     })
 }
 
+/// How long an activation waits on a capacity verdict whose `retry_after`
+/// is `base`, after `failed_activations` claims in a row without progress:
+/// `base` doubled for each, at most 1,024 times `base`.
+fn capacity_backoff(base: std::time::Duration, failed_activations: u32) -> std::time::Duration {
+    base.saturating_mul(1_u32 << failed_activations.min(10))
+}
+
 pub(super) fn millis(at: DurableInstant) -> u64 {
     u64::try_from(at.0).unwrap_or_default()
 }
@@ -274,6 +288,10 @@ impl ProcessActivation {
                     Ok(Waited::Stopping) => return Exit::Abandoned,
                     Ok(Waited::Woke) | Err(_) => {}
                 },
+                Ok(Pass::Backoff(verdict)) => {
+                    self.back_off(owned, &live, &verdict).await;
+                    return Exit::Abandoned;
+                }
                 Ok(Pass::Released) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                 // A refusal as corrupt answers every retry the same: the
                 // process ends Failed on the first one, and the next pass
@@ -304,6 +322,34 @@ impl ProcessActivation {
 }
 
 impl ProcessActivation {
+    /// Wait out a capacity verdict before the activation ends: its
+    /// `retry_after`, doubled for each claim in a row that made no progress,
+    /// or until mail or the node's drain may need the actor sooner. A poll
+    /// tick alone does not end it.
+    async fn back_off(&self, owned: &Owned, live: &Live, verdict: &CapacityVerdict) {
+        let delay = capacity_backoff(verdict.retry_after, live.failed_activations);
+        tracing::debug!(
+            actor = %owned.actor(),
+            %verdict,
+            delay_ms = delay.as_millis(),
+            failed_activations = live.failed_activations,
+            "process step met a capacity verdict; backing off"
+        );
+        let clock = Arc::clone(owned.clock());
+        let elapsed = clock.sleep(delay);
+        tokio::pin!(elapsed);
+        loop {
+            tokio::select! {
+                () = &mut elapsed => return,
+                wake = owned.wait_for_mail() => {
+                    if !matches!(wake, Wake::Poll) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     /// Hand the host every event appended to `process`'s log past its
     /// durable publication mark that this node has not published: only
     /// what committed, each once on this node, in sequence order. Nothing
@@ -694,6 +740,9 @@ impl ProcessActivation {
                 };
                 if !idle.suspendable() {
                     return Ok(Pass::Wait(idle, due));
+                }
+                if let Some(verdict) = idle.capacity() {
+                    return Ok(Pass::Backoff(verdict.clone()));
                 }
                 // Only rows are left to wait on: release as `waiting` until
                 // the earliest of them, holding nothing.

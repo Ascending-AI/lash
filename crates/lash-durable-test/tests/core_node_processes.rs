@@ -2169,3 +2169,6 @@ mod session_and_isolated_envs;
 
 #[path = "core_node_processes/idle_obligations.rs"]
 mod idle_obligations;
+
+#[path = "core_node_processes/capacity_verdicts.rs"]
+mod capacity_verdicts;

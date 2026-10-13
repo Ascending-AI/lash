@@ -591,7 +591,7 @@ impl super::engine_state::EngineSteps for RetriedEngineSteps {
         &self,
         run: super::engine_state::EngineStepRun,
         cancel: tokio_util::sync::CancellationToken,
-    ) -> crate::runtime::actor::round::SettledOutput {
+    ) -> super::engine_state::EngineStepAnswer {
         self.steps.run(run, cancel).await
     }
 }

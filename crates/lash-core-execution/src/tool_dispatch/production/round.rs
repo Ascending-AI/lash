@@ -126,6 +126,7 @@ fn parked_output(
         output: SettledOutput::Waiting(source),
         store_local: Vec::new(),
         terminal: parked.awaited_process().cloned(),
+        capacity: None,
     }
 }
 

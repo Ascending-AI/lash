@@ -504,15 +504,11 @@ pub(crate) async fn run_once_async_process_settlement(
         .await?;
     validate_runtime_perf_turn(scenario, 0, &turn, &runtime.export_state().await?)?;
     let parent_return_ms = elapsed_ms(run_started);
-    control.wait_for_pending(children).await;
-    let spawn_ms = elapsed_ms(run_started);
-    let open_spans_before_settle = phase_probe.open_span_count();
-    if open_spans_before_settle < children {
-        anyhow::bail!(
-            "async settlement expected at least {children} open child spans, found {open_spans_before_settle}"
-        );
-    }
 
+    // Each child's start committed before the parent's turn did, so every
+    // child is listed now. Its terminal is awaited from here on: a child
+    // that ends before it reaches its gated completion fails the run with
+    // its own terminal, instead of leaving the gate short of a child forever.
     let session = runtime.session();
     let processes = session.admin().processes().list_all().await?;
     if processes.len() != children {
@@ -525,21 +521,39 @@ pub(crate) async fn run_once_async_process_settlement(
     for process in processes {
         let session = session.clone();
         terminals.spawn(async move {
-            let started = Instant::now();
-            session
+            let output = session
                 .admin()
                 .processes()
                 .await_output(&process.process_id)
                 .await?;
-            anyhow::Result::<f64>::Ok(elapsed_ms(started))
+            anyhow::Result::<_>::Ok((process.process_id, output, Instant::now()))
         });
     }
-    tokio::task::yield_now().await;
+    tokio::select! {
+        () = control.wait_for_pending(children) => {}
+        Some(ended) = terminals.join_next() => {
+            let (process_id, output, _) = ended.map_err(anyhow::Error::from)??;
+            anyhow::bail!(
+                "async settlement child {process_id} ended before its gated completion: {output:?}"
+            );
+        }
+    }
+    let spawn_ms = elapsed_ms(run_started);
+    let open_spans_before_settle = phase_probe.open_span_count();
+    if open_spans_before_settle < children {
+        anyhow::bail!(
+            "async settlement expected at least {children} open child spans, found {open_spans_before_settle}"
+        );
+    }
+
     let settle_started = Instant::now();
     control.release(children);
     let mut child_terminal_ms = Vec::with_capacity(children);
     while let Some(result) = terminals.join_next().await {
-        child_terminal_ms.push(result.map_err(anyhow::Error::from)??);
+        let (_, _, ended_at) = result.map_err(anyhow::Error::from)??;
+        child_terminal_ms.push(round3(
+            ended_at.duration_since(settle_started).as_secs_f64() * 1000.0,
+        ));
     }
     let settle_ms = elapsed_ms(settle_started);
     let drain_started = Instant::now();

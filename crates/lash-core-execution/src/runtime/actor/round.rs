@@ -904,6 +904,10 @@ pub(crate) enum Stop {
     Lapsed,
     /// The durable clock could not be read; the activation retries without an outcome.
     Durable(DurableError),
+    /// The host lacked capacity for the attempt, which the lifecycle
+    /// honours: no outcome, and the step runs again uncounted
+    /// ([`CapacityVerdict`](crate::runtime::process::CapacityVerdict)).
+    Capacity(crate::runtime::process::CapacityVerdict),
 }
 
 /// Run `admitted`'s body under its limit, the context's cancel token,
