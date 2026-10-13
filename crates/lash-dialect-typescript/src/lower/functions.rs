@@ -139,7 +139,7 @@ impl Lowerer<'_> {
         let outer_span = self.span;
         let body = self.scoped_block(|lowerer| {
             lowerer.parameters(&function.params, &args)?;
-            lowerer.function_body(function)?;
+            lowerer.admitted_body(function, Some(&args))?;
             if lowerer.frame().arguments_used {
                 let prefix = lowerer.block(|this| {
                     let object = this.invoke(
@@ -170,6 +170,57 @@ impl Lowerer<'_> {
             atom: closure.atom,
             ty: self.facts.function(function.return_ty.as_ref()),
         })
+    }
+
+    /// Admit normalized numeric parameters before the shared source body.
+    /// Positional entries have already discarded extra arguments; packed
+    /// entries retain their arity check before selecting numeric facts.
+    fn admitted_body(
+        &mut self,
+        function: &ast::Function,
+        args: Option<&lash_kernel_doc::Name>,
+    ) -> Lowering<()> {
+        if !self.facts.numeric_function(function) {
+            return self.function_body(function);
+        }
+        let [ast::Pattern::Ident(parameter, None)] = function.params.as_slice() else {
+            unreachable!("numeric body has one plain parameter");
+        };
+        let Some(name) = function.name.as_ref() else {
+            unreachable!("numeric function name");
+        };
+        let operand = self.read(parameter, None)?;
+        let kind = self.native("kind", vec![operand.expr()])?;
+        let admitted_test = self.same(kind, Operand::text("float").expr())?;
+        let generic = self.block(|this| this.function_body(function))?;
+        let fast = self.block(|this| {
+            this.narrowed(
+                vec![
+                    (parameter.clone(), Ty::Float),
+                    (name.clone(), Ty::Function(Box::new(Ty::Float))),
+                ],
+                |this| this.function_body(function),
+            )
+        })?;
+        let admitted = if let Some(args) = args {
+            let length = self.native("list.len", vec![Expr::Variable(args.clone())])?;
+            let arity = self.native("num.le", vec![length, Operand::number(1.0).expr()])?;
+            self.block(|this| {
+                this.emit_if(
+                    arity,
+                    fast,
+                    Buf {
+                        stmts: generic.stmts.clone(),
+                        notes: generic.notes.clone(),
+                    },
+                );
+                Ok(())
+            })?
+        } else {
+            fast
+        };
+        self.emit_if(admitted_test, admitted, generic);
+        Ok(())
     }
 
     /// The shared source body, after its parameter bindings.
@@ -227,7 +278,7 @@ impl Lowerer<'_> {
                     )?;
                 }
             }
-            lowerer.function_body(function)
+            lowerer.admitted_body(function, None)
         });
         self.span = outer_span;
         self.functions.pop();

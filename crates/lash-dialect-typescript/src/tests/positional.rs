@@ -126,6 +126,29 @@ fn direct_calls_charge_only_emitted_statements_atoms_and_body_expressions() {
     assert_eq!(machine.meters().charged, 2 + 2 + 2 + 14 + 5 + 4 + 5);
 }
 
+/// Locate the source base case through any numeric admission branch.
+fn returning_branch(stmts: &mut [Stmt]) -> Option<&mut Vec<Stmt>> {
+    for stmt in stmts {
+        if let Stmt::If {
+            then_block,
+            else_block,
+            ..
+        } = stmt
+        {
+            if matches!(then_block.as_slice(), [Stmt::Return { .. }]) {
+                return Some(then_block);
+            }
+            if let Some(block) = returning_branch(then_block) {
+                return Some(block);
+            }
+            if let Some(block) = returning_branch(else_block) {
+                return Some(block);
+            }
+        }
+    }
+    None
+}
+
 #[test]
 fn a_positional_body_parked_at_sixty_recursive_calls_round_trips_exactly() {
     let mut lowered = super::lower_with_effects("function descend(n) { if (n < 1) return n; return descend(n - 1); } console.log(descend(60));").unwrap();
@@ -143,13 +166,7 @@ fn a_positional_body_parked_at_sixty_recursive_calls_round_trips_exactly() {
             _ => None,
         })
         .expect("the shared positional body");
-    let block = body
-        .iter_mut()
-        .find_map(|stmt| match stmt {
-            Stmt::If { then_block, .. } => Some(then_block),
-            _ => None,
-        })
-        .unwrap();
+    let block = returning_branch(body).expect("the recursive base case");
     lowered.document.manifest.effects.insert(
         lash_kernel_doc::EffectName::new("echo").unwrap(),
         machine::effects()[&lash_kernel_doc::EffectName::new("echo").unwrap()].clone(),

@@ -452,3 +452,187 @@ fn plain_record_paths_account_charge_across_slice_resume() {
     assert_eq!((&plain.0, plain.1), (&sliced.0, sliced.1));
     assert!(sliced.2 > 10, "multiple member steps were imported");
 }
+
+/// TS-NUMERIC-ENTRY: one float admission per recursive call replaces
+/// per-operation coercion, without changing the result or exact accounting.
+#[test]
+fn numeric_recursive_calls_admit_once_and_account_real_work() {
+    let source = "function fib(n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); } await finish(fib(10));";
+    let (mut machine, _) = start(source);
+    machine.count_work();
+    let mut result = None;
+    loop {
+        match machine.run(&mut Console::default(), u64::MAX).expect("run") {
+            Step::Parked(park) => {
+                for request in park.requests {
+                    let Request::Effect(effect) = request else {
+                        panic!("effect")
+                    };
+                    let value = effect.args.first().cloned().unwrap_or(Datum::Null);
+                    result = Some(value.clone());
+                    machine
+                        .deliver(effect.wait, Outcome::Completed(value))
+                        .expect("deliver");
+                }
+            }
+            Step::Ended(End::Finished(_)) => break,
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!(
+        result,
+        Some(Datum::Float(lash_kernel_doc::Float::new(55.0)))
+    );
+    let work = machine.work().expect("counted");
+    assert_eq!(work.residual(), 0);
+    assert_eq!(work.insertion_residual(), 0);
+    assert_eq!(
+        work.natives
+            .iter()
+            .find(|native| native.symbol.name == "kind")
+            .expect("kind admission")
+            .counts
+            .calls,
+        178,
+        "177 recursive invocations plus the finish boundary"
+    );
+    for code in &work.codes {
+        assert!(
+            !matches!(code.symbol.name.as_str(), "ts.lt" | "ts.sub" | "ts.add"),
+            "numeric recursion executed {}",
+            code.symbol.name
+        );
+    }
+}
+
+/// TS-NUMERIC-POSITIONAL: direct recursive entries admit their normalized
+/// parameter, rather than bypassing the numeric body through the packed entry.
+#[test]
+fn numeric_entry_positional_recursion_executes_no_coercion_helpers() {
+    let (mut machine, _) = start(
+        "function fib(n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); } console.log(fib(10));",
+    );
+    machine.count_work();
+    let mut console = Console::default();
+    assert!(matches!(
+        machine.run(&mut console, u64::MAX).expect("run"),
+        Step::Ended(End::Finished(_))
+    ));
+    assert_eq!(console.lines, ["55"]);
+    let work = machine.work().expect("counted");
+    assert_eq!(work.residual(), 0);
+    assert_eq!(work.insertion_residual(), 0);
+    for code in &work.codes {
+        assert!(
+            !matches!(code.symbol.name.as_str(), "ts.lt" | "ts.sub" | "ts.add"),
+            "positional recursion executed {}",
+            code.symbol.name
+        );
+    }
+}
+
+/// TS-NUMERIC-PARK: the entry proof is code, with no transient facts needed
+/// by a serialized continuation stopped inside the loop.
+#[test]
+fn numeric_entry_loop_resumes_with_identical_result_and_charge() {
+    let source = "function step(n) { return n + 1; } let s = 0; for (let i = 0; i < 3; i++) { await echo(i); s = step(s); } await finish(s);";
+    let plain = plain_record_resume(source, u64::MAX, false);
+    let restored = plain_record_resume(source, u64::MAX, true);
+    assert_eq!((&plain.0, plain.1), (&restored.0, restored.1));
+    assert_eq!(restored.2, 4);
+    assert_eq!(plain.0, Datum::Float(lash_kernel_doc::Float::new(3.0)));
+    let guarded = source.replace("let s = 0", "const escaped = step; let s = 0");
+    assert_eq!(plain_record_resume(&guarded, u64::MAX, true).0, plain.0);
+}
+
+/// TS-NUMERIC-SAVED: saved code retains its generic entry semantics for
+/// later cells, even though its originating cell called it with a float.
+#[test]
+fn numeric_entry_saved_functions_accept_later_unknown_calls() {
+    let source = "function step(n) { return n + 1; } step(1);";
+    let lowered = super::lower_with_effects(source).expect("source");
+    let (mut machine, _) = start(source);
+    let Step::Ended(End::Finished(finished)) =
+        machine.run(&mut Console::default(), u64::MAX).expect("run")
+    else {
+        panic!("end")
+    };
+    let (saved, refused) = lash_kernel_dialect::save(
+        lash_kernel_dialect::Left {
+            document: &lowered.document,
+            carried: &finished.bindings.variables,
+            carried_objects: &finished.bindings.objects,
+            closures: &finished.closures.variables,
+            closure_objects: &finished.closures.objects,
+            not_carried: &finished.not_carried,
+            controls: super::controls(),
+            annotations: Some(&lowered.annotations),
+            values: &crate::function_values(),
+        },
+        &BTreeSet::new(),
+    );
+    assert!(refused.is_empty(), "{refused:?}");
+    let function = saved
+        .get(&Name::new("step"))
+        .expect("saved step")
+        .function
+        .clone();
+    let bytes = serde_json::to_vec(&function).expect("encode");
+    let restored = serde_json::from_slice(&bytes).expect("decode");
+    assert_eq!(function, restored);
+    let functions = BTreeMap::from([(Name::new("step"), restored)]);
+    let bindings = BTreeSet::from([Name::new("step")]);
+    let effects = effects();
+    let environment = Environment {
+        library: super::library(),
+        effects: &effects,
+        tool_roots: &BTreeSet::new(),
+        controls: super::controls(),
+        bindings: &bindings,
+        functions: &functions,
+    };
+    let next = crate::lower(
+        "await finish(JSON.stringify([step('2'), Number.isNaN(step()), step(2)]));",
+        &environment,
+    )
+    .expect("next cell");
+    let program = Program {
+        document: Arc::new(next.document),
+        library: prepared().clone(),
+    };
+    let mut machine = KernelMachine::start(
+        program,
+        BOUNDS,
+        Start {
+            target: Target::Main,
+            args: Vec::new(),
+            bindings: Bindings {
+                variables: BTreeMap::from([(Name::new("step"), lash_kernel_doc::Value::Absent)]),
+                ..Default::default()
+            },
+        },
+    )
+    .expect("next start");
+    let next_step = machine
+        .run(&mut Console::default(), u64::MAX)
+        .expect("next run");
+    let Step::Parked(park) = next_step else {
+        panic!("finish park: {next_step:?}")
+    };
+    let [Request::Effect(effect)] = park.requests.as_slice() else {
+        panic!("finish effect")
+    };
+    assert_eq!(
+        effect.args,
+        vec![Datum::Text("[\"21\",true,3]".to_string())]
+    );
+    machine
+        .deliver(effect.wait, Outcome::Completed(Datum::Null))
+        .expect("finish reply");
+    assert!(matches!(
+        machine
+            .run(&mut Console::default(), u64::MAX)
+            .expect("finish"),
+        Step::Ended(End::Finished(_))
+    ));
+}

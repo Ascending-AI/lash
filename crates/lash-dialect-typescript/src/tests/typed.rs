@@ -628,3 +628,66 @@ fn plain_record_restored_brand_markers_keep_admission() {
             .collect::<Vec<_>>()
     );
 }
+
+fn numeric_pair(source: &str, expected: &str) {
+    let guarded = source.replace("await finish(", "const escaped = step; await finish(");
+    assert_eq!(finished(&guarded), expected);
+    assert_eq!(finished(source), expected);
+}
+
+/// TS-NUMERIC-F64: admission proves doubles, including rounding beyond 2^53
+/// and fractional division; it never selects exact-integer arithmetic.
+#[test]
+fn numeric_entry_preserves_f64_precision_and_fractions() {
+    numeric_pair(
+        "function step(n) { return n + 1; } let n = 9007199254740992; for (let i = 0; i < 3; i++) { n = step(n); } await finish(JSON.stringify(n));",
+        "9007199254740992",
+    );
+    numeric_pair(
+        "function step(n) { return n / 2; } await finish(JSON.stringify(step(1)));",
+        "0.5",
+    );
+}
+
+/// TS-NUMERIC-IEEE: negative zero, NaN and infinities retain f64 semantics.
+#[test]
+fn numeric_entry_preserves_negative_zero_nan_and_infinity() {
+    numeric_pair(
+        "function step(n) { return n * 1; } await finish(JSON.stringify([1 / step(-0) === -Infinity, Number.isNaN(step(NaN)), step(Infinity) === Infinity]));",
+        "[true,true,true]",
+    );
+}
+
+/// TS-NUMERIC-ESCAPE: values and captures do not acquire a call-site proof.
+#[test]
+fn numeric_entry_excludes_escaping_and_captured_functions() {
+    for source in [
+        "function step(n) { return n + 1; } const alias = step; await finish(JSON.stringify(alias('2')));",
+        "function step(n) { return n + 1; } const callback = () => step('2'); await finish(JSON.stringify(callback()));",
+        "let n = 0; function step(i) { return n + i; } const change = () => { n = '2'; }; for (let j = 0; j < 1; j++) { change(); } await finish(JSON.stringify(step(1)));",
+    ] {
+        let text = super::main_text_with_effects(source);
+        assert!(!text.contains("same(kind(n), \"float\")"), "{text}");
+        assert!(!text.contains("same(kind(i), \"float\")"), "{text}");
+        assert_eq!(finished(source), "\"21\"");
+    }
+}
+
+/// TS-NUMERIC-COERCION: object admission must precede numeric assumptions.
+#[test]
+fn numeric_entry_valueof_operands_still_coerce() {
+    numeric_pair(
+        "function step(n) { return n + 1; } let calls = 0; const value = { valueOf() { calls++; return 7; } }; await finish(JSON.stringify([step(value), calls]));",
+        "[8,1]",
+    );
+}
+
+/// TS-NUMERIC-UNKNOWN-CALL: strings and missing arguments retain generic
+/// semantics; positional entries discard extras after evaluating them.
+#[test]
+fn numeric_entry_unproven_and_wrong_arity_calls_keep_the_generic_result() {
+    numeric_pair(
+        "function step(n) { return n + 1; } await finish(JSON.stringify([step('2'), Number.isNaN(step()), step(2, 'ignored')]));",
+        "[\"21\",true,3]",
+    );
+}
