@@ -1,4 +1,5 @@
 use crate::SessionId;
+
 use crate::plugin::{PluginSessionMaterializationRequest, PluginSessionRequest};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -98,25 +99,17 @@ fn lifecycle_event_hook_kind(event: &PluginLifecycleEvent) -> &'static str {
 
 enum PluginOperationInvocation {
     Query {
-        sessions: Arc<dyn SessionReadService>,
-        processes: Arc<dyn ProcessReadService>,
+        bindings: Arc<ServiceBindings>,
     },
     Command {
-        sessions: Arc<dyn SessionStateService>,
-        session_lifecycle: Arc<dyn SessionLifecycleService>,
-        session_graph: Arc<dyn SessionGraphService>,
-        processes: Arc<dyn crate::ProcessService>,
+        bindings: Arc<ServiceBindings>,
     },
     Task {
-        sessions: Arc<dyn SessionStateService>,
-        session_lifecycle: Arc<dyn SessionLifecycleService>,
-        session_graph: Arc<dyn SessionGraphService>,
-        processes: Arc<dyn crate::ProcessService>,
+        bindings: Arc<ServiceBindings>,
         scoped_effect_controller: crate::ActorContext,
         cancellation_token: tokio_util::sync::CancellationToken,
     },
 }
-
 impl PluginOperationInvocation {
     fn kind(&self) -> PluginOperationKind {
         match self {
@@ -125,42 +118,31 @@ impl PluginOperationInvocation {
             Self::Task { .. } => PluginOperationKind::Task,
         }
     }
-
+    fn bindings(&self) -> &ServiceBindings {
+        match self {
+            Self::Query { bindings } | Self::Command { bindings } | Self::Task { bindings, .. } => {
+                bindings
+            }
+        }
+    }
     fn into_context(self, session_id: Option<SessionId>) -> PluginOperationContext {
         match self {
-            Self::Query {
-                sessions,
-                processes,
-            } => PluginOperationContext::Query(PluginQueryContext {
+            Self::Query { bindings } => PluginOperationContext::Query(PluginQueryContext {
                 session_id,
-                sessions,
-                processes,
+                sessions: bindings.clone(),
+                processes: bindings,
             }),
-            Self::Command {
-                sessions,
-                session_lifecycle,
-                session_graph,
-                processes,
-            } => PluginOperationContext::Command(PluginCommandContext {
+            Self::Command { bindings } => PluginOperationContext::Command(PluginCommandContext {
                 session_id,
-                sessions,
-                session_lifecycle,
-                session_graph,
-                processes,
+                bindings,
             }),
             Self::Task {
-                sessions,
-                session_lifecycle,
-                session_graph,
-                processes,
+                bindings,
                 scoped_effect_controller,
                 cancellation_token,
             } => PluginOperationContext::Task(PluginTaskContext {
                 session_id,
-                sessions,
-                session_lifecycle,
-                session_graph,
-                processes,
+                bindings,
                 scoped_effect_controller,
                 cancellation_token,
             }),
@@ -227,6 +209,7 @@ pub(super) struct LiveSessionAuthority {
 
 #[derive(Clone)]
 pub struct PluginSession {
+    pub(super) bindings: Arc<std::sync::RwLock<std::sync::Weak<ServiceBindings>>>,
     pub(super) state: Arc<std::sync::Mutex<PluginStateRegistry>>,
     pub(super) native_view: Arc<std::sync::Mutex<Option<PluginNativeView>>>,
     pub(super) host: PluginHost,
@@ -261,6 +244,19 @@ pub(super) struct PluginSessionCapabilities {
 }
 
 impl PluginSession {
+    /// Install the real host ports before any owner binder runs.
+    pub fn bind_services(&self, bindings: Arc<ServiceBindings>) -> Result<(), PluginError> {
+        self.host.preflight_services(&bindings)?;
+        *self.bindings.write_recover() = Arc::downgrade(&bindings);
+        Ok(())
+    }
+    pub fn service_bindings(&self) -> Arc<ServiceBindings> {
+        self.bindings.read_recover().upgrade().unwrap_or_default()
+    }
+    pub fn installed_inventory(&self) -> Option<&InstalledInventory> {
+        self.capabilities.get()?.contributions.inventory.as_ref()
+    }
+
     pub fn composition(&self) -> Arc<ExecutionComposition> {
         Arc::clone(&self.capabilities().composition)
     }
@@ -1012,6 +1008,10 @@ impl PluginSession {
         default_to_current_session: bool,
         invocation: PluginOperationInvocation,
     ) -> Result<(String, ErasedPluginOperationOutcome), PluginOperationInvokeError> {
+        self.host
+            .preflight_services(invocation.bindings())
+            .map_err(|error| PluginOperationInvokeError::Failed(Box::new(error.into())))?;
+
         let Some(operation) = self
             .capabilities()
             .contributions
@@ -1046,8 +1046,7 @@ impl PluginSession {
         args: serde_json::Value,
         session_id: Option<SessionId>,
         default_to_current_session: bool,
-        sessions: Arc<dyn SessionReadService>,
-        processes: Arc<dyn ProcessReadService>,
+        bindings: Arc<ServiceBindings>,
     ) -> Result<(String, serde_json::Value), PluginOperationInvokeError> {
         let (plugin_id, outcome) = self
             .invoke_plugin_operation(
@@ -1055,29 +1054,19 @@ impl PluginSession {
                 args,
                 session_id,
                 default_to_current_session,
-                PluginOperationInvocation::Query {
-                    sessions,
-                    processes,
-                },
+                PluginOperationInvocation::Query { bindings },
             )
             .await?;
         Ok((plugin_id, outcome.output))
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "plugin command invocation carries the runtime mutation services exposed to commands"
-    )]
     pub async fn run_plugin_command(
         &self,
         name: &str,
         args: serde_json::Value,
         session_id: Option<SessionId>,
         default_to_current_session: bool,
-        sessions: Arc<dyn SessionStateService>,
-        session_lifecycle: Arc<dyn SessionLifecycleService>,
-        session_graph: Arc<dyn SessionGraphService>,
-        processes: Arc<dyn crate::ProcessService>,
+        bindings: Arc<ServiceBindings>,
     ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
     {
         let (plugin_id, outcome) = self
@@ -1086,12 +1075,7 @@ impl PluginSession {
                 args,
                 session_id,
                 default_to_current_session,
-                PluginOperationInvocation::Command {
-                    sessions,
-                    session_lifecycle,
-                    session_graph,
-                    processes,
-                },
+                PluginOperationInvocation::Command { bindings },
             )
             .await?;
         Ok((
@@ -1114,10 +1098,7 @@ impl PluginSession {
         args: serde_json::Value,
         session_id: Option<SessionId>,
         default_to_current_session: bool,
-        sessions: Arc<dyn SessionStateService>,
-        session_lifecycle: Arc<dyn SessionLifecycleService>,
-        session_graph: Arc<dyn SessionGraphService>,
-        processes: Arc<dyn crate::ProcessService>,
+        bindings: Arc<ServiceBindings>,
         scoped_effect_controller: crate::ActorContext,
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
@@ -1129,10 +1110,7 @@ impl PluginSession {
                 session_id,
                 default_to_current_session,
                 PluginOperationInvocation::Task {
-                    sessions,
-                    session_lifecycle,
-                    session_graph,
-                    processes,
+                    bindings,
                     scoped_effect_controller,
                     cancellation_token,
                 },
@@ -1275,11 +1253,24 @@ mod presentation_plan_tests {
             "plan-presenter"
         }
 
-        fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-            Ok(Arc::new(Presenter {
-                calls: Arc::clone(&self.calls),
-                text: self.text,
-            }))
+        fn recipe(
+            self: Arc<Self>,
+        ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+            let mut reg = crate::plugin::PluginRegistrar::<Presenter>::new(
+                crate::plugin::PluginFactory::id(self.as_ref()),
+            );
+            Presenter::declare(&mut reg)?;
+            let id = crate::plugin::PluginFactory::id(self.as_ref());
+            Ok(crate::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |_, _state| {
+                    Ok(Arc::new(Presenter {
+                        calls: Arc::clone(&self.calls),
+                        text: self.text,
+                    }))
+                },
+            ))
         }
     }
 
@@ -1297,18 +1288,25 @@ mod presentation_plan_tests {
         fn id(&self) -> &'static str {
             "plan-presenter"
         }
-        fn register(&self, registrar: &mut PluginRegistrar) -> Result<(), PluginError> {
-            let calls = Arc::clone(&self.calls);
-            let text = self.text;
-            registrar.tool_results().presenter(Arc::new(move |input| {
-                calls.fetch_add(1, Ordering::SeqCst);
-                Box::pin(async move {
-                    Ok(crate::ModelToolReturn::text(
-                        input.context.tool_name.clone(),
-                        text,
-                    ))
-                })
-            }))
+    }
+    impl Presenter {
+        fn declare(
+            reg: &mut crate::plugin::PluginRegistrar<Self>,
+        ) -> std::result::Result<(), crate::plugin::PluginError> {
+            reg.tool_results().presenter(move |this, _state| {
+                let calls = Arc::clone(&this.calls);
+                let text = this.text;
+                Ok(Arc::new(move |input| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Box::pin(async move {
+                        Ok(crate::ModelToolReturn::text(
+                            input.context.tool_name.clone(),
+                            text,
+                        ))
+                    })
+                }))
+            })?;
+            Ok(())
         }
     }
 

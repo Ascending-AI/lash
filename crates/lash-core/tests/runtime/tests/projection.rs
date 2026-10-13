@@ -9,6 +9,7 @@
 //! host's `send()` in `crates/lash/src/tests/projection.rs`.
 
 use super::*;
+use lash_core::plugin::PluginRecipe;
 use lash_core::plugin::PluginSessionRequest;
 
 struct AppendRollbackProtocolFactory {
@@ -24,23 +25,38 @@ impl lash_core::facade_support::PluginFactory for AppendRollbackProtocolFactory 
         "test_protocol"
     }
 
-    fn build(
-        &self,
-        _ctx: &lash_core::facade_support::PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(AppendRollbackProtocolPlugin {
-            store: Arc::clone(&self.store),
-            protocol_dirty: Arc::clone(&self.protocol_dirty),
-            restore_called: Arc::clone(&self.restore_called),
-            fail_restore: Arc::clone(&self.fail_restore),
-            advance_store_head: self.advance_store_head,
-        }))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<AppendRollbackProtocolPlugin>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        AppendRollbackProtocolPlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| {
+                Ok(Arc::new(AppendRollbackProtocolPlugin {
+                    store: Arc::clone(&self.store),
+                    protocol_dirty: Arc::clone(&self.protocol_dirty),
+                    restore_called: Arc::clone(&self.restore_called),
+                    fail_restore: Arc::clone(&self.fail_restore),
+                    advance_store_head: self.advance_store_head,
+                }))
+            },
+        ))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for AppendRollbackProtocolFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl AppendRollbackProtocolFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("test_protocol")
+    }
+}
+impl lash_core::plugin::PluginMetadata for AppendRollbackProtocolFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -56,21 +72,24 @@ impl lash_core::facade_support::SessionPlugin for AppendRollbackProtocolPlugin {
     fn id(&self) -> &'static str {
         "test_protocol"
     }
+}
+impl AppendRollbackProtocolPlugin {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        reg.protocol().session(move |this, _state| {
+            Ok(Arc::new(AppendRollbackProtocolSession {
+                store: Arc::clone(&this.store),
+                protocol_dirty: Arc::clone(&this.protocol_dirty),
+                restore_called: Arc::clone(&this.restore_called),
+                fail_restore: Arc::clone(&this.fail_restore),
+                advance_store_head: this.advance_store_head,
+            }))
+        })?;
 
-    fn register(
-        &self,
-        reg: &mut lash_core::facade_support::PluginRegistrar,
-    ) -> Result<(), lash_core::PluginError> {
-        reg.protocol()
-            .session(Arc::new(AppendRollbackProtocolSession {
-                store: Arc::clone(&self.store),
-                protocol_dirty: Arc::clone(&self.protocol_dirty),
-                restore_called: Arc::clone(&self.restore_called),
-                fail_restore: Arc::clone(&self.fail_restore),
-                advance_store_head: self.advance_store_head,
-            }))?;
-        reg.protocol()
-            .protocol_driver(Arc::new(UnusedAppendRollbackProtocolDriver))?;
+        reg.protocol().protocol_driver(move |_this, _state| {
+            Ok(Arc::new(UnusedAppendRollbackProtocolDriver))
+        })?;
         Ok(())
     }
 }

@@ -1,9 +1,7 @@
-//! Plugin registration: `PluginSpec` (the declarative bundle of all a
-//! plugin's hooks), the `PluginFactory` / `SessionPlugin` traits
-//! plugin crates implement, and the two convenience factories
-//! (`StaticPluginFactory`, `PluginSpecFactory`) + the `SpecPlugin`
-//! glue that walks a spec and wires each field into the registrar.
+//! Typed plugin recipes, ergonomic specs, and owner lifecycle traits.
+//! Specs feed the same declared registrations as authored recipes.
 
+use super::ServiceBindings;
 use std::sync::Arc;
 
 use super::{
@@ -11,9 +9,9 @@ use super::{
     BeforeTurnHook, CheckpointHook, ContextCompactor, ContextPressureHook,
     ErasedPluginOperationInvokeFuture, HookKey, PluginCommand, PluginCommandHandler, PluginError,
     PluginHost, PluginLifecycleEventHook, PluginOperationOutcome, PluginOperationRegistration,
-    PluginOperationSpec, PluginQuery, PluginQueryHandler, PluginQueryInvokeFuture, PluginRegistrar,
-    PluginTask, PluginTaskHandler, ToolArgsCheckHook, ToolArgsTransformHook,
-    ToolCatalogContributor, ToolPresentationStep, ToolResultCheckHook, ToolResultTransformHook,
+    PluginOperationSpec, PluginQuery, PluginQueryHandler, PluginQueryInvokeFuture, PluginTask,
+    PluginTaskHandler, ToolArgsCheckHook, ToolArgsTransformHook, ToolCatalogContributor,
+    ToolPresentationStep, ToolResultCheckHook, ToolResultTransformHook,
 };
 use crate::ToolProvider;
 
@@ -59,6 +57,17 @@ impl PluginExtensions {
         extensions
     }
 
+    pub(crate) fn merged(&self, other: &Self) -> Self {
+        let mut merged = self.clone();
+        for (key, values) in &other.contributions {
+            merged
+                .contributions
+                .entry(key.clone())
+                .or_default()
+                .extend(values.clone());
+        }
+        merged
+    }
     pub fn insert(&mut self, contribution: PluginExtensionContribution) {
         self.contributions
             .entry(contribution.extension_id)
@@ -78,37 +87,16 @@ impl PluginExtensions {
 
 #[derive(Clone, Default)]
 pub struct PluginSpec {
-    pub extension_contributions: Vec<PluginExtensionContribution>,
-    /// Each provider under its declared key (FIG-6073).
-    pub tool_providers: Vec<(HookKey, Arc<dyn ToolProvider>)>,
-    /// The deferred provider, under its declared key: a session has at
-    /// most one.
-    pub deferred_provider: Option<(HookKey, Arc<dyn crate::DeferredToolProvider>)>,
-    pub tool_catalog_contributors: Vec<(HookKey, ToolCatalogContributor)>,
-    pub before_turn_hooks: Vec<(HookKey, BeforeTurnHook)>,
-    pub tool_args_transforms: Vec<(HookKey, ToolArgsTransformHook)>,
-    pub tool_args_checks: Vec<(HookKey, ToolArgsCheckHook)>,
-    pub tool_result_transforms: Vec<(HookKey, ToolResultTransformHook)>,
-    pub tool_result_checks: Vec<(HookKey, ToolResultCheckHook)>,
-    pub after_turn_hooks: Vec<(HookKey, AfterTurnHook)>,
-    pub checkpoint_hooks: Vec<(HookKey, CheckpointHook)>,
-    pub assistant_stream_hooks: Vec<(HookKey, AssistantStreamHook)>,
-    /// Response callbacks, each with the stream-finished key whose state it
-    /// receives.
-    pub assistant_response_hooks: Vec<(HookKey, Option<HookKey>, AssistantResponseHook)>,
-    pub assistant_stream_finished_hooks: Vec<(HookKey, AssistantStreamFinishedHook)>,
-    /// Composable presentation steps, applied in list order (FIG-3420).
-    pub presentation_steps: Vec<(HookKey, ToolPresentationStep)>,
-    pub runtime_event_hooks: Vec<(HookKey, PluginLifecycleEventHook)>,
-    pub(crate) plugin_operations: Vec<PluginOperationRegistration>,
-    pub context_compactors: Vec<(i32, Arc<dyn ContextCompactor>)>,
-    pub context_pressure_hooks: Vec<(i32, Arc<dyn ContextPressureHook>)>,
-    /// The pure reducers a [`StateCommands::apply`](super::StateCommands::apply)
-    /// names, by name (K10).
-    pub state_reducers: Vec<(String, super::StateReducer)>,
+    pub(crate) registrations: super::PluginRegistrar<()>,
+    pub(crate) errors: Vec<PluginError>,
 }
-
 impl PluginSpec {
+    fn admit(&mut self, result: Result<(), PluginError>) {
+        if let Err(error) = result {
+            self.errors.push(error);
+        }
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -117,23 +105,39 @@ impl PluginSpec {
         mut self,
         contribution: PluginExtensionContribution,
     ) -> Self {
-        self.extension_contributions.push(contribution);
+        let result = self
+            .registrations
+            .extension(contribution.extension_id.clone(), move |_, _| {
+                Ok(contribution.payload.clone())
+            });
+        self.admit(result);
         self
     }
 
-    pub fn with_tool_provider(mut self, key: HookKey, provider: Arc<dyn ToolProvider>) -> Self {
-        self.tool_providers.push((key, provider));
+    pub fn with_tool_provider(
+        mut self,
+        key: super::ToolProviderKey,
+        provider: Arc<dyn ToolProvider>,
+    ) -> Self {
+        let result = self
+            .registrations
+            .tools()
+            .record_provider(key, move |_, _| Ok(Arc::clone(&provider)));
+        self.admit(result);
         self
     }
 
-    /// Register `provider` as the deferred provider under `key`, replacing
-    /// one this spec named before.
+    /// Declare the one deferred provider under `key`; duplicate addresses are refused.
     pub fn with_deferred_provider(
         mut self,
-        key: HookKey,
+        key: super::ToolProviderKey,
         provider: Arc<dyn crate::DeferredToolProvider>,
     ) -> Self {
-        self.deferred_provider = Some((key, provider));
+        let result = self
+            .registrations
+            .tools()
+            .record_deferred(key, move |_, _| Ok(Arc::clone(&provider)));
+        self.admit(result);
         self
     }
 
@@ -144,22 +148,38 @@ impl PluginSpec {
         key: HookKey,
         contributor: ToolCatalogContributor,
     ) -> Self {
-        self.tool_catalog_contributors.push((key, contributor));
+        let result = self
+            .registrations
+            .tool_catalog()
+            .contribute(key, move |_, _| Ok(Arc::clone(&contributor)));
+        self.admit(result);
         self
     }
 
     pub fn with_before_turn(mut self, key: HookKey, hook: BeforeTurnHook) -> Self {
-        self.before_turn_hooks.push((key, hook));
+        let result = self
+            .registrations
+            .turn()
+            .before(key, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
         self
     }
 
     pub fn with_tool_args_transform(mut self, key: HookKey, hook: ToolArgsTransformHook) -> Self {
-        self.tool_args_transforms.push((key, hook));
+        let result = self
+            .registrations
+            .tool_calls()
+            .transform_args(key, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
         self
     }
 
     pub fn with_tool_args_check(mut self, key: HookKey, hook: ToolArgsCheckHook) -> Self {
-        self.tool_args_checks.push((key, hook));
+        let result = self
+            .registrations
+            .tool_calls()
+            .check_args(key, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
         self
     }
 
@@ -168,27 +188,47 @@ impl PluginSpec {
         key: HookKey,
         hook: ToolResultTransformHook,
     ) -> Self {
-        self.tool_result_transforms.push((key, hook));
+        let result = self
+            .registrations
+            .tool_calls()
+            .transform_result(key, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
         self
     }
 
     pub fn with_tool_result_check(mut self, key: HookKey, hook: ToolResultCheckHook) -> Self {
-        self.tool_result_checks.push((key, hook));
+        let result = self
+            .registrations
+            .tool_calls()
+            .check_result(key, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
         self
     }
 
     pub fn with_after_turn(mut self, key: HookKey, hook: AfterTurnHook) -> Self {
-        self.after_turn_hooks.push((key, hook));
+        let result = self
+            .registrations
+            .turn()
+            .after(key, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
         self
     }
 
     pub fn with_checkpoint(mut self, key: HookKey, hook: CheckpointHook) -> Self {
-        self.checkpoint_hooks.push((key, hook));
+        let result = self
+            .registrations
+            .turn()
+            .checkpoint(key, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
         self
     }
 
     pub fn with_assistant_stream(mut self, key: HookKey, hook: AssistantStreamHook) -> Self {
-        self.assistant_stream_hooks.push((key, hook));
+        let result = self
+            .registrations
+            .output()
+            .stream(key, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
         self
     }
 
@@ -198,8 +238,11 @@ impl PluginSpec {
         stream_state_from: Option<HookKey>,
         hook: AssistantResponseHook,
     ) -> Self {
-        self.assistant_response_hooks
-            .push((key, stream_state_from, hook));
+        let result = self
+            .registrations
+            .output()
+            .response(key, stream_state_from, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
         self
     }
 
@@ -208,19 +251,31 @@ impl PluginSpec {
         key: HookKey,
         hook: AssistantStreamFinishedHook,
     ) -> Self {
-        self.assistant_stream_finished_hooks.push((key, hook));
+        let result = self
+            .registrations
+            .output()
+            .stream_finished(key, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
         self
     }
 
     /// Appends one composable presentation step (FIG-3420). Steps run in the
     /// order `with_presentation_step` calls list them.
     pub fn with_presentation_step(mut self, key: HookKey, step: ToolPresentationStep) -> Self {
-        self.presentation_steps.push((key, step));
+        let result = self
+            .registrations
+            .tool_results()
+            .presentation_step(key, move |_, _| Ok(Arc::clone(&step)));
+        self.admit(result);
         self
     }
 
     pub fn with_runtime_event(mut self, key: HookKey, hook: PluginLifecycleEventHook) -> Self {
-        self.runtime_event_hooks.push((key, hook));
+        let result = self
+            .registrations
+            .session()
+            .on_event(key, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
         self
     }
 
@@ -229,8 +284,11 @@ impl PluginSpec {
         spec: PluginOperationSpec,
         handler: PluginQueryHandler,
     ) -> Self {
-        self.plugin_operations
-            .push(PluginOperationRegistration::query(spec, handler));
+        let result = self
+            .registrations
+            .operations()
+            .register(PluginOperationRegistration::query(spec, handler));
+        self.admit(result);
         self
     }
 
@@ -274,8 +332,11 @@ impl PluginSpec {
         spec: PluginOperationSpec,
         handler: PluginCommandHandler,
     ) -> Self {
-        self.plugin_operations
-            .push(PluginOperationRegistration::command(spec, handler));
+        let result = self
+            .registrations
+            .operations()
+            .register(PluginOperationRegistration::command(spec, handler));
+        self.admit(result);
         self
     }
 
@@ -338,8 +399,11 @@ impl PluginSpec {
         spec: PluginOperationSpec,
         handler: PluginTaskHandler,
     ) -> Self {
-        self.plugin_operations
-            .push(PluginOperationRegistration::task(spec, handler));
+        let result = self
+            .registrations
+            .operations()
+            .register(PluginOperationRegistration::task(spec, handler));
+        self.admit(result);
         self
     }
 
@@ -402,7 +466,12 @@ impl PluginSpec {
         priority: i32,
         compactor: Arc<dyn ContextCompactor>,
     ) -> Self {
-        self.context_compactors.push((priority, compactor));
+        let result = HookKey::new(compactor.id()).and_then(|key| {
+            self.registrations
+                .context()
+                .compact(key, priority, move |_, _| Ok(Arc::clone(&compactor)))
+        });
+        self.admit(result);
         self
     }
 
@@ -411,7 +480,12 @@ impl PluginSpec {
         priority: i32,
         hook: Arc<dyn ContextPressureHook>,
     ) -> Self {
-        self.context_pressure_hooks.push((priority, hook));
+        let result = HookKey::new(hook.id()).and_then(|key| {
+            self.registrations
+                .context()
+                .pressure(key, priority, move |_, _| Ok(Arc::clone(&hook)))
+        });
+        self.admit(result);
         self
     }
 
@@ -420,7 +494,10 @@ impl PluginSpec {
         name: impl Into<String>,
         reducer: super::StateReducer,
     ) -> Self {
-        self.state_reducers.push((name.into(), reducer));
+        let result = self
+            .registrations
+            .state_reducer(name, move |_, _| Ok(Arc::clone(&reducer)));
+        self.admit(result);
         self
     }
 }
@@ -486,6 +563,7 @@ impl PluginExecutionTrace {
 
 #[derive(Clone, Debug)]
 pub struct PluginSessionContext {
+    pub bindings: Arc<ServiceBindings>,
     pub tracing: crate::trace::TraceRuntime,
     pub trace: Option<lash_trace::DurableTraceScope>,
     /// Who the plugin session is built for: a session, or a process runtime
@@ -715,46 +793,14 @@ impl PluginComposition {
 pub trait SessionPlugin: Send + Sync {
     fn id(&self) -> &'static str;
 
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError>;
-
-    /// Per-session mirror of [`PluginFactory::extension_contributions`].
-    ///
-    /// Collected once per session after [`register`](Self::register), so a
-    /// session plugin can derive extensions from the session's own plugin
-    /// options — on a durable-process session, the process's execution env
-    /// spec. Must be cheap and perform no I/O.
-    fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
-        Vec::new()
-    }
-
     fn session_ready(&self, _ctx: SessionReadyContext) -> Result<(), PluginError> {
         Ok(())
     }
 }
 
-/// A plugin's identity and formats, independent of its
-/// runtime dependencies. Production factory types implement this once; hosts
-/// can call it before opening stores, pools or connections. It must be pure,
-/// cheap and perform no I/O. Its native namespace format must be writable,
-/// and its native stream-state format must be readable.
-pub trait PluginDefinition {
-    fn declaration() -> PluginDeclaration;
-}
-
-/// Object-safe access to a declaration. For statically defined plugins the
-/// blanket implementation reads [`PluginDefinition`], so boot and offline
-/// generation use exactly the same declaration. Configured spec factories
-/// return the declaration supplied separately from their runtime hooks.
-/// This access must be pure and perform no I/O; runtime dependencies must not
-/// determine the declaration. Prefer the static definition for factory types.
+/// Pure identity and format metadata shared by deployment and offline readers.
 pub trait PluginMetadata {
     fn plugin_declaration(&self) -> PluginDeclaration;
-}
-
-impl<T: PluginDefinition> PluginMetadata for T {
-    fn plugin_declaration(&self) -> PluginDeclaration {
-        T::declaration()
-    }
 }
 
 /// # Cheap-build / stateful-factory contract
@@ -855,27 +901,6 @@ pub trait PluginFactory: PluginMetadata + Send + Sync {
         Ok(())
     }
 
-    fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
-        Vec::new()
-    }
-
-    /// Register this plugin's recorded config namespace and the typed
-    /// commands that change it (FIG-4379), before any session exists.
-    ///
-    /// The owner creates the namespace at every session's creation — from
-    /// the creator's input and its defaults, never another session's — and
-    /// validates every candidate; each command is one change the namespace
-    /// admits, and a setting no command changes is immutable. Every open
-    /// delivers the recorded namespace unchanged, in
-    /// [`PluginSessionContext::plugin_config`] and in each scoped hook's
-    /// context. The default registers nothing: the plugin records no config.
-    fn register_config(
-        &self,
-        _reg: &mut super::ConfigRegistrar,
-    ) -> Result<(), super::ConfigRegistrationError> {
-        Ok(())
-    }
-
     /// The [`Backend::binding_identity`](crate::Backend::binding_identity) of
     /// the backend whose stores this factory keeps state in, when it keeps
     /// any: the RLM protocol keeps its Lash VM module artifacts there.
@@ -888,27 +913,9 @@ pub trait PluginFactory: PluginMetadata + Send + Sync {
         None
     }
 
-    /// Host-level contribution of [`ProcessEngine`](crate::ProcessEngine)s,
-    /// mirroring [`extension_contributions`](Self::extension_contributions).
-    ///
-    /// After the plugin host is built, core asks each factory for the process
-    /// engines it wants registered, passing a read-only host context (the built
-    /// plugin extensions, the runtime trace context, and whether process
-    /// lifecycle is available). The returned engines land in the runtime host's
-    /// [`ProcessEngineRegistry`](crate::runtime::ProcessEngineRegistry) with
-    /// unique [`ProcessEngine::kind`](crate::ProcessEngine::kind) enforced.
-    ///
-    /// The default contributes nothing, so most plugins never implement this.
-    fn process_engine_contributions(
-        &self,
-        _ctx: &ProcessEngineContributionContext<'_>,
-    ) -> Result<Vec<crate::ProcessEngineRegistration>, PluginError> {
-        Ok(Vec::new())
-    }
-
-    /// Produce a session-scoped plugin. **Must be cheap** — see the
-    /// trait-level docs for the full contract.
-    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError>;
+    /// Declare contributions and their binders without constructing a session owner.
+    /// Configuration, host extensions and process engines belong to this same recipe.
+    fn recipe(self: Arc<Self>) -> std::result::Result<super::PluginRecipe, PluginError>;
 }
 
 /// Exposes the built plugin-host extensions (the same data
@@ -924,6 +931,7 @@ pub trait PluginFactory: PluginMetadata + Send + Sync {
 /// are never contributed. The facade exports it as
 /// `lash::plugins::ProcessEngineContributionContext` (FIG-4373).
 pub struct ProcessEngineContributionContext<'a> {
+    extensions: PluginExtensions,
     plugin_host: &'a super::PluginHost,
     backend: &'a crate::Backend,
     trace_runtime: &'a crate::trace::TraceRuntime,
@@ -936,17 +944,18 @@ impl<'a> ProcessEngineContributionContext<'a> {
         backend: &'a crate::Backend,
         trace_runtime: &'a crate::trace::TraceRuntime,
         process_lifecycle_available: bool,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, PluginError> {
+        Ok(Self {
+            extensions: plugin_host.extensions()?,
             plugin_host,
             backend,
             trace_runtime,
             process_lifecycle_available,
-        }
+        })
     }
 
     pub fn extensions(&self) -> &PluginExtensions {
-        self.plugin_host.extensions()
+        &self.extensions
     }
 
     /// The host whose factories supply creation-time process resource grants.
@@ -976,151 +985,47 @@ impl<'a> ProcessEngineContributionContext<'a> {
     }
 }
 
-pub type PluginSpecBuilder =
-    Arc<dyn Fn(&PluginSessionContext) -> Result<PluginSpec, PluginError> + Send + Sync>;
-
-pub struct PluginSpecFactory {
-    declaration: PluginDeclaration,
-    builder: PluginSpecBuilder,
-}
-
-impl PluginSpecFactory {
-    pub fn new(declaration: PluginDeclaration, builder: PluginSpecBuilder) -> Self {
-        Self {
-            declaration,
-            builder,
-        }
-    }
-}
-
+#[derive(Clone)]
 pub struct StaticPluginFactory {
     declaration: PluginDeclaration,
     spec: PluginSpec,
 }
-
 impl StaticPluginFactory {
     pub fn new(declaration: PluginDeclaration, spec: PluginSpec) -> Self {
         Self { declaration, spec }
     }
-
+    /// The scoped address of a provider in this factory's declared entries.
+    pub fn provider_handle(
+        &self,
+        key: super::ToolProviderKey,
+    ) -> Result<super::ToolProviderHandle, PluginError> {
+        if let Some(error) = self.spec.errors.first() {
+            return Err(error.clone());
+        }
+        self.spec
+            .registrations
+            .provider_handle(self.id(), super::RegistryKind::Session, key)
+    }
     pub(crate) fn spec(&self) -> &PluginSpec {
         &self.spec
     }
 }
-
-struct SpecPlugin {
-    id: &'static str,
-    spec: PluginSpec,
-}
-
-impl PluginFactory for PluginSpecFactory {
-    fn id(&self) -> &'static str {
-        self.declaration.id.as_str()
-    }
-
-    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(SpecPlugin {
-            id: self.id(),
-            spec: (self.builder)(ctx)?,
-        }))
-    }
-}
-
-impl crate::plugin::PluginMetadata for PluginSpecFactory {
-    fn plugin_declaration(&self) -> PluginDeclaration {
-        self.declaration.clone()
-    }
-}
-
 impl PluginFactory for StaticPluginFactory {
     fn id(&self) -> &'static str {
         self.declaration.id.as_str()
     }
-
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(SpecPlugin {
-            id: self.id(),
-            spec: self.spec.clone(),
-        }))
+    fn recipe(self: Arc<Self>) -> std::result::Result<super::PluginRecipe, PluginError> {
+        if let Some(error) = self.spec.errors.first() {
+            return Err(error.clone());
+        }
+        Ok(super::PluginRecipe::from_spec(
+            self.id(),
+            self.spec.registrations.clone(),
+        ))
     }
 }
-
-impl crate::plugin::PluginMetadata for StaticPluginFactory {
+impl PluginMetadata for StaticPluginFactory {
     fn plugin_declaration(&self) -> PluginDeclaration {
         self.declaration.clone()
-    }
-}
-
-impl SessionPlugin for SpecPlugin {
-    fn id(&self) -> &'static str {
-        self.id
-    }
-
-    fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
-        self.spec.extension_contributions.clone()
-    }
-
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        for (key, provider) in &self.spec.tool_providers {
-            reg.tools().provider(*key, Arc::clone(provider))?;
-        }
-        if let Some((key, provider)) = &self.spec.deferred_provider {
-            reg.tools().deferred(*key, Arc::clone(provider))?;
-        }
-        for (key, contributor) in &self.spec.tool_catalog_contributors {
-            reg.tool_catalog()
-                .contribute(*key, Arc::clone(contributor))?;
-        }
-        for (key, hook) in &self.spec.before_turn_hooks {
-            reg.turn().before(*key, Arc::clone(hook))?;
-        }
-        for (key, hook) in &self.spec.tool_args_transforms {
-            reg.tool_calls().transform_args(*key, Arc::clone(hook))?;
-        }
-        for (key, hook) in &self.spec.tool_args_checks {
-            reg.tool_calls().check_args(*key, Arc::clone(hook))?;
-        }
-        for (key, hook) in &self.spec.tool_result_transforms {
-            reg.tool_calls().transform_result(*key, Arc::clone(hook))?;
-        }
-        for (key, hook) in &self.spec.tool_result_checks {
-            reg.tool_calls().check_result(*key, Arc::clone(hook))?;
-        }
-        for (key, hook) in &self.spec.after_turn_hooks {
-            reg.turn().after(*key, Arc::clone(hook))?;
-        }
-        for (key, hook) in &self.spec.checkpoint_hooks {
-            reg.turn().checkpoint(*key, Arc::clone(hook))?;
-        }
-        for (key, hook) in &self.spec.assistant_stream_hooks {
-            reg.output().stream(*key, Arc::clone(hook))?;
-        }
-        for (key, hook) in &self.spec.assistant_stream_finished_hooks {
-            reg.output().stream_finished(*key, Arc::clone(hook))?;
-        }
-        for (key, stream_state_from, hook) in &self.spec.assistant_response_hooks {
-            reg.output()
-                .response(*key, *stream_state_from, Arc::clone(hook))?;
-        }
-        for (key, step) in &self.spec.presentation_steps {
-            reg.tool_results()
-                .presentation_step(*key, Arc::clone(step))?;
-        }
-        for (key, hook) in &self.spec.runtime_event_hooks {
-            reg.session().on_event(*key, Arc::clone(hook))?;
-        }
-        for operation in &self.spec.plugin_operations {
-            reg.operations().register(operation.clone())?;
-        }
-        for (priority, compactor) in &self.spec.context_compactors {
-            reg.context().compact(*priority, Arc::clone(compactor))?;
-        }
-        for (priority, hook) in &self.spec.context_pressure_hooks {
-            reg.context().pressure(*priority, Arc::clone(hook))?;
-        }
-        for (name, reducer) in &self.spec.state_reducers {
-            reg.state_reducer(name.clone(), Arc::clone(reducer))?;
-        }
-        Ok(())
     }
 }

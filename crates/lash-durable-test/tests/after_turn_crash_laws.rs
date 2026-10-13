@@ -141,9 +141,14 @@ struct AfterTurnPlugin {
     world: Arc<World>,
 }
 
-impl lash::plugins::PluginDefinition for AfterTurnPlugin {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl AfterTurnPlugin {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         lash::plugins::PluginDeclaration::initial(PLUGIN)
+    }
+}
+impl lash::plugins::PluginMetadata for AfterTurnPlugin {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -152,11 +157,19 @@ impl lash::plugins::PluginFactory for AfterTurnPlugin {
         PLUGIN
     }
 
-    fn build(
-        &self,
-        _: &lash::plugins::PluginSessionContext,
-    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<AfterTurnPlugin>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        AfterTurnPlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -164,50 +177,52 @@ impl lash::plugins::SessionPlugin for AfterTurnPlugin {
     fn id(&self) -> &'static str {
         PLUGIN
     }
-
-    fn register(
-        &self,
-        reg: &mut lash::plugins::PluginRegistrar,
-    ) -> Result<(), lash::plugins::PluginError> {
-        let world = Arc::clone(&self.world);
-        reg.turn().after(
-            lash::hook_key!("mark"),
-            Arc::new(move |ctx| {
-                let world = Arc::clone(&world);
-                Box::pin(async move {
-                    let outcome = match &ctx.turn.outcome {
-                        lash_core::facade_support::TurnOutcome::Finished(_) => "finished",
-                        _ => "other",
-                    };
-                    let value = world.enter(outcome.to_owned());
-                    // Fenced to the leaf it read, as the workbench's note is:
-                    // the head the turn started from.
-                    let snapshot = ctx.sessions.snapshot_current().await?;
-                    let leaf = lash::persistence::SessionReadView::from_snapshot(&snapshot)
-                        .session_graph()
-                        .leaf_node_id
-                        .clone();
-                    Ok(lash::plugins::AfterTurnContributions {
-                        records: vec![lash::plugins::PluginRecordContribution {
-                            plugin_type: RECORD.to_owned(),
-                            body: serde_json::json!({ "value": value }),
-                        }],
-                        state: lash::plugins::StateCommands::new().set(KEY, value.clone().into()),
-                        session: lash::plugins::SessionContributions {
-                            graph_appends: vec![lash::plugins::AppendSessionNodesRequest {
-                                operation_id: format!("after-turn-law:{value}"),
-                                nodes: vec![lash::plugins::SessionAppendNode::plugin(
-                                    NOTE,
-                                    serde_json::json!({ "value": value }),
-                                )],
-                                requires_ancestor_node_id: leaf,
+}
+impl AfterTurnPlugin {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        reg.turn()
+            .after(lash::hook_key!("mark"), move |this, _state| {
+                let world = Arc::clone(&this.world);
+                Ok(Arc::new(move |ctx| {
+                    let world = Arc::clone(&world);
+                    Box::pin(async move {
+                        let outcome = match &ctx.turn.outcome {
+                            lash_core::facade_support::TurnOutcome::Finished(_) => "finished",
+                            _ => "other",
+                        };
+                        let value = world.enter(outcome.to_owned());
+                        // Fenced to the leaf it read, as the workbench's note is:
+                        // the head the turn started from.
+                        let snapshot = ctx.sessions.snapshot_current().await?;
+                        let leaf = lash::persistence::SessionReadView::from_snapshot(&snapshot)
+                            .session_graph()
+                            .leaf_node_id
+                            .clone();
+                        Ok(lash::plugins::AfterTurnContributions {
+                            records: vec![lash::plugins::PluginRecordContribution {
+                                plugin_type: RECORD.to_owned(),
+                                body: serde_json::json!({ "value": value }),
                             }],
-                        },
-                        ..Default::default()
+                            state: lash::plugins::StateCommands::new()
+                                .set(KEY, value.clone().into()),
+                            session: lash::plugins::SessionContributions {
+                                graph_appends: vec![lash::plugins::AppendSessionNodesRequest {
+                                    operation_id: format!("after-turn-law:{value}"),
+                                    nodes: vec![lash::plugins::SessionAppendNode::plugin(
+                                        NOTE,
+                                        serde_json::json!({ "value": value }),
+                                    )],
+                                    requires_ancestor_node_id: leaf,
+                                }],
+                            },
+                            ..Default::default()
+                        })
                     })
-                })
-            }),
-        )
+                }))
+            })?;
+        Ok(())
     }
 }
 

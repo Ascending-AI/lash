@@ -164,7 +164,7 @@ fn core_with(
     executor: &Arc<Executor>,
     tools: Arc<dyn lash_core::ToolProvider>,
 ) -> lash::LashCoreBuilder {
-    core_without_tools(backend, executor).tools(lash::hook_key!("tools"), tools)
+    core_without_tools(backend, executor).tools(lash::tool_provider_key!("tools"), tools)
 }
 
 fn core_without_tools(backend: &lash::Backend, executor: &Arc<Executor>) -> lash::LashCoreBuilder {
@@ -451,15 +451,20 @@ fn rotating_definition(name: &str) -> lash_core::ToolDefinition {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for RotatingTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        let mut names = vec!["rotate_surface", "curated_before_rotation"];
-        if self.rotated.load(Ordering::SeqCst) {
-            names.extend(["new_after_rotation", "hidden_after_rotation"]);
-        }
-        names
-            .into_iter()
-            .map(|name| rotating_definition(name).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            let mut names = vec!["rotate_surface", "curated_before_rotation"];
+            if self.rotated.load(Ordering::SeqCst) {
+                names.extend(["new_after_rotation", "hidden_after_rotation"]);
+            }
+            names
+                .into_iter()
+                .map(|name| rotating_definition(name).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -468,6 +473,7 @@ impl lash_core::ToolProvider for RotatingTools {
         config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
         self.tool_manifests(config)
+            .ok()?
             .into_iter()
             .any(|manifest| manifest.name == name)
             .then(|| Arc::new(rotating_definition(name).contract()))

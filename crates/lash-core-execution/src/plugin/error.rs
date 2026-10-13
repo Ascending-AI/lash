@@ -383,6 +383,30 @@ define_plugin_errors! {
         => Self::Registration(_)
         => "registration"
         => crate::ToolFailureClass::Internal;
+#[error("plugin preflight refused: {0}")]
+    Preflight (super::PreflightIssue)
+        => PluginError::Preflight(source)
+        => (super::PreflightIssue)
+        => Self::Preflight(source.clone())
+        => Self::Preflight(_)
+        => "preflight"
+        => crate::ToolFailureClass::Unavailable;
+#[error("provider `{owner}` cannot decode its configuration: {message}")]
+    ProviderConfig { owner: String, message: String }
+        => PluginError::ProviderConfig { owner, message }
+        => { owner: String, message: String }
+        => Self::ProviderConfig { owner: owner.clone(), message: message.clone() }
+        => Self::ProviderConfig { .. }
+        => "provider_config"
+        => crate::ToolFailureClass::InvalidRequest;
+#[error("provider `{provider}` belongs to another registry; expected {expected:?}")]
+    ProviderRegistryMismatch { expected: super::RegistryKind, provider: super::ToolProviderHandle }
+        => PluginError::ProviderRegistryMismatch { expected, provider }
+        => { expected: lash_core_store::obligations::RegistryKind, provider: lash_core_store::plugin_registrations::ToolProviderHandle }
+        => Self::ProviderRegistryMismatch { expected: *expected, provider: provider.clone() }
+        => Self::ProviderRegistryMismatch { .. }
+        => "provider_registry_mismatch"
+        => crate::ToolFailureClass::InvalidRequest;
 /// A plugin's config registration cannot stand on the deployment's plugin set.
 #[error("config registration is invalid: {0}")]
     ConfigRegistration (super::ConfigRegistrationError)
@@ -968,6 +992,9 @@ impl PluginError {
             | Self::ValueMismatch { .. }
             | Self::Session(_)
             | Self::Registration(_)
+            | Self::Preflight(_)
+            | Self::ProviderConfig { .. }
+            | Self::ProviderRegistryMismatch { .. }
             | Self::ConfigRegistration(_)
             | Self::Invoke(_)
             | Self::State(_)
@@ -1209,9 +1236,17 @@ impl From<PluginError> for super::PluginOperationFailure {
                 ));
             }
         };
-        let mut failure = runtime_operation_failure(
-            crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
-        );
+        // These direct refusals are wrapped in a PluginOperation cause by
+        // the controller. Build their envelope without reentering that conversion.
+        let runtime = match &error {
+            PluginError::Preflight(_)
+            | PluginError::ProviderConfig { .. }
+            | PluginError::ProviderRegistryMismatch { .. } => {
+                crate::RuntimeError::new(crate::RuntimeErrorCode::Plugin, error.to_string())
+            }
+            _ => crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+        };
+        let mut failure = runtime_operation_failure(runtime);
         if failure.class != super::PluginFailureClass::Parked {
             failure.class = match class {
                 PluginErrorClass::Retryable => super::PluginFailureClass::Retryable,
@@ -1222,6 +1257,12 @@ impl From<PluginError> for super::PluginOperationFailure {
         failure.error_type = "lash.plugin".into();
         failure.payload = payload;
         failure
+    }
+}
+
+impl From<super::ConfigRegistrationError> for PluginError {
+    fn from(error: super::ConfigRegistrationError) -> Self {
+        Self::ConfigRegistration(error)
     }
 }
 

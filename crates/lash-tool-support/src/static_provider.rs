@@ -103,12 +103,17 @@ impl<E: StaticToolExecute> StaticToolProvider<E> {
 
 #[async_trait::async_trait]
 impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
-    fn tool_manifests(&self, config: &OwnerConfigView) -> Vec<ToolManifest> {
-        self.manifests
-            .iter()
-            .filter(|manifest| self.offers(&manifest.id, config))
-            .cloned()
-            .collect()
+    fn tool_manifests(
+        &self,
+        config: &OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok({
+            self.manifests
+                .iter()
+                .filter(|manifest| self.offers(&manifest.id, config))
+                .cloned()
+                .collect()
+        })
     }
 
     fn resolve_manifest(&self, name: &str, config: &OwnerConfigView) -> Option<ToolManifest> {

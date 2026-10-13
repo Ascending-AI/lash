@@ -57,8 +57,11 @@ struct Deferring {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Deferring {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![definition().manifest()])
     }
 
     fn resolve_contract(
@@ -156,7 +159,7 @@ fn deployment(
 ) -> lash::LashCoreBuilder {
     plugins.into_iter().fold(
         lash::LashCore::standard_builder(backend.clone())
-            .tools(lash::hook_key!("tools"), Arc::clone(tools) as _),
+            .tools(lash::tool_provider_key!("tools"), Arc::clone(tools) as _),
         lash::LashCoreBuilder::plugin,
     )
 }

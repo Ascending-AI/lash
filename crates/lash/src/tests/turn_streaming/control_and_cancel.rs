@@ -612,7 +612,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+    .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(
@@ -750,7 +750,7 @@ async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result<()> {
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+    .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(
@@ -814,7 +814,7 @@ async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(tool_roundtrip_provider(), mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+    .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse("fanout-tool-events").expect("nonblank host identity"))

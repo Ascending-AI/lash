@@ -9,13 +9,12 @@
     reason = "test target: the setup helpers around the law are test code too"
 )]
 
+use lash_core::plugin::{PluginError, PluginRecipe, PluginRegistrar};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash::plugins::{
-    OfferedTools, PluginDeclaration, PluginDefinition, PromptFamilySection, PromptInput,
-    PromptRenderError, PromptSectionFamilySpec, PromptSectionSource, PromptSectionSpec,
-    PromptWrapSpec, PromptWrapTarget, SectionText,
+    OfferedTools, PluginDeclaration, PromptFamilySection, PromptInput, PromptRenderError,
+    PromptSectionFamilySpec, PromptSectionSource, PromptWrapSpec, PromptWrapTarget, SectionText,
 };
 use lash::prompt::{
     PlacementSource, PromptPlacement, PromptPlan, PromptPlanError, PromptPurpose, PromptSectionId,
@@ -63,13 +62,16 @@ impl PromptSectionSource for ModuleGuidance {
 }
 
 #[derive(Clone)]
-struct Witness {
-    registered: Arc<AtomicBool>,
-}
+struct Witness;
 
-impl PluginDefinition for Witness {
-    fn declaration() -> PluginDeclaration {
+impl Witness {
+    pub fn declaration() -> PluginDeclaration {
         PluginDeclaration::initial(PLUGIN)
+    }
+}
+impl lash_core::plugin::PluginMetadata for Witness {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -78,11 +80,16 @@ impl lash::plugins::PluginFactory for Witness {
         PLUGIN
     }
 
-    fn build(
-        &self,
-        _: &lash::plugins::PluginSessionContext,
-    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(self: Arc<Self>) -> std::result::Result<PluginRecipe, PluginError> {
+        let mut reg =
+            PluginRegistrar::<Witness>::new(lash_core::plugin::PluginFactory::id(self.as_ref()));
+        Witness::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -90,62 +97,90 @@ impl lash::plugins::SessionPlugin for Witness {
     fn id(&self) -> &'static str {
         PLUGIN
     }
-
-    fn register(
-        &self,
-        reg: &mut lash::plugins::PluginRegistrar,
-    ) -> Result<(), lash::plugins::PluginError> {
+}
+impl Witness {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
         reg.prompt().section(
-            PromptSectionSpec::new(
-                PromptSectionKey::new("notes").expect("valid section key"),
-                PromptPlacement::CurrentContext,
+            lash_core::plugin::prompt::PromptSectionSpec::new(
+                lash_core::prompt_sections::PromptSectionKey::new("notes")
+                    .expect("valid section key"),
+                lash_core::prompt_sections::PromptPlacement::CurrentContext,
             ),
-            Arc::new(|input: &PromptInput<'_>| {
-                let count = input.state().get_as::<u64>("count")?.unwrap_or(0);
-                Ok::<_, PromptRenderError>(SectionText::Text(format!("{count} notes")))
-            }),
+            move |_this, _state| {
+                Ok(Arc::new(
+                    |input: &lash_core::plugin::prompt::PromptInput<'_>| {
+                        let count = input.state().get_as::<u64>("count")?.unwrap_or(0);
+                        Ok::<_, lash_core::plugin::prompt::PromptRenderError>(
+                            lash_core::plugin::prompt::SectionText::Text(format!("{count} notes")),
+                        )
+                    },
+                ))
+            },
         )?;
+
         reg.prompt().wrap(
             PromptWrapSpec::new(
                 PromptWrapKey::new("frame").expect("valid wrap key"),
                 notes(),
             ),
-            Arc::new(
-                |_: &PromptInput<'_>, _: PromptWrapTarget<'_>, previous: SectionText| {
-                    Ok(match previous {
-                        SectionText::Text(text) => {
-                            SectionText::Text(format!("<notes>{text}</notes>"))
-                        }
-                        SectionText::Omit => SectionText::Omit,
-                    })
-                },
-            ),
+            move |_this, _state| {
+                Ok(Arc::new(
+                    |_: &lash_core::plugin::prompt::PromptInput<'_>,
+                     _: PromptWrapTarget<'_>,
+                     previous: lash_core::plugin::prompt::SectionText| {
+                        Ok(match previous {
+                            lash_core::plugin::prompt::SectionText::Text(text) => {
+                                lash_core::plugin::prompt::SectionText::Text(format!(
+                                    "<notes>{text}</notes>"
+                                ))
+                            }
+                            lash_core::plugin::prompt::SectionText::Omit => {
+                                lash_core::plugin::prompt::SectionText::Omit
+                            }
+                        })
+                    },
+                ))
+            },
         )?;
+
         reg.prompt().section(
-            PromptSectionSpec::new(key("intro"), PromptPlacement::InitialInstructions),
-            Arc::new(|_: &PromptInput<'_>| {
-                Ok::<_, PromptRenderError>(SectionText::text("witness intro"))
-            }),
+            lash_core::plugin::prompt::PromptSectionSpec::new(
+                key("intro"),
+                lash_core::prompt_sections::PromptPlacement::InitialInstructions,
+            ),
+            move |_this, _state| {
+                Ok(Arc::new(
+                    |_: &lash_core::plugin::prompt::PromptInput<'_>| {
+                        Ok::<_, lash_core::plugin::prompt::PromptRenderError>(
+                            lash_core::plugin::prompt::SectionText::text("witness intro"),
+                        )
+                    },
+                ))
+            },
         )?;
+
         reg.prompt().family(
-            PromptSectionFamilySpec::new(key("module"), PromptPlacement::InitialInstructions),
-            Arc::new(ModuleGuidance),
+            PromptSectionFamilySpec::new(
+                key("module"),
+                lash_core::prompt_sections::PromptPlacement::InitialInstructions,
+            ),
+            move |_this, _state| Ok(Arc::new(ModuleGuidance)),
         )?;
-        self.registered.store(true, Ordering::SeqCst);
         Ok(())
     }
 }
 
 /// A core over SQLite memory stores with the witness plugin installed.
-async fn witness_core(registered: Arc<AtomicBool>) -> lash::LashCore {
+async fn witness_core() -> lash::LashCore {
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open a memory store set");
-    witness_core_over(registered, Arc::new(stores), true).await
+    witness_core_over(Arc::new(stores), true).await
 }
 
 async fn witness_core_over(
-    registered: Arc<AtomicBool>,
     stores: Arc<lash_sqlite_store::SqliteStoreSet>,
     installed: bool,
 ) -> lash::LashCore {
@@ -155,7 +190,6 @@ async fn witness_core_over(
         .build()
         .into_handle();
     witness_core_with(
-        registered,
         lash_conformance::backend_over(stores),
         installed,
         model,
@@ -176,7 +210,6 @@ fn answer(text: &str) -> lash_core::llm::types::LlmResponse {
 }
 
 async fn witness_core_with(
-    registered: Arc<AtomicBool>,
     backend: lash::Backend,
     installed: bool,
     model: lash_core::facade_support::ProviderHandle,
@@ -204,12 +237,12 @@ async fn witness_core_with(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended());
     let builder = if installed {
-        builder.plugin(Arc::new(Witness { registered }))
+        builder.plugin(Arc::new(Witness))
     } else {
         builder
     };
     let builder = match tools {
-        Some(tools) => builder.tools(lash::hook_key!("tools"), tools),
+        Some(tools) => builder.tools(lash::tool_provider_key!("tools"), tools),
         None => builder,
     };
     builder
@@ -222,8 +255,7 @@ async fn witness_core_with(
 
 #[tokio::test]
 async fn a_host_registers_sections_sets_the_plan_and_decodes_a_snapshot_through_the_facade() {
-    let registered = Arc::new(AtomicBool::new(false));
-    let core = witness_core(Arc::clone(&registered)).await;
+    let core = witness_core().await;
     let session = crate::created_session(&core, MODEL, "prompt-witness-session")
         .await
         .open()
@@ -340,10 +372,6 @@ async fn a_host_registers_sections_sets_the_plan_and_decodes_a_snapshot_through_
         .await
         .expect("the turn answers");
     assert!(turn.is_success(), "{turn:?}");
-    assert!(
-        registered.load(Ordering::SeqCst),
-        "the plugin's section and wrapper registered"
-    );
 
     let loaded = session
         .admin()
@@ -400,7 +428,7 @@ fn offering(tools: Vec<lash::tools::ToolDefinition>) -> OfferedTools {
 /// section recorded as the host's exclusion, and the wrapper over it absent.
 #[tokio::test]
 async fn a_host_reads_back_its_plan_and_the_catalog_and_previews_the_resolution() {
-    let core = witness_core(Arc::new(AtomicBool::new(false))).await;
+    let core = witness_core().await;
     let session = crate::created_session(&core, MODEL, "prompt-host-session")
         .await
         .open()
@@ -553,7 +581,7 @@ async fn a_removed_plugins_plan_override_is_recorded_and_the_turn_succeeds() {
             .await
             .expect("stores"),
     );
-    let core = witness_core_over(Arc::new(AtomicBool::new(false)), Arc::clone(&stores), true).await;
+    let core = witness_core_over(Arc::clone(&stores), true).await;
     let session = crate::created_session(&core, MODEL, "removed-prompt-session")
         .await
         .open()
@@ -592,7 +620,7 @@ async fn a_removed_plugins_plan_override_is_recorded_and_the_turn_succeeds() {
     drop(session);
     drop(core);
 
-    let core = witness_core_over(Arc::new(AtomicBool::new(false)), stores, false).await;
+    let core = witness_core_over(stores, false).await;
     let session = core
         .session(lash::SessionId::from("removed-prompt-session"))
         .open()

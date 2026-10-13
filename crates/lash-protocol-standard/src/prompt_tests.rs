@@ -3,19 +3,25 @@
 //! trusted wrappers complement or replace them.
 
 use super::*;
-use lash_core::plugin::prompt::{OfferedTools, PromptCall, PromptCatalog};
+use lash_core::plugin::PluginRegistrar;
+use lash_core::plugin::prompt::{OfferedTools, PromptCall};
 use lash_core::prompt_sections::{PromptPlan, PromptPurpose};
 use lash_core::testing::prompt::{ComposedPrompt, PromptCutParts};
 
-fn standard(config: StandardProtocolConfig) -> Arc<dyn SessionPlugin> {
-    Arc::new(StandardProtocolPlugin {
+fn standard(config: StandardProtocolConfig) -> lash_core::plugin::PluginRecipe {
+    let mut reg = PluginRegistrar::<StandardProtocolPlugin>::new(STANDARD_PROTOCOL_PLUGIN_ID);
+    StandardProtocolPlugin::declare(&mut reg).expect("protocol declarations");
+    let owner = Arc::new(StandardProtocolPlugin {
         config,
         termination: lash_core::TerminationMode::Natural,
+    });
+    lash_core::plugin::PluginRecipe::new(STANDARD_PROTOCOL_PLUGIN_ID, reg, move |_, _| {
+        Ok(Arc::clone(&owner))
     })
 }
 
 async fn compose(
-    plugins: &[Arc<dyn SessionPlugin>],
+    plugins: &[lash_core::plugin::PluginRecipe],
     purpose: PromptPurpose,
     catalog: lash_core::ToolCatalog,
 ) -> ComposedPrompt {
@@ -37,7 +43,7 @@ async fn compose(
         namespaces: Default::default(),
     });
     lash_core::testing::prompt::compose(
-        &PromptCatalog::of_plugins(plugins).expect("the plugins register"),
+        &lash_core::testing::prompt_catalog_from_recipes(plugins).expect("the plugins register"),
         &PromptPlan::default(),
         &purpose,
         cut,

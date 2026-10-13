@@ -265,9 +265,9 @@ pub fn section_id(local: &str) -> lash_core::prompt_sections::PromptSectionId {
 }
 
 /// Register the protocol's sections, in the order the module states.
-pub(crate) fn register_sections(
-    reg: &mut PluginRegistrar,
-    behaviour: RlmSectionBehaviour,
+pub(crate) fn register_sections<T: Send + Sync + 'static>(
+    reg: &mut PluginRegistrar<T>,
+    behaviour: impl Fn(&T) -> RlmSectionBehaviour + Send + Sync + 'static,
 ) -> Result<(), PluginError> {
     use PromptPlacement::{CurrentContext, InitialInstructions};
     use section_keys::*;
@@ -281,7 +281,10 @@ pub(crate) fn register_sections(
     ];
     for (local, placement, render) in sections {
         let spec = PromptSectionSpec::new(key(local), placement);
-        reg.prompt().section(spec, renderer(&behaviour, render))?;
+        let behaviour = Arc::clone(&behaviour);
+        reg.prompt().section(spec, move |owner, _| {
+            Ok(renderer(&Arc::new(behaviour(owner)), render))
+        })?;
     }
     Ok(())
 }

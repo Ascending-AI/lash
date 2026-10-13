@@ -616,10 +616,15 @@ struct NativeAndMcpProvider {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for NativeAndMcpProvider {
-    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        let mut manifests = vec![self.native.manifest()];
-        manifests.extend(self.mcp.tool_manifests(config));
-        manifests
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            let mut manifests = vec![self.native.manifest()];
+            manifests.extend(self.mcp.tool_manifests(config)?);
+            manifests
+        })
     }
 
     fn resolve_contract(
@@ -700,7 +705,11 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
     .with_execution(std::time::Duration::from_secs(120));
     let native_id = native.manifest.id.clone();
     let rebuilt = lash_core::ToolRegistry::from_tool_provider(
-        lash_core::plugin::PluginCallbackIdentity::tool_provider("mcp", "servers"),
+        lash_core::plugin::ToolProviderHandle::new(
+            lash_core::plugin::RegistryKind::Session,
+            "mcp",
+            lash_core::tool_provider_key!("servers"),
+        ),
         Arc::new(NativeAndMcpProvider {
             native,
             mcp: crate::McpToolProvider::new(Arc::clone(&pool)),
@@ -715,7 +724,9 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
         .advertise(&lash_core::OwnerConfigView::default())
         .expect("the rebuilt providers advertise");
     let registry = lash_core::SurfaceTools::of_entries(entries, registry);
-    let manifests = registry.tool_manifests(&lash_core::OwnerConfigView::default());
+    let manifests = registry
+        .tool_manifests(&lash_core::OwnerConfigView::default())
+        .expect("fixture provider advertises");
 
     // With the reservation reverted, the rejected attach above becomes a second child.
     pool.shutdown_all().await;

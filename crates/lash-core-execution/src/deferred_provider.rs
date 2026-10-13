@@ -21,6 +21,8 @@ use crate::{DeferredOutcome, ToolProvider};
 #[non_exhaustive]
 pub struct DeferredResolveContext<'a> {
     /// The session frame or process whose call paths are resolved.
+    /// The scoped address under which this resolver was registered.
+    pub provider: &'a crate::plugin::ToolProviderHandle,
     pub owner: &'a crate::ExecutionOwner,
     /// The admitted logical Run; `None` for a process.
     pub run: Option<&'a crate::runtime::TurnAddress>,
@@ -32,12 +34,14 @@ pub struct DeferredResolveContext<'a> {
 
 impl<'a> DeferredResolveContext<'a> {
     pub fn new(
+        provider: &'a crate::plugin::ToolProviderHandle,
         owner: &'a crate::ExecutionOwner,
         run: Option<&'a crate::runtime::TurnAddress>,
         capabilities: &'a BTreeMap<crate::SlotId, crate::CapabilityRef>,
         config: &'a OwnerConfigView,
     ) -> Self {
         Self {
+            provider,
             owner,
             run,
             capabilities,

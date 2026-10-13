@@ -73,9 +73,14 @@ impl Observer {
     }
 }
 
-impl lash::plugins::PluginDefinition for Observer {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl Observer {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         lash::plugins::PluginDeclaration::initial(PLUGIN)
+    }
+}
+impl lash::plugins::PluginMetadata for Observer {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -84,11 +89,19 @@ impl lash::plugins::PluginFactory for Observer {
         PLUGIN
     }
 
-    fn build(
-        &self,
-        _: &lash::plugins::PluginSessionContext,
-    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<Observer>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        Observer::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -110,31 +123,34 @@ impl lash::plugins::SessionPlugin for Observer {
         }
         Ok(())
     }
-
-    fn register(
-        &self,
-        reg: &mut lash::plugins::PluginRegistrar,
-    ) -> Result<(), lash::plugins::PluginError> {
-        let seen = Arc::clone(&self.seen);
-        reg.session().on_event(
-            lash::hook_key!("observe"),
-            Arc::new(move |event| {
-                let seen = Arc::clone(&seen);
-                Box::pin(async move {
-                    if let lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) = event {
-                        let snapshot = ctx.sessions.snapshot_current().await?;
-                        seen.lock_recover().push(Seen {
-                            session: ctx.session_id.to_string(),
-                            revision: ctx.revision,
-                            previous: ctx.previous.max_tool_calls.get(),
-                            current: ctx.current.max_tool_calls.get(),
-                            served: snapshot.policy.max_tool_calls.get(),
-                        });
-                    }
-                    Ok(())
-                })
-            }),
-        )
+}
+impl Observer {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        reg.session()
+            .on_event(lash::hook_key!("observe"), move |this, _state| {
+                let seen = Arc::clone(&this.seen);
+                Ok(Arc::new(move |event| {
+                    let seen = Arc::clone(&seen);
+                    Box::pin(async move {
+                        if let lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) =
+                            event
+                        {
+                            let snapshot = ctx.sessions.snapshot_current().await?;
+                            seen.lock_recover().push(Seen {
+                                session: ctx.session_id.to_string(),
+                                revision: ctx.revision,
+                                previous: ctx.previous.max_tool_calls.get(),
+                                current: ctx.current.max_tool_calls.get(),
+                                served: snapshot.policy.max_tool_calls.get(),
+                            });
+                        }
+                        Ok(())
+                    })
+                }))
+            })?;
+        Ok(())
     }
 }
 

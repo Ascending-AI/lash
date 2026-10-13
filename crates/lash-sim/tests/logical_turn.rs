@@ -33,8 +33,11 @@ struct NoTools;
 
 #[async_trait]
 impl ToolProvider for NoTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_contract(
@@ -54,8 +57,11 @@ impl ToolProvider for NoTools {
 
 #[async_trait]
 impl ToolProvider for SeedSwitchTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
-        vec![switch_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok(vec![switch_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -204,7 +210,7 @@ fn standard_core_on(
 ) -> (lash::LashCore, lash_sim::backend::SimEngine) {
     let core = lash::LashCore::standard_builder(engine.backend())
         .serve_test_llm_profile(provider, model())
-        .tools(lash::hook_key!("tools"), tools)
+        .tools(lash::tool_provider_key!("tools"), tools)
         .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -317,7 +323,7 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model())
         .tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::new(SeedSwitchTool { initial_nodes }),
         )
         .trace_sink(trace.clone())
@@ -431,10 +437,15 @@ impl BoundedSwitchTools {
 
 #[async_trait]
 impl ToolProvider for BoundedSwitchTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
-        (0..self.switch_count)
-            .map(|index| Self::definition(index).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok({
+            (0..self.switch_count)
+                .map(|index| Self::definition(index).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -604,7 +615,7 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
     let core = lash::LashCore::standard_builder(engine.backend())
         .serve_test_llm_profile(provider, model())
         .tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::new(BoundedSwitchTools {
                 switch_count: limit + 1,
             }),

@@ -215,7 +215,7 @@ impl FrameSwitch {
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(model(Arc::clone(&self.seen)), metadata())
-                    .tools(lash::hook_key!("tools"), switch_frame())
+                    .tools(lash::tool_provider_key!("tools"), switch_frame())
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
                         lash::persistence::LeaseOwnerId::new("frame-switch-deployment"),
                         lash::persistence::LeaseIncarnationId::new("frame-switch-boot"),

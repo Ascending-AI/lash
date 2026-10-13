@@ -3,6 +3,7 @@
 //! of `tests/workflow_laws.rs`.
 
 use super::*;
+
 use crate::workflow::{WorkflowRead, WorkflowUnavailable};
 
 /// Registers the fixture engine as an engine author would with no document
@@ -15,11 +16,11 @@ impl lash_core::plugin::SessionPlugin for UndocumentedEnginePlugin {
     fn id(&self) -> &'static str {
         "undocumented-engine-plugin"
     }
-
-    fn register(
-        &self,
-        _reg: &mut lash_core::plugin::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+}
+impl UndocumentedEnginePlugin {
+    fn declare(
+        _reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
         Ok(())
     }
 }
@@ -29,28 +30,49 @@ impl lash_core::plugin::PluginFactory for UndocumentedEngineFactory {
         "undocumented-engine-factory"
     }
 
-    fn process_engine_contributions(
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> = {
+            let mut reg = crate::plugins::PluginRegistrar::<UndocumentedEnginePlugin>::new(
+                crate::plugins::PluginFactory::id(self.as_ref()),
+            );
+            UndocumentedEnginePlugin::declare(&mut reg)?;
+            let id = self.id();
+            Ok(crate::plugins::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| Ok(Arc::new(UndocumentedEnginePlugin)),
+            ))
+        };
+        let mut recipe = recipe?;
+        let engine_factory = Arc::clone(&recipe_factory);
+        recipe = recipe.with_process_engine("testing-fixture", move |context| {
+            engine_factory.bind_process_engine(context)
+        });
+        Ok(recipe)
+    }
+}
+impl UndocumentedEngineFactory {
+    pub fn bind_process_engine(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> std::result::Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError>
-    {
-        Ok(vec![lash_core::ProcessEngineRegistration::accepting(
-            Arc::new(lash_core::testing::FixtureProcessEngine),
-        )])
-    }
-
-    fn build(
-        &self,
-        _ctx: &lash_core::plugin::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
-    {
-        Ok(Arc::new(UndocumentedEnginePlugin))
+    ) -> std::result::Result<lash_core::ProcessEngineRegistration, lash_core::PluginError> {
+        Ok(lash_core::ProcessEngineRegistration::accepting(Arc::new(
+            lash_core::testing::FixtureProcessEngine,
+        )))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for UndocumentedEngineFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl UndocumentedEngineFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("undocumented-engine-factory")
+    }
+}
+impl lash_core::plugin::PluginMetadata for UndocumentedEngineFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 

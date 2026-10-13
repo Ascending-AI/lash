@@ -101,9 +101,14 @@ const WATCH: &str = "lash-sim-watch";
 #[derive(Clone)]
 struct Watch;
 
-impl lash_core::plugin::PluginDefinition for Watch {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl Watch {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(WATCH)
+    }
+}
+impl lash_core::plugin::PluginMetadata for Watch {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -112,11 +117,19 @@ impl lash_core::plugin::PluginFactory for Watch {
         WATCH
     }
 
-    fn build(
-        &self,
-        _: &lash_core::plugin::PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<Watch>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        Watch::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -124,15 +137,18 @@ impl lash_core::plugin::SessionPlugin for Watch {
     fn id(&self) -> &'static str {
         WATCH
     }
-
-    fn register(
-        &self,
-        reg: &mut lash_core::plugin::PluginRegistrar,
-    ) -> Result<(), lash_core::PluginError> {
-        reg.turn().checkpoint(
-            lash_core::hook_key!("watch"),
-            Arc::new(|_| Box::pin(async { Ok(lash_core::plugin::TurnContributions::default()) })),
-        )
+}
+impl Watch {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        reg.turn()
+            .checkpoint(lash_core::hook_key!("watch"), move |_this, _state| {
+                Ok(Arc::new(|_| {
+                    Box::pin(async { Ok(lash_core::plugin::TurnContributions::default()) })
+                }))
+            })?;
+        Ok(())
     }
 }
 
@@ -161,7 +177,10 @@ fn core(
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .serve_test_llm_profile(model(), metadata()?)
-    .tools(lash::hook_key!("tools"), ext_write(Arc::downgrade(world))?);
+    .tools(
+        lash::tool_provider_key!("tools"),
+        ext_write(Arc::downgrade(world))?,
+    );
     let builder = if watched {
         builder.plugin(Arc::new(Watch))
     } else {

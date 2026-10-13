@@ -156,7 +156,7 @@ impl RuntimeExecutionContext<'_> {
     /// this node; `None` when this node registers no provider under it.
     pub fn binding_formats(
         &self,
-        codec: &crate::plugin::PluginCallbackIdentity,
+        codec: &crate::plugin::ToolProviderHandle,
     ) -> Option<&'static [crate::FormatVersion]> {
         self.dispatch
             .routes
@@ -168,8 +168,8 @@ impl RuntimeExecutionContext<'_> {
     pub fn tool_provider(
         &self,
         tool: &crate::ToolId,
-        granted: Option<&crate::plugin::PluginCallbackIdentity>,
-    ) -> Result<crate::plugin::PluginCallbackIdentity, crate::PluginError> {
+        granted: Option<&crate::plugin::ToolProviderHandle>,
+    ) -> Result<crate::plugin::ToolProviderHandle, crate::PluginError> {
         self.dispatch
             .composition
             .tool_provider(tool, self.dispatch.routed_provider(tool, granted))

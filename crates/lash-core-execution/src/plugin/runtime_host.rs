@@ -10,35 +10,19 @@ pub trait SessionStateService: Send + Sync {
         &self,
         _session_id: &SessionId,
         _turn_id: &TurnId,
-    ) -> Result<crate::ExecutionScope, PluginError> {
-        Err(PluginError::Session(
-            "session turn scopes are unavailable in this runtime".to_string(),
-        ))
-    }
+    ) -> Result<crate::ExecutionScope, PluginError>;
 
-    async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
-        Err(PluginError::Session(
-            "session snapshots are unavailable in this runtime".to_string(),
-        ))
-    }
+    async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError>;
 
     async fn snapshot_session(
         &self,
         _session_id: &SessionId,
-    ) -> Result<SessionSnapshot, PluginError> {
-        Err(PluginError::Session(
-            "session lookup is unavailable in this runtime".to_string(),
-        ))
-    }
+    ) -> Result<SessionSnapshot, PluginError>;
 
     async fn tool_catalog(
         &self,
         _session_id: &SessionId,
-    ) -> Result<Vec<serde_json::Value>, PluginError> {
-        Err(PluginError::Session(
-            "tool catalogs are unavailable in this runtime".to_string(),
-        ))
-    }
+    ) -> Result<Vec<serde_json::Value>, PluginError>;
 
     async fn shared_tool_catalog(
         &self,
@@ -60,11 +44,7 @@ pub trait SessionLifecycleService: Send + Sync {
     async fn create_session(
         &self,
         _request: SessionCreateRequest,
-    ) -> Result<SessionHandle, PluginError> {
-        Err(PluginError::Session(
-            "session creation is unavailable in this runtime".to_string(),
-        ))
-    }
+    ) -> Result<SessionHandle, PluginError>;
 }
 
 #[async_trait::async_trait]
@@ -73,11 +53,7 @@ pub trait SessionGraphService: Send + Sync {
         &self,
         _session_id: &SessionId,
         _request: AppendSessionNodesRequest,
-    ) -> Result<AppendSessionNodesOutcome, PluginError> {
-        Err(PluginError::Session(
-            "session graph mutation is unavailable in this session".to_string(),
-        ))
-    }
+    ) -> Result<AppendSessionNodesOutcome, PluginError>;
 
     async fn emit_trace_event(
         &self,

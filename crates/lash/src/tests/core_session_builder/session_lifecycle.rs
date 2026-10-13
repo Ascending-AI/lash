@@ -283,7 +283,7 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() {
         [historical_model.clone(), builder_model.clone()],
     ))
     .tools(
-        crate::hook_key!("tools"),
+        crate::tool_provider_key!("tools"),
         Arc::new(crate::tools::StaticToolProvider::new(
             vec![definition],
             SwitchFrame,

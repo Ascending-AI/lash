@@ -48,7 +48,7 @@ fn core(
         }]
     };
     lash::LashCore::standard_builder(backend.clone())
-        .tools(lash::hook_key!("tools"), Arc::new(EchoTool))
+        .tools(lash::tool_provider_key!("tools"), Arc::new(EchoTool))
         .plugin(plugin)
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())

@@ -46,8 +46,11 @@ struct Inspector {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Inspector {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![inspect_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![inspect_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -83,7 +86,7 @@ async fn world(tier: Tier, inspector: &Arc<Inspector>) -> Option<World> {
                 lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
             ),
         ))
-        .tools(lash::hook_key!("tools"), inspector)
+        .tools(lash::tool_provider_key!("tools"), inspector)
     })
     .await
 }

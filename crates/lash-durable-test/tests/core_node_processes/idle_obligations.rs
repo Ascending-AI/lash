@@ -9,10 +9,8 @@ use super::*;
 /// The token a node serves when its write component contributes the write
 /// tool's provider, and a process requires while a write is unsettled.
 fn write_token() -> String {
-    format!(
-        "callback:process:{}/tool_provider:tools",
-        WRITE_COMPONENT.component()
-    )
+    let provider = WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools"));
+    lash_core::ObligationToken::for_callback(provider.registry(), &provider.callback_identity())
 }
 
 /// The write component's id and format with no tool provider: a node

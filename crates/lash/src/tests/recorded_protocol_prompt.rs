@@ -16,6 +16,7 @@
 //! (FIG-5296): `core_node_processes.rs` in lash-durable-test holds that law.
 
 use super::*;
+
 use crate::prompt::{PromptPlacement, PromptPlan, PromptSectionId, PromptSectionKey};
 
 /// The section the first deployment's plan places.
@@ -57,9 +58,14 @@ fn placing(key: &str) -> PromptPlan {
 #[derive(Clone)]
 struct Sections;
 
-impl lash_core::plugin::PluginDefinition for Sections {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl Sections {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(PLUGIN)
+    }
+}
+impl lash_core::plugin::PluginMetadata for Sections {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -68,40 +74,38 @@ impl PluginFactory for Sections {
         PLUGIN
     }
 
-    fn build(
-        &self,
-        _: &lash_core::facade_support::PluginSessionContext,
-    ) -> std::result::Result<
-        Arc<dyn lash_core::facade_support::SessionPlugin>,
-        lash_core::PluginError,
-    > {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, lash_core::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<Self>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        for (key, text) in SECTIONS {
+            reg.prompt().section(
+                crate::plugins::PromptSectionSpec::new(
+                    crate::prompt::PromptSectionKey::new(key).expect("valid section key"),
+                    crate::prompt::PromptPlacement::Excluded,
+                ),
+                move |_, _| {
+                    Ok(Arc::new(move |_: &crate::plugins::PromptInput<'_>| {
+                        Ok::<_, crate::plugins::PromptRenderError>(
+                            crate::plugins::SectionText::text(text),
+                        )
+                    }))
+                },
+            )?;
+        }
+        Ok(crate::plugins::PluginRecipe::new(
+            PLUGIN,
+            reg,
+            move |_, _| Ok(Arc::clone(&self)),
+        ))
     }
 }
 
 impl lash_core::facade_support::SessionPlugin for Sections {
     fn id(&self) -> &'static str {
         PLUGIN
-    }
-
-    fn register(
-        &self,
-        reg: &mut lash_core::facade_support::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        for (key, text) in SECTIONS {
-            reg.prompt().section(
-                crate::plugins::PromptSectionSpec::new(
-                    PromptSectionKey::new(key).expect("valid section key"),
-                    PromptPlacement::Excluded,
-                ),
-                Arc::new(move |_: &crate::plugins::PromptInput<'_>| {
-                    Ok::<_, crate::plugins::PromptRenderError>(crate::plugins::SectionText::text(
-                        text,
-                    ))
-                }),
-            )?;
-        }
-        Ok(())
     }
 }
 
@@ -156,7 +160,7 @@ fn scripted_provider(served: &Served, script: &Arc<Script>) -> ProviderHandle {
 /// A core over `backend` with the sections and `app_lookup` installed.
 fn core_over(backend: lash_core::Backend, provider: ProviderHandle) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+        .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
         .plugin(Arc::new(Sections))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
@@ -525,43 +529,60 @@ async fn an_rlm_run_options_prompt_is_refused() -> Result<()> {
 
 #[derive(Clone)]
 struct PoolProbe(Arc<std::sync::Mutex<Vec<std::thread::ThreadId>>>);
-impl crate::plugins::PluginDefinition for PoolProbe {
-    fn declaration() -> crate::plugins::PluginDeclaration {
+impl PoolProbe {
+    pub fn declaration() -> crate::plugins::PluginDeclaration {
         crate::plugins::PluginDeclaration::initial("pool-probe")
+    }
+}
+impl crate::plugins::PluginMetadata for PoolProbe {
+    fn plugin_declaration(&self) -> crate::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 impl PluginFactory for PoolProbe {
     fn id(&self) -> &'static str {
         "pool-probe"
     }
-    fn build(
-        &self,
-        _: &crate::plugins::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn crate::plugins::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<PoolProbe>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        PoolProbe::declare(&mut reg)?;
+        let id = self.id();
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 impl crate::plugins::SessionPlugin for PoolProbe {
     fn id(&self) -> &'static str {
         "pool-probe"
     }
-    fn register(
-        &self,
-        reg: &mut crate::plugins::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        let threads = Arc::clone(&self.0);
+}
+impl PoolProbe {
+    fn declare(
+        reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
         reg.prompt().section(
             crate::plugins::PromptSectionSpec::new(
-                PromptSectionKey::new("thread").expect("key"),
-                PromptPlacement::Excluded,
+                crate::prompt::PromptSectionKey::new("thread").expect("key"),
+                crate::prompt::PromptPlacement::Excluded,
             ),
-            Arc::new(move |_: &crate::plugins::PromptInput<'_>| {
-                threads.lock_recover().push(std::thread::current().id());
-                Ok::<_, crate::plugins::PromptRenderError>(crate::plugins::SectionText::text(
-                    "host render pool probe",
-                ))
-            }),
-        )
+            move |this, _state| {
+                let threads = Arc::clone(&this.0);
+                Ok(Arc::new(move |_: &crate::plugins::PromptInput<'_>| {
+                    threads.lock_recover().push(std::thread::current().id());
+                    Ok::<_, crate::plugins::PromptRenderError>(crate::plugins::SectionText::text(
+                        "host render pool probe",
+                    ))
+                }))
+            },
+        )?;
+        Ok(())
     }
 }
 

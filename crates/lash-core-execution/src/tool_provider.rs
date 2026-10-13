@@ -10,16 +10,18 @@ use serde::{Deserialize, Serialize};
 use crate::plugin::{
     OwnerConfigView, PluginError, SessionLifecycleService, SessionSnapshot, SessionStateService,
 };
-use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcome};
+use crate::{ToolContract, ToolId, ToolManifest, ToolOutcome};
 
 mod attachments;
 mod completion_support;
 mod direct_completion;
+mod grant;
 mod isolation;
 mod session;
 
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
+pub use grant::ToolExecutionGrant;
 pub use isolation::{IsolatedProcessRequest, IsolatedStart};
 
 /// Why a start's definition target did not resolve.
@@ -172,7 +174,7 @@ pub(crate) enum ToolExecutionRoute {
     #[default]
     Catalog,
     Granted {
-        provider: crate::plugin::PluginCallbackIdentity,
+        provider: crate::plugin::ToolProviderHandle,
     },
 }
 
@@ -1031,7 +1033,7 @@ impl<'run> ToolContext<'run> {
 
     pub(crate) fn with_granted_provider(
         mut self,
-        provider: crate::plugin::PluginCallbackIdentity,
+        provider: crate::plugin::ToolProviderHandle,
     ) -> Self {
         self.tool_execution_route = ToolExecutionRoute::Granted { provider };
         self
@@ -1144,63 +1146,6 @@ impl PreparedToolBatch {
     }
 }
 
-/// The authority to execute a tool a recorded deferred match resolved,
-/// outside the run's recorded surface: the provider the match names, the
-/// definition its calls are admitted under and the match's execution
-/// binding, which the provider reads from its prepare and execute contexts.
-// `PartialEq` but not `Eq`: the binding's payload is a `serde_json::Value`,
-// whose float arm has no total equality.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ToolExecutionGrant {
-    /// The declared provider that prepares and executes this grant's calls:
-    /// the one identity its calls bind to and dispatch through.
-    #[serde(
-        deserialize_with = "lash_core_store::store::plugin_writers::declared_tool_provider::deserialize"
-    )]
-    pub provider: crate::plugin::PluginCallbackIdentity,
-    /// Tool identity and model-facing metadata authorized by the grant.
-    pub(crate) manifest: ToolManifest,
-    /// Contract used to validate granted call arguments without consulting the
-    /// current Tool Catalog.
-    pub(crate) contract: Box<ToolContract>,
-    /// The match's execution binding, passed to prepare and execute contexts.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binding: Option<crate::ExecutionBinding>,
-}
-
-impl ToolExecutionGrant {
-    /// A grant of `definition`, executed by the provider declared as
-    /// `provider`.
-    pub fn from_definition(
-        provider: crate::plugin::PluginCallbackIdentity,
-        definition: ToolDefinition,
-    ) -> Self {
-        Self {
-            provider,
-            manifest: definition.manifest(),
-            contract: Box::new(definition.contract()),
-            binding: None,
-        }
-    }
-
-    /// Returns the tool identity and model-facing metadata authorized by this grant.
-    pub fn manifest(&self) -> &ToolManifest {
-        &self.manifest
-    }
-
-    /// Returns the contract used to validate granted call arguments.
-    pub fn contract(&self) -> &ToolContract {
-        &self.contract
-    }
-
-    /// The grant with the match's execution binding.
-    pub fn with_execution_binding(mut self, binding: Option<crate::ExecutionBinding>) -> Self {
-        self.binding = binding;
-        self
-    }
-}
-
 #[derive(Clone)]
 pub struct ToolPrepareContext {
     fleet_format: crate::FleetFormat,
@@ -1289,7 +1234,7 @@ impl ToolPrepareContext {
 
     pub(crate) fn with_granted_provider(
         mut self,
-        provider: crate::plugin::PluginCallbackIdentity,
+        provider: crate::plugin::ToolProviderHandle,
     ) -> Self {
         self.tool_execution_route = ToolExecutionRoute::Granted { provider };
         self
@@ -1508,9 +1453,13 @@ pub trait ToolProvider: Send + Sync + 'static {
     /// The tools this provider advertises under `config`, the run's resolved
     /// config: which tools exist is the provider's own configuration
     /// (FIG-6074).
-    fn tool_manifests(&self, config: &OwnerConfigView) -> Vec<ToolManifest>;
+    fn tool_manifests(
+        &self,
+        config: &OwnerConfigView,
+    ) -> Result<Vec<ToolManifest>, crate::PluginError>;
     fn resolve_manifest(&self, name: &str, config: &OwnerConfigView) -> Option<ToolManifest> {
         self.tool_manifests(config)
+            .ok()?
             .into_iter()
             .find(|manifest| manifest.name == name)
     }
@@ -1520,6 +1469,7 @@ pub trait ToolProvider: Send + Sync + 'static {
         config: &OwnerConfigView,
     ) -> Option<ToolManifest> {
         self.tool_manifests(config)
+            .ok()?
             .into_iter()
             .find(|manifest| manifest.id == *id)
     }
@@ -1583,7 +1533,7 @@ mod tests {
             SessionId::from("session-1"),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
-            Arc::new(crate::UnavailableProcessService),
+            Arc::new(crate::plugin::ServiceBindings::default()),
             controller,
             Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             crate::DirectCompletionClient::unavailable(

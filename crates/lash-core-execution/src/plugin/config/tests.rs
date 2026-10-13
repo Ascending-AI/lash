@@ -1,3 +1,4 @@
+use crate::plugin::PluginError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -134,6 +135,7 @@ impl ConfigCommand for Increment {
     const NAME: &'static str = "increment";
 }
 
+#[derive(Clone)]
 struct CounterFactory {
     id: &'static str,
     /// The owner the run options key it registers names: its own id.
@@ -156,16 +158,35 @@ impl PluginFactory for CounterFactory {
         self.id
     }
 
-    fn build(
-        &self,
-        _ctx: &crate::plugin::PluginSessionContext,
-    ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "not built in these laws".to_string(),
-        ))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> = {
+            let id = self.id();
+            Ok(crate::plugin::PluginRecipe::empty(
+                id,
+                move |_ctx, _state| {
+                    Err(crate::PluginError::Session(
+                        "not built in these laws".to_string(),
+                    ))
+                },
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = crate::plugin::ConfigRegistrar::new(
+            crate::plugin::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
     }
-
-    fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
+}
+impl CounterFactory {
+    pub fn declare_configuration(
+        &self,
+        reg: &mut ConfigRegistrar,
+    ) -> Result<(), ConfigRegistrationError> {
         reg.owner_with_run_options(CounterOwner, crate::RunOptionsKey::new(self.options_key))?;
         let reductions = Arc::clone(&self.reductions);
         reg.command::<Increment>(move |recorded, command| {
@@ -703,7 +724,10 @@ fn an_owner_registered_under_another_plugins_options_key_is_refused() {
     foreign.options_key = "second";
     let factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(foreign)];
     assert_eq!(
-        ConfigRegistry::build(&factories).err(),
+        match ConfigRegistry::build(&factories).err() {
+            Some(PluginError::ConfigRegistration(error)) => Some(error),
+            other => panic!("typed config refusal: {other:?}"),
+        },
         Some(ConfigRegistrationError::ForeignRunOptionsKey {
             plugin_id: "first".to_string(),
             key: "second".to_string(),
@@ -860,21 +884,32 @@ fn registrations_that_cannot_stand_are_refused() {
             CORE_CONFIG_OWNER
         }
 
-        fn build(
-            &self,
-            _ctx: &crate::plugin::PluginSessionContext,
-        ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
-            Err(crate::PluginError::Session("unused".to_string()))
+        fn recipe(
+            self: Arc<Self>,
+        ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+            let id = self.id();
+            Ok(crate::plugin::PluginRecipe::empty(
+                id,
+                move |_ctx, _state| Err(crate::PluginError::Session("unused".to_string())),
+            ))
         }
     }
 
-    impl crate::plugin::PluginDefinition for Reserved {
-        fn declaration() -> crate::plugin::PluginDeclaration {
+    impl Reserved {
+        pub fn declaration() -> crate::plugin::PluginDeclaration {
             crate::plugin::PluginDeclaration::initial(CORE_CONFIG_OWNER)
         }
     }
+    impl crate::plugin::PluginMetadata for Reserved {
+        fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+            Self::declaration()
+        }
+    }
     assert_eq!(
-        ConfigRegistry::build(&[Arc::new(Reserved) as Arc<dyn PluginFactory>]).map(drop),
+        match ConfigRegistry::build(&[Arc::new(Reserved) as Arc<dyn PluginFactory>]) {
+            Err(PluginError::ConfigRegistration(error)) => Err::<(), _>(error),
+            other => panic!("typed config refusal: {other:?}"),
+        },
         Err(ConfigRegistrationError::ReservedOwner {
             owner: CORE_CONFIG_OWNER.to_string()
         })
@@ -937,24 +972,24 @@ impl PluginFactory for FormattedCounter {
         })
     }
 
-    fn build(
-        &self,
-        ctx: &crate::plugin::PluginSessionContext,
-    ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
-        self.0.build(ctx)
-    }
-
-    fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
-        self.0.register_config(reg)
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+        Arc::new(self.0.clone()).recipe()
     }
 }
 
-impl crate::plugin::PluginDefinition for FormattedCounter {
-    fn declaration() -> crate::plugin::PluginDeclaration {
+impl FormattedCounter {
+    pub fn declaration() -> crate::plugin::PluginDeclaration {
         let mut declaration = crate::plugin::PluginDeclaration::initial(Self::ID);
         declaration.format_version = crate::FormatVersion::new(2).expect("a format version");
         declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
         declaration
+    }
+}
+impl crate::plugin::PluginMetadata for FormattedCounter {
+    fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 

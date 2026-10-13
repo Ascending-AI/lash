@@ -38,7 +38,7 @@ async fn world(
         move |backend| {
             let builder = lash::LashCore::standard_builder(backend.clone());
             match tools {
-                Some(tools) => builder.tools(lash::hook_key!("tools"), tools),
+                Some(tools) => builder.tools(lash::tool_provider_key!("tools"), tools),
                 None => builder,
             }
         },
@@ -202,8 +202,11 @@ impl UndeclaredFinish {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for UndeclaredFinish {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![Self::definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![Self::definition().manifest()])
     }
 
     fn resolve_contract(
@@ -733,8 +736,11 @@ fn attachment_result_tool_definition() -> lash_core::ToolDefinition {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for AttachmentResultTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![attachment_result_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![attachment_result_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -924,7 +930,7 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
         attachment_model(Arc::clone(&asked)),
         |backend| {
             lash::LashCore::standard_builder(backend.clone()).tools(
-                lash::hook_key!("tools"),
+                lash::tool_provider_key!("tools"),
                 Arc::new(AttachmentResultTool {
                     media_type: "application/octet-stream",
                     bytes: UNSUPPORTED_BYTES,
@@ -991,7 +997,7 @@ async fn accepted_tool_attachment_round_trips_without_degradation(tier: Tier) {
         attachment_model(Arc::clone(&asked)),
         |backend| {
             lash::LashCore::standard_builder(backend.clone()).tools(
-                lash::hook_key!("tools"),
+                lash::tool_provider_key!("tools"),
                 Arc::new(AttachmentResultTool {
                     media_type: "image/png",
                     bytes: IMAGE_BYTES,
@@ -1047,8 +1053,11 @@ fn array_attachment_tool_definition() -> lash_core::ToolDefinition {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for ArrayAttachmentTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![array_attachment_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![array_attachment_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -1145,8 +1154,10 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
         .build()
         .into_handle();
     let Some(world) = World::with_model(tier, Vec::new(), model, |backend| {
-        lash::LashCore::standard_builder(backend.clone())
-            .tools(lash::hook_key!("tools"), Arc::new(ArrayAttachmentTool))
+        lash::LashCore::standard_builder(backend.clone()).tools(
+            lash::tool_provider_key!("tools"),
+            Arc::new(ArrayAttachmentTool),
+        )
     })
     .await
     else {
@@ -1309,7 +1320,7 @@ async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_fini
         move |backend| {
             lash::LashCore::standard_builder(backend.clone())
                 .tools(
-                    lash::hook_key!("tools"),
+                    lash::tool_provider_key!("tools"),
                     Arc::new(TerminalControlTool {
                         controls: vec![lash_core::ToolControl::Turn {
                             control: lash_core::TurnControl::Finish {

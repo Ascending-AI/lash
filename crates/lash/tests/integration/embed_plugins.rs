@@ -10,9 +10,7 @@ use async_trait::async_trait;
 use lash::LashCore;
 use lash::TurnInput;
 use lash::direct::LlmOutputPart;
-use lash::plugins::{
-    PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
-};
+use lash::plugins::{PluginFactory, SessionPlugin};
 use lash::provider::LlmResponse;
 use lash::tools::{
     ToolAttemptOutcome, ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
@@ -84,31 +82,65 @@ impl PluginFactory for TestPluginFactory {
         TEST_PLUGIN_ID
     }
 
-    fn register_config(
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_core::plugin::PluginError,
+        > = {
+            let mut reg = lash_core::plugin::PluginRegistrar::<TestSessionPlugin>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            TestSessionPlugin::declare(&mut reg)?;
+            let id = lash_core::plugin::PluginFactory::id(self.as_ref());
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |ctx, _state| {
+                    let label = ctx
+                        .plugin_config
+                        .config
+                        .decode::<TestPluginConfig>(TEST_PLUGIN_ID)
+                        .map_err(|error| {
+                            lash_core::plugin::PluginError::Session(error.to_string())
+                        })?
+                        .map(|config| config.label);
+                    Ok(Arc::new(TestSessionPlugin {
+                        label,
+                        hook_seen: Arc::clone(&self.hook_seen),
+                        tool_seen: Arc::clone(&self.tool_seen),
+                    }))
+                },
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = lash_core::plugin::ConfigRegistrar::new(
+            lash_core::plugin::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
+    }
+}
+impl TestPluginFactory {
+    pub fn declare_configuration(
         &self,
         registrar: &mut lash::plugins::ConfigRegistrar,
     ) -> Result<(), lash::plugins::ConfigRegistrationError> {
         registrar.owner(TestConfigOwner)
     }
-
-    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        let label = ctx
-            .plugin_config
-            .config
-            .decode::<TestPluginConfig>(TEST_PLUGIN_ID)
-            .map_err(|error| PluginError::Session(error.to_string()))?
-            .map(|config| config.label);
-        Ok(Arc::new(TestSessionPlugin {
-            label,
-            hook_seen: Arc::clone(&self.hook_seen),
-            tool_seen: Arc::clone(&self.tool_seen),
-        }))
-    }
 }
 
-impl lash_core::plugin::PluginDefinition for TestPluginFactory {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl TestPluginFactory {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         lash::plugins::PluginDeclaration::initial(TEST_PLUGIN_ID)
+    }
+}
+impl lash_core::plugin::PluginMetadata for TestPluginFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -123,45 +155,56 @@ impl SessionPlugin for TestSessionPlugin {
     fn id(&self) -> &'static str {
         TEST_PLUGIN_ID
     }
+}
+impl TestSessionPlugin {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        reg.turn()
+            .before(lash::hook_key!("turn-before-1"), move |this, _state| {
+                let hook_seen = Arc::clone(&this.hook_seen);
+                let hook_label = this.label.clone();
+                Ok(Arc::new(move |_ctx| {
+                    let hook_seen = Arc::clone(&hook_seen);
+                    let label = hook_label.clone();
+                    Box::pin(async move {
+                        if let Some(label) = label {
+                            hook_seen.lock_recover().push(label);
+                        }
+                        Ok(Default::default())
+                    })
+                }))
+            })?;
 
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        // A session that recorded no label runs the plugin with nothing to
-        // contribute: no turn hook and no tools.
-        let Some(label) = self.label.clone() else {
-            return Ok(());
-        };
-        let hook_seen = Arc::clone(&self.hook_seen);
-        let hook_label = label.clone();
-        reg.turn().before(
-            lash::hook_key!("turn-before-1"),
-            Arc::new(move |_ctx| {
-                let hook_seen = Arc::clone(&hook_seen);
-                let label = hook_label.clone();
-                Box::pin(async move {
-                    hook_seen.lock_recover().push(label);
-                    Ok(Default::default())
-                })
-            }),
-        )?;
-        reg.tools().provider(
-            lash::hook_key!("tools"),
-            Arc::new(TestTools {
-                label,
-                seen: Arc::clone(&self.tool_seen),
-            }),
-        )
+        reg.tools()
+            .provider(lash::tool_provider_key!("tools"), move |this, _state| {
+                Ok(Arc::new(TestTools {
+                    label: this.label.clone(),
+                    seen: Arc::clone(&this.tool_seen),
+                }))
+            })?;
+        Ok(())
     }
 }
 
 struct TestTools {
-    label: String,
+    label: Option<String>,
     seen: Arc<Mutex<Vec<String>>>,
 }
 
 #[async_trait]
 impl ToolProvider for TestTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
-        vec![typed_probe_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok({
+            if self.label.is_some() {
+                vec![typed_probe_definition().manifest()]
+            } else {
+                Vec::new()
+            }
+        })
     }
 
     fn resolve_contract(

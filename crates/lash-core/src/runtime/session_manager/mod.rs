@@ -462,6 +462,19 @@ impl ProcessCapability {
 }
 
 impl RuntimeSessionServices {
+    pub(in crate::runtime) fn bindings(self: &Arc<Self>) -> Arc<crate::plugin::ServiceBindings> {
+        let mut bindings = crate::plugin::ServiceBindings::default();
+        if self.current.session().is_some() {
+            bindings = bindings
+                .with_session_state(self.state_service())
+                .with_session_lifecycle(self.lifecycle_service())
+                .with_session_graph(self.graph_service());
+        }
+        if self.current.host.process_registry().is_some() {
+            bindings = bindings.with_processes(self.process_service());
+        }
+        Arc::new(bindings)
+    }
     /// Adopt `admission` as the plugin admission the owner's plugins write
     /// under (FIG-4747).
     pub(in crate::runtime) fn adopt_plugin_admission(
@@ -527,6 +540,7 @@ impl RuntimeSessionServices {
         })
     }
 
+    #[cfg(test)]
     pub(in crate::runtime) fn process_read_service(
         self: &Arc<Self>,
     ) -> Arc<dyn crate::plugin::ProcessReadService> {

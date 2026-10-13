@@ -161,15 +161,17 @@ impl RuntimeTurnDriver<'_> {
         request: &LlmRequest,
         last_call_usage: Option<crate::LlmUsage>,
     ) -> Result<Option<crate::ProtocolLlmCallAction>, PluginError> {
+        let bindings = self.session_services.bindings();
+        self.session
+            .plugins()
+            .bind_services(Arc::clone(&bindings))?;
         self.session
             .plugins()
             .protocol_session()
             .before_llm_call(
                 crate::ProtocolBeforeLlmCallContext {
                     session_id: self.session_id.clone(),
-                    sessions: self.session_services.state_service(),
-                    session_graph: self.session_services.graph_service(),
-                    processes: self.session_services.process_service(),
+                    bindings,
                     state: self.checkpoint_state_view(messages, protocol_iteration),
                     latest_prompt_usage: last_call_usage,
                     run_spec: self.run_config.run().spec().clone(),

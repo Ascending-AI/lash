@@ -252,8 +252,11 @@ struct FixtureTool {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for FixtureTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![fixture_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![fixture_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -330,7 +333,7 @@ fn standard_core(
             ),
         ))
         .tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::clone(tool) as Arc<dyn lash_core::ToolProvider>,
         )
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))

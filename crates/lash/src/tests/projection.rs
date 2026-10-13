@@ -51,7 +51,7 @@ async fn presentation_step_only_changes_model_observation() -> Result<()> {
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), Arc::new(EchoTool))
+    .tools(crate::tool_provider_key!("tools"), Arc::new(EchoTool))
     .plugin(Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("model-projection"),
         lash_core::facade_support::PluginSpec::new().with_presentation_step(

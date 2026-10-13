@@ -1,26 +1,14 @@
 //! Immutable execution contributions shared by session and process dispatch.
 use super::prompt::{PromptCatalog, PromptRegistry};
 use super::*;
+
 use lash_core_store::tool_run::{AttributedVerdict, CheckRecord};
 use std::sync::Arc;
 
-/// Every executable slot, with registration identities scoped by its owner.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ContributionKind {
-    ToolProvider,
-    ToolCatalogContributor,
-    ToolArgsTransform,
-    ToolArgsCheck,
-    ToolResultTransform,
-    ToolResultCheck,
-    Presenter,
-    PresentationStep,
-    PromptSection,
-}
-
 /// Built once per materialization, in owner and registration order.
 pub struct ExecutionComposition {
-    tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
+    callbacks: Vec<PluginCallbackIdentity>,
+    tool_providers: Vec<super::registrar::RegisteredProvider<Arc<dyn ToolProvider>>>,
     tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
     tool_args_transforms: Vec<RegisteredHook<ToolArgsTransformHook>>,
     tool_args_checks: Vec<RegisteredHook<ToolArgsCheckHook>>,
@@ -38,6 +26,11 @@ impl ExecutionComposition {
         tool_registry: Arc<crate::ToolRegistry>,
     ) -> Self {
         Self {
+            callbacks: contributions
+                .inventory
+                .as_ref()
+                .map(|inventory| inventory.callbacks().cloned().collect())
+                .unwrap_or_default(),
             tool_providers: std::mem::take(&mut contributions.tool_providers),
             tool_catalog_contributors: std::mem::take(&mut contributions.tool_catalog_contributors),
             tool_args_transforms: std::mem::take(&mut contributions.tool_args_transforms),
@@ -55,51 +48,6 @@ impl ExecutionComposition {
         PromptCatalog::new(self.prompt.clone())
     }
 
-    pub fn contributions(
-        &self,
-    ) -> impl Iterator<Item = (ContributionKind, &PluginCallbackIdentity)> {
-        use ContributionKind::*;
-        self.tool_providers
-            .iter()
-            .map(|h| (ToolProvider, &h.identity))
-            .chain(
-                self.tool_catalog_contributors
-                    .iter()
-                    .map(|h| (ToolCatalogContributor, &h.identity)),
-            )
-            .chain(
-                self.tool_args_transforms
-                    .iter()
-                    .map(|h| (ToolArgsTransform, &h.identity)),
-            )
-            .chain(
-                self.tool_args_checks
-                    .iter()
-                    .map(|h| (ToolArgsCheck, &h.identity)),
-            )
-            .chain(
-                self.tool_result_transforms
-                    .iter()
-                    .map(|h| (ToolResultTransform, &h.identity)),
-            )
-            .chain(
-                self.tool_result_checks
-                    .iter()
-                    .map(|h| (ToolResultCheck, &h.identity)),
-            )
-            .chain(self.presenter.iter().map(|h| (Presenter, &h.identity)))
-            .chain(
-                self.presentation_steps
-                    .iter()
-                    .map(|h| (PresentationStep, &h.identity)),
-            )
-            .chain(
-                self.prompt
-                    .identities()
-                    .map(|identity| (PromptSection, identity)),
-            )
-    }
-
     pub(super) fn tool_catalog_contributors(&self) -> &[RegisteredHook<ToolCatalogContributor>] {
         &self.tool_catalog_contributors
     }
@@ -108,10 +56,7 @@ impl ExecutionComposition {
         PluginError::Runtime(
             RecordedCallbackUnavailable {
                 recorded: callback.clone(),
-                available: self
-                    .contributions()
-                    .map(|(_, identity)| identity.clone())
-                    .collect(),
+                available: self.callbacks.clone(),
             }
             .into_runtime_error(),
         )
@@ -124,8 +69,8 @@ impl ExecutionComposition {
     pub fn tool_provider(
         &self,
         tool: &crate::ToolId,
-        provider: Option<&PluginCallbackIdentity>,
-    ) -> Result<PluginCallbackIdentity, PluginError> {
+        provider: Option<&ToolProviderHandle>,
+    ) -> Result<ToolProviderHandle, PluginError> {
         let provider = provider.cloned().ok_or_else(|| {
             PluginError::Registration(format!(
                 "tool `{tool}` is neither on the run's surface nor a recorded match"
@@ -146,9 +91,9 @@ impl ExecutionComposition {
     pub(crate) fn tool_run_binding(
         &self,
         tool: &crate::ToolId,
-        provider: Option<&PluginCallbackIdentity>,
+        provider: Option<&ToolProviderHandle>,
     ) -> Result<crate::tool_run::AdmittedBinding, PluginError> {
-        let executable = self.tool_provider(tool, provider)?;
+        let executable = self.tool_provider(tool, provider)?.callback_identity();
         Ok(crate::tool_run::AdmittedBinding {
             preparation: executable.clone(),
             executable,
@@ -158,7 +103,7 @@ impl ExecutionComposition {
 
     /// The deferred provider's key, when one is registered: what resolves
     /// the call paths a surface does not offer.
-    pub fn deferred_key(&self) -> Option<PluginCallbackIdentity> {
+    pub fn deferred_key(&self) -> Option<ToolProviderHandle> {
         self.tool_registry.deferred_key().cloned()
     }
 
@@ -172,7 +117,7 @@ impl ExecutionComposition {
             .map(|binding| {
                 self.tool_providers
                     .iter()
-                    .find(|registered| &registered.identity == binding)
+                    .find(|registered| registered.identity.callback_identity() == *binding)
                     .map(|registered| Arc::clone(&registered.hook))
                     .ok_or_else(|| {
                         PluginError::Session(format!(
@@ -558,130 +503,506 @@ impl ExecutionComposition {
 mod tests {
     use super::*;
     use crate::plugin::prompt::{PromptInput, PromptSectionSpec, SectionText};
-    use crate::prompt_sections::{PromptPlacement, PromptPurpose, PromptSectionKey};
+    use crate::prompt_sections::{PromptPlacement, PromptSectionKey};
     use std::collections::BTreeSet;
 
-    struct EveryContribution;
+    const KEYED_TOOL: &str = "tool:keyed";
 
-    impl PluginDefinition for EveryContribution {
-        fn declaration() -> PluginDeclaration {
-            PluginDeclaration::initial("composition-identities")
-        }
-    }
-
-    impl PluginFactory for EveryContribution {
-        fn id(&self) -> &'static str {
-            "composition-identities"
-        }
-
-        fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-            Ok(Arc::new(EveryContribution))
-        }
-    }
-
-    impl SessionPlugin for EveryContribution {
-        fn id(&self) -> &'static str {
-            "composition-identities"
-        }
-
-        fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-            reg.tools().provider(
-                crate::hook_key!("empty"),
-                Arc::new(crate::testing::EmptyToolProvider),
-            )?;
-            reg.tool_catalog().contribute(
-                crate::hook_key!("catalog"),
-                Arc::new(|_| Ok(Default::default())),
-            )?;
-            reg.tool_calls().transform_args(
-                crate::hook_key!("args"),
-                Arc::new(|input| Box::pin(async move { Ok(input.current) })),
-            )?;
-            reg.tool_calls().check_args(
-                crate::hook_key!("args"),
-                Arc::new(|_| Box::pin(async { Ok(BeforeToolDecision::Allow) })),
-            )?;
-            reg.tool_calls().transform_result(
-                crate::hook_key!("result"),
-                Arc::new(|input| Box::pin(async move { Ok(input.current) })),
-            )?;
-            reg.tool_calls().check_result(
-                crate::hook_key!("result"),
-                Arc::new(|_| Box::pin(async { Ok(AfterToolContributions::default()) })),
-            )?;
-            reg.tool_results().presenter(Arc::new(|input| {
-                Box::pin(async move { Ok(input.previous) })
-            }))?;
-            reg.tool_results().presentation_step(
-                crate::hook_key!("presentation"),
-                Arc::new(|input| Box::pin(async move { Ok(input.previous) })),
-            )?;
-            reg.prompt().section(
-                PromptSectionSpec::new(
-                    PromptSectionKey::new("direct").expect("section key"),
-                    PromptPlacement::InitialInstructions,
-                )
-                .purposes([PromptPurpose::Direct {
-                    name: "probe".into(),
-                }]),
-                Arc::new(|_: &PromptInput<'_>| Ok(SectionText::text("probe"))),
-            )
-        }
-    }
-
-    /// COMPOSITION-IDENTITIES (D3): every executable contribution exposes
-    /// its registering owner and its unique callback key.
+    /// REGISTRATION-IS-INVENTORY: a turn callback is part of installed code.
     #[test]
-    fn composition_identities() {
-        let session = crate::testing::test_plugin_host(vec![Arc::new(EveryContribution)])
-            .build_session(PluginSessionRequest::creation(
-                "composition-identities-session",
-                SessionAuthorityContext::fixture(),
-            ))
-            .expect("materialized session");
-        let composition = session.composition();
-        let contributions = composition
-            .contributions()
-            .filter(|(_, identity)| identity.owner == "composition-identities")
-            .collect::<Vec<_>>();
-        let expected = BTreeSet::from([
-            ContributionKind::ToolProvider,
-            ContributionKind::ToolCatalogContributor,
-            ContributionKind::ToolArgsTransform,
-            ContributionKind::ToolArgsCheck,
-            ContributionKind::ToolResultTransform,
-            ContributionKind::ToolResultCheck,
-            ContributionKind::Presenter,
-            ContributionKind::PresentationStep,
-            ContributionKind::PromptSection,
-        ]);
-        assert_eq!(contributions.len(), expected.len());
-        assert_eq!(
-            contributions
-                .iter()
-                .map(|(kind, _)| *kind)
-                .collect::<BTreeSet<_>>(),
-            expected
+    fn registration_is_inventory() {
+        use super::super::prompt::{
+            OfferedTools, PromptFamilySection, PromptSectionFamilySpec, PromptSectionSource,
+            PromptWrapSpec, PromptWrapTarget,
+        };
+        use crate::prompt_sections::PromptWrapKey;
+        #[derive(Clone)]
+        struct Owner(Arc<std::sync::atomic::AtomicUsize>);
+        impl SessionPlugin for Owner {
+            fn id(&self) -> &'static str {
+                "test_protocol"
+            }
+        }
+        #[async_trait::async_trait]
+        impl CodeExecutorPlugin for Owner {
+            async fn execute_code(
+                &self,
+                _: crate::RuntimeExecutionContext<'_>,
+                _: crate::ExecRequest,
+            ) -> Result<crate::ExecResponse, crate::SessionError> {
+                Err(crate::SessionError::Protocol(
+                    "inventory fixture executes no code".into(),
+                ))
+            }
+            async fn frame_switch_carries(
+                &self,
+                _: ProtocolSessionContext<'_>,
+                _: &crate::FrameNodeId,
+                _: &[crate::SessionAppendNode],
+            ) -> Result<Vec<crate::ArtifactName>, crate::SessionError> {
+                Ok(Vec::new())
+            }
+        }
+        impl AssistantProseProjectorPlugin for Owner {
+            fn project_assistant_prose(&self, text: &str) -> String {
+                text.to_owned()
+            }
+        }
+        #[async_trait::async_trait]
+        impl ContextPressureHook for Owner {
+            fn id(&self) -> &'static str {
+                "pressure"
+            }
+            async fn decide(
+                &self,
+                _: &ContextPressureContext<'_>,
+            ) -> Result<ContextPressureDecision, ContextError> {
+                Ok(ContextPressureDecision::Continue)
+            }
+        }
+        #[async_trait::async_trait]
+        impl ContextCompactor for Owner {
+            fn id(&self) -> &'static str {
+                "compact"
+            }
+            async fn compact(
+                &self,
+                _: &CompactionContext<'_>,
+            ) -> Result<Option<ContextCompaction>, ContextError> {
+                Ok(None)
+            }
+        }
+        impl AttachmentOmissionPolicy for Owner {
+            fn id(&self) -> &'static str {
+                "omit"
+            }
+            fn omissions(
+                &self,
+                _: &AttachmentOmissionContext,
+                _: &[crate::Message],
+            ) -> Result<BTreeSet<HistoryPartId>, PluginError> {
+                Ok(BTreeSet::new())
+            }
+        }
+        impl PromptSectionSource for Owner {
+            fn sections(&self, _: &OfferedTools) -> Vec<PromptFamilySection> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Vec::new()
+            }
+        }
+        struct Config;
+        impl ConfigOwner for Config {
+            type Create = serde_json::Value;
+            type Recorded = serde_json::Value;
+            type Refusal = String;
+            type RunOptions = NoRunOptions;
+            fn create(
+                &self,
+                input: Option<Self::Create>,
+            ) -> Result<Option<Self::Recorded>, Self::Refusal> {
+                Ok(input)
+            }
+            fn validate(
+                &self,
+                _: &Self::Recorded,
+                _: Option<&Self::Recorded>,
+                _: &CandidateFacts<'_>,
+            ) -> Result<(), Self::Refusal> {
+                Ok(())
+            }
+            fn apply_run_options(
+                &self,
+                _: &Self::Recorded,
+                options: Self::RunOptions,
+            ) -> Result<Self::Recorded, Self::Refusal> {
+                match options {}
+            }
+        }
+        #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+        struct Command;
+        impl ConfigCommand for Command {
+            type Owner = Config;
+            type Output = ();
+            const NAME: &'static str = "set";
+        }
+        let constructions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let expansions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut reg = PluginRegistrar::<Owner>::new("test_protocol");
+        crate::testing::register_inventory_protocol(&mut reg).unwrap();
+        reg.turn()
+            .before(crate::hook_key!("before"), |_, _| {
+                Ok(Arc::new(|_| Box::pin(async { Ok(Default::default()) })))
+            })
+            .unwrap();
+        reg.turn()
+            .after(crate::hook_key!("after"), |_, _| {
+                Ok(Arc::new(|_| Box::pin(async { Ok(Default::default()) })))
+            })
+            .unwrap();
+        reg.turn()
+            .checkpoint(crate::hook_key!("checkpoint"), |_, _| {
+                Ok(Arc::new(|_| Box::pin(async { Ok(Default::default()) })))
+            })
+            .unwrap();
+        reg.output()
+            .stream(crate::hook_key!("stream"), |_, _| {
+                Ok(Arc::new(|ctx| {
+                    Box::pin(async move {
+                        Ok(AssistantStreamTransform {
+                            chunk: ctx.chunk,
+                            reasoning_deltas: Vec::new(),
+                            events: Vec::new(),
+                            abort_stream: false,
+                        })
+                    })
+                }))
+            })
+            .unwrap();
+        reg.output()
+            .stream_finished(crate::hook_key!("stream"), |_, _| {
+                Ok(Arc::new(|_| Box::pin(async { Ok(None) })))
+            })
+            .unwrap();
+        reg.output()
+            .response(
+                crate::hook_key!("response"),
+                Some(crate::hook_key!("stream")),
+                |_, _| {
+                    Ok(Arc::new(|ctx| {
+                        Box::pin(async move {
+                            Ok(AssistantResponseTransform {
+                                response: ctx.response,
+                                events: Vec::new(),
+                            })
+                        })
+                    }))
+                },
+            )
+            .unwrap();
+        reg.output()
+            .assistant_prose_projector(|owner, _| Ok(Arc::new(owner.clone())))
+            .unwrap();
+        reg.execution()
+            .code_executor(|owner, _| Ok(Arc::new(owner.clone())))
+            .unwrap();
+        reg.context()
+            .pressure(crate::hook_key!("pressure"), 3, |owner, _| {
+                Ok(Arc::new(owner.clone()))
+            })
+            .unwrap();
+        reg.context()
+            .compact(crate::hook_key!("compact"), 2, |owner, _| {
+                Ok(Arc::new(owner.clone()))
+            })
+            .unwrap();
+        reg.context()
+            .attachment_omissions(crate::hook_key!("omit"), 1, |owner, _| {
+                Ok(Arc::new(owner.clone()))
+            })
+            .unwrap();
+        reg.session()
+            .on_event(crate::hook_key!("event"), |_, _| {
+                Ok(Arc::new(|_| Box::pin(async { Ok(()) })))
+            })
+            .unwrap();
+        let provider_handle = reg
+            .tools()
+            .provider(crate::tool_provider_key!("tools"), |_, _| {
+                Ok(Arc::new(crate::testing::EmptyToolProvider))
+            })
+            .unwrap();
+        assert!(
+            matches!(
+                reg.tools()
+                    .provider(crate::tool_provider_key!("tools"), |_, _| Ok(Arc::new(
+                        crate::testing::EmptyToolProvider
+                    ))),
+                Err(PluginError::Registration(_))
+            ),
+            "declared provider addresses are unique"
         );
-        let mut keys = BTreeSet::new();
-        for (_, identity) in contributions {
-            assert_eq!(identity.owner, "composition-identities");
+        reg.tool_catalog()
+            .contribute(crate::hook_key!("catalog"), |_, _| {
+                Ok(Arc::new(|_| Ok(Default::default())))
+            })
+            .unwrap();
+        reg.tool_calls()
+            .transform_args(crate::hook_key!("args"), |_, _| {
+                Ok(Arc::new(|input| Box::pin(async move { Ok(input.current) })))
+            })
+            .unwrap();
+        reg.tool_calls()
+            .check_args(crate::hook_key!("args"), |_, _| {
+                Ok(Arc::new(|_| {
+                    Box::pin(async { Ok(BeforeToolDecision::Allow) })
+                }))
+            })
+            .unwrap();
+        reg.tool_calls()
+            .transform_result(crate::hook_key!("result"), |_, _| {
+                Ok(Arc::new(|input| Box::pin(async move { Ok(input.current) })))
+            })
+            .unwrap();
+        reg.tool_calls()
+            .check_result(crate::hook_key!("result"), |_, _| {
+                Ok(Arc::new(|_| {
+                    Box::pin(async { Ok(AfterToolContributions::default()) })
+                }))
+            })
+            .unwrap();
+        reg.tool_results()
+            .presenter(|_, _| {
+                Ok(Arc::new(|input| {
+                    Box::pin(async move { Ok(input.previous) })
+                }))
+            })
+            .unwrap();
+        reg.tool_results()
+            .presentation_step(crate::hook_key!("step"), |_, _| {
+                Ok(Arc::new(|input| {
+                    Box::pin(async move { Ok(input.previous) })
+                }))
+            })
+            .unwrap();
+        reg.operations()
+            .query(
+                PluginOperationSpec {
+                    name: "query".into(),
+                    description: "fixture".into(),
+                    session_param: SessionParam::Optional,
+                    input_schema: serde_json::json!({}),
+                    output_schema: serde_json::json!({}),
+                    error_type: "fixture".into(),
+                    error_version: FormatVersion::ONE,
+                    error_schema: serde_json::json!({}),
+                },
+                |_, _| Ok(Arc::new(|_, value| Box::pin(async { Ok(value) }))),
+            )
+            .unwrap();
+        let section = PromptSectionKey::new("section").unwrap();
+        reg.prompt()
+            .section(
+                PromptSectionSpec::new(section.clone(), PromptPlacement::InitialInstructions),
+                |_, _| {
+                    Ok(Arc::new(|_: &PromptInput<'_>| {
+                        Ok::<_, super::super::prompt::PromptRenderError>(SectionText::text(
+                            "section",
+                        ))
+                    }))
+                },
+            )
+            .unwrap();
+        reg.prompt()
+            .family(
+                PromptSectionFamilySpec::new(
+                    PromptSectionKey::new("family").unwrap(),
+                    PromptPlacement::CurrentContext,
+                ),
+                |owner, _| Ok(Arc::new(owner.clone())),
+            )
+            .unwrap();
+        reg.prompt()
+            .wrap(
+                PromptWrapSpec::new(
+                    PromptWrapKey::new("wrap").unwrap(),
+                    super::super::prompt::PromptSectionId::new("test_protocol", section),
+                ),
+                |_, _| {
+                    Ok(Arc::new(
+                        |_: &PromptInput<'_>, _: PromptWrapTarget<'_>, text: SectionText| {
+                            Ok::<_, super::super::prompt::PromptRenderError>(text)
+                        },
+                    ))
+                },
+            )
+            .unwrap();
+        reg.state_reducer("reduce", |_, _| {
+            Ok(Arc::new(|reduction| Ok(reduction.current.cloned())))
+        })
+        .unwrap();
+        reg.extension("owner-extension", |_, _| Ok(serde_json::Value::Null))
+            .unwrap();
+        let count = Arc::clone(&constructions);
+        let family = Arc::clone(&expansions);
+        let mut recipe = PluginRecipe::new("test_protocol", reg, move |_, _| {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Arc::new(Owner(Arc::clone(&family))))
+        });
+        let mut config = ConfigRegistrar::new("test_protocol");
+        config.owner(Config).unwrap();
+        config
+            .command::<Command>(|recorded, _| {
+                Ok(OwnerChange {
+                    recorded: recorded.clone(),
+                    output: (),
+                })
+            })
+            .unwrap();
+        recipe = recipe
+            .with_configuration(config)
+            .with_factory_extension(PluginExtensionContribution::from_value(
+                "factory-extension",
+                serde_json::Value::Null,
+            ))
+            .with_process_engine("testing-fixture", |_| {
+                Ok(crate::ProcessEngineRegistration::accepting(Arc::new(
+                    crate::testing::FixtureProcessEngine,
+                )))
+            });
+        let factory = PluginRecipeFactory::new(PluginDeclaration::initial("test_protocol"), recipe);
+        let host = PluginHost::new(
+            vec![Arc::new(factory)],
+            crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
+        );
+        let declared = host.installed_inventory().unwrap();
+        assert_eq!(constructions.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(expansions.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let kinds = declared
+            .entries
+            .iter()
+            .map(|entry| entry.kind.clone())
+            .collect::<BTreeSet<_>>();
+        for slot in CallbackSlot::ALL {
             assert!(
-                keys.insert(identity.key.clone()),
-                "duplicate contribution key"
+                kinds.contains(&ContributionKind::Callback(*slot)),
+                "{slot:?} missing from inventory"
             );
         }
-        let owners = composition
-            .prompt
-            .owners()
-            .filter(|(owner, _)| owner == "composition-identities")
-            .collect::<Vec<_>>();
-        assert_eq!(owners.len(), 1);
-        assert_eq!(owners[0].1.key.as_str(), "direct");
-        assert!(Arc::ptr_eq(&composition, &session.composition()));
+        for kind in [
+            ContributionKind::PromptSection,
+            ContributionKind::PromptFamily,
+            ContributionKind::PromptWrapper,
+            ContributionKind::StateReducer,
+            ContributionKind::ConfigNamespace,
+            ContributionKind::ConfigCommand,
+            ContributionKind::Extension,
+            ContributionKind::ProcessEngine,
+        ] {
+            assert!(kinds.contains(&kind), "{kind:?} missing from inventory");
+        }
+        let session = host
+            .build_session(PluginSessionRequest::creation(
+                "test_protocol",
+                SessionAuthorityContext::fixture(),
+            ))
+            .unwrap();
+        assert_eq!(constructions.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            expansions.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "family members are not expanded to describe an installation"
+        );
+        assert_eq!(
+            declared.entries.len(),
+            session.installed_inventory().unwrap().entries.len()
+        );
+        assert!(
+            session
+                .installed_inventory()
+                .unwrap()
+                .callbacks()
+                .any(|key| *key == provider_handle.callback_identity())
+        );
+        assert!(session.tool_registry().serves(&provider_handle));
+        let before = &session.capabilities().contributions.before_turn_hooks[0];
+        assert!(
+            session
+                .installed_inventory()
+                .unwrap()
+                .callbacks()
+                .any(|key| key == &before.identity)
+        );
+        assert_eq!(before.identity.key, "before_turn:before");
+        assert_eq!(
+            session.session_extensions().payloads("owner-extension"),
+            &[serde_json::Value::Null]
+        );
+        assert_eq!(
+            session.extensions().payloads("factory-extension"),
+            &[serde_json::Value::Null]
+        );
     }
 
-    const KEYED_TOOL: &str = "tool:keyed";
+    /// PORT-PREFLIGHT-PRECEDES-BIND: missing ports construct no owners.
+    #[test]
+    fn port_preflight_precedes_bind() {
+        let binds = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::clone(&binds);
+        let factory = PluginRecipeFactory::new(
+            PluginDeclaration::initial("test_protocol"),
+            PluginRecipe::empty("test_protocol", move |_, _| {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }),
+        );
+        let result = PluginHost::new(
+            vec![Arc::new(factory)],
+            crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
+        )
+        .build_session(PluginSessionRequest::creation(
+            "missing-port",
+            SessionAuthorityContext::fixture(),
+        ));
+        assert!(matches!(
+            result,
+            Err(PluginError::Preflight(PreflightIssue::MissingPort {
+                port: RequiredPort::ProtocolSession
+            }))
+        ));
+        assert_eq!(binds.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let counter = Arc::clone(&binds);
+        let mut recipe = PluginRecipe::empty("missing-service", move |_, _| {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        });
+        recipe
+            .requirements
+            .services
+            .insert(ServiceKind::CurrentSessionSnapshot);
+        let factory =
+            PluginRecipeFactory::new(PluginDeclaration::initial("missing-service"), recipe);
+        let result = crate::testing::test_plugin_host(vec![Arc::new(factory)]).build_session(
+            PluginSessionRequest::creation("missing-service", SessionAuthorityContext::fixture()),
+        );
+        assert!(
+            matches!(result, Err(PluginError::Preflight(PreflightIssue::MissingService { owner, service: ServiceKind::CurrentSessionSnapshot })) if owner == "missing-service")
+        );
+        assert_eq!(binds.load(std::sync::atomic::Ordering::SeqCst), 0);
+        struct Duplicate;
+        impl SessionPlugin for Duplicate {
+            fn id(&self) -> &'static str {
+                "duplicate-port"
+            }
+        }
+        let mut reg = PluginRegistrar::<Duplicate>::new("duplicate-port");
+        reg.protocol()
+            .session(|_, _| {
+                Err(PluginError::Invoke(
+                    "a refused binder cannot execute".into(),
+                ))
+            })
+            .unwrap();
+        let counter = Arc::clone(&binds);
+        let recipe = PluginRecipe::new("duplicate-port", reg, move |_, _| {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Arc::new(Duplicate))
+        });
+        let factory =
+            PluginRecipeFactory::new(PluginDeclaration::initial("duplicate-port"), recipe);
+        let result = crate::testing::test_plugin_host(vec![Arc::new(factory)]).build_session(
+            PluginSessionRequest::creation("duplicate-port", SessionAuthorityContext::fixture()),
+        );
+        assert!(matches!(
+            result,
+            Err(PluginError::Preflight(PreflightIssue::DuplicatePort {
+                port: RequiredPort::ProtocolSession,
+                ..
+            }))
+        ));
+        assert_eq!(binds.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
 
     /// A provider of one tool, `keyed`, that answers with its `label`. A
     /// provider that does not `advertise` still resolves the tool by id, as
@@ -707,12 +1028,17 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::ToolProvider for Keyed {
-        fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
-            if self.advertises {
-                vec![Self::definition().manifest()]
-            } else {
-                Vec::new()
-            }
+        fn tool_manifests(
+            &self,
+            _config: &crate::OwnerConfigView,
+        ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+            Ok({
+                if self.advertises {
+                    vec![Self::definition().manifest()]
+                } else {
+                    Vec::new()
+                }
+            })
         }
 
         fn resolve_manifest_by_id(
@@ -738,16 +1064,16 @@ mod tests {
 
     /// The advertising provider under `served`, then the id-only one under
     /// `hidden`, or the reverse.
-    fn keyed_providers(served_first: bool) -> Vec<(HookKey, Arc<dyn ToolProvider>)> {
+    fn keyed_providers(served_first: bool) -> Vec<(ToolProviderKey, Arc<dyn ToolProvider>)> {
         let served = (
-            crate::hook_key!("served"),
+            crate::tool_provider_key!("served"),
             Arc::new(Keyed {
                 label: "served",
                 advertises: true,
             }) as Arc<dyn ToolProvider>,
         );
         let hidden = (
-            crate::hook_key!("hidden"),
+            crate::tool_provider_key!("hidden"),
             Arc::new(Keyed {
                 label: "hidden",
                 advertises: false,
@@ -766,9 +1092,10 @@ mod tests {
     async fn bound_and_executed(
         composition: &ExecutionComposition,
         registry: Arc<crate::ToolRegistry>,
+        config: crate::OwnerConfigView,
     ) -> (crate::tool_run::AdmittedBinding, serde_json::Value) {
         let entries = registry
-            .advertise(&crate::OwnerConfigView::default())
+            .advertise(&config)
             .expect("the providers advertise");
         let tools = crate::SurfaceTools::of_entries(entries, registry);
         let tool = crate::ToolId::from(KEYED_TOOL);
@@ -799,7 +1126,7 @@ mod tests {
 
     fn keyed_plugin(
         id: &'static str,
-        providers: Vec<(HookKey, Arc<dyn ToolProvider>)>,
+        providers: Vec<(ToolProviderKey, Arc<dyn ToolProvider>)>,
     ) -> Arc<dyn PluginFactory> {
         let spec = providers
             .into_iter()
@@ -822,8 +1149,12 @@ mod tests {
         let served = PluginCallbackIdentity::tool_provider("keyed", "served");
         for served_first in [true, false] {
             let session = session_of(vec![keyed_plugin("keyed", keyed_providers(served_first))]);
-            let (binding, executed) =
-                bound_and_executed(&session.composition(), session.tool_registry()).await;
+            let (binding, executed) = bound_and_executed(
+                &session.composition(),
+                session.tool_registry(),
+                crate::OwnerConfigView::default(),
+            )
+            .await;
             assert_eq!(binding.executable, served, "served first: {served_first}");
             assert_eq!(binding.preparation, served, "served first: {served_first}");
             assert_eq!(executed, serde_json::json!("served"));
@@ -835,8 +1166,12 @@ mod tests {
                 .map(|(key, provider)| keyed_plugin(key.as_str(), vec![(key, provider)]))
                 .collect();
             let session = session_of(plugins);
-            let (binding, executed) =
-                bound_and_executed(&session.composition(), session.tool_registry()).await;
+            let (binding, executed) = bound_and_executed(
+                &session.composition(),
+                session.tool_registry(),
+                crate::OwnerConfigView::default(),
+            )
+            .await;
             assert_eq!(
                 binding.executable,
                 PluginCallbackIdentity::tool_provider("served", "served"),
@@ -853,10 +1188,11 @@ mod tests {
                     Arc::new(
                         StaticPluginFactory::new(
                             PluginDeclaration::initial("keyed-component"),
-                            PluginSpec {
-                                tool_providers: keyed_providers(served_first),
-                                ..PluginSpec::default()
-                            },
+                            keyed_providers(served_first)
+                                .into_iter()
+                                .fold(PluginSpec::new(), |spec, (key, provider)| {
+                                    spec.with_tool_provider(key, provider)
+                                }),
                         )
                         .as_component(key.format())
                         .expect("tool providers are a process component"),
@@ -870,9 +1206,15 @@ mod tests {
                     None,
                 )
                 .expect("the components compose");
-            let (binding, executed) =
-                bound_and_executed(&composition.composition, Arc::clone(&composition.registry))
-                    .await;
+            let (binding, executed) = bound_and_executed(
+                &composition.composition,
+                Arc::clone(&composition.registry),
+                crate::OwnerConfigView::components(Arc::new(crate::testing::component_env(
+                    "keyed-component",
+                    key.format(),
+                ))),
+            )
+            .await;
             assert_eq!(
                 binding.executable,
                 PluginCallbackIdentity::tool_provider("keyed-component", "served"),
@@ -880,87 +1222,5 @@ mod tests {
             );
             assert_eq!(executed, serde_json::json!("served"));
         }
-    }
-
-    /// A duplicate provider key is refused at registration, in a session
-    /// plugin and in a process component alike, and so is a key that does
-    /// not begin with a letter.
-    #[test]
-    fn a_duplicate_or_positional_provider_key_is_refused_at_registration() {
-        let twice = || {
-            vec![
-                (
-                    crate::hook_key!("search"),
-                    Arc::new(crate::testing::EmptyToolProvider) as Arc<dyn ToolProvider>,
-                ),
-                (
-                    crate::hook_key!("search"),
-                    Arc::new(crate::testing::EmptyToolProvider) as Arc<dyn ToolProvider>,
-                ),
-            ]
-        };
-        let refused = crate::testing::test_plugin_host(vec![keyed_plugin("twice", twice())])
-            .build_session(PluginSessionRequest::creation(
-                "duplicate-key",
-                SessionAuthorityContext::fixture(),
-            ))
-            .err()
-            .expect("a duplicate key refuses the session's registration");
-        assert!(
-            matches!(&refused, PluginError::Registration(message)
-                if message.contains("duplicate hook key `tool_provider:search`")),
-            "{refused}"
-        );
-
-        let positional = crate::testing::test_plugin_host(vec![keyed_plugin(
-            "positional",
-            vec![(
-                crate::hook_key!("0"),
-                Arc::new(crate::testing::EmptyToolProvider) as Arc<dyn ToolProvider>,
-            )],
-        )])
-        .build_session(PluginSessionRequest::creation(
-            "positional-key",
-            SessionAuthorityContext::fixture(),
-        ))
-        .err()
-        .expect("a positional key refuses the session's registration");
-        assert!(
-            matches!(&positional, PluginError::Registration(message)
-                if message.contains("must begin with a letter")),
-            "{positional}"
-        );
-
-        let key = crate::ProcessConfigKey::<()>::new("twice-component", crate::FormatVersion::ONE);
-        let mut components = ProcessComponentRegistry::new();
-        components
-            .register(
-                Arc::new(
-                    StaticPluginFactory::new(
-                        PluginDeclaration::initial("twice-component"),
-                        PluginSpec {
-                            tool_providers: twice(),
-                            ..PluginSpec::default()
-                        },
-                    )
-                    .as_component(key.format())
-                    .expect("tool providers are a process component"),
-                ),
-                key,
-            )
-            .expect("the component registers");
-        let refused = components
-            .compose(
-                &crate::testing::component_env("twice-component", key.format()),
-                None,
-            )
-            .err()
-            .expect("a duplicate key refuses the component's registration");
-        assert!(
-            refused
-                .to_string()
-                .contains("duplicate hook key `tool_provider:search`"),
-            "{refused}"
-        );
     }
 }

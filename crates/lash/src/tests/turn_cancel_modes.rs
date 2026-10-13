@@ -68,8 +68,11 @@ fn tool_definition(name: &str) -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for TokenWatchingTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![tool_definition(WATCH).manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![tool_definition(WATCH).manifest()])
     }
 
     fn resolve_contract(
@@ -112,8 +115,11 @@ struct RetryOnceTool {
 
 #[async_trait]
 impl ToolProvider for RetryOnceTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![tool_definition(RETRY).manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![tool_definition(RETRY).manifest()])
     }
 
     fn resolve_contract(
@@ -237,7 +243,7 @@ async fn session_with(
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(model, mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), tools)
+    .tools(crate::tool_provider_key!("tools"), tools)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(id).expect("nonblank host identity"))
@@ -996,7 +1002,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
                 tool_calling_model(WATCH, &calls, &seen),
                 mock_llm_profile_spec(),
             )
-            .tools(crate::hook_key!("tools"), Arc::new(tool))
+            .tools(crate::tool_provider_key!("tools"), Arc::new(tool))
             .build(crate::testing::runtime_lease_owner())
     };
     // The first owner's tool never finishes: the owner is lost with the
@@ -1080,7 +1086,7 @@ async fn an_accepted_cancel_survives_its_owners_loss_in_a_retry_backoff_without_
                 tool_calling_model(RETRY, &calls, &seen),
                 mock_llm_profile_spec(),
             )
-            .tools(crate::hook_key!("tools"), Arc::new(tool.clone()))
+            .tools(crate::tool_provider_key!("tools"), Arc::new(tool.clone()))
             .build(crate::testing::runtime_lease_owner())
     };
     let core = deploy()?;

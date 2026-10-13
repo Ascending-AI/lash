@@ -8,8 +8,11 @@ struct NoopTools;
 
 #[async_trait::async_trait]
 impl ToolProvider for NoopTools {
-    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &crate::OwnerConfigView,
+    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_contract(
@@ -53,7 +56,7 @@ fn test_execution_context_with_env_store(
         sessions: Arc::new(crate::testing::MockSessionManager::default()),
         session_lifecycle: Arc::new(crate::testing::MockSessionManager::default()),
         session_graph: Arc::new(crate::testing::MockSessionManager::default()),
-        processes: Arc::new(crate::UnavailableProcessService),
+        processes: Arc::new(crate::plugin::ServiceBindings::default()),
         process_engines: crate::ProcessEngineRegistry::default(),
         effect_controller: crate::ActorContext::unavailable()
             .scoped(crate::AdmittedScope::runtime_operation(

@@ -8,8 +8,11 @@ struct GrantBoundTools;
 
 #[async_trait]
 impl ToolProvider for GrantBoundTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_contract(
@@ -48,8 +51,11 @@ fn grant_bound_tool_definition() -> lash_core::ToolDefinition {
 
 #[tokio::test]
 async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
-    let provider =
-        lash_core::plugin::PluginCallbackIdentity::tool_provider("grant-source", "tools");
+    let provider = lash_core::plugin::ToolProviderHandle::new(
+        lash_core::plugin::RegistryKind::Session,
+        "grant-source",
+        lash_core::tool_provider_key!("tools"),
+    );
     let grant = lash_core::ToolExecutionGrant::from_definition(
         provider.clone(),
         grant_bound_tool_definition(),

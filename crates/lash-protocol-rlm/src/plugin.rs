@@ -28,3 +28,5 @@ pub use protocol_session::{RlmSessionConfigDecodeError, rlm_session_config};
 
 mod channel;
 pub use channel::RlmChannel;
+
+pub(crate) use factory::RlmProtocolPlugin;

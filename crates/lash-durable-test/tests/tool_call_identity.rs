@@ -130,11 +130,16 @@ struct Probes {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Probes {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        [PROBE, DEFERRED]
-            .into_iter()
-            .map(|name| probe_definition(name).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            [PROBE, DEFERRED]
+                .into_iter()
+                .map(|name| probe_definition(name).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -224,7 +229,7 @@ async fn world(tier: Tier) -> Option<(World, Arc<Witness>)> {
     let probes = Arc::clone(&witness);
     let world = World::new(tier, move |backend| {
         lash::LashCore::standard_builder(backend.clone()).tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::new(Probes {
                 witness: probes,
                 backend: backend.clone(),
@@ -640,7 +645,7 @@ async fn retry_into_a_park(tier: Tier, records: &Arc<Records>) -> Option<(World,
             .trace_level(lash::tracing::TraceLevel::Extended)
             .telemetry_content(lash::tracing::TelemetryContent::Captured)
             .tools(
-                lash::hook_key!("tools"),
+                lash::tool_provider_key!("tools"),
                 Arc::new(Probes {
                     witness: probes,
                     backend: backend.clone(),
@@ -851,7 +856,7 @@ mod sqlite_memory_traced {
                 .trace_level(lash::tracing::TraceLevel::Extended)
                 .telemetry_content(lash::tracing::TelemetryContent::Captured)
                 .tools(
-                    lash::hook_key!("tools"),
+                    lash::tool_provider_key!("tools"),
                     std::sync::Arc::new(super::Probes {
                         witness: probes,
                         backend: backend.clone(),

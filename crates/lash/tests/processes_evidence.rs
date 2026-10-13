@@ -15,6 +15,7 @@
 #![allow(dead_code, unreachable_code, unused_variables, unused_imports)]
 #![allow(clippy::all)]
 
+use lash_core::plugin::PluginRecipe;
 fn type_witness<T>() {}
 fn member_witness<T>(_: T) {}
 fn field_witness<T>(_: impl FnOnce(&T)) {}
@@ -765,47 +766,63 @@ mod named_component_laws {
                 })
         }
 
-        fn build(
-            &self,
-            _cx: &ProcessComponentContext<'_>,
-        ) -> Result<ProcessComponentSpec, PluginError> {
-            *self
-                .witness
-                .builds
-                .lock_recover()
-                .entry(self.key.component().to_owned())
-                .or_default() += 1;
-            let id = self.key.component().to_owned();
-            let witness = Arc::clone(&self.witness);
-            let check: lash::plugins::ToolResultCheckHook = Arc::new(move |_input| {
-                witness.hooks.lock_recover().push(id.clone());
-                Box::pin(async { Ok(AfterToolContributions::default()) })
-            });
-            let key = HookKey::new("record").expect("a hook key");
-            let mut spec = ProcessComponentSpec::default();
+        fn recipe(
+            self: Arc<Self>,
+        ) -> Result<lash::plugins::ProcessRecipe, lash_core::plugin::PluginError> {
+            let mut reg =
+                lash::plugins::PluginRegistrar::<Self>::for_process(self.declaration().id.as_str());
+            let key = lash::hook_key!("record");
+            let check = |this: &Self, _: &lash::plugins::PluginStateView| {
+                let id = this.key.component().to_owned();
+                let witness = Arc::clone(&this.witness);
+                let hook: lash::plugins::ToolResultCheckHook = Arc::new(move |_input| {
+                    witness.hooks.lock_recover().push(id.clone());
+                    Box::pin(async { Ok(AfterToolContributions::default()) })
+                });
+                Ok(hook)
+            };
             match self.shape {
-                Shape::Check => spec.tool_result_checks.push((key, check)),
+                Shape::Check => {
+                    reg.tool_calls().check_result(key, check)?;
+                }
                 Shape::Tool => {
-                    spec.tool_providers.push((key, a_provider()));
-                    spec.tool_result_checks.push((key, check));
+                    reg.tools()
+                        .provider(lash::tool_provider_key!("record"), |_, _| Ok(a_provider()))?;
+                    reg.tool_calls().check_result(key, check)?;
                 }
                 Shape::Presenter => {
-                    spec.presenter = Some(Arc::new(|input| {
-                        Box::pin(async move { Ok(input.previous) })
-                    }));
+                    reg.tool_results().presenter(|_, _| {
+                        Ok(Arc::new(|input| {
+                            Box::pin(async move { Ok(input.previous) })
+                        }))
+                    })?;
                 }
                 Shape::Nothing => {}
             }
-            Ok(spec)
+            let id = self.key.component();
+            Ok(lash::plugins::ProcessRecipe::new(id, reg, move |_| {
+                *self
+                    .witness
+                    .builds
+                    .lock_recover()
+                    .entry(self.key.component().to_owned())
+                    .or_default() += 1;
+                Ok(Arc::clone(&self))
+            }))
         }
     }
 
     /// A session plugin that counts the builds made for a process.
     struct CountingPlugin(Arc<Witness>);
 
-    impl lash::plugins::PluginDefinition for CountingPlugin {
-        fn declaration() -> lash::plugins::PluginDeclaration {
+    impl CountingPlugin {
+        pub fn declaration() -> lash::plugins::PluginDeclaration {
             lash::plugins::PluginDeclaration::initial("evidence-counting-plugin")
+        }
+    }
+    impl lash::plugins::PluginMetadata for CountingPlugin {
+        fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+            Self::declaration()
         }
     }
 
@@ -815,8 +832,11 @@ mod named_component_laws {
         fn id(&self) -> &'static str {
             "evidence-counting-plugin"
         }
-
-        fn register(&self, _reg: &mut lash::plugins::PluginRegistrar) -> Result<(), PluginError> {
+    }
+    impl Inert {
+        fn declare(
+            reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+        ) -> std::result::Result<(), lash_core::plugin::PluginError> {
             Ok(())
         }
     }
@@ -826,14 +846,25 @@ mod named_component_laws {
             "evidence-counting-plugin"
         }
 
-        fn build(
-            &self,
-            ctx: &lash::plugins::PluginSessionContext,
-        ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, PluginError> {
-            if matches!(ctx.owner, lash_core::RuntimeOwner::Process(_)) {
-                self.0.process_plugin_builds.fetch_add(1, Ordering::SeqCst);
-            }
-            Ok(Arc::new(Inert))
+        fn recipe(
+            self: Arc<Self>,
+        ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError>
+        {
+            let mut reg = lash_core::plugin::PluginRegistrar::<Inert>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            Inert::declare(&mut reg)?;
+            let id = self.id();
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |ctx, _state| {
+                    if matches!(ctx.owner, lash_core::RuntimeOwner::Process(_)) {
+                        self.0.process_plugin_builds.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Ok(Arc::new(Inert))
+                },
+            ))
         }
     }
 
@@ -983,7 +1014,7 @@ mod named_component_laws {
             .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
                 lash::plugins::PluginDeclaration::initial(A.component()),
                 lash::plugins::PluginSpec::new()
-                    .with_tool_provider(lash::hook_key!("record"), a_provider()),
+                    .with_tool_provider(lash::tool_provider_key!("record"), a_provider()),
             )))
             .plugin(Arc::new(CountingPlugin(Arc::clone(&witness))))
             .plugin(Arc::new(
@@ -994,7 +1025,7 @@ mod named_component_laws {
             ));
         if authority {
             builder = builder.tools(
-                lash::hook_key!("authority"),
+                lash::tool_provider_key!("authority"),
                 Arc::new(lash::tools::StaticToolProvider::new(
                     vec![a_definition("b"), a_definition("c")],
                     AnswerA,
@@ -1507,7 +1538,10 @@ mod named_component_laws {
         use lash::process::authority::{ExcessLink, tools_excess, tools_within};
         let env = ProcessEnv::builder(lash::MaxToolCalls::new(2))
             .component(A, &())
-            .link_tool(A.tool_provider("tools"), &a_definition("a"))
+            .link_tool(
+                A.tool_provider(lash::tool_provider_key!("tools")),
+                &a_definition("a"),
+            )
             .build()
             .unwrap();
         let excess: std::collections::BTreeSet<_> = [ExcessLink {

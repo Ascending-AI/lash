@@ -12,6 +12,11 @@ pub(crate) struct RegisteredHook<T> {
 }
 
 pub(crate) type RegisteredExclusiveHook<T> = RegisteredHook<T>;
+#[derive(Clone)]
+pub(crate) struct RegisteredProvider<T> {
+    pub(crate) identity: ToolProviderHandle,
+    pub(crate) hook: T,
+}
 
 /// The identity of `owner`'s callback named `key` in `slot`.
 fn keyed_identity(owner: &str, slot: CallbackSlot, key: HookKey) -> PluginCallbackIdentity {
@@ -96,13 +101,15 @@ fn register_singleton_hook<H>(
 
 #[derive(Clone, Default)]
 pub(crate) struct PluginContributions {
+    pub(crate) inventory: Option<InstalledInventory>,
+    pub(crate) extensions: Vec<PluginExtensionContribution>,
     /// Plugins that kept their state view past registration (FIG-3712).
     pub(crate) state_retaining_plugins: Vec<String>,
     /// Each plugin's pure state reducers, by name (K10).
     pub(crate) state_reducers: BTreeMap<String, BTreeMap<String, super::StateReducer>>,
-    pub(crate) tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
+    pub(crate) tool_providers: Vec<RegisteredProvider<Arc<dyn ToolProvider>>>,
     /// The one deferred provider, registered among `tool_providers` too.
-    pub(crate) deferred_provider: Option<RegisteredHook<Arc<dyn crate::DeferredToolProvider>>>,
+    pub(crate) deferred_provider: Option<RegisteredProvider<Arc<dyn crate::DeferredToolProvider>>>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
     pub(crate) before_turn_hooks: Vec<RegisteredHook<BeforeTurnHook>>,
     pub(crate) tool_args_transforms: Vec<RegisteredHook<ToolArgsTransformHook>>,
@@ -138,14 +145,14 @@ pub(crate) struct PluginContributions {
     pub(crate) prompt: super::prompt::PromptRegistry,
 }
 
-pub struct PluginRegistrar {
-    pub(super) state: Option<super::PluginStateView>,
+pub(crate) struct BoundRegistrar {
+    registry: RegistryKind,
     pub(crate) contributions: PluginContributions,
     pub(crate) owner: String,
 }
 
-pub struct ToolRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
+pub(crate) struct ToolRegistrations<'a> {
+    reg: &'a mut BoundRegistrar,
 }
 
 impl ToolRegistrations<'_> {
@@ -155,7 +162,7 @@ impl ToolRegistrations<'_> {
     /// providers in. A key begins with a letter; a duplicate key is refused.
     pub fn provider(
         self,
-        key: HookKey,
+        key: ToolProviderKey,
         provider: Arc<dyn ToolProvider>,
     ) -> Result<(), PluginError> {
         self.reg.add_tool_provider(key, provider)
@@ -167,10 +174,10 @@ impl ToolRegistrations<'_> {
     /// second, from any plugin, is refused.
     pub fn deferred(
         self,
-        key: HookKey,
+        key: ToolProviderKey,
         provider: Arc<dyn crate::DeferredToolProvider>,
     ) -> Result<(), PluginError> {
-        let identity = PluginCallbackIdentity::tool_provider(self.reg.owner.clone(), key.as_str());
+        let identity = ToolProviderHandle::new(self.reg.registry, self.reg.owner.clone(), key);
         if let Some(existing) = &self.reg.contributions.deferred_provider {
             return Err(PluginError::Registration(format!(
                 "deferred tool provider `{identity}` conflicts with `{}`; a session or process \
@@ -180,7 +187,7 @@ impl ToolRegistrations<'_> {
         }
         self.reg
             .add_tool_provider(key, Arc::clone(&provider) as Arc<dyn ToolProvider>)?;
-        self.reg.contributions.deferred_provider = Some(RegisteredHook {
+        self.reg.contributions.deferred_provider = Some(RegisteredProvider {
             identity,
             hook: provider,
         });
@@ -188,8 +195,8 @@ impl ToolRegistrations<'_> {
     }
 }
 
-pub struct ToolCatalogRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
+pub(crate) struct ToolCatalogRegistrations<'a> {
+    reg: &'a mut BoundRegistrar,
 }
 
 impl ToolCatalogRegistrations<'_> {
@@ -210,8 +217,8 @@ impl ToolCatalogRegistrations<'_> {
     }
 }
 
-pub struct TurnRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
+pub(crate) struct TurnRegistrations<'a> {
+    reg: &'a mut BoundRegistrar,
 }
 
 /// Turn observers run sequentially in recorded registration order. Each
@@ -254,8 +261,8 @@ impl TurnRegistrations<'_> {
     }
 }
 
-pub struct ToolCallRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
+pub(crate) struct ToolCallRegistrations<'a> {
+    reg: &'a mut BoundRegistrar,
 }
 
 /// The four tool hook phases (ADR 0128). Transforms chain once in recorded
@@ -319,8 +326,8 @@ impl ToolCallRegistrations<'_> {
     }
 }
 
-pub struct OutputRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
+pub(crate) struct OutputRegistrations<'a> {
+    reg: &'a mut BoundRegistrar,
 }
 
 impl OutputRegistrations<'_> {
@@ -396,8 +403,8 @@ impl OutputRegistrations<'_> {
     }
 }
 
-pub struct ToolResultRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
+pub(crate) struct ToolResultRegistrations<'a> {
+    reg: &'a mut BoundRegistrar,
 }
 
 impl ToolResultRegistrations<'_> {
@@ -422,8 +429,8 @@ impl ToolResultRegistrations<'_> {
     }
 }
 
-pub struct SessionRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
+pub(crate) struct SessionRegistrations<'a> {
+    reg: &'a mut BoundRegistrar,
 }
 
 impl SessionRegistrations<'_> {
@@ -441,8 +448,8 @@ impl SessionRegistrations<'_> {
     }
 }
 
-pub struct PluginOperationRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
+pub(crate) struct PluginOperationRegistrations<'a> {
+    reg: &'a mut BoundRegistrar,
 }
 
 impl PluginOperationRegistrations<'_> {
@@ -622,8 +629,8 @@ impl PluginOperationRegistrations<'_> {
     }
 }
 
-pub struct ContextRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
+pub(crate) struct ContextRegistrations<'a> {
+    reg: &'a mut BoundRegistrar,
 }
 
 /// Context hooks are keyed by their trait's `id()`. Higher priority runs
@@ -634,6 +641,7 @@ impl ContextRegistrations<'_> {
     /// omits the union.
     pub fn attachment_omissions(
         self,
+        key: HookKey,
         priority: i32,
         policy: Arc<dyn super::AttachmentOmissionPolicy>,
     ) -> Result<(), PluginError> {
@@ -641,7 +649,7 @@ impl ContextRegistrations<'_> {
             &mut self.reg.contributions.attachment_omission_policies,
             &self.reg.owner,
             CallbackSlot::AttachmentOmission,
-            policy.id(),
+            key.as_str(),
             priority,
             policy,
         )
@@ -650,6 +658,7 @@ impl ContextRegistrations<'_> {
     /// The first compactor that returns a nonempty compaction decides.
     pub fn compact(
         self,
+        key: HookKey,
         priority: i32,
         compactor: Arc<dyn ContextCompactor>,
     ) -> Result<(), PluginError> {
@@ -657,7 +666,7 @@ impl ContextRegistrations<'_> {
             &mut self.reg.contributions.context_compactors,
             &self.reg.owner,
             CallbackSlot::ContextCompactor,
-            compactor.id(),
+            key.as_str(),
             priority,
             compactor,
         )
@@ -667,6 +676,7 @@ impl ContextRegistrations<'_> {
     /// the last one called for that turn.
     pub fn pressure(
         self,
+        key: HookKey,
         priority: i32,
         hook: Arc<dyn ContextPressureHook>,
     ) -> Result<(), PluginError> {
@@ -674,15 +684,15 @@ impl ContextRegistrations<'_> {
             &mut self.reg.contributions.context_pressure_hooks,
             &self.reg.owner,
             CallbackSlot::ContextPressure,
-            hook.id(),
+            key.as_str(),
             priority,
             hook,
         )
     }
 }
 
-pub struct ProtocolRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
+pub(crate) struct ProtocolRegistrations<'a> {
+    reg: &'a mut BoundRegistrar,
 }
 
 impl ProtocolRegistrations<'_> {
@@ -701,8 +711,8 @@ impl ProtocolRegistrations<'_> {
     }
 }
 
-pub struct ExecutionRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
+pub(crate) struct ExecutionRegistrations<'a> {
+    reg: &'a mut BoundRegistrar,
 }
 
 impl ExecutionRegistrations<'_> {
@@ -711,19 +721,12 @@ impl ExecutionRegistrations<'_> {
     }
 }
 
-impl PluginRegistrar {
-    /// A read-only view of the host-owned namespace bound to the registering
-    /// plugin. A plugin changes its namespace only by returning
-    /// [`StateCommands`](super::StateCommands) from a tool body or a
-    /// before-turn, after-turn, checkpoint or after-tool callback.
-    #[expect(
-        clippy::expect_used,
-        reason = "`PluginRegistrar::new` is private and every registrar reaching a plugin is bound by `bind_state` first"
-    )]
-    pub fn state(&self) -> super::PluginStateView {
-        self.state
-            .clone()
-            .expect("registrar is bound during registration")
+impl BoundRegistrar {
+    pub(crate) fn for_process(owner: String) -> Self {
+        Self {
+            registry: RegistryKind::Process,
+            ..Self::new(owner)
+        }
     }
 
     /// Register the pure reducer [`StateCommands::apply`](super::StateCommands::apply)
@@ -751,7 +754,7 @@ impl PluginRegistrar {
 
     pub(crate) fn new(owner: String) -> Self {
         Self {
-            state: None,
+            registry: RegistryKind::Session,
             contributions: PluginContributions::default(),
             owner,
         }
@@ -803,22 +806,25 @@ impl PluginRegistrar {
 
     fn add_tool_provider(
         &mut self,
-        key: HookKey,
+        key: ToolProviderKey,
         provider: Arc<dyn ToolProvider>,
     ) -> Result<(), PluginError> {
-        if !lash_core_store::store::plugin_writers::is_declared_tool_provider_key(key.as_str()) {
+        let identity = ToolProviderHandle::new(self.registry, self.owner.clone(), key);
+        if self
+            .contributions
+            .tool_providers
+            .iter()
+            .any(|entry| entry.identity == identity)
+        {
             return Err(PluginError::Registration(format!(
-                "tool provider key `{key}` of plugin `{}` must begin with a letter",
-                self.owner
+                "duplicate provider {identity}"
             )));
         }
-        push_keyed_hook(
-            &mut self.contributions.tool_providers,
-            &self.owner,
-            CallbackSlot::ToolProvider,
-            key,
-            provider,
-        )
+        self.contributions.tool_providers.push(RegisteredProvider {
+            identity,
+            hook: provider,
+        });
+        Ok(())
     }
 
     fn add_assistant_prose_projector(

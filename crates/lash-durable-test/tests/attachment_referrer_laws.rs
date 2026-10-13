@@ -231,12 +231,17 @@ impl BlobTools {
 
 #[async_trait::async_trait]
 impl ToolProvider for BlobTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![
-            put_blob_definition().manifest(),
-            hold_definition().manifest(),
-            start_turn_child_definition().manifest(),
-        ]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            vec![
+                put_blob_definition().manifest(),
+                hold_definition().manifest(),
+                start_turn_child_definition().manifest(),
+            ]
+        })
     }
 
     fn resolve_contract(

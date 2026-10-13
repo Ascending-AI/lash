@@ -1,7 +1,8 @@
 //! Typed causes survive the facade on the durable substrate (FIG-5307).
 
 use super::*;
-use lash_core::facade_support::{PluginRegistrar, PluginSessionContext, SessionPlugin};
+
+use lash_core::facade_support::SessionPlugin;
 use lash_core::plugin::SessionReadyContext;
 use lash_core::{PluginError, PluginStateError};
 
@@ -121,27 +122,36 @@ impl PluginFactory for StateHook {
         Ok([("k".into(), serde_json::json!("text"))].into())
     }
 
-    fn build(
-        &self,
-        _: &PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<StateHook>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        StateHook::declare(&mut reg)?;
+        let id = crate::plugins::PluginFactory::id(self.as_ref());
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for StateHook {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl StateHook {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("typed-state")
+    }
+}
+impl lash_core::plugin::PluginMetadata for StateHook {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
 impl SessionPlugin for StateHook {
     fn id(&self) -> &'static str {
         "typed-state"
-    }
-
-    fn register(&self, _registrar: &mut PluginRegistrar) -> std::result::Result<(), PluginError> {
-        Ok(())
     }
 
     fn session_ready(&self, ctx: SessionReadyContext) -> std::result::Result<(), PluginError> {
@@ -162,6 +172,13 @@ impl SessionPlugin for StateHook {
             "the state codec did not refuse; the namespace held {:?}",
             ctx.state.keys()
         )))
+    }
+}
+impl StateHook {
+    fn declare(
+        _reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
+        Ok(())
     }
 }
 

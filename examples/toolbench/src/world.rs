@@ -1146,10 +1146,12 @@ mod catalog_tests {
             let world = SharedWorld::new(seed);
             let rlm = world
                 .provider()
-                .tool_manifests(&lash::tools::OwnerConfigView::default());
+                .tool_manifests(&lash::tools::OwnerConfigView::default())
+                .expect("fixture provider advertises");
             let mut standard = world
                 .standard_provider()
-                .tool_manifests(&lash::tools::OwnerConfigView::default());
+                .tool_manifests(&lash::tools::OwnerConfigView::default())
+                .expect("fixture provider advertises");
             assert_eq!(rlm.len(), count);
             let submit = standard.pop().unwrap();
             assert_eq!(submit.name, "submit");

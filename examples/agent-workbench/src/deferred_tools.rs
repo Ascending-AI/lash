@@ -27,7 +27,8 @@ use sha2::{Digest, Sha256};
 const SEARCH_TOOL_NAME: &str = "search_tools";
 const SEARCH_CALL_PATH: &str = "tools.search";
 /// The key the workbench declares its deferred provider under.
-pub(crate) const DEFERRED_PROVIDER_KEY: lash::plugins::HookKey = lash::hook_key!("deferred");
+pub(crate) const DEFERRED_PROVIDER_KEY: lash::plugins::ToolProviderKey =
+    lash::tool_provider_key!("deferred");
 /// The execution binding format the deferred provider writes and reads:
 /// `{"kind": "agent_workbench_deferred", "call_path": <path>}`.
 /// version_surface = "coexist"
@@ -36,10 +37,11 @@ const BINDING_FORMAT: lash::plugins::FormatVersion = lash::plugins::FormatVersio
 
 /// The provider every deferred match executes through: the workbench
 /// plugin's deferred provider.
-fn deferred_provider() -> lash::plugins::PluginCallbackIdentity {
-    lash::plugins::PluginCallbackIdentity::tool_provider(
+fn deferred_provider() -> lash::plugins::ToolProviderHandle {
+    lash::plugins::ToolProviderHandle::new(
+        lash::plugins::RegistryKind::Session,
         "agent_workbench",
-        DEFERRED_PROVIDER_KEY.as_str(),
+        DEFERRED_PROVIDER_KEY,
     )
 }
 
@@ -227,8 +229,11 @@ impl DeferredToolProvider for WorkbenchDeferredProvider {
 
 #[async_trait]
 impl ToolProvider for WorkbenchDeferredProvider {
-    fn tool_manifests(&self, _config: &lash::tools::OwnerConfigView) -> Vec<ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash::plugins::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_manifest_by_id(
@@ -721,7 +726,13 @@ mod tests {
         let config = lash::tools::OwnerConfigView::default();
         provider
             .resolve(
-                &DeferredResolveContext::new(&owner, None, &capabilities, &config),
+                &DeferredResolveContext::new(
+                    &deferred_provider(),
+                    &owner,
+                    None,
+                    &capabilities,
+                    &config,
+                ),
                 paths,
             )
             .await

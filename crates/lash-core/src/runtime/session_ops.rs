@@ -212,13 +212,7 @@ impl LashRuntime {
             });
         };
         plugins
-            .query(
-                name,
-                args,
-                session_id,
-                manager.read_service(),
-                manager.process_read_service(),
-            )
+            .query(name, args, session_id, manager.bindings())
             .await
     }
 
@@ -246,16 +240,7 @@ impl LashRuntime {
         };
         let (plugin_id, outcome) = session
             .plugins()
-            .run_plugin_command(
-                name,
-                args,
-                session_id,
-                true,
-                manager.state_service(),
-                manager.lifecycle_service(),
-                manager.graph_service(),
-                manager.process_service(),
-            )
+            .run_plugin_command(name, args, session_id, true, manager.bindings())
             .await?;
         let events = self.apply_storeless_plugin_operation_effects(
             &plugin_id,

@@ -3,14 +3,17 @@ use lash::plugins::{OfferedTools, ProjectedHistoryStats, PromptCall, SectionText
 use lash::prompt::{PlacementSource, PromptPlacement, PromptPlan, PromptPurpose};
 use lash::testing::prompt::{PromptCut, PromptCutParts, compose_sections};
 
-fn workbench_plugin(factory: &WorkbenchPluginFactory) -> Arc<dyn SessionPlugin> {
-    Arc::new(WorkbenchSessionPlugin {
+fn workbench_plugin(factory: &WorkbenchPluginFactory) -> lash::plugins::PluginRecipe {
+    let plugin = Arc::new(WorkbenchSessionPlugin {
         mail_world: factory.mail_world.clone(),
         config_changes: factory.config_changes.clone(),
         deferred_tools: factory.deferred_tools.clone(),
         approvals: factory.approvals.clone(),
         host_triggers: factory.host_triggers.clone(),
-    })
+    });
+    let mut reg = PluginRegistrar::<WorkbenchSessionPlugin>::new("agent_workbench");
+    WorkbenchSessionPlugin::declare(&mut reg).unwrap();
+    lash::plugins::PluginRecipe::new("agent_workbench", reg, move |_, _| Ok(Arc::clone(&plugin)))
 }
 
 fn cut(prompt: &WorkbenchPrompt, history_messages: u32) -> PromptCut {
@@ -56,7 +59,7 @@ fn cut(prompt: &WorkbenchPrompt, history_messages: u32) -> PromptCut {
 fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budget() {
     let factory = WorkbenchPluginFactory::new();
     let catalog =
-        lash::plugins::PromptCatalog::of_plugins(&[workbench_plugin(&factory)]).expect("catalog");
+        lash::testing::prompt_catalog_from_recipes(&[workbench_plugin(&factory)]).expect("catalog");
     let resolved = catalog
         .preview(
             &PromptPlan::default(),

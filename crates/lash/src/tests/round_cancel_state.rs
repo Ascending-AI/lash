@@ -3,6 +3,7 @@
 //! the key its finished sibling wrote too.
 
 use super::*;
+
 use crate::{TurnCancelMode, TurnEvent, TurnInput};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::TurnCancelOutcome;
@@ -45,9 +46,14 @@ struct StatePlugin {
     observed: Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl crate::plugins::PluginDefinition for StatePlugin {
-    fn declaration() -> crate::plugins::PluginDeclaration {
+impl StatePlugin {
+    pub fn declaration() -> crate::plugins::PluginDeclaration {
         crate::plugins::PluginDeclaration::initial(STATE_PLUGIN)
+    }
+}
+impl crate::plugins::PluginMetadata for StatePlugin {
+    fn plugin_declaration(&self) -> crate::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -56,12 +62,19 @@ impl crate::plugins::PluginFactory for StatePlugin {
         STATE_PLUGIN
     }
 
-    fn build(
-        &self,
-        _: &crate::plugins::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn crate::plugins::SessionPlugin>, crate::plugins::PluginError>
-    {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<StatePlugin>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        StatePlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -69,20 +82,26 @@ impl crate::plugins::SessionPlugin for StatePlugin {
     fn id(&self) -> &'static str {
         STATE_PLUGIN
     }
-
-    fn register(
-        &self,
-        reg: &mut crate::plugins::PluginRegistrar,
+}
+impl StatePlugin {
+    fn declare(
+        reg: &mut crate::plugins::PluginRegistrar<Self>,
     ) -> std::result::Result<(), crate::plugins::PluginError> {
         reg.tools()
-            .provider(crate::hook_key!("tools"), Arc::new(self.clone()))
+            .provider(crate::tool_provider_key!("tools"), move |this, _state| {
+                Ok(Arc::new(this.clone()))
+            })?;
+        Ok(())
     }
 }
 
 #[async_trait]
 impl ToolProvider for StatePlugin {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![set_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![set_definition().manifest()])
     }
 
     fn resolve_contract(

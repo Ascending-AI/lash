@@ -270,7 +270,7 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
                     )
                     .with_host_start_key(format!("operation-session-process:{key}"));
                     let process = ctx
-                        .processes
+                        .bindings
                         .start_from_request(&session, request, scope.clone())
                         .await
                         .map_err(|error| error.to_string())?;

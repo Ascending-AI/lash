@@ -146,7 +146,7 @@ impl GeneratedRuntimeWorld {
             .live_replay_store(world_live_replay_store())
             .serve_test_llm_profile(provider_handle, model.clone())
             .tools(
-                lash::hook_key!("tools"),
+                lash::tool_provider_key!("tools"),
                 Arc::new(SuspendToolProvider::new(
                     tool_name.clone(),
                     Arc::clone(&key_slot),
@@ -452,8 +452,11 @@ impl SuspendToolProvider {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for SuspendToolProvider {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![self.definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![self.definition().manifest()])
     }
 
     fn resolve_contract(

@@ -355,8 +355,11 @@ impl ApprovalToolProvider {
 
 #[async_trait]
 impl ToolProvider for ApprovalToolProvider {
-    fn tool_manifests(&self, _config: &lash::tools::OwnerConfigView) -> Vec<ToolManifest> {
-        vec![Self::definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash::plugins::PluginError> {
+        Ok(vec![Self::definition().manifest()])
     }
 
     fn resolve_contract(

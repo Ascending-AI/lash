@@ -107,10 +107,15 @@ struct ControlRaceTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for ControlRaceTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        ["slow", "fast", "release"]
-            .map(|name| definition(name, name, "tools", name).manifest())
-            .into()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            ["slow", "fast", "release"]
+                .map(|name| definition(name, name, "tools", name).manifest())
+                .into()
+        })
     }
 
     fn resolve_contract(
@@ -287,11 +292,16 @@ impl CellTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for CellTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![
-            definition("tool:echo", "echo", "echo", "say").manifest(),
-            definition("tool:echo_await", "echo_await", "echo", "await").manifest(),
-        ]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            vec![
+                definition("tool:echo", "echo", "echo", "say").manifest(),
+                definition("tool:echo_await", "echo_await", "echo", "await").manifest(),
+            ]
+        })
     }
 
     fn resolve_manifest_by_id(
@@ -366,8 +376,8 @@ macro_rules! resolves_only {
             fn tool_manifests(
                 &self,
                 _config: &lash_core::OwnerConfigView,
-            ) -> Vec<lash_core::ToolManifest> {
-                Vec::new()
+            ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+                Ok({ Vec::new() })
             }
 
             fn resolve_contract(

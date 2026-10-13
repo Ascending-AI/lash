@@ -191,8 +191,15 @@ impl<T> ProcessConfigKey<T> {
 
     /// The key of the tool provider this component declares as `key`: what
     /// an env links an effect it serves to.
-    pub fn tool_provider(&self, key: &str) -> crate::tool_surface::ProviderKey {
-        crate::tool_surface::ProviderKey::tool_provider(self.component, key)
+    pub fn tool_provider(
+        &self,
+        key: crate::plugin_registrations::ToolProviderKey,
+    ) -> crate::tool_surface::ProviderKey {
+        crate::plugin_registrations::ToolProviderHandle::new(
+            crate::obligations::RegistryKind::Process,
+            self.component,
+            key,
+        )
     }
 
     pub const fn format(&self) -> FormatVersion {
@@ -350,6 +357,10 @@ impl ProcessComponentConfig {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ProcessEnvRefusal {
+    #[error("{issue}")]
+    PluginPreflight {
+        issue: crate::plugin_registrations::PreflightIssue,
+    },
     #[error("process component `{id}` is named more than once")]
     DuplicateComponent { id: String },
     #[error("process component `{id}` is not installed")]

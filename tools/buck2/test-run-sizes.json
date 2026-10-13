@@ -159,14 +159,6 @@
     "peak_bytes": 397365248,
     "samples": 190
   },
-  "//crates/lash-core:tool_execution_grant_layout__test": {
-    "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 1.03,
-    "p99_peak_bytes": 19402752,
-    "peak_bytes": 19402752,
-    "samples": 9
-  },
   "//crates/lash-core:turn_event_schema__test": {
     "cpu_count": 1,
     "memory_kb": 262144,

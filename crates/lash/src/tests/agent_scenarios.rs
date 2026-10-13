@@ -170,8 +170,11 @@ const RETRYING_DIRECT_COMPONENT: lash_core::ProcessConfigKey<()> =
 
 #[async_trait]
 impl ToolProvider for RetryingDirectTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![retrying_direct_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![retrying_direct_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -298,8 +301,11 @@ fn overflow_payload_definition() -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for OverflowPayloadTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![overflow_payload_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![overflow_payload_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -371,7 +377,7 @@ async fn context_overflow_mid_turn_continues_on_the_same_session() -> Result<()>
             explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
                 .serve_test_llm_profile(provider, mock_llm_profile_spec())
                 .tools(
-                    crate::hook_key!("tools"),
+                    crate::tool_provider_key!("tools"),
                     Arc::new(OverflowPayloadTools(Arc::clone(&tool_calls))),
                 )
                 .build(crate::testing::runtime_lease_owner())?;

@@ -1132,8 +1132,8 @@ impl lash::tools::ToolProvider for AskTwice {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> Vec<lash::tools::ToolManifest> {
-        vec![ask_twice_definition().manifest()]
+    ) -> std::result::Result<Vec<lash::tools::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![ask_twice_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -1219,7 +1219,7 @@ impl AskTwiceRun {
             Arc::new(lash::plugins::StaticPluginFactory::new(
                 lash::plugins::PluginDeclaration::initial("keys-ask-twice"),
                 lash::plugins::PluginSpec::new().with_tool_provider(
-                    lash::hook_key!("tools"),
+                    lash::tool_provider_key!("tools"),
                     Arc::new(AskTwice {
                         catalog: Arc::clone(&catalog),
                         retire,

@@ -15,7 +15,9 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn catalog_for<T: ToolProvider + ?Sized>(provider: &Arc<T>) -> crate::ToolCatalog {
-        let manifests = provider.tool_manifests(&crate::plugin::OwnerConfigView::default());
+        let manifests = provider
+            .tool_manifests(&crate::plugin::OwnerConfigView::default())
+            .expect("fixture provider advertises");
         let contracts = manifests
             .iter()
             .filter_map(|manifest| {
@@ -55,8 +57,8 @@ mod tests {
         fn tool_manifests(
             &self,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> Vec<crate::ToolManifest> {
-            vec![process_tool_definition().manifest()]
+        ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+            Ok(vec![process_tool_definition().manifest()])
         }
 
         fn resolve_contract(

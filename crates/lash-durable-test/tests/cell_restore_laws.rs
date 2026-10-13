@@ -339,16 +339,21 @@ struct DeferredTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for DeferredTools {
-    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        let mut manifests = self.listed.tool_manifests(config);
-        if self
-            .world
-            .redeployed
-            .load(std::sync::atomic::Ordering::SeqCst)
-        {
-            manifests.push(granted(AMBIENT).manifest());
-        }
-        manifests
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            let mut manifests = self.listed.tool_manifests(config)?;
+            if self
+                .world
+                .redeployed
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                manifests.push(granted(AMBIENT).manifest());
+            }
+            manifests
+        })
     }
 
     fn resolve_manifest_by_id(
@@ -439,8 +444,11 @@ impl CancelTarget {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for GrantingResolver {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_contract(
@@ -475,7 +483,11 @@ impl lash::tools::DeferredToolProvider for GrantingResolver {
             .world
             .redeployed
             .load(std::sync::atomic::Ordering::SeqCst);
-        let codec = lash::plugins::PluginCallbackIdentity::tool_provider("tools", "tools");
+        let codec = lash::plugins::ToolProviderHandle::new(
+            lash::plugins::RegistryKind::Session,
+            "tools",
+            lash::tool_provider_key!("tools"),
+        );
         let binding =
             (*self.world.binding.lock_recover()).map(|format| lash::tools::ExecutionBinding {
                 codec: codec.clone(),
@@ -971,8 +983,10 @@ impl CellTurn {
                     Some(deferred) => {
                         builder.plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
                             lash::plugins::PluginDeclaration::initial("granting"),
-                            lash::plugins::PluginSpec::new()
-                                .with_deferred_provider(lash::hook_key!("deferred"), deferred),
+                            lash::plugins::PluginSpec::new().with_deferred_provider(
+                                lash::tool_provider_key!("deferred"),
+                                deferred,
+                            ),
                         )))
                     }
                     None => builder,
@@ -997,7 +1011,7 @@ impl CellTurn {
                             .build()
                             .expect("the model's metadata"),
                     )
-                    .tools(lash::hook_key!("tools"), tools)
+                    .tools(lash::tool_provider_key!("tools"), tools)
                     .plugin(Arc::new(
                         lash::process_controls::SessionProcessAdminPluginFactory::new(
                             lash_core::lifetime::session_or_starter,

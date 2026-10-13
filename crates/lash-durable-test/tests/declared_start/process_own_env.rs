@@ -200,24 +200,30 @@ impl lash::process::ProcessComponentFactory for ProbeComponent {
         })
     }
 
-    fn build(
-        &self,
-        cx: &lash::process::ProcessComponentContext<'_>,
-    ) -> Result<lash::process::ProcessComponentSpec, lash_core::PluginError> {
-        if cx.process.is_some() {
-            let env = cx
-                .env
-                .stable_ref()
-                .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
-            self.seen
-                .builds
-                .lock_recover()
-                .push((env, cx.capabilities.clone()));
-        }
-        let mut spec = lash::process::ProcessComponentSpec::default();
-        spec.tool_providers
-            .push((lash::hook_key!("tools"), Arc::clone(&self.tools)));
-        Ok(spec)
+    fn recipe(self: Arc<Self>) -> Result<lash::plugins::ProcessRecipe, lash_core::PluginError> {
+        let mut reg =
+            lash::plugins::PluginRegistrar::<Self>::for_process(self.declaration().id.as_str());
+        reg.tools()
+            .provider(lash::tool_provider_key!("tools"), |this, _| {
+                Ok(Arc::clone(&this.tools))
+            })?;
+        Ok(lash::plugins::ProcessRecipe::new(
+            PROBE.component(),
+            reg,
+            move |cx| {
+                if cx.process.is_some() {
+                    let env = cx
+                        .env
+                        .stable_ref()
+                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+                    self.seen
+                        .builds
+                        .lock_recover()
+                        .push((env, cx.capabilities.clone()));
+                }
+                Ok(Arc::clone(&self))
+            },
+        ))
     }
 }
 
@@ -232,7 +238,10 @@ struct Policy;
 fn new_environment() -> lash::process::ProcessEnv {
     lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(7))
         .component(PROBE, &())
-        .link_tool(PROBE.tool_provider("tools"), &probe_definition(READ))
+        .link_tool(
+            PROBE.tool_provider(lash::tool_provider_key!("tools")),
+            &probe_definition(READ),
+        )
         .build()
         .expect("the environment builds")
 }

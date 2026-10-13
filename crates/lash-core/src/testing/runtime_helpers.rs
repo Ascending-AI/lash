@@ -434,7 +434,8 @@ pub fn plugin_session_with_tools(
 ) -> Arc<crate::PluginSession> {
     let tool_factory = StaticPluginFactory::new(
         crate::plugin::PluginDeclaration::initial("test_tools"),
-        crate::PluginSpec::new().with_tool_provider(crate::hook_key!("tools"), Arc::clone(&tools)),
+        crate::PluginSpec::new()
+            .with_tool_provider(crate::tool_provider_key!("tools"), Arc::clone(&tools)),
     );
     let mut factories = crate::testing::test_standard_protocol_factories();
     factories.push(Arc::new(tool_factory));
@@ -630,8 +631,11 @@ pub fn test_runtime_host_config_with_provider(
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for EmptyTools {
-    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &crate::OwnerConfigView,
+    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_contract(
@@ -654,7 +658,7 @@ pub fn test_runtime_plugin_host(
 ) -> crate::PluginHost {
     plugins.push(Arc::new(StaticPluginFactory::new(
         crate::plugin::PluginDeclaration::initial("test_tools"),
-        crate::PluginSpec::new().with_tool_provider(crate::hook_key!("tools"), tools),
+        crate::PluginSpec::new().with_tool_provider(crate::tool_provider_key!("tools"), tools),
     )));
     crate::testing::test_plugin_host(plugins)
 }
@@ -867,72 +871,6 @@ pub async fn standard_runtime_with_transport(
 ) -> LashRuntime {
     TestRuntime::new(backend, transport).build().await
 }
-pub type RuntimeTestPluginBuilder = dyn Fn(&crate::PluginSessionContext) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError>
-    + Send
-    + Sync;
-pub type RuntimeExternalRegistrar =
-    dyn Fn(&mut crate::PluginRegistrar) -> Result<(), crate::PluginError> + Send + Sync;
-
-pub struct RuntimeTestPluginFactory {
-    pub build: Arc<RuntimeTestPluginBuilder>,
-}
-
-impl crate::PluginFactory for RuntimeTestPluginFactory {
-    fn id(&self) -> &'static str {
-        "runtime-test"
-    }
-
-    fn build(
-        &self,
-        ctx: &crate::PluginSessionContext,
-    ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
-        (self.build)(ctx)
-    }
-}
-
-impl crate::plugin::PluginDefinition for RuntimeTestPluginFactory {
-    fn declaration() -> crate::plugin::PluginDeclaration {
-        crate::plugin::PluginDeclaration::initial("runtime-test")
-    }
-}
-
-pub struct RuntimeTestPlugin {
-    pub before_turn: Option<crate::plugin::BeforeTurnHook>,
-    pub checkpoint: Option<crate::plugin::CheckpointHook>,
-    pub presentation_steps: Vec<(crate::plugin::HookKey, crate::plugin::ToolPresentationStep)>,
-    pub runtime_event: Option<crate::plugin::PluginLifecycleEventHook>,
-    pub external_registrar: Option<Arc<RuntimeExternalRegistrar>>,
-}
-
-impl crate::SessionPlugin for RuntimeTestPlugin {
-    fn id(&self) -> &'static str {
-        "runtime-test"
-    }
-
-    fn register(&self, reg: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {
-        if let Some(hook) = &self.before_turn {
-            reg.turn()
-                .before(crate::hook_key!("runtime-test"), Arc::clone(hook))?;
-        }
-        if let Some(hook) = &self.checkpoint {
-            reg.turn()
-                .checkpoint(crate::hook_key!("runtime-test"), Arc::clone(hook))?;
-        }
-        for (key, step) in &self.presentation_steps {
-            reg.tool_results()
-                .presentation_step(*key, Arc::clone(step))?;
-        }
-        if let Some(hook) = &self.runtime_event {
-            reg.session()
-                .on_event(crate::hook_key!("runtime-test"), Arc::clone(hook))?;
-        }
-        if let Some(register) = &self.external_registrar {
-            register(reg)?;
-        }
-        Ok(())
-    }
-}
-
 pub async fn runtime_with_plugins(
     backend: &crate::Backend,
     plugins: Vec<Arc<dyn crate::PluginFactory>>,
@@ -1010,8 +948,11 @@ fn echo_tool_definition() -> crate::ToolDefinition {
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for EchoTool {
-    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
-        vec![echo_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &crate::OwnerConfigView,
+    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        Ok(vec![echo_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -1046,10 +987,15 @@ pub struct TerminalControlTool {
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for TerminalControlTool {
-    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
-        (0..self.controls.len())
-            .map(|index| self.definition(index).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &crate::OwnerConfigView,
+    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        Ok({
+            (0..self.controls.len())
+                .map(|index| self.definition(index).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -1129,8 +1075,11 @@ pub struct SlowTool {
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for SlowTool {
-    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
-        vec![slow_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &crate::OwnerConfigView,
+    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        Ok(vec![slow_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -1178,8 +1127,11 @@ pub struct MemoryProbeTool;
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for MemoryProbeTool {
-    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
-        vec![memory_probe_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &crate::OwnerConfigView,
+    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        Ok(vec![memory_probe_tool_definition().manifest()])
     }
 
     fn resolve_contract(

@@ -37,8 +37,8 @@ use lash_core::facade_support::ModelToolReturnPart;
 use lash_core::plugin::{
     AttachmentOmissionContext, AttachmentOmissionPolicy, CompactionContext, ContextCompaction,
     ContextCompactor, ContextError, ContextPressureContext, ContextPressureDecision,
-    ContextPressureHook, HistoryPartId, PluginError, PluginFactory, PluginRegistrar,
-    PluginSessionContext, SessionPlugin, omit_part_attachments,
+    ContextPressureHook, HistoryPartId, PluginError, PluginFactory, SessionPlugin,
+    omit_part_attachments,
 };
 use lash_core::{LlmUsage, Message, MessageOrigin, MessageRole, Part, PartKind, SessionSnapshot};
 
@@ -760,21 +760,39 @@ impl PluginFactory for StandardCompactionPluginFactory {
         STANDARD_COMPACTION_PLUGIN_ID
     }
 
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        if self.config.prune_context_percent > 100 {
-            return Err(PluginError::Registration(
-                "prune_context_percent must be at most 100".into(),
-            ));
-        }
-        Ok(Arc::new(StandardCompactionPlugin {
-            config: self.config.clone(),
-        }))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<StandardCompactionPlugin>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        StandardCompactionPlugin::declare(&mut reg)?;
+        let id = lash_core::plugin::PluginFactory::id(self.as_ref());
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| {
+                if self.config.prune_context_percent > 100 {
+                    return Err(lash_core::plugin::PluginError::Registration(
+                        "prune_context_percent must be at most 100".into(),
+                    ));
+                }
+                Ok(Arc::new(StandardCompactionPlugin {
+                    config: self.config.clone(),
+                }))
+            },
+        ))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for StandardCompactionPluginFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl StandardCompactionPluginFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(STANDARD_COMPACTION_PLUGIN_ID)
+    }
+}
+impl lash_core::plugin::PluginMetadata for StandardCompactionPluginFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -786,47 +804,73 @@ impl SessionPlugin for StandardCompactionPlugin {
     fn id(&self) -> &'static str {
         STANDARD_COMPACTION_PLUGIN_ID
     }
-
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        use lash_core::plugin::prompt::{
-            PromptInput, PromptPlacement, PromptPurpose, PromptRenderError, PromptSectionKey,
-            PromptSectionSpec, SectionText,
-        };
+}
+impl StandardCompactionPlugin {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        use lash_core::plugin::prompt::PromptPurpose;
         reg.prompt().section(
-            PromptSectionSpec::new(
-                PromptSectionKey::new(SUMMARY_INSTRUCTION_SECTION)
-                    .map_err(|error| PluginError::Registration(error.to_string()))?,
-                PromptPlacement::CurrentContext,
+            lash_core::plugin::prompt::PromptSectionSpec::new(
+                lash_core::prompt_sections::PromptSectionKey::new(SUMMARY_INSTRUCTION_SECTION)
+                    .map_err(|error| {
+                        lash_core::plugin::PluginError::Registration(error.to_string())
+                    })?,
+                lash_core::prompt_sections::PromptPlacement::CurrentContext,
             )
             .purposes([PromptPurpose::Compaction]),
-            Arc::new(|input: &PromptInput<'_>| {
-                let instruction =
-                    input
-                        .protocol_facts::<SummaryInstruction>()
-                        .ok_or_else(|| {
-                            PromptRenderError::new("compaction summary inputs are absent")
-                        })?;
-                Ok(SectionText::text(&instruction.0))
-            }),
+            move |_this, _| {
+                Ok(Arc::new(
+                    |input: &lash_core::plugin::prompt::PromptInput<'_>| {
+                        let instruction =
+                            input
+                                .protocol_facts::<SummaryInstruction>()
+                                .ok_or_else(|| {
+                                    lash_core::plugin::prompt::PromptRenderError::new(
+                                        "compaction summary inputs are absent",
+                                    )
+                                })?;
+                        Ok(lash_core::plugin::prompt::SectionText::text(&instruction.0))
+                    },
+                ))
+            },
         )?;
-        let config = self.config.clone();
         reg.context().pressure(
+            lash_core::hook_key!("standard_compaction.context_pressure"),
             100,
-            Arc::new(StandardCompactionPressureHook::new(config.clone())),
+            move |this, _| {
+                let config = this.config.clone();
+                Ok(Arc::new(StandardCompactionPressureHook::new(
+                    config.clone(),
+                )))
+            },
         )?;
         reg.context().attachment_omissions(
+            lash_core::hook_key!("standard_compaction.attachment_omissions"),
             100,
-            Arc::new(StandardCompactionAttachmentPolicy(config.clone())),
+            move |this, _| {
+                let config = this.config.clone();
+                Ok(Arc::new(StandardCompactionAttachmentPolicy(config.clone())))
+            },
         )?;
-        reg.context()
-            .compact(100, Arc::new(StandardContextCompactor::new(config.clone())))?;
-        reg.turn().after(
-            lash_core::hook_key!("overflow-recovery"),
-            Arc::new(move |ctx: lash_core::plugin::TurnResultHookContext| {
-                let config = config.clone();
-                Box::pin(async move { overflow_recovery_after_turn(&ctx, &config).await })
-            }),
+        reg.context().compact(
+            lash_core::hook_key!("standard_compaction.compact"),
+            100,
+            move |this, _| {
+                let config = this.config.clone();
+                Ok(Arc::new(StandardContextCompactor::new(config.clone())))
+            },
         )?;
+        reg.turn()
+            .after(lash_core::hook_key!("overflow-recovery"), move |this, _| {
+                let config = this.config.clone();
+                Ok(Arc::new(
+                    move |ctx: lash_core::plugin::TurnResultHookContext| {
+                        let config = config.clone();
+                        Box::pin(async move { overflow_recovery_after_turn(&ctx, &config).await })
+                    },
+                ))
+            })?;
         Ok(())
     }
 }

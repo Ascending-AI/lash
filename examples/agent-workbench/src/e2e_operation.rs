@@ -1,6 +1,7 @@
 //! S17 ("operation Run is recoverably explicit", L08/L14) runs on the agent-workbench product host:
 //! a plugin task whose body the case holds, followed and reattached by its Run ID.
 
+use lash::plugins::PluginRecipe;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -88,16 +89,34 @@ impl PluginFactory for OperationPlugin {
         PLUGIN
     }
 
-    fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(Self {
-            controls: self.controls.clone(),
-        }))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+        let mut reg = lash::plugins::PluginRegistrar::<OperationPlugin>::new(
+            lash::plugins::PluginFactory::id(self.as_ref()),
+        );
+        OperationPlugin::declare(&mut reg)?;
+        let id = lash::plugins::PluginFactory::id(self.as_ref());
+        Ok(lash::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| {
+                Ok(Arc::new(Self {
+                    controls: self.controls.clone(),
+                }))
+            },
+        ))
     }
 }
 
-impl lash::plugins::PluginDefinition for OperationPlugin {
-    fn declaration() -> PluginDeclaration {
+impl OperationPlugin {
+    pub fn declaration() -> PluginDeclaration {
         PluginDeclaration::initial(PLUGIN)
+    }
+}
+impl lash::plugins::PluginMetadata for OperationPlugin {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -105,13 +124,17 @@ impl SessionPlugin for OperationPlugin {
     fn id(&self) -> &'static str {
         PLUGIN
     }
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        let controls = self.controls.clone();
+}
+impl OperationPlugin {
+    fn declare(
+        reg: &mut lash::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash::plugins::PluginError> {
         reg.operations()
-            .typed_task::<WorkbenchOperation, _, _>(move |ctx, output| {
+            .typed_task::<WorkbenchOperation, _, _>(move |this, state| { let controls = this.controls.clone();
+Ok(move |ctx: lash::plugins::PluginTaskContext, output: <WorkbenchOperation as lash::plugins::PluginOperation>::Args| {
                 let controls = controls.clone();
                 async move { operation(ctx, controls, output).await }
-            })?;
+            }) })?;
         Ok(())
     }
 }

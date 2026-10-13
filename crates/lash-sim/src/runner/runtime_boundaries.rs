@@ -507,7 +507,7 @@ fn durable_effect_core(
                 .map_err(|error| RuntimeBoundaryError::new(error.to_string()))?,
         )
         .tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::new(tool) as Arc<dyn lash_core::ToolProvider>,
         )
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -584,8 +584,11 @@ impl OpaqueEffectTool {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for OpaqueEffectTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![Self::definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![Self::definition().manifest()])
     }
 
     fn resolve_contract(

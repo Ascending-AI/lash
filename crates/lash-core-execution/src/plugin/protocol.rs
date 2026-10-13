@@ -181,9 +181,7 @@ impl<'a> ProtocolSessionContext<'a> {
 
 pub struct ProtocolBeforeLlmCallContext {
     pub session_id: SessionId,
-    pub sessions: Arc<dyn crate::plugin::SessionStateService>,
-    pub session_graph: Arc<dyn crate::plugin::SessionGraphService>,
-    pub processes: Arc<dyn crate::ProcessService>,
+    pub bindings: Arc<crate::plugin::ServiceBindings>,
     pub state: SessionReadView,
     pub latest_prompt_usage: Option<LlmUsage>,
     /// The spec the running turn's recorded shape resolved (FIG-6021).

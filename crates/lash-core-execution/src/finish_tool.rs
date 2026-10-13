@@ -79,8 +79,11 @@ impl FinishToolProvider {
 
 #[async_trait]
 impl ToolProvider for FinishToolProvider {
-    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<ToolManifest> {
-        self.tools.iter().map(ToolDefinition::manifest).collect()
+    fn tool_manifests(
+        &self,
+        _config: &crate::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, crate::PluginError> {
+        Ok(self.tools.iter().map(ToolDefinition::manifest).collect())
     }
 
     fn resolve_contract(

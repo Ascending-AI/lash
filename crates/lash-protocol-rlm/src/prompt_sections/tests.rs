@@ -4,10 +4,8 @@
 
 use std::sync::Arc;
 
-use lash_core::plugin::prompt::{
-    ComposedPrompt, PromptInput, PromptWrapSpec, PromptWrapTarget, SectionText,
-};
-use lash_core::plugin::{PluginError, PluginRegistrar, SessionPlugin};
+use lash_core::plugin::SessionPlugin;
+use lash_core::plugin::prompt::{ComposedPrompt, PromptWrapSpec, PromptWrapTarget};
 use lash_core::prompt_sections::{
     PromptPlacement, PromptPlan, PromptSectionPlacement, PromptWrapKey,
 };
@@ -100,8 +98,10 @@ impl SessionPlugin for HostWrappers {
     fn id(&self) -> &'static str {
         "host"
     }
-
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+}
+impl HostWrappers {
+    fn recipe(self) -> lash_core::plugin::PluginRecipe {
+        let mut reg = lash_core::plugin::PluginRegistrar::<Self>::new("host");
         for (target, text) in &self.0 {
             let text = *text;
             reg.prompt().wrap(
@@ -109,14 +109,15 @@ impl SessionPlugin for HostWrappers {
                     PromptWrapKey::new(*target).expect("valid wrap key"),
                     section_id(target),
                 ),
-                Arc::new(
-                    move |_: &PromptInput<'_>, _: PromptWrapTarget<'_>, _: SectionText| {
-                        Ok(text.map_or(SectionText::Omit, SectionText::text))
+                move |_, _| Ok(Arc::new(
+                    move |_: &lash_core::plugin::prompt::PromptInput<'_>, _: PromptWrapTarget<'_>, _: lash_core::plugin::prompt::SectionText| {
+                        Ok(text.map_or(lash_core::plugin::prompt::SectionText::Omit, lash_core::plugin::prompt::SectionText::text))
                     },
-                ),
-            )?;
+                )),
+            ).expect("wrapper declares");
         }
-        Ok(())
+        let owner = Arc::new(self);
+        lash_core::plugin::PluginRecipe::new("host", reg, move |_, _| Ok(Arc::clone(&owner)))
     }
 }
 
@@ -237,10 +238,8 @@ fn the_declarations_describe_exactly_the_offered_callable_tools() {
         ..sections(&discovering)
     };
     for wrappers in [vec![], vec![(section_keys::EXECUTION, None)]] {
-        let plugins: [Arc<dyn SessionPlugin>; 2] = [
-            Arc::new(discovery.clone()),
-            Arc::new(HostWrappers(wrappers)),
-        ];
+        let plugins: [lash_core::plugin::PluginRecipe; 2] =
+            [discovery.clone().recipe(), HostWrappers(wrappers).recipe()];
         let composed = compose(&plugins, turn(discovering.clone()));
         let rendered = initial(&composed);
         assert!(rendered.contains(
@@ -250,12 +249,13 @@ fn the_declarations_describe_exactly_the_offered_callable_tools() {
         assert!(!rendered.contains("A tool found by search."));
     }
 
-    let plugins: [Arc<dyn SessionPlugin>; 2] = [
-        Arc::new(sections(&full)),
-        Arc::new(HostWrappers(vec![(
+    let plugins: [lash_core::plugin::PluginRecipe; 2] = [
+        sections(&full).recipe(),
+        HostWrappers(vec![(
             section_keys::DECLARATIONS,
             Some("### Tools\n\nThe host's own catalogue."),
-        )])),
+        )])
+        .recipe(),
     ];
     let replaced = compose(&plugins, turn(full.clone()));
     assert!(initial(&replaced).ends_with("### Tools\n\nThe host's own catalogue."));

@@ -801,7 +801,7 @@ fn benchmark_plugin_factories(
     )];
     let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("runtime_perf_tools"),
-        PluginSpec::new().with_tool_provider(lash::hook_key!("tools"), benchmark_tool),
+        PluginSpec::new().with_tool_provider(lash::tool_provider_key!("tools"), benchmark_tool),
     ))];
     if wiring.llm_query_plugin {
         factories.push(Arc::new(LlmToolsPluginFactory::default()));
@@ -838,15 +838,17 @@ fn benchmark_plugin_factories(
     if wiring.oblique_tools_plugin {
         factories.push(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("runtime_perf_oblique_tools"),
-            PluginSpec::new()
-                .with_tool_provider(lash::hook_key!("tools"), Arc::new(BenchmarkObliqueTools)),
+            PluginSpec::new().with_tool_provider(
+                lash::tool_provider_key!("tools"),
+                Arc::new(BenchmarkObliqueTools),
+            ),
         )));
     }
     if wiring.large_tool_catalog_plugin {
         factories.push(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("runtime_perf_large_tool_catalog"),
             PluginSpec::new().with_tool_provider(
-                lash::hook_key!("tools"),
+                lash::tool_provider_key!("tools"),
                 Arc::new(BenchmarkLargeToolCatalog::default()),
             ),
         )));
@@ -938,7 +940,7 @@ pub(crate) async fn build_embed_core(
             benchmark_rlm_builder(backend.clone(), provider, factory)
                 .with_explicit_ephemeral_facets()
                 .tools(
-                    lash::hook_key!("tools"),
+                    lash::tool_provider_key!("tools"),
                     Arc::new(BenchmarkEchoTool::new(effect_host)),
                 )
                 .build(runtime_perf_owner())

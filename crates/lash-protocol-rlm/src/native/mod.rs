@@ -6,7 +6,6 @@ pub(crate) mod prompt;
 mod stall;
 mod tool;
 pub(crate) mod transport;
-pub use plugin::RlmNativeToolPlugin;
 pub use tool::NATIVE_EXECUTE_TOOL_NAME;
 #[cfg(test)]
 mod cell_reply_laws;

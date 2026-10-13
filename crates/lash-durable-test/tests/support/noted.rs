@@ -31,17 +31,30 @@ impl lash_core::facade_support::PluginFactory for NotedProtocolFactory {
         NOTED_PROTOCOL
     }
 
-    fn build(
-        &self,
-        _ctx: &lash_core::facade_support::PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(NotedProtocolPlugin))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<NotedProtocolPlugin>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        NotedProtocolPlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(NotedProtocolPlugin)),
+        ))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for NotedProtocolFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl NotedProtocolFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(NOTED_PROTOCOL)
+    }
+}
+impl lash_core::plugin::PluginMetadata for NotedProtocolFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -51,15 +64,16 @@ impl lash_core::facade_support::SessionPlugin for NotedProtocolPlugin {
     fn id(&self) -> &'static str {
         NOTED_PROTOCOL
     }
+}
+impl NotedProtocolPlugin {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        reg.protocol()
+            .session(move |_this, _state| Ok(Arc::new(NotedSession)))?;
 
-    fn register(
-        &self,
-        registrar: &mut lash_core::facade_support::PluginRegistrar,
-    ) -> Result<(), lash_core::PluginError> {
-        registrar.protocol().session(Arc::new(NotedSession))?;
-        registrar
-            .protocol()
-            .protocol_driver(Arc::new(NotedDriverPlugin))?;
+        reg.protocol()
+            .protocol_driver(move |_this, _state| Ok(Arc::new(NotedDriverPlugin)))?;
         Ok(())
     }
 }

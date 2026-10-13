@@ -135,7 +135,10 @@ struct CountedEcho(Arc<Script>);
 
 #[async_trait]
 impl ToolProvider for CountedEcho {
-    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
         lash_core::testing::FixtureTools.tool_manifests(config)
     }
 
@@ -173,7 +176,7 @@ fn build_boot(
         mock_llm_profile_spec(),
     )
     .tools(
-        crate::hook_key!("tools"),
+        crate::tool_provider_key!("tools"),
         Arc::new(CountedEcho(Arc::clone(script))),
     )
     .build(lash_core::LeaseOwnerIdentity::opaque(

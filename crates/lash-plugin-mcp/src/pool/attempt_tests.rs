@@ -41,6 +41,7 @@ async fn l12_mcp_cold_registry_cannot_replace_the_recorded_preparation_binding()
     let provider = crate::McpToolProvider::new(Arc::clone(&pool));
     let original = provider
         .tool_manifests(&lash_core::OwnerConfigView::default())
+        .expect("fixture provider advertises")
         .remove(0);
     let prepared = prepare(&provider, &original).await;
     let grant = crate::McpDeferredToolProvider::new(Arc::clone(&pool));
@@ -77,6 +78,7 @@ async fn l12_mcp_cold_registry_cannot_replace_the_recorded_preparation_binding()
         .manifest = replacement;
     let rebuilt = provider
         .tool_manifests(&lash_core::OwnerConfigView::default())
+        .expect("fixture provider advertises")
         .remove(0);
     let restored: lash_core::PreparedToolCall = serde_json::from_value(recorded).unwrap();
     let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&restored);
@@ -156,6 +158,7 @@ async fn l12_mcp_refuses_changed_or_corrupt_admitted_bindings_before_send() {
     let provider = crate::McpToolProvider::new(Arc::clone(&pool));
     let original = provider
         .tool_manifests(&lash_core::OwnerConfigView::default())
+        .expect("fixture provider advertises")
         .remove(0);
     let prepared = prepare(&provider, &original).await;
     let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);
@@ -265,6 +268,7 @@ async fn l07_l08_mcp_sockets_refuse_remote_defer_and_isolation_before_send() {
     let provider = crate::McpToolProvider::new(Arc::clone(&pool));
     let original = provider
         .tool_manifests(&lash_core::OwnerConfigView::default())
+        .expect("fixture provider advertises")
         .remove(0);
     let prepared = prepare(&provider, &original).await;
     let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);
@@ -399,6 +403,7 @@ async fn l07_mcp_required_remote_tasks_refuse_during_admission() {
     let provider = crate::McpToolProvider::new(Arc::clone(&pool));
     let manifest = provider
         .tool_manifests(&lash_core::OwnerConfigView::default())
+        .expect("fixture provider advertises")
         .remove(0);
     let context = lash_core::ToolPrepareContext::for_testing(
         lash_core::RuntimeOwner::Session("mcp-task-refusal".into()),
@@ -433,6 +438,7 @@ async fn l22_mcp_transport_timeout_is_an_inline_body_failure() {
     let provider = crate::McpToolProvider::new(Arc::clone(&pool));
     let manifest = provider
         .tool_manifests(&lash_core::OwnerConfigView::default())
+        .expect("fixture provider advertises")
         .remove(0);
     let prepared = prepare(&provider, &manifest).await;
     let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);

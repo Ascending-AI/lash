@@ -426,6 +426,9 @@ pub struct ProcessEngineRegistration {
 }
 
 impl ProcessEngineRegistration {
+    pub fn kind(&self) -> &str {
+        self.engine.kind()
+    }
     pub fn new(
         engine: Arc<dyn ProcessEngine>,
         admission: ProcessEngineAdmission,

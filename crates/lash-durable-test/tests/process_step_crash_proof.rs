@@ -113,7 +113,7 @@ fn ext_write(world: &Arc<ExternalWorld>) -> Arc<dyn lash::process::ProcessCompon
         lash_core::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial(EXT_WRITE.component()),
             lash_core::facade_support::PluginSpec::new()
-                .with_tool_provider(lash::hook_key!("tools"), provider),
+                .with_tool_provider(lash::tool_provider_key!("tools"), provider),
         )
         .as_component(EXT_WRITE.format())
         .expect("ext_write is a process component"),
@@ -288,7 +288,12 @@ fn environment_admitting(tools: Vec<lash_core::ToolDefinition>) -> lash_core::Pr
         .iter()
         .fold(
             lash_core::ProcessEnv::builder(lash::MaxToolCalls::new(16)).component(EXT_WRITE, &()),
-            |env, tool| env.link_tool(EXT_WRITE.tool_provider("tools"), tool),
+            |env, tool| {
+                env.link_tool(
+                    EXT_WRITE.tool_provider(lash::tool_provider_key!("tools")),
+                    tool,
+                )
+            },
         )
         .build()
         .expect("the environment builds")

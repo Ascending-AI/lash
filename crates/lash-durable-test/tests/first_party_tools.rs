@@ -62,7 +62,10 @@ struct CountingFirstPartyProvider {
 
 #[async_trait::async_trait]
 impl ToolProvider for CountingFirstPartyProvider {
-    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
         self.inner.tool_manifests(config)
     }
 
@@ -118,7 +121,9 @@ fn model(
 
 async fn every_registered_first_party_tool_succeeds_from_a_production_cell(tier: Tier) {
     let provider: Arc<dyn ToolProvider> = Arc::new(lash_llm_tools::llm_query_provider());
-    let manifests = provider.tool_manifests(&lash_core::OwnerConfigView::default());
+    let manifests = provider
+        .tool_manifests(&lash_core::OwnerConfigView::default())
+        .expect("fixture provider advertises");
     assert!(
         !manifests.is_empty(),
         "the first-party tool registry must not be empty"
@@ -145,7 +150,7 @@ async fn every_registered_first_party_tool_succeeds_from_a_production_cell(tier:
                     backend.clone(),
                     served::rlm(backend, sim::untimed_workers()),
                 )
-                .tools(lash::hook_key!("tools"), tools)
+                .tools(lash::tool_provider_key!("tools"), tools)
             },
         )
         .await

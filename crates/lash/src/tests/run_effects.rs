@@ -22,8 +22,11 @@ struct EchoTool;
 
 #[async_trait]
 impl ToolProvider for EchoTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![echo_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![echo_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -91,7 +94,7 @@ async fn admitted_plugin_abort_commits_and_settles_input() -> Result<()> {
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(one_tool_call("echo_tool"), mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), Arc::new(EchoTool))
+    .tools(crate::tool_provider_key!("tools"), Arc::new(EchoTool))
     .plugin(abort)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -142,8 +145,11 @@ struct AttachmentPutTool;
 
 #[async_trait]
 impl ToolProvider for AttachmentPutTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![attachment_put_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![attachment_put_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -186,7 +192,10 @@ async fn stream_turn_tool_put_is_bound_to_the_turn_id() -> Result<()> {
     let backend = sqlite_memory_store_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(one_tool_call("attachment_put"), mock_llm_profile_spec())
-        .tools(crate::hook_key!("tools"), Arc::new(AttachmentPutTool))
+        .tools(
+            crate::tool_provider_key!("tools"),
+            Arc::new(AttachmentPutTool),
+        )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse("attachment-owner").expect("nonblank host identity"))

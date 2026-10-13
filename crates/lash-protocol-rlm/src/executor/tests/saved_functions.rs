@@ -200,8 +200,11 @@ pub(super) struct NoTools;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for NoTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_manifest_by_id(
@@ -471,8 +474,11 @@ impl EchoEndsTheTurn {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for EchoEndsTheTurn {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![Self::definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![Self::definition().manifest()])
     }
 
     fn resolve_contract(

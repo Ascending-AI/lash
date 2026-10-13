@@ -249,36 +249,14 @@ impl LashRuntime {
         // (FIG-5324). The head's own config stays the session's: a view holds
         // the config of the run that recorded it, which a later config
         // transaction supersedes (FIG-5897).
-        let mut admitted_capabilities = false;
-        if let Some(bytes) = state.plugin_admission_snapshot() {
-            match services.plugins.adopt_native_view(
-                &bytes,
-                services
-                    .store
-                    .as_ref()
-                    .map(crate::store::SessionStore::fleet_format)
-                    .unwrap_or_else(crate::FleetFormat::current),
-            ) {
-                Ok(()) => {
-                    services.plugins.materialize()?;
-                    admitted_capabilities = true;
-                }
-                Err(crate::PluginError::Format(_)) => {}
-                Err(error) => return Err(error.into()),
-            }
-        }
-        let session = if admitted_capabilities {
-            Some(Self::restore_constructed_session(&services, &mut state).await?)
-        } else {
-            None
-        };
         let resident_session = ResidentSessionContinuity::fresh();
         let turn_phase_probe = host
             .core
             .turn_phase_probes
             .get_for_scope(&crate::SessionScope::new(state.session_id.clone()));
-        Ok(Self {
-            session,
+        let mut runtime = Self {
+            plugin_bindings: None,
+            session: None,
             host,
             services,
             state,
@@ -287,7 +265,41 @@ impl LashRuntime {
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             turn_phase_probe,
             resident_session,
-        })
+        };
+        runtime.bind_plugin_services()?;
+        if let Some(bytes) = runtime.state.plugin_admission_snapshot() {
+            match runtime.services.plugins.adopt_native_view(
+                &bytes,
+                runtime
+                    .services
+                    .store
+                    .as_ref()
+                    .map(crate::store::SessionStore::fleet_format)
+                    .unwrap_or_else(crate::FleetFormat::current),
+            ) {
+                Ok(()) => {
+                    runtime.services.plugins.materialize()?;
+                    runtime.session = Some(
+                        Self::restore_constructed_session(&runtime.services, &mut runtime.state)
+                            .await?,
+                    );
+                }
+                Err(crate::PluginError::Format(_)) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(runtime)
+    }
+
+    fn bind_plugin_services(&mut self) -> Result<(), SessionError> {
+        let services = Arc::new(
+            super::session_manager::RuntimeSessionServices::new(self)
+                .map_err(|error| SessionError::Protocol(error.to_string()))?,
+        );
+        let bindings = services.bindings();
+        self.services.plugins.bind_services(Arc::clone(&bindings))?;
+        self.plugin_bindings = Some(bindings);
+        Ok(())
     }
 
     pub(in crate::runtime) async fn restore_constructed_session(
@@ -334,6 +346,7 @@ impl LashRuntime {
     pub(in crate::runtime) async fn materialize_published_session(
         &mut self,
     ) -> Result<(), SessionError> {
+        self.bind_plugin_services()?;
         self.services.plugins.materialize()?;
         if self.session.is_none() {
             let session =

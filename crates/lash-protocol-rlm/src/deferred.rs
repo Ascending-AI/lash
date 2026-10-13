@@ -65,6 +65,8 @@ pub(crate) fn offer_unavailable_notes(
 pub enum DeferredResolutionError {
     #[error("deferred resolution requires an admitted ExecCode effect address")]
     MissingLinkIdentity,
+    #[error("deferred provider address refused: {0}")]
+    ProviderRegistry(#[source] lash_core::PluginError),
     #[error("failed to commit deferred matches: {0}")]
     Journal(#[source] lash_core::RuntimeEffectControllerError),
     #[error("journaled deferred matches are invalid: {0}")]
@@ -101,14 +103,15 @@ impl DeferredResolutionError {
     pub fn runtime_effect_error(&self) -> lash_core::RuntimeEffectControllerError {
         let code = match self {
             Self::Journal(error) => return error.clone(),
+            Self::ProviderRegistry(error) => return error.clone().into(),
+            Self::Owner { source, .. } => return source.clone().into(),
             Self::ProviderUnserved { .. } => lash_core::RuntimeErrorCode::LashVmCellBindingDrift,
             Self::BindingUnreadable { .. } => {
                 lash_core::RuntimeErrorCode::ExecutionBindingUnreadable
             }
-            Self::MissingLinkIdentity
-            | Self::InvalidJournaledOutcome(_)
-            | Self::Offer { .. }
-            | Self::Owner { .. } => lash_core::RuntimeErrorCode::ToolCatalogResolutionFailed,
+            Self::MissingLinkIdentity | Self::InvalidJournaledOutcome(_) | Self::Offer { .. } => {
+                lash_core::RuntimeErrorCode::ToolCatalogResolutionFailed
+            }
         };
         lash_core::RuntimeEffectControllerError::new(code, self.to_string())
     }
@@ -171,10 +174,20 @@ pub(crate) async fn journal_deferred_matches(
     candidates: BTreeSet<String>,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
 ) -> Result<Option<BTreeMap<String, DeferredMatch>>, DeferredResolutionError> {
-    let provider = match ctx.deferred_provider() {
-        Ok(Some((_, provider))) => std::sync::Arc::clone(provider),
+    let (provider_handle, provider) = match ctx.deferred_provider() {
+        Ok(Some((handle, provider))) => {
+            ctx.owner_config()
+                .validate_provider(handle)
+                .map_err(DeferredResolutionError::ProviderRegistry)?;
+            (handle.clone(), std::sync::Arc::clone(provider))
+        }
         Ok(None) => return Ok(None),
-        Err(provider) => return Err(DeferredResolutionError::ProviderUnserved { provider }),
+        Err(provider) => {
+            ctx.owner_config()
+                .validate_provider(&provider)
+                .map_err(DeferredResolutionError::ProviderRegistry)?;
+            return Err(DeferredResolutionError::ProviderUnserved { provider });
+        }
     };
     let address = ctx
         .parent_invocation()
@@ -194,7 +207,13 @@ pub(crate) async fn journal_deferred_matches(
     let journaled = ctx
         .journaled_deferred_resolution_with(effect_id, operation, move || async move {
             let paths = candidates.iter().map(String::as_str).collect::<Vec<_>>();
-            let cx = DeferredResolveContext::new(&owner, run.as_ref(), &capabilities, &config);
+            let cx = DeferredResolveContext::new(
+                &provider_handle,
+                &owner,
+                run.as_ref(),
+                &capabilities,
+                &config,
+            );
             let mut resolved = provider.resolve(&cx, &paths).await;
             let matches = paths
                 .into_iter()
@@ -207,6 +226,18 @@ pub(crate) async fn journal_deferred_matches(
                     ),
                 })
                 .collect::<Vec<_>>();
+            for matched in &matches {
+                if let Some((provider, _, binding)) = matched.resolved() {
+                    config
+                        .validate_provider(provider)
+                        .map_err(lash_core::RuntimeEffectControllerError::from)?;
+                    if let Some(binding) = binding {
+                        config
+                            .validate_provider(&binding.codec)
+                            .map_err(lash_core::RuntimeEffectControllerError::from)?;
+                    }
+                }
+            }
             let _phase = phase_context
                 .named_phase("codemode_lash_vm.deferred_resolve.after_resolver_return");
             serde_json::to_value(matches).map_err(|error| {
@@ -248,6 +279,14 @@ pub(crate) fn offer_deferred_matches(
         let Some((provider, definition, binding)) = matched.resolved() else {
             continue;
         };
+        ctx.owner_config()
+            .validate_provider(provider)
+            .map_err(DeferredResolutionError::ProviderRegistry)?;
+        if let Some(binding) = binding {
+            ctx.owner_config()
+                .validate_provider(&binding.codec)
+                .map_err(DeferredResolutionError::ProviderRegistry)?;
+        }
         // A binding is read by its codec only in a format the codec
         // declares; one it cannot read parks the cell before anything is
         // offered, and an unserved codec is an unserved provider.
@@ -291,6 +330,41 @@ pub(crate) fn offer_deferred_matches(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A process address returned for a session refuses before the unserved-provider park.
+    #[tokio::test]
+    async fn a_process_provider_handle_is_refused_before_session_provider_lookup() {
+        let host = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+        let handle = lash_core::plugin::ToolProviderHandle::new(
+            lash_core::RegistryKind::Process,
+            "process-tools",
+            lash_core::tool_provider_key!("deferred"),
+        );
+        let surface = lash_core::RecordedSurface::new(Vec::new(), Some(handle.clone()))
+            .expect("a recorded surface");
+        let routes = lash_core::SurfaceTools::of_surface(
+            &surface,
+            std::sync::Arc::new(lash_core::ToolRegistry::default()),
+        );
+        let context = lash_core::testing::TestExecutionContextBuilder::new(host.ports())
+            .routes(routes)
+            .build()
+            .into_runtime();
+        let error = journal_deferred_matches(BTreeSet::new(), &context)
+            .await
+            .expect_err("the process address cannot resolve a session");
+        assert!(
+            matches!(&error, DeferredResolutionError::ProviderRegistry(lash_core::PluginError::ProviderRegistryMismatch { expected: lash_core::RegistryKind::Session, provider }) if provider == &handle)
+        );
+        let controller = error.runtime_effect_error();
+        assert!(
+            matches!(
+                controller.cause,
+                Some(lash_core::RuntimeErrorCause::PluginOperation { .. })
+            ),
+            "the host receives a typed cause"
+        );
+    }
 
     /// The gather step finds every dotted call and nothing that is not
     /// one: a bare call, a member read and a path inside a longer name are

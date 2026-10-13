@@ -835,7 +835,7 @@ async fn a_linked_childs_attachment_is_held_by_the_child_alone(tier: Tier) {
     let deployment = deploy(tier, Vec::new(), |builder| {
         builder
             .serve_test_llm_profile(model, metadata())
-            .tools(lash::hook_key!("tools"), write_attachment_tool())
+            .tools(lash::tool_provider_key!("tools"), write_attachment_tool())
     })
     .await;
     let parent = SessionId::from("attachment-parent");
@@ -1051,7 +1051,7 @@ async fn a_turn_report_sums_two_model_calls_usage(tier: Tier) {
     let deployment = deploy(tier, Vec::new(), |builder| {
         builder
             .serve_test_llm_profile(model, metadata())
-            .tools(lash::hook_key!("tools"), write_attachment_tool())
+            .tools(lash::tool_provider_key!("tools"), write_attachment_tool())
     })
     .await;
     let output = settle(&deployment.core, "report-two-calls", "write the attachment").await;
@@ -1326,7 +1326,7 @@ fn write_component(world: &Arc<World>) -> Arc<dyn lash::process::ProcessComponen
         lash_core::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial(WRITE_COMPONENT.component()),
             lash_core::facade_support::PluginSpec::new()
-                .with_tool_provider(lash::hook_key!("tools"), write_tool(world)),
+                .with_tool_provider(lash::tool_provider_key!("tools"), write_tool(world)),
         )
         .as_component(WRITE_COMPONENT.format())
         .expect("the write tool is a process component"),
@@ -1352,7 +1352,10 @@ fn environment_of(
     tools
         .iter()
         .fold(builder, |builder, (component, tool)| {
-            builder.link_tool(component.tool_provider("tools"), tool)
+            builder.link_tool(
+                component.tool_provider(lash::tool_provider_key!("tools")),
+                tool,
+            )
         })
         .build()
         .expect("the environment builds")
@@ -1885,8 +1888,11 @@ fn isolated_definition() -> lash_core::ToolDefinition {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for IsolatedTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![isolated_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![isolated_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -1938,7 +1944,7 @@ fn isolated_core(backend: &lash::Backend, tools: &Arc<IsolatedTools>) -> lash::L
     rlm_core(backend)
         .serve_test_llm_profile(model, metadata())
         .tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::clone(tools) as Arc<dyn lash_core::ToolProvider>,
         )
 }

@@ -12,8 +12,8 @@
 use std::sync::{Arc, Mutex};
 
 use lash::plugins::{
-    PluginDeclaration, PluginDefinition, PluginError, PluginRegistrar, PromptInput,
-    PromptRenderError, PromptSectionSpec, PromptWrapSpec, PromptWrapTarget, SectionText,
+    PluginDeclaration, PluginError, PluginRegistrar, PromptInput, PromptRenderError,
+    PromptSectionSpec, PromptWrapSpec, PromptWrapTarget, SectionText,
 };
 use lash::prompt::{
     PromptPlacement, PromptPlan, PromptPurpose, PromptSectionId, PromptSectionKey,
@@ -32,9 +32,14 @@ const DIRECT_TEXT: &str = "direct section 6e3a";
 #[derive(Clone)]
 struct Probe;
 
-impl PluginDefinition for Probe {
-    fn declaration() -> PluginDeclaration {
+impl Probe {
+    pub fn declaration() -> PluginDeclaration {
         PluginDeclaration::initial(PLUGIN)
+    }
+}
+impl lash_core::plugin::PluginMetadata for Probe {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -43,16 +48,24 @@ impl lash::plugins::PluginFactory for Probe {
         PLUGIN
     }
 
-    fn build(
-        &self,
-        _: &lash::plugins::PluginSessionContext,
-    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<Probe>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        Probe::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
-fn section(
-    reg: &mut PluginRegistrar,
+fn section<T: Send + Sync + 'static>(
+    reg: &mut PluginRegistrar<T>,
     key: &str,
     purpose: PromptPurpose,
     text: &'static str,
@@ -63,7 +76,11 @@ fn section(
             PromptPlacement::InitialInstructions,
         )
         .purposes([purpose]),
-        Arc::new(move |_: &PromptInput<'_>| Ok::<_, PromptRenderError>(SectionText::text(text))),
+        move |_, _| {
+            Ok(Arc::new(move |_: &PromptInput<'_>| {
+                Ok::<_, PromptRenderError>(SectionText::text(text))
+            }))
+        },
     )
 }
 
@@ -71,23 +88,12 @@ impl lash::plugins::SessionPlugin for Probe {
     fn id(&self) -> &'static str {
         PLUGIN
     }
-
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+}
+impl Probe {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
         section(reg, "turn", PromptPurpose::Turn, TURN_TEXT)?;
-        reg.prompt().wrap(
-            PromptWrapSpec::new(
-                PromptWrapKey::new("summary").expect("valid wrap key"),
-                PromptSectionId::new(
-                    "standard_compaction",
-                    PromptSectionKey::new("summary_instruction").expect("valid section key"),
-                ),
-            ),
-            Arc::new(
-                |_: &PromptInput<'_>, _: PromptWrapTarget<'_>, _: SectionText| {
-                    Ok(SectionText::text(COMPACTION_TEXT))
-                },
-            ),
-        )?;
         section(
             reg,
             "direct",
@@ -96,19 +102,42 @@ impl lash::plugins::SessionPlugin for Probe {
             },
             DIRECT_TEXT,
         )?;
-        let definition = lash::tools::ToolDefinition::raw(
-            "purpose:probe",
-            TOOL,
-            "Asks the model a direct question",
-            serde_json::json!({"type":"object","additionalProperties":false}),
-            serde_json::json!({"type":"string"}),
-        )
-        .map_err(|error| PluginError::Session(error.to_string()))?
-        .with_execution(std::time::Duration::from_secs(120));
-        reg.tools().provider(
-            lash::hook_key!("tools"),
-            Arc::new(StaticToolProvider::new(vec![definition], Probe)),
+
+        reg.prompt().wrap(
+            PromptWrapSpec::new(
+                PromptWrapKey::new("summary").expect("valid wrap key"),
+                PromptSectionId::new(
+                    "standard_compaction",
+                    lash_core::prompt_sections::PromptSectionKey::new("summary_instruction")
+                        .expect("valid section key"),
+                ),
+            ),
+            move |_this, _state| {
+                Ok(Arc::new(
+                    |_: &lash_core::plugin::prompt::PromptInput<'_>,
+                     _: PromptWrapTarget<'_>,
+                     _: lash_core::plugin::prompt::SectionText| {
+                        Ok(lash_core::plugin::prompt::SectionText::text(
+                            COMPACTION_TEXT,
+                        ))
+                    },
+                ))
+            },
         )?;
+
+        reg.tools()
+            .provider(lash::tool_provider_key!("tools"), move |_this, _state| {
+                let definition = lash::tools::ToolDefinition::raw(
+                    "purpose:probe",
+                    TOOL,
+                    "Asks the model a direct question",
+                    serde_json::json!({"type":"object","additionalProperties":false}),
+                    serde_json::json!({"type":"string"}),
+                )
+                .map_err(|error| lash_core::plugin::PluginError::Session(error.to_string()))?
+                .with_execution(std::time::Duration::from_secs(120));
+                Ok(Arc::new(StaticToolProvider::new(vec![definition], Probe)))
+            })?;
         Ok(())
     }
 }

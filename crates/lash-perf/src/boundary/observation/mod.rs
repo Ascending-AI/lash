@@ -127,15 +127,19 @@ fn workload_component(
 ) -> Result<lash::process::StaticProcessComponent> {
     Ok(lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(WORKLOAD_TOOLS.component()),
-        lash::plugins::PluginSpec::new().with_tool_provider(lash::hook_key!("tools"), tools),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider(lash::tool_provider_key!("tools"), tools),
     )
     .as_component(WORKLOAD_TOOLS.format())?)
 }
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Tools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![self.mark.manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![self.mark.manifest()])
     }
     fn resolve_contract(
         &self,
@@ -228,7 +232,7 @@ impl Fleet {
                     );
                     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(Tools::new(meter)?);
                     lash::LashCore::rlm_builder(backend, factory)
-                        .tools(lash::hook_key!("tools"), Arc::clone(&tools))
+                        .tools(lash::tool_provider_key!("tools"), Arc::clone(&tools))
                         .process_component(Arc::new(workload_component(tools)?), WORKLOAD_TOOLS)
                 }
                 Flavor::Chat => lash::LashCore::standard_builder(backend)
@@ -320,7 +324,10 @@ fn environment(marks: bool) -> Result<ProcessEnv> {
     let builder =
         ProcessEnv::builder(lash::MaxToolCalls::new(1_000_000)).component(WORKLOAD_TOOLS, &());
     let builder = if marks {
-        builder.link_tool(WORKLOAD_TOOLS.tool_provider("tools"), &mark_definition()?)
+        builder.link_tool(
+            WORKLOAD_TOOLS.tool_provider(lash::tool_provider_key!("tools")),
+            &mark_definition()?,
+        )
     } else {
         builder
     };

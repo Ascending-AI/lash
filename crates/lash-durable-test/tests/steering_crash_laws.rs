@@ -405,7 +405,7 @@ impl Steering {
                         metadata(),
                     )
                     .tools(
-                        lash::hook_key!("tools"),
+                        lash::tool_provider_key!("tools"),
                         match self.arrival {
                             Arrival::Candidate => {
                                 finish_round(Arc::clone(&self.core), self.arrival)

@@ -94,6 +94,18 @@ macro_rules! hook_key {
     }};
 }
 
+pub use lash_core_store::plugin_registrations::{ToolProviderKey, ToolProviderKeyError};
+
+/// A provider key validated at compile time.
+#[macro_export]
+macro_rules! tool_provider_key {
+    ($key:literal) => {{
+        const KEY: $crate::plugin::ToolProviderKey =
+            $crate::plugin::ToolProviderKey::__literal($key);
+        KEY
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +121,15 @@ mod tests {
             assert!(HookKey::new(invalid).is_err(), "{invalid:?}");
         }
         assert_eq!(crate::hook_key!("literal").as_str(), "literal");
+        assert_eq!(crate::hook_key!("7").as_str(), "7");
+        assert_eq!(
+            ToolProviderKey::new("tools.v2").unwrap().as_str(),
+            "tools.v2"
+        );
+        for invalid in ["7", "0", "", "_tools", "tool:key", "has space"] {
+            assert!(
+                matches!(ToolProviderKey::new(invalid), Err(ToolProviderKeyError::InvalidGrammar { key }) if key == invalid)
+            );
+        }
     }
 }

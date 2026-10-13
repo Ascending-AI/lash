@@ -20,8 +20,11 @@ fn tool() -> crate::ToolDefinition {
 struct Answer(crate::ToolDefinition);
 #[async_trait::async_trait]
 impl crate::ToolProvider for Answer {
-    fn tool_manifests(&self, _: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
-        vec![self.0.manifest.clone()]
+    fn tool_manifests(
+        &self,
+        _: &crate::OwnerConfigView,
+    ) -> Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        Ok(vec![self.0.manifest.clone()])
     }
     fn resolve_contract(
         &self,
@@ -100,7 +103,11 @@ async fn capture_keeps_recorded_provider_and_surface() {
     ));
     let surface = SurfaceTools::of_entries(
         [crate::SurfaceEntry {
-            provider: RECORDED.tool_provider("tools"),
+            provider: crate::plugin::ToolProviderHandle::new(
+                crate::RegistryKind::Session,
+                RECORDED.component(),
+                crate::tool_provider_key!("tools"),
+            ),
             definition: tool(),
         }],
         Arc::new(crate::ToolRegistry::default()),
@@ -121,7 +128,10 @@ async fn capture_keeps_recorded_provider_and_surface() {
     );
     let captured = cx.capture(&run, &surface, components(true)).await.unwrap();
     let link = &captured.effects()[&crate::EffectName::new("search.run").unwrap()];
-    assert_eq!(link.provider, RECORDED.tool_provider("tools"));
+    assert_eq!(
+        link.provider,
+        RECORDED.tool_provider(crate::tool_provider_key!("tools"))
+    );
     assert_eq!(link.surface, crate::ProcessSurface::of(&tool()));
     let engines = registry(true, true);
     let cx = ProcessEnvCx::new(
@@ -197,7 +207,10 @@ async fn an_exact_fit_is_required_before_a_launch_is_held() {
     let effect = crate::EffectName::new("search.run").unwrap();
     let env = ProcessEnv::builder(crate::MaxToolCalls::new(4))
         .component(RECORDED, &())
-        .link_tool(RECORDED.tool_provider("tools"), &wider)
+        .link_tool(
+            RECORDED.tool_provider(crate::tool_provider_key!("tools")),
+            &wider,
+        )
         .build()
         .unwrap();
     let performed = engines

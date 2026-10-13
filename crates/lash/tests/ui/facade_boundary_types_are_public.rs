@@ -19,10 +19,9 @@ use lash::persistence::{
 };
 use lash::plugins::{
     AfterToolContributions, AfterToolDecision, BeforeToolDecision, CompactionContext,
-    ContextCompaction, ContextCompactor, ContextError, PluginHost, PluginSpec, PluginSpecBuilder,
-    PluginSpecFactory, ToolArgsCheckHook, ToolArgsCheckInput, ToolArgsTransformHook,
-    ToolArgsTransformInput, ToolCatalogContribution, ToolResultCheckHook, ToolResultCheckInput,
-    ToolResultTransformHook, ToolResultTransformInput,
+    ContextCompaction, ContextCompactor, ContextError, PluginHost, PluginSpec, ToolArgsCheckHook,
+    ToolArgsCheckInput, ToolArgsTransformHook, ToolArgsTransformInput, ToolCatalogContribution,
+    ToolResultCheckHook, ToolResultCheckInput, ToolResultTransformHook, ToolResultTransformInput,
 };
 use lash::provider::{ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy};
 use lash::tools::{ToolCallRecord, ToolOutputContract};
@@ -82,17 +81,15 @@ fn plugin_types_are_nameable() -> PluginHost {
         let _ = input.final_result.outcome.clone();
         Box::pin(async move { Ok(AfterToolContributions::from(AfterToolDecision::Allow)) })
     });
-    let builder: PluginSpecBuilder = Arc::new(move |_ctx| {
-        Ok(PluginSpec::new()
-            .with_tool_args_transform(lash::hook_key!("normalize"), Arc::clone(&normalize))
-            .with_tool_args_check(lash::hook_key!("policy"), Arc::clone(&policy))
-            .with_tool_result_transform(lash::hook_key!("recover"), Arc::clone(&recover))
-            .with_tool_result_check(lash::hook_key!("audit"), Arc::clone(&audit)))
-    });
+    let spec = PluginSpec::new()
+        .with_tool_args_transform(lash::hook_key!("normalize"), normalize)
+        .with_tool_args_check(lash::hook_key!("policy"), policy)
+        .with_tool_result_transform(lash::hook_key!("recover"), recover)
+        .with_tool_result_check(lash::hook_key!("audit"), audit);
     PluginHost::new(
-        vec![Arc::new(PluginSpecFactory::new(
+        vec![Arc::new(lash::plugins::StaticPluginFactory::new(
             lash::plugins::PluginDeclaration::initial("facade"),
-            builder,
+            spec,
         ))],
         lash_core::ExecutionBudgets::recommended(),
         lash::runtime::TraceRuntime::new(Arc::new(lash::runtime::SystemClock)),
@@ -159,7 +156,7 @@ fn builder_accepts_tools_and_plugins(
     plugin: Arc<dyn lash::plugins::PluginFactory>,
 ) -> lash::LashCoreBuilder {
     builder
-        .tools(lash::hook_key!("tools"), tools)
+        .tools(lash::tool_provider_key!("tools"), tools)
         .plugin(plugin)
 }
 

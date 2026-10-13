@@ -525,8 +525,11 @@ impl DeclaringProbe {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for DeclaringProbe {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![probe_tool().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![probe_tool().manifest()])
     }
 
     fn resolve_contract(
@@ -662,11 +665,11 @@ impl lash_core::plugin::SessionPlugin for FactsPlugin {
     fn id(&self) -> &'static str {
         FACTS
     }
-
-    fn register(
-        &self,
-        _reg: &mut lash_core::plugin::PluginRegistrar,
-    ) -> Result<(), lash_core::PluginError> {
+}
+impl FactsPlugin {
+    fn declare(
+        _reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
         Ok(())
     }
 }
@@ -676,28 +679,57 @@ impl lash_core::facade_support::PluginFactory for FactsFactory {
         FACTS
     }
 
-    fn register_config(
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_core::plugin::PluginError,
+        > = {
+            let mut reg = lash_core::plugin::PluginRegistrar::<FactsPlugin>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            FactsPlugin::declare(&mut reg)?;
+            let id = self.id();
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |ctx, _state| {
+                    self.builds.lock_recover().push((
+                        ctx.owner.to_string(),
+                        ctx.plugin_config.config.get(FACTS).cloned(),
+                    ));
+                    Ok(Arc::new(FactsPlugin))
+                },
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = lash_core::plugin::ConfigRegistrar::new(
+            lash_core::plugin::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
+    }
+}
+impl FactsFactory {
+    pub fn declare_configuration(
         &self,
         registrar: &mut lash_core::ConfigRegistrar,
     ) -> Result<(), lash_core::ConfigRegistrationError> {
         registrar.owner(FactsOwner)
     }
-
-    fn build(
-        &self,
-        ctx: &lash_core::plugin::PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
-        self.builds.lock_recover().push((
-            ctx.owner.to_string(),
-            ctx.plugin_config.config.get(FACTS).cloned(),
-        ));
-        Ok(Arc::new(FactsPlugin))
-    }
 }
 
-impl lash_core::plugin::PluginDefinition for FactsFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl FactsFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(FACTS)
+    }
+}
+impl lash_core::plugin::PluginMetadata for FactsFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -817,10 +849,12 @@ impl World {
                     if shape.producer == Producer::PromiseAll {
                         builder
                     } else {
-                        builder.tools(lash::hook_key!("tools"), probe).tools(
-                            lash::hook_key!("tools-2"),
-                            Arc::new(lash_core_execution::testing::FixtureTools::new()),
-                        )
+                        builder
+                            .tools(lash::tool_provider_key!("tools"), probe)
+                            .tools(
+                                lash::tool_provider_key!("tools-2"),
+                                Arc::new(lash_core_execution::testing::FixtureTools::new()),
+                            )
                     }
                 },
             )

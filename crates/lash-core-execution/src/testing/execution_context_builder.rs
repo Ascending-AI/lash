@@ -10,15 +10,17 @@ use super::{EmptyToolProvider, MockSessionManager};
 pub const TEST_TOOLS_PLUGIN_ID: &str = "test_tools";
 
 /// The key a test context registers its provider under.
-pub const TEST_TOOLS_PROVIDER_KEY: crate::plugin::HookKey = crate::hook_key!("tools");
+pub const TEST_TOOLS_PROVIDER_KEY: crate::plugin::ToolProviderKey =
+    crate::tool_provider_key!("tools");
 
 /// The identity of a test context's provider: what a grant of one of its
 /// tools names.
 #[must_use]
-pub fn test_tools_provider() -> crate::plugin::PluginCallbackIdentity {
-    crate::plugin::PluginCallbackIdentity::tool_provider(
+pub fn test_tools_provider() -> crate::plugin::ToolProviderHandle {
+    crate::plugin::ToolProviderHandle::new(
+        crate::plugin::RegistryKind::Session,
         TEST_TOOLS_PLUGIN_ID,
-        TEST_TOOLS_PROVIDER_KEY.as_str(),
+        TEST_TOOLS_PROVIDER_KEY,
     )
 }
 
@@ -239,7 +241,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             tool_catalog: crate::ToolCatalog::from_tool_definitions(Vec::new()),
             routes: None,
             deferred: None,
-            processes: Arc::new(crate::UnavailableProcessService),
+            processes: Arc::new(crate::plugin::ServiceBindings::default()),
             process_engines: match artifact_ports {
                 Some(ports) => process_engines.with_artifact_ports(ports),
                 None => process_engines,
@@ -315,11 +317,10 @@ impl<'run> TestExecutionContextBuilder<'run> {
     /// through it.
     pub fn deferred_provider(
         mut self,
-        owner: &str,
-        key: &str,
+        handle: crate::plugin::ToolProviderHandle,
         provider: Arc<dyn crate::DeferredToolProvider>,
     ) -> Self {
-        self.deferred = Some((crate::ProviderKey::tool_provider(owner, key), provider));
+        self.deferred = Some((handle, provider));
         self
     }
 
@@ -340,6 +341,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
         let entries = self
             .provider
             .tool_manifests(&config)
+            .expect("fixture provider advertises")
             .into_iter()
             .filter_map(|manifest| {
                 let contract = self.provider.resolve_contract(&manifest.name, &config)?;

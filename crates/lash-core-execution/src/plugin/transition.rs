@@ -364,7 +364,8 @@ impl PluginSession {
         if let Some(config) = config {
             plugin_config.config = Arc::new(config);
         }
-        self.host
+        let built = self
+            .host
             .isolated_registry()
             .defer_session(PluginSessionRequest {
                 owner: self.owner.clone(),
@@ -373,7 +374,9 @@ impl PluginSession {
                     config: SessionAuthorityContext { plugin_config },
                 },
                 tool_catalog_overlay: self.tool_catalog_overlay.clone(),
-            })
+            })?;
+        built.bind_services(self.service_bindings())?;
+        Ok(built)
     }
 
     pub fn native_view(&self, fleet: crate::FleetFormat) -> Result<Option<Arc<[u8]>>, PluginError> {

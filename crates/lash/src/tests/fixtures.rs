@@ -11,20 +11,30 @@ impl PluginFactory for SurfacePluginFactory {
         "surface_test"
     }
 
-    fn build(
-        &self,
-        _ctx: &lash_core::facade_support::PluginSessionContext,
-    ) -> std::result::Result<
-        Arc<dyn lash_core::facade_support::SessionPlugin>,
-        lash_core::PluginError,
-    > {
-        Ok(Arc::new(SurfacePlugin))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<SurfacePlugin>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        SurfacePlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(SurfacePlugin)),
+        ))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for SurfacePluginFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl SurfacePluginFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("surface_test")
+    }
+}
+impl lash_core::plugin::PluginMetadata for SurfacePluginFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -34,26 +44,28 @@ impl lash_core::facade_support::SessionPlugin for SurfacePlugin {
     fn id(&self) -> &'static str {
         "surface_test"
     }
-
-    fn register(
-        &self,
-        reg: &mut lash_core::facade_support::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+}
+impl SurfacePlugin {
+    fn declare(
+        reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
         reg.output().response(
             crate::hook_key!("output-response-1"),
             None,
-            Arc::new(|ctx| {
-                Box::pin(async move {
-                    Ok(lash_core::facade_support::AssistantResponseTransform {
-                        response: ctx.response,
-                        events: vec![lash_core::PluginRuntimeEvent::Status {
-                            key: "surface".to_string(),
-                            label: "working".to_string(),
-                            detail: Some("details".to_string()),
-                        }],
+            move |_this, _state| {
+                Ok(Arc::new(|ctx| {
+                    Box::pin(async move {
+                        Ok(lash_core::facade_support::AssistantResponseTransform {
+                            response: ctx.response,
+                            events: vec![lash_core::PluginRuntimeEvent::Status {
+                                key: "surface".to_string(),
+                                label: "working".to_string(),
+                                detail: Some("details".to_string()),
+                            }],
+                        })
                     })
-                })
-            }),
+                }))
+            },
         )?;
         Ok(())
     }
@@ -64,8 +76,11 @@ pub(crate) struct LongTextTools;
 
 #[async_trait]
 impl ToolProvider for LongTextTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![long_text_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![long_text_tool_definition().manifest()])
     }
 
     fn resolve_contract(

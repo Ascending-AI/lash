@@ -79,9 +79,14 @@ struct FaultingCatalog {
     faults: Arc<Faults>,
 }
 
-impl lash::plugins::PluginDefinition for FaultingCatalog {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl FaultingCatalog {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         lash::plugins::PluginDeclaration::initial(PLUGIN)
+    }
+}
+impl lash::plugins::PluginMetadata for FaultingCatalog {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -90,11 +95,19 @@ impl lash::plugins::PluginFactory for FaultingCatalog {
         PLUGIN
     }
 
-    fn build(
-        &self,
-        _: &lash::plugins::PluginSessionContext,
-    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<FaultingCatalog>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        FaultingCatalog::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -102,19 +115,22 @@ impl lash::plugins::SessionPlugin for FaultingCatalog {
     fn id(&self) -> &'static str {
         PLUGIN
     }
-
-    fn register(
-        &self,
-        reg: &mut lash::plugins::PluginRegistrar,
-    ) -> Result<(), lash::plugins::PluginError> {
-        let faults = Arc::clone(&self.faults);
+}
+impl FaultingCatalog {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
         reg.tool_catalog().contribute(
             lash::hook_key!("faulting-catalog"),
-            Arc::new(move |_| {
-                faults.run()?;
-                Ok(Default::default())
-            }),
-        )
+            move |this, _state| {
+                let faults = Arc::clone(&this.faults);
+                Ok(Arc::new(move |_| {
+                    faults.run()?;
+                    Ok(Default::default())
+                }))
+            },
+        )?;
+        Ok(())
     }
 }
 

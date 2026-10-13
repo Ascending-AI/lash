@@ -25,11 +25,10 @@ pub fn native_format_two_component(id: &'static str) -> crate::plugin::ProcessCo
             Ok(())
         }
 
-        fn build(
-            &self,
-            _: &crate::plugin::ProcessComponentContext<'_>,
-        ) -> Result<crate::plugin::ProcessComponentSpec, crate::PluginError> {
-            Ok(crate::plugin::ProcessComponentSpec::default())
+        fn recipe(
+            self: std::sync::Arc<Self>,
+        ) -> Result<crate::plugin::ProcessRecipe, crate::PluginError> {
+            crate::plugin::ProcessComponentSpec::new().recipe(self.declaration().id.as_str())
         }
     }
 

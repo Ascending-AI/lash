@@ -39,8 +39,7 @@ pub use replay::{
 #[derive(Clone)]
 pub struct ObservationPluginServices {
     plugins: QueryPlugins,
-    read: Arc<dyn crate::plugin::SessionReadService>,
-    process_read: Arc<dyn crate::plugin::ProcessReadService>,
+    bindings: Arc<crate::plugin::ServiceBindings>,
 }
 
 /// The plugins a query runs on: the session's own, when a run built them on
@@ -86,9 +85,14 @@ impl QueryPlugins {
         name: &str,
         args: serde_json::Value,
         session_id: Option<SessionId>,
-        read: Arc<dyn crate::plugin::SessionReadService>,
-        process_read: Arc<dyn crate::plugin::ProcessReadService>,
+        bindings: Arc<crate::plugin::ServiceBindings>,
     ) -> Result<(String, serde_json::Value), crate::PluginOperationInvokeError> {
+        let owner = match self {
+            Self::Built(plugins) | Self::Recorded { plugins, .. } | Self::Head(plugins) => plugins,
+        };
+        owner
+            .bind_services(Arc::clone(&bindings))
+            .map_err(|error| crate::PluginOperationInvokeError::Failed(Box::new(error.into())))?;
         let built = match self {
             Self::Built(plugins) => Ok(Arc::clone(plugins)),
             Self::Recorded {
@@ -104,7 +108,7 @@ impl QueryPlugins {
             ))
         })?;
         plugins
-            .query_plugin(name, args, session_id, true, read, process_read)
+            .query_plugin(name, args, session_id, true, bindings)
             .await
     }
 }
@@ -163,8 +167,7 @@ impl RuntimeObservation {
             match runtime.runtime_session_services() {
                 Ok(services) => Some(ObservationPluginServices {
                     plugins,
-                    read: services.read_service(),
-                    process_read: services.process_read_service(),
+                    bindings: services.bindings(),
                 }),
                 Err(err) => {
                     tracing::warn!(
@@ -245,13 +248,7 @@ impl RuntimeObservation {
         };
         services
             .plugins
-            .query(
-                name,
-                args,
-                session_id,
-                Arc::clone(&services.read),
-                Arc::clone(&services.process_read),
-            )
+            .query(name, args, session_id, Arc::clone(&services.bindings))
             .await
     }
 

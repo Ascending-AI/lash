@@ -57,9 +57,17 @@ impl PluginFactory for FormatPlugin {
         }
         Ok(value)
     }
-    fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let id = lash_core::plugin::PluginFactory::id(self.as_ref());
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            lash_core::plugin::PluginRegistrar::<Self>::new(lash_core::plugin::PluginFactory::id(
+                self.as_ref(),
+            )),
+            move |_, _| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -79,14 +87,6 @@ impl crate::plugin::PluginMetadata for FormatPlugin {
 impl SessionPlugin for FormatPlugin {
     fn id(&self) -> &'static str {
         self.id
-    }
-    fn register(&self, _: &mut PluginRegistrar) -> Result<(), PluginError> {
-        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(())
-    }
-    fn session_ready(&self, _: SessionReadyContext) -> Result<(), PluginError> {
-        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(())
     }
 }
 
@@ -266,8 +266,8 @@ pub(super) async fn plugin_format_boundary(
     replay.materialize().unwrap();
     assert_eq!(
         calls.load(std::sync::atomic::Ordering::SeqCst),
-        8,
-        "two capability reconstructions run build/register/ready, with no converter replay"
+        2,
+        "capability reconstruction never repeats committed format conversion"
     );
     assert_eq!(decoded.export_state(), replay.export_state());
     assert_eq!(

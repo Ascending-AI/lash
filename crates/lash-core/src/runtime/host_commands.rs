@@ -341,10 +341,7 @@ impl LashRuntime {
                         args,
                         Some(session_id.clone()),
                         true,
-                        services.state_service(),
-                        services.lifecycle_service(),
-                        services.graph_service(),
-                        services.process_service(),
+                        services.bindings(),
                     )
                     .await
             }
@@ -357,10 +354,7 @@ impl LashRuntime {
                     args,
                     Some(session_id.clone()),
                     true,
-                    services.state_service(),
-                    services.lifecycle_service(),
-                    services.graph_service(),
-                    services.process_service(),
+                    services.bindings(),
                     operation_controller.clone(),
                     stop.clone(),
                 );

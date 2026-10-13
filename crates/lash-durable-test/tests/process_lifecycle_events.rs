@@ -121,7 +121,7 @@ fn core(
         .build()
         .expect("the backend assembles");
     let core = lash::LashCore::standard_builder(backend.clone())
-        .tools(lash::hook_key!("tools"), write_tool(world))
+        .tools(lash::tool_provider_key!("tools"), write_tool(world))
         .process_component(
             lash_core::testing::tool_component(WRITE_COMPONENT, write_tool(world)),
             WRITE_COMPONENT,
@@ -389,7 +389,10 @@ fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineActi
 fn environment() -> lash_core::ProcessEnv {
     lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(16))
         .component(WRITE_COMPONENT, &())
-        .link_tool(WRITE_COMPONENT.tool_provider("tools"), &write_definition())
+        .link_tool(
+            WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools")),
+            &write_definition(),
+        )
         .build()
         .expect("the environment builds")
 }

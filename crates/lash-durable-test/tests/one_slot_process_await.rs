@@ -44,7 +44,7 @@ async fn world(
                 ),
             ));
         match tools {
-            Some(tools) => builder.tools(lash::hook_key!("tools"), tools),
+            Some(tools) => builder.tools(lash::tool_provider_key!("tools"), tools),
             None => builder,
         }
     })

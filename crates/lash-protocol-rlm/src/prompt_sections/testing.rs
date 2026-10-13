@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use lash_core::plugin::prompt::{OfferedTools, PromptCall, PromptCatalog, PromptModel};
-use lash_core::plugin::{PluginError, PluginRegistrar, SessionPlugin};
+use lash_core::plugin::SessionPlugin;
+use lash_core::plugin::prompt::{OfferedTools, PromptCall, PromptModel};
 use lash_core::prompt_sections::{PromptPlan, PromptPurpose};
 use lash_core::testing::prompt::{ComposedPrompt, PromptCutParts};
 use lash_rlm_types::RlmCreateExtras;
@@ -46,18 +46,23 @@ impl SessionPlugin for RlmSections {
     fn id(&self) -> &'static str {
         RLM_PROTOCOL_PLUGIN_ID
     }
+}
 
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        register_sections(
-            reg,
-            RlmSectionBehaviour {
-                dialect: Arc::clone(&self.dialect),
-                channel: self.channel,
-                prompt_features: self.prompt_features,
-                discovery: self.discovery.clone(),
-                budget_tokens: self.budget_tokens,
-            },
-        )
+impl RlmSections {
+    pub(crate) fn recipe(self) -> lash_core::plugin::PluginRecipe {
+        let mut reg = lash_core::plugin::PluginRegistrar::<Self>::new(RLM_PROTOCOL_PLUGIN_ID);
+        register_sections(&mut reg, |owner| RlmSectionBehaviour {
+            dialect: Arc::clone(&owner.dialect),
+            channel: owner.channel,
+            prompt_features: owner.prompt_features,
+            discovery: owner.discovery.clone(),
+            budget_tokens: owner.budget_tokens,
+        })
+        .expect("the sections declare");
+        let owner = Arc::new(self);
+        lash_core::plugin::PluginRecipe::new(RLM_PROTOCOL_PLUGIN_ID, reg, move |_, _| {
+            Ok(Arc::clone(&owner))
+        })
     }
 }
 
@@ -89,7 +94,7 @@ impl Default for Call {
 }
 
 /// Compose `call` over the sections `plugins` register, in order.
-pub(crate) fn compose(plugins: &[Arc<dyn SessionPlugin>], call: Call) -> ComposedPrompt {
+pub(crate) fn compose(plugins: &[lash_core::plugin::PluginRecipe], call: Call) -> ComposedPrompt {
     let recorded = RlmRecordedConfig::read(&RlmRecordedConfig::for_testing(call.options))
         .expect("the recorded namespace reads")
         .expect("the recorded namespace is present");
@@ -124,7 +129,8 @@ pub(crate) fn compose(plugins: &[Arc<dyn SessionPlugin>], call: Call) -> Compose
         },
         call.facts.map(|facts| Arc::new(facts) as _),
     );
-    let catalog = PromptCatalog::of_plugins(plugins).expect("the sections register");
+    let catalog =
+        lash_core::testing::prompt_catalog_from_recipes(plugins).expect("the sections register");
     tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
@@ -140,5 +146,5 @@ pub(crate) fn compose(plugins: &[Arc<dyn SessionPlugin>], call: Call) -> Compose
 
 /// The RLM sections alone.
 pub(crate) fn compose_rlm(sections: RlmSections, call: Call) -> ComposedPrompt {
-    compose(&[Arc::new(sections)], call)
+    compose(&[sections.recipe()], call)
 }

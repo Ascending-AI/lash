@@ -200,7 +200,7 @@ async fn a_frame_switch_through_send_completes_and_its_follow_on_runs_next() {
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .tools(
-        crate::hook_key!("tools"),
+        crate::tool_provider_key!("tools"),
         Arc::new(crate::tools::StaticToolProvider::new(
             vec![definition],
             SwitchFrame,
@@ -281,12 +281,17 @@ fn account_tool(name: &str) -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for AccountTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        self.names
-            .lock_recover()
-            .iter()
-            .map(|name| account_tool(name).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok({
+            self.names
+                .lock_recover()
+                .iter()
+                .map(|name| account_tool(name).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -353,7 +358,7 @@ impl AccountCore {
         ))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .tools(
-            crate::hook_key!("tools"),
+            crate::tool_provider_key!("tools"),
             Arc::new(AccountTools {
                 names: Arc::clone(&accounts),
             }),
@@ -612,7 +617,7 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
                 ))
                 .serve_test_llm_profile(provider.clone(), mock_llm_profile_spec())
                 .tools(
-                    crate::hook_key!("tools"),
+                    crate::tool_provider_key!("tools"),
                     Arc::new(lash_core::testing::FixtureTools),
                 )
                 .build(lash_core::LeaseOwnerIdentity::opaque(
@@ -978,18 +983,30 @@ impl PluginFactory for HostSections {
         "host_sections"
     }
 
-    fn build(
-        &self,
-        _ctx: &lash_core::plugin::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
-    {
-        Ok(Arc::new(HostSections))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<HostSections>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        HostSections::declare(&mut reg)?;
+        let id = self.id();
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(HostSections)),
+        ))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for HostSections {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl HostSections {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("host_sections")
+    }
+}
+impl lash_core::plugin::PluginMetadata for HostSections {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -997,27 +1014,39 @@ impl lash_core::plugin::SessionPlugin for HostSections {
     fn id(&self) -> &'static str {
         "host_sections"
     }
-
-    fn register(
-        &self,
-        reg: &mut lash_core::plugin::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        use crate::plugins::{PromptInput, PromptSectionSpec, SectionText};
-        use crate::prompt::{PromptPlacement, PromptSectionKey};
+}
+impl HostSections {
+    fn declare(
+        reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
         reg.prompt().section(
-            PromptSectionSpec::new(
-                PromptSectionKey::new("intro").expect("valid section key"),
-                PromptPlacement::InitialInstructions,
+            crate::plugins::PromptSectionSpec::new(
+                crate::prompt::PromptSectionKey::new("intro").expect("valid section key"),
+                crate::prompt::PromptPlacement::InitialInstructions,
             ),
-            Arc::new(|_: &PromptInput<'_>| Ok(SectionText::text("You are the release desk."))),
+            move |_this, _state| {
+                Ok(Arc::new(|_: &crate::plugins::PromptInput<'_>| {
+                    Ok(crate::plugins::SectionText::text(
+                        "You are the release desk.",
+                    ))
+                }))
+            },
         )?;
+
         reg.prompt().section(
-            PromptSectionSpec::new(
-                PromptSectionKey::new("release").expect("valid section key"),
-                PromptPlacement::CurrentContext,
+            crate::plugins::PromptSectionSpec::new(
+                crate::prompt::PromptSectionKey::new("release").expect("valid section key"),
+                crate::prompt::PromptPlacement::CurrentContext,
             ),
-            Arc::new(|_: &PromptInput<'_>| Ok(SectionText::text("Release 4.2 freezes on Friday."))),
-        )
+            move |_this, _state| {
+                Ok(Arc::new(|_: &crate::plugins::PromptInput<'_>| {
+                    Ok(crate::plugins::SectionText::text(
+                        "Release 4.2 freezes on Friday.",
+                    ))
+                }))
+            },
+        )?;
+        Ok(())
     }
 }
 
@@ -1045,7 +1074,7 @@ async fn a_turns_request_carries_its_sections_where_they_are_placed() {
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .tools(
-        crate::hook_key!("tools"),
+        crate::tool_provider_key!("tools"),
         Arc::new(AccountTools {
             names: Arc::new(StdMutex::new(vec!["ask".to_owned()])),
         }),
@@ -1107,18 +1136,30 @@ impl PluginFactory for BrokenSection {
         "broken_section"
     }
 
-    fn build(
-        &self,
-        _ctx: &lash_core::plugin::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
-    {
-        Ok(Arc::new(BrokenSection))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<BrokenSection>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        BrokenSection::declare(&mut reg)?;
+        let id = self.id();
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(BrokenSection)),
+        ))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for BrokenSection {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl BrokenSection {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("broken_section")
+    }
+}
+impl lash_core::plugin::PluginMetadata for BrokenSection {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -1126,24 +1167,25 @@ impl lash_core::plugin::SessionPlugin for BrokenSection {
     fn id(&self) -> &'static str {
         "broken_section"
     }
-
-    fn register(
-        &self,
-        reg: &mut lash_core::plugin::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        use crate::plugins::{PromptInput, PromptRenderError, PromptSectionSpec, SectionText};
-        use crate::prompt::{PromptPlacement, PromptSectionKey};
+}
+impl BrokenSection {
+    fn declare(
+        reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
         reg.prompt().section(
-            PromptSectionSpec::new(
-                PromptSectionKey::new("calendar").expect("valid section key"),
-                PromptPlacement::CurrentContext,
+            crate::plugins::PromptSectionSpec::new(
+                crate::prompt::PromptSectionKey::new("calendar").expect("valid section key"),
+                crate::prompt::PromptPlacement::CurrentContext,
             ),
-            Arc::new(|_: &PromptInput<'_>| {
-                Err::<SectionText, _>(PromptRenderError::new(
-                    "the release calendar is unreachable",
-                ))
-            }),
-        )
+            move |_this, _state| {
+                Ok(Arc::new(|_: &crate::plugins::PromptInput<'_>| {
+                    Err::<crate::plugins::SectionText, _>(crate::plugins::PromptRenderError::new(
+                        "the release calendar is unreachable",
+                    ))
+                }))
+            },
+        )?;
+        Ok(())
     }
 }
 

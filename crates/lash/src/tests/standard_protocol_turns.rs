@@ -159,8 +159,11 @@ fn status_tool() -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for CountingTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![status_tool().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![status_tool().manifest()])
     }
 
     fn resolve_contract(
@@ -193,7 +196,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
         mock_llm_profile_spec(),
     )
     .tools(
-        crate::hook_key!("tools"),
+        crate::tool_provider_key!("tools"),
         Arc::new(CountingTools {
             executed: Arc::clone(&executed),
         }),
@@ -321,11 +324,16 @@ fn discovery_tool(name: &str, inline: bool) -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for DiscoveryTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![
-            discovery_tool("tools.search", true).manifest(),
-            discovery_tool("catalog_only", false).manifest(),
-        ]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok({
+            vec![
+                discovery_tool("tools.search", true).manifest(),
+                discovery_tool("catalog_only", false).manifest(),
+            ]
+        })
     }
 
     fn resolve_contract(
@@ -408,7 +416,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
         mock_llm_profile_spec(),
     )
     .tools(
-        crate::hook_key!("tools"),
+        crate::tool_provider_key!("tools"),
         Arc::new(DiscoveryTools {
             admitted: Arc::clone(&admitted),
             refused: Arc::clone(&refused),
@@ -589,8 +597,11 @@ fn lookup_tool() -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for LookupTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![lookup_tool().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![lookup_tool().manifest()])
     }
 
     fn resolve_contract(
@@ -630,7 +641,7 @@ async fn persisted_provider_parts(
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), Arc::new(LookupTool))
+    .tools(crate::tool_provider_key!("tools"), Arc::new(LookupTool))
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core");
     let session = core

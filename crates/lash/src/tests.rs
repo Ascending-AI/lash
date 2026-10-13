@@ -331,8 +331,11 @@ struct AppTools;
 
 #[async_trait]
 impl ToolProvider for AppTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![app_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![app_tool_definition().manifest()])
     }
 
     fn resolve_contract(

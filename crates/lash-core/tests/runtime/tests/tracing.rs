@@ -42,8 +42,11 @@ impl SchemaChangingTool {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for SchemaChangingTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![self.definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![self.definition().manifest()])
     }
 
     fn resolve_contract(
@@ -104,8 +107,11 @@ struct PendingEchoTool {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for PendingEchoTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![pending_echo_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![pending_echo_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -169,32 +175,34 @@ fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
 /// adopted snapshot while resident services await reload, without a warning.
 #[tokio::test]
 async fn durable_observation_skips_invalidated_services_without_warning() {
-    let (_, capture) = trace_capture::capturing(|| async {
-        let backend = sqlite_memory_store_backend().await;
-        let mut runtime = runtime_with_plugins_and_tools(
-            &backend,
-            Vec::new(),
-            Arc::new(EmptyTools),
-            mock_provider(Vec::new()),
-        )
-        .await;
-        runtime.invalidate_resident_session_state();
-        let handle = RuntimeHandle::new(runtime);
-        assert!(handle.observe().plugin_services.is_none());
-        let writer = handle.writer();
-        let mut runtime = writer.lock().await;
-        runtime
-            .reload_invalidated_resident_session_state()
-            .await
-            .expect("reload");
-        handle.adopt_observation_from(&runtime);
-        assert!(
-            matches!(
-                runtime.resident_session.validity(),
-                ResidentSessionState::Valid
-            ),
-            "reload adopts the durable head"
-        );
+    let (_, capture) = trace_capture::capturing(|| {
+        Box::pin(async {
+            let backend = sqlite_memory_store_backend().await;
+            let mut runtime = runtime_with_plugins_and_tools(
+                &backend,
+                Vec::new(),
+                Arc::new(EmptyTools),
+                mock_provider(Vec::new()),
+            )
+            .await;
+            runtime.invalidate_resident_session_state();
+            let handle = RuntimeHandle::new(runtime);
+            assert!(handle.observe().plugin_services.is_none());
+            let writer = handle.writer();
+            let mut runtime = writer.lock().await;
+            runtime
+                .reload_invalidated_resident_session_state()
+                .await
+                .expect("reload");
+            handle.adopt_observation_from(&runtime);
+            assert!(
+                matches!(
+                    runtime.resident_session.validity(),
+                    ResidentSessionState::Valid
+                ),
+                "reload adopts the durable head"
+            );
+        })
     })
     .await;
     let warnings: Vec<_> = capture

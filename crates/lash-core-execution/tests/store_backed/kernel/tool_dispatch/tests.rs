@@ -56,8 +56,11 @@ struct ExactDispatchTools {
 
 #[async_trait::async_trait]
 impl ToolProvider for ExactDispatchTools {
-    fn tool_manifests(&self, _config: &crate::plugin::OwnerConfigView) -> Vec<crate::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &crate::plugin::OwnerConfigView,
+    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_manifest(
@@ -106,7 +109,7 @@ fn provider_plugins(
     crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
         lash_core_execution::plugin::PluginDeclaration::initial("test_tools"),
         crate::PluginSpec::new()
-            .with_tool_provider(lash_core_execution::hook_key!("tools"), provider),
+            .with_tool_provider(lash_core_execution::tool_provider_key!("tools"), provider),
     ))])
     .build_session(PluginSessionRequest::creation("root", authority))
     .expect("plugin session")
@@ -131,7 +134,7 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
-        processes: Arc::new(crate::UnavailableProcessService),
+        processes: Arc::new(crate::plugin::ServiceBindings::default()),
         process_engines: Default::default(),
         effect_controller: crate::ActorContext::unavailable(),
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -209,7 +212,11 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     ))
     .await;
     let grant = crate::ToolExecutionGrant::from_definition(
-        crate::plugin::PluginCallbackIdentity::tool_provider("test_tools", "tools"),
+        crate::plugin::ToolProviderHandle::new(
+            crate::plugin::RegistryKind::Session,
+            "test_tools",
+            crate::tool_provider_key!("tools"),
+        ),
         named_beta_tool("host_only"),
     )
     .with_execution_binding(Some(granted_binding()));
@@ -259,7 +266,11 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
 /// The binding the grant in these tests carries, in its provider's format.
 fn granted_binding() -> crate::ExecutionBinding {
     crate::ExecutionBinding {
-        codec: crate::plugin::PluginCallbackIdentity::tool_provider("test_tools", "tools"),
+        codec: crate::plugin::ToolProviderHandle::new(
+            crate::plugin::RegistryKind::Session,
+            "test_tools",
+            crate::tool_provider_key!("tools"),
+        ),
         format: crate::FormatVersion::ONE,
         payload: json!({ "kind": "test", "route": "deferred" }),
     }
@@ -298,8 +309,8 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
         fn tool_manifests(
             &self,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> Vec<crate::ToolManifest> {
-            manifests(vec![definition()])
+        ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+            Ok(manifests(vec![definition()]))
         }
 
         fn resolve_contract(
@@ -369,8 +380,8 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
         fn tool_manifests(
             &self,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> Vec<crate::ToolManifest> {
-            manifests(vec![definition()])
+        ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+            Ok(manifests(vec![definition()]))
         }
 
         fn resolve_contract(
@@ -400,7 +411,7 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
         lash_core_execution::plugin::PluginDeclaration::initial("projection_policy_tools"),
         crate::PluginSpec::new()
             .with_tool_provider(
-                lash_core_execution::hook_key!("tools"),
+                lash_core_execution::tool_provider_key!("tools"),
                 Arc::new(ProjectionPolicyTools),
             )
             .with_tool_args_transform(lash_core_execution::hook_key!("capture"), hook),

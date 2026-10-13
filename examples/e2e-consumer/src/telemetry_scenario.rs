@@ -8,10 +8,7 @@ use axum::extract::Path;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lash::direct::LlmOutputPart;
-use lash::plugins::{
-    PluginDeclaration, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
-    SessionPlugin,
-};
+use lash::plugins::{PluginDeclaration, PluginFactory, SessionPlugin};
 use lash::provider::{LlmContentBlock, LlmRequest, LlmResponse, ProviderHandle};
 use lash::sync::MutexExt as _;
 use lash::tools::{
@@ -251,14 +248,30 @@ impl PluginFactory for TelemetryPlugin {
         "s34-telemetry"
     }
 
-    fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(Self(self.0.clone())))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+        let mut reg = lash::plugins::PluginRegistrar::<TelemetryPlugin>::new(
+            lash::plugins::PluginFactory::id(self.as_ref()),
+        );
+        TelemetryPlugin::declare(&mut reg)?;
+        let id = lash::plugins::PluginFactory::id(self.as_ref());
+        Ok(lash::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(Self(self.0.clone()))),
+        ))
     }
 }
 
-impl lash::plugins::PluginDefinition for TelemetryPlugin {
-    fn declaration() -> PluginDeclaration {
+impl TelemetryPlugin {
+    pub fn declaration() -> PluginDeclaration {
         PluginDeclaration::initial("s34-telemetry")
+    }
+}
+impl lash::plugins::PluginMetadata for TelemetryPlugin {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -266,28 +279,32 @@ impl SessionPlugin for TelemetryPlugin {
     fn id(&self) -> &'static str {
         "s34-telemetry"
     }
-    fn register(&self, registrar: &mut PluginRegistrar) -> Result<(), PluginError> {
-        let definition = ToolDefinition::raw(
-            "s34:retry",
-            "s34_retry",
-            "One reported retry under one admitted call",
-            json!({"type":"object","additionalProperties":false}),
-            json!({"type":"string"}),
-        )
-        .map_err(|error| PluginError::Session(error.to_string()))?
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_execution_policy(ExecutionPolicy::repeatable(
-            std::num::NonZeroU32::MIN.saturating_add(1),
-            0,
-            0,
-        ));
-        registrar.tools().provider(
-            lash::hook_key!("tools"),
-            Arc::new(StaticToolProvider::new(
-                vec![definition],
-                TelemetryTool(self.0.clone()),
-            )),
-        )?;
+}
+impl TelemetryPlugin {
+    fn declare(
+        reg: &mut lash::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash::plugins::PluginError> {
+        reg.tools()
+            .provider(lash::tool_provider_key!("tools"), move |this, _state| {
+                let definition = ToolDefinition::raw(
+                    "s34:retry",
+                    "s34_retry",
+                    "One reported retry under one admitted call",
+                    json!({"type":"object","additionalProperties":false}),
+                    json!({"type":"string"}),
+                )
+                .map_err(|error| lash::plugins::PluginError::Session(error.to_string()))?
+                .with_execution(std::time::Duration::from_secs(120))
+                .with_execution_policy(ExecutionPolicy::repeatable(
+                    std::num::NonZeroU32::MIN.saturating_add(1),
+                    0,
+                    0,
+                ));
+                Ok(Arc::new(StaticToolProvider::new(
+                    vec![definition],
+                    TelemetryTool(this.0.clone()),
+                )))
+            })?;
         Ok(())
     }
 }

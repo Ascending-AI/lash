@@ -184,7 +184,7 @@ async fn setup_crash_case(tier: Tier, request: Request) {
     let runs = Arc::new(AtomicUsize::new(0));
     let Some(world) = World::with_model(tier, Vec::new(), model(&killer, &calls), |backend| {
         lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers.clone()))
-            .tools(lash::hook_key!("tools"), count(&runs))
+            .tools(lash::tool_provider_key!("tools"), count(&runs))
     })
     .await
     else {
@@ -262,7 +262,7 @@ async fn a_tool_and_finish_cell_crosses_the_worker_boundary_on_one_lease(tier: T
     let runs = Arc::new(AtomicUsize::new(0));
     let Some(world) = World::with_model(tier, Vec::new(), model, |backend| {
         lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers.clone()))
-            .tools(lash::hook_key!("tools"), count(&runs))
+            .tools(lash::tool_provider_key!("tools"), count(&runs))
     })
     .await
     else {

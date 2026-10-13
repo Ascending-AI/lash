@@ -106,7 +106,7 @@ impl PluginOperationDef {
         self.kind
     }
 
-    fn from_spec(spec: PluginOperationSpec, kind: PluginOperationKind) -> Self {
+    pub(crate) fn from_spec(spec: PluginOperationSpec, kind: PluginOperationKind) -> Self {
         Self {
             name: spec.name,
             description: spec.description,
@@ -242,52 +242,32 @@ pub struct PluginQueryContext {
     pub sessions: Arc<dyn SessionReadService>,
     pub processes: Arc<dyn ProcessReadService>,
 }
-
 #[derive(Clone)]
 pub struct PluginCommandContext {
     pub session_id: Option<SessionId>,
-    pub sessions: Arc<dyn SessionStateService>,
-    pub session_lifecycle: Arc<dyn SessionLifecycleService>,
-    pub session_graph: Arc<dyn SessionGraphService>,
-    pub processes: Arc<dyn crate::ProcessService>,
+    pub bindings: Arc<ServiceBindings>,
 }
-
 #[derive(Clone)]
 pub struct PluginTaskContext {
     pub session_id: Option<SessionId>,
-    pub sessions: Arc<dyn SessionStateService>,
-    pub session_lifecycle: Arc<dyn SessionLifecycleService>,
-    pub session_graph: Arc<dyn SessionGraphService>,
-    pub processes: Arc<dyn crate::ProcessService>,
+    pub bindings: Arc<ServiceBindings>,
     pub scoped_effect_controller: crate::ActorContext,
     pub cancellation_token: tokio_util::sync::CancellationToken,
 }
 
 #[async_trait::async_trait]
 pub trait SessionReadService: Send + Sync {
-    async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
-        Err(PluginError::Session(
-            "session snapshots are unavailable in this runtime".to_string(),
-        ))
-    }
+    async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError>;
 
     async fn snapshot_session(
         &self,
         _session_id: &SessionId,
-    ) -> Result<SessionSnapshot, PluginError> {
-        Err(PluginError::Session(
-            "session lookup is unavailable in this runtime".to_string(),
-        ))
-    }
+    ) -> Result<SessionSnapshot, PluginError>;
 
     async fn tool_catalog(
         &self,
         _session_id: &SessionId,
-    ) -> Result<Vec<serde_json::Value>, PluginError> {
-        Err(PluginError::Session(
-            "tool catalogs are unavailable in this runtime".to_string(),
-        ))
-    }
+    ) -> Result<Vec<serde_json::Value>, PluginError>;
 
     async fn shared_tool_catalog(
         &self,
@@ -304,11 +284,7 @@ pub trait ProcessReadService: Send + Sync {
         _session_id: &SessionId,
         _mode: crate::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError> {
-        Err(PluginError::Session(
-            "process inspection is unavailable in this runtime".to_string(),
-        ))
-    }
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

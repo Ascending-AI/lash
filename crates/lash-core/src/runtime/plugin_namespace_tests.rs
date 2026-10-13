@@ -1,5 +1,6 @@
 use crate::SessionId;
 use crate::plugin::PluginSessionRequest;
+
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
@@ -26,11 +27,20 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
                 serde_json::json!(self.id),
             )]))
         }
-        fn build(
-            &self,
-            _: &crate::plugin::PluginSessionContext,
-        ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
-            Ok(Arc::new(self.clone()))
+        fn recipe(
+            self: Arc<Self>,
+        ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError>
+        {
+            let mut reg = lash_core::plugin::PluginRegistrar::<Fixture>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            Fixture::declare(&mut reg)?;
+            let id = self.id();
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+            ))
         }
     }
 
@@ -43,43 +53,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         fn id(&self) -> &'static str {
             self.id
         }
-        fn register(
-            &self,
-            reg: &mut crate::plugin::PluginRegistrar,
-        ) -> Result<(), crate::PluginError> {
-            let state = reg.state();
-            let hosts = self.hosts.clone();
-            reg.turn().before(
-                crate::hook_key!("turn-before-1"),
-                Arc::new(move |ctx| {
-                    let hosts = hosts.clone();
-                    let state = state.clone();
-                    Box::pin(async move {
-                        assert_eq!(state.keys(), vec![state.plugin_id().to_string()]);
-                        for (id, host) in hosts.lock_recover().iter() {
-                            let session = host.session(&SessionId::from(id)).unwrap();
-                            assert!(session.export_state().plugins.is_empty());
-                            let mut exported = crate::RuntimeSessionState::fixture(
-                                crate::testing::mock_session_policy(),
-                            );
-                            exported
-                                .refresh_plugin_states(&session)
-                                .expect("the live plugin state is captured");
-                            assert!(
-                                exported
-                                    .plugin_state()
-                                    .is_none_or(|state| state.plugins.is_empty()),
-                                "public refresh must respect restricted namespace exports"
-                            );
-                        }
-                        let snapshot = serde_json::to_string(&ctx.state.to_snapshot()).unwrap();
-                        assert!(!snapshot.contains("neighbor-secret-key"));
-                        Ok(Default::default())
-                    })
-                }),
-            )?;
-            Ok(())
-        }
+
         fn session_ready(
             &self,
             ctx: crate::plugin::SessionReadyContext,
@@ -98,6 +72,44 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
                     .is_empty()
             );
             self.hosts.lock_recover().push((session_id, ctx.host));
+            Ok(())
+        }
+    }
+    impl Fixture {
+        fn declare(
+            reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+        ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+            reg.turn()
+                .before(crate::hook_key!("turn-before-1"), move |this, state| {
+                    let state = state.clone();
+                    let hosts = this.hosts.clone();
+                    Ok(Arc::new(move |ctx| {
+                        let hosts = hosts.clone();
+                        let state = state.clone();
+                        Box::pin(async move {
+                            assert_eq!(state.keys(), vec![state.plugin_id().to_string()]);
+                            for (id, host) in hosts.lock_recover().iter() {
+                                let session = host.session(&SessionId::from(id)).unwrap();
+                                assert!(session.export_state().plugins.is_empty());
+                                let mut exported = crate::RuntimeSessionState::fixture(
+                                    crate::testing::mock_session_policy(),
+                                );
+                                exported
+                                    .refresh_plugin_states(&session)
+                                    .expect("the live plugin state is captured");
+                                assert!(
+                                    exported
+                                        .plugin_state()
+                                        .is_none_or(|state| state.plugins.is_empty()),
+                                    "public refresh must respect restricted namespace exports"
+                                );
+                            }
+                            let snapshot = serde_json::to_string(&ctx.state.to_snapshot()).unwrap();
+                            assert!(!snapshot.contains("neighbor-secret-key"));
+                            Ok(Default::default())
+                        })
+                    }))
+                })?;
             Ok(())
         }
     }
@@ -120,7 +132,31 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     }
     struct Sessions;
     #[async_trait::async_trait]
-    impl crate::plugin::SessionReadService for Sessions {}
+    impl crate::plugin::SessionReadService for Sessions {
+        async fn snapshot_current(
+            &self,
+        ) -> Result<lash_core::SessionSnapshot, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
+        async fn snapshot_session(
+            &self,
+            _session_id: &lash_core::SessionId,
+        ) -> Result<lash_core::SessionSnapshot, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
+        async fn tool_catalog(
+            &self,
+            _session_id: &lash_core::SessionId,
+        ) -> Result<Vec<serde_json::Value>, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
+    }
     let hosts = Arc::new(Mutex::new(Vec::new()));
     let restores = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut factories = vec![

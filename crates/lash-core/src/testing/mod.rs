@@ -17,6 +17,7 @@
 // The execution kernel's fixtures downstream test crates reach through
 // `lash_core::testing`, named one by one: the kernel's `kernel_internals` seam
 // serves its own store-backed tests and is not re-exported here.
+pub use lash_core_execution::testing::kernel_internals::prompt_catalog_from_recipes;
 pub use lash_core_execution::testing::{
     Call, DeploymentOp, FaultKind, GATE_DEADLINE, Gate, Op, Outcome, Phase, Script, Scripted,
     ScriptedError, StoreOp,

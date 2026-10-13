@@ -30,6 +30,28 @@ impl OwnerConfigView {
         Self(OwnerConfigSource::Components(env))
     }
 
+    pub fn registry_kind(&self) -> super::RegistryKind {
+        match &self.0 {
+            OwnerConfigSource::Session(_) => super::RegistryKind::Session,
+            OwnerConfigSource::Components(_) => super::RegistryKind::Process,
+        }
+    }
+    /// Refuse an address from another composition before attempting local lookup.
+    pub fn validate_provider(
+        &self,
+        provider: &super::ToolProviderHandle,
+    ) -> Result<(), super::PluginError> {
+        let expected = self.registry_kind();
+        if provider.registry() == expected {
+            Ok(())
+        } else {
+            Err(super::PluginError::ProviderRegistryMismatch {
+                expected,
+                provider: provider.clone(),
+            })
+        }
+    }
+
     pub fn decode<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,

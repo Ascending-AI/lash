@@ -10,5 +10,5 @@ fn main() {
         serde_json::json!({ "type": "object" }),
     ).expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120));
-    let _ = lash::plugins::PluginSpec::new().with_tool_provider(lash::hook_key!("tools"), definition);
+    let _ = lash::plugins::PluginSpec::new().with_tool_provider(lash::tool_provider_key!("tools"), definition);
 }

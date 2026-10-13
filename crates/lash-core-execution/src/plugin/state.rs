@@ -137,7 +137,7 @@ impl From<Vec<StateCommand>> for StateCommands {
 #[derive(Clone)]
 pub struct PluginStateView {
     /// Who the plugin session this view belongs to was built for.
-    owner: crate::RuntimeOwner,
+    owner: Option<crate::RuntimeOwner>,
     plugin_id: Arc<str>,
     state: Arc<Mutex<PluginStateRegistry>>,
 }
@@ -158,8 +158,20 @@ impl PluginStateView {
         Arc::clone(&self.plugin_id)
     }
 
-    pub(super) fn bind(
+    pub(crate) fn bind(
         owner: &crate::RuntimeOwner,
+        plugin_id: &str,
+        state: Arc<Mutex<PluginStateRegistry>>,
+    ) -> Self {
+        Self::namespace(Some(owner.clone()), plugin_id, state)
+    }
+
+    pub(crate) fn detached(plugin_id: &str, state: Arc<Mutex<PluginStateRegistry>>) -> Self {
+        Self::namespace(None, plugin_id, state)
+    }
+
+    fn namespace(
+        owner: Option<crate::RuntimeOwner>,
         plugin_id: &str,
         state: Arc<Mutex<PluginStateRegistry>>,
     ) -> Self {
@@ -170,14 +182,15 @@ impl PluginStateView {
             .entry(plugin_id.to_owned())
             .or_default();
         Self {
-            owner: owner.clone(),
+            owner,
             plugin_id: plugin_id.into(),
             state,
         }
     }
 
-    pub fn owner(&self) -> &crate::RuntimeOwner {
-        &self.owner
+    /// The materialized owner, absent when a component is bound for a deployment preview.
+    pub fn owner(&self) -> Option<&crate::RuntimeOwner> {
+        self.owner.as_ref()
     }
 
     pub fn plugin_id(&self) -> &str {
@@ -291,7 +304,7 @@ mod tests;
 
 /// The resident published state of one owner, and its publication slots.
 #[derive(Debug, Default)]
-pub(super) struct PluginStateRegistry {
+pub(crate) struct PluginStateRegistry {
     pub(super) trace_limits: lash_trace::TraceLimits,
     pub(super) limits: lash_core_store::tool_run::StateCommandLimits,
     /// Published state: every namespace's values at its applied generation.

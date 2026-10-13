@@ -150,8 +150,8 @@ impl<'run> ToolDispatchContext<'run> {
     pub fn routed_provider<'a>(
         &'a self,
         tool: &crate::ToolId,
-        granted: Option<&'a crate::plugin::PluginCallbackIdentity>,
-    ) -> Option<&'a crate::plugin::PluginCallbackIdentity> {
+        granted: Option<&'a crate::plugin::ToolProviderHandle>,
+    ) -> Option<&'a crate::plugin::ToolProviderHandle> {
         granted.or_else(|| self.routes.entry(tool).map(|entry| &entry.provider))
     }
 

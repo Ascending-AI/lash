@@ -31,10 +31,15 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for DiscoveryTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        ["search", "hidden"]
-            .map(|name| definition(name).manifest())
-            .to_vec()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok({
+            ["search", "hidden"]
+                .map(|name| definition(name).manifest())
+                .to_vec()
+        })
     }
     fn resolve_contract(
         &self,
@@ -139,7 +144,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
         let core = explicit_ephemeral_facets(builder)
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
             .tools(
-                crate::hook_key!("tools"),
+                crate::tool_provider_key!("tools"),
                 Arc::new(DiscoveryTools {
                     calls: calls.clone(),
                 }),

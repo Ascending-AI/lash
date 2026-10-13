@@ -65,7 +65,41 @@ impl PluginFactory for WorkbenchPluginFactory {
 
     /// The workbench's own config namespace: the host prompt text its
     /// sections render.
-    fn register_config(
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> = {
+            let mut reg = lash::plugins::PluginRegistrar::<WorkbenchSessionPlugin>::new(
+                lash::plugins::PluginFactory::id(self.as_ref()),
+            );
+            WorkbenchSessionPlugin::declare(&mut reg)?;
+            let id = lash::plugins::PluginFactory::id(self.as_ref());
+            Ok(lash::plugins::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| {
+                    Ok(Arc::new(WorkbenchSessionPlugin {
+                        mail_world: self.mail_world.clone(),
+                        config_changes: self.config_changes.clone(),
+                        deferred_tools: self.deferred_tools.clone(),
+                        approvals: self.approvals.clone(),
+                        host_triggers: self.host_triggers.clone(),
+                    }))
+                },
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = lash::plugins::ConfigRegistrar::new(
+            lash::plugins::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
+    }
+}
+impl WorkbenchPluginFactory {
+    pub fn declare_configuration(
         &self,
         registrar: &mut lash::plugins::ConfigRegistrar,
     ) -> Result<(), lash::plugins::ConfigRegistrationError> {
@@ -89,21 +123,16 @@ impl PluginFactory for WorkbenchPluginFactory {
             })
         })
     }
-
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(WorkbenchSessionPlugin {
-            mail_world: self.mail_world.clone(),
-            config_changes: self.config_changes.clone(),
-            deferred_tools: self.deferred_tools.clone(),
-            approvals: self.approvals.clone(),
-            host_triggers: self.host_triggers.clone(),
-        }))
-    }
 }
 
-impl lash::plugins::PluginDefinition for WorkbenchPluginFactory {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl WorkbenchPluginFactory {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         lash::plugins::PluginDeclaration::initial("agent_workbench")
+    }
+}
+impl lash::plugins::PluginMetadata for WorkbenchPluginFactory {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -119,58 +148,72 @@ impl SessionPlugin for WorkbenchSessionPlugin {
     fn id(&self) -> &'static str {
         "agent_workbench"
     }
+}
+impl WorkbenchSessionPlugin {
+    pub(crate) fn declare(
+        reg: &mut lash::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash::plugins::PluginError> {
+        register_workbench_sections(reg)?;
 
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         reg.tools().provider(
-            lash::hook_key!("tool-search"),
-            self.deferred_tools.search_provider(),
+            lash::tool_provider_key!("tool-search"),
+            move |this, _state| Ok(this.deferred_tools.search_provider()),
         )?;
+
         reg.tools().deferred(
             crate::deferred_tools::DEFERRED_PROVIDER_KEY,
-            self.deferred_tools.deferred_provider(),
+            move |this, _state| Ok(this.deferred_tools.deferred_provider()),
         )?;
+
+        reg.tools().provider(
+            lash::tool_provider_key!("approvals"),
+            move |this, _state| Ok(this.approvals.provider()),
+        )?;
+
+        reg.tools().provider(
+            lash::tool_provider_key!("host-triggers"),
+            move |this, _state| Ok(this.host_triggers.provider()),
+        )?;
+
         reg.tools()
-            .provider(lash::hook_key!("approvals"), self.approvals.provider())?;
-        reg.tools().provider(
-            lash::hook_key!("host-triggers"),
-            self.host_triggers.provider(),
-        )?;
-        reg.tools().provider(
-            lash::hook_key!("mail"),
-            Arc::new(mail::MockMailProvider::new(
-                self.mail_world.clone(),
-                self.host_triggers.clone(),
-            )),
-        )?;
-        register_workbench_sections(reg)?;
-        reg.turn().after(
-            lash::hook_key!("write-back-notes"),
-            Arc::new(|ctx| {
-                Box::pin(async move {
-                    let snapshot = ctx.sessions.snapshot_current().await?;
-                    let state = lash::persistence::SessionReadView::from_snapshot(&snapshot);
-                    Ok(lash::plugins::AfterTurnContributions {
-                        session: lash::plugins::SessionContributions {
-                            graph_appends: workbench_derived_note(&state).into_iter().collect(),
-                        },
-                        ..Default::default()
+            .provider(lash::tool_provider_key!("mail"), move |this, _state| {
+                Ok(Arc::new(mail::MockMailProvider::new(
+                    this.mail_world.clone(),
+                    this.host_triggers.clone(),
+                )))
+            })?;
+
+        reg.turn()
+            .after(lash::hook_key!("write-back-notes"), move |_this, _state| {
+                Ok(Arc::new(|ctx| {
+                    Box::pin(async move {
+                        let snapshot = ctx.sessions.snapshot_current().await?;
+                        let state = lash::persistence::SessionReadView::from_snapshot(&snapshot);
+                        Ok(lash::plugins::AfterTurnContributions {
+                            session: lash::plugins::SessionContributions {
+                                graph_appends: workbench_derived_note(&state).into_iter().collect(),
+                            },
+                            ..Default::default()
+                        })
                     })
-                })
-            }),
-        )?;
-        let config_changes = self.config_changes.clone();
-        reg.session().on_event(
-            lash::hook_key!("observe"),
-            Arc::new(move |event| {
-                let config_changes = config_changes.clone();
-                Box::pin(async move {
-                    if let lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) = event {
-                        config_changes.observe(&ctx).await?;
-                    }
-                    Ok(())
-                })
-            }),
-        )?;
+                }))
+            })?;
+
+        reg.session()
+            .on_event(lash::hook_key!("observe"), move |this, _state| {
+                let config_changes = this.config_changes.clone();
+                Ok(Arc::new(move |event| {
+                    let config_changes = config_changes.clone();
+                    Box::pin(async move {
+                        if let lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) =
+                            event
+                        {
+                            config_changes.observe(&ctx).await?;
+                        }
+                        Ok(())
+                    })
+                }))
+            })?;
         Ok(())
     }
 }
@@ -254,9 +297,13 @@ impl lash::plugins::ConfigCommand for SetWorkbenchTools {
 /// every tool when none is recorded, and none when it does not decode.
 pub(crate) fn workbench_tool_selection(
     config: &lash::tools::OwnerConfigView,
-) -> lash::tools::ToolSelection {
-    lash::tools::ToolSelection::of(config, "agent_workbench")
-        .unwrap_or_else(|_| lash::tools::ToolSelection::Only(Vec::new()))
+) -> Result<lash::tools::ToolSelection, PluginError> {
+    lash::tools::ToolSelection::of(config, "agent_workbench").map_err(|error| {
+        PluginError::ProviderConfig {
+            owner: "agent_workbench".into(),
+            message: error.to_string(),
+        }
+    })
 }
 
 pub(crate) struct WorkbenchConfigOwner;
@@ -340,7 +387,9 @@ fn recorded_prompt(
 /// the model, late and outside the history, as an annotation: durable
 /// compaction is an explicit Agent Frame transition, not a rewrite of the
 /// request.
-pub(crate) fn register_workbench_sections(reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+pub(crate) fn register_workbench_sections<T: Send + Sync + 'static>(
+    reg: &mut PluginRegistrar<T>,
+) -> Result<(), PluginError> {
     reg.prompt().section(
         lash::plugins::PromptSectionSpec::new(
             section_key("intro")?,
@@ -350,9 +399,11 @@ pub(crate) fn register_workbench_sections(reg: &mut PluginRegistrar) -> Result<(
             lash::prompt::PromptPurpose::Turn,
             lash::prompt::PromptPurpose::Compaction,
         ]),
-        Arc::new(|_: &lash::plugins::PromptInput<'_>| {
-            Ok(lash::plugins::SectionText::text(WORKBENCH_INTRO))
-        }),
+        move |_, _| {
+            Ok(Arc::new(|_: &lash::plugins::PromptInput<'_>| {
+                Ok(lash::plugins::SectionText::text(WORKBENCH_INTRO))
+            }))
+        },
     )?;
     reg.prompt().section(
         lash::plugins::PromptSectionSpec::new(
@@ -360,36 +411,44 @@ pub(crate) fn register_workbench_sections(reg: &mut PluginRegistrar) -> Result<(
             lash::prompt::PromptPlacement::InitialInstructions,
         )
         .purposes([lash::prompt::PromptPurpose::Turn]),
-        Arc::new(|_: &lash::plugins::PromptInput<'_>| {
-            Ok(lash::plugins::SectionText::text(WORKBENCH_GUIDANCE))
-        }),
+        move |_, _| {
+            Ok(Arc::new(|_: &lash::plugins::PromptInput<'_>| {
+                Ok(lash::plugins::SectionText::text(WORKBENCH_GUIDANCE))
+            }))
+        },
     )?;
     reg.prompt().section(
         lash::plugins::PromptSectionSpec::new(
             section_key(WORKBENCH_INSTRUCTIONS_SECTION)?,
             lash::prompt::PromptPlacement::InitialInstructions,
         ),
-        Arc::new(|input: &lash::plugins::PromptInput<'_>| {
-            Ok(paragraphs(&recorded_prompt(input)?.instructions))
-        }),
+        move |_, _| {
+            Ok(Arc::new(|input: &lash::plugins::PromptInput<'_>| {
+                Ok(paragraphs(&recorded_prompt(input)?.instructions))
+            }))
+        },
     )?;
     reg.prompt().section(
         lash::plugins::PromptSectionSpec::new(
             section_key(WORKBENCH_ACCOUNTS_SECTION)?,
             lash::prompt::PromptPlacement::InitialInstructions,
         ),
-        Arc::new(|input: &lash::plugins::PromptInput<'_>| {
-            Ok(paragraphs(&recorded_prompt(input)?.context))
-        }),
+        move |_, _| {
+            Ok(Arc::new(|input: &lash::plugins::PromptInput<'_>| {
+                Ok(paragraphs(&recorded_prompt(input)?.context))
+            }))
+        },
     )?;
     reg.prompt().section(
         lash::plugins::PromptSectionSpec::new(
             section_key(WORKBENCH_CONTEXT_BUDGET_SECTION)?,
             lash::prompt::PromptPlacement::CurrentContext,
         ),
-        Arc::new(|input: &lash::plugins::PromptInput<'_>| {
-            Ok(lash::plugins::SectionText::Text(context_budget_text(input)))
-        }),
+        move |_, _| {
+            Ok(Arc::new(|input: &lash::plugins::PromptInput<'_>| {
+                Ok(lash::plugins::SectionText::Text(context_budget_text(input)))
+            }))
+        },
     )
 }
 

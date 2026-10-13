@@ -178,8 +178,11 @@ fn data_definition() -> lash_core::ToolDefinition {
 #[cfg(feature = "rlm")]
 #[async_trait]
 impl ToolProvider for DataTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![data_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![data_definition().manifest()])
     }
     fn resolve_contract(
         &self,
@@ -342,12 +345,17 @@ struct ChangingDataTool(Arc<std::sync::atomic::AtomicBool>);
 #[cfg(feature = "rlm")]
 #[async_trait]
 impl ToolProvider for ChangingDataTool {
-    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        if self.0.load(Ordering::SeqCst) {
-            DataTool.tool_manifests(config)
-        } else {
-            Vec::new()
-        }
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok({
+            if self.0.load(Ordering::SeqCst) {
+                DataTool.tool_manifests(config)?
+            } else {
+                Vec::new()
+            }
+        })
     }
     fn resolve_contract(
         &self,
@@ -386,7 +394,7 @@ async fn provider_installation_refuses_an_existing_namespace_binding() -> Result
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
             .tools(
-                crate::hook_key!("tools"),
+                crate::tool_provider_key!("tools"),
                 Arc::new(ChangingDataTool(Arc::clone(&visible))),
             )
             .build(crate::testing::runtime_lease_owner())?;

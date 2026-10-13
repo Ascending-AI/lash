@@ -17,11 +17,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use lash::plugins::{
-    PluginDeclaration, PluginDefinition, PromptInput, PromptRenderError, PromptSectionSpec,
-    SectionText,
-};
-use lash::prompt::{PromptPlacement, PromptSectionKey};
+use lash::plugins::PluginDeclaration;
 
 const PLUGIN: &str = "section-leak";
 const MODEL: &str = "section-leak-model";
@@ -47,9 +43,14 @@ impl lash::tools::StaticToolExecute for Ping {
 #[derive(Clone)]
 struct Instruction;
 
-impl PluginDefinition for Instruction {
-    fn declaration() -> PluginDeclaration {
+impl Instruction {
+    pub fn declaration() -> PluginDeclaration {
         PluginDeclaration::initial(PLUGIN)
+    }
+}
+impl lash_core::plugin::PluginMetadata for Instruction {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -58,11 +59,19 @@ impl lash::plugins::PluginFactory for Instruction {
         PLUGIN
     }
 
-    fn build(
-        &self,
-        _: &lash::plugins::PluginSessionContext,
-    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<Instruction>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        Instruction::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -70,72 +79,84 @@ impl lash::plugins::SessionPlugin for Instruction {
     fn id(&self) -> &'static str {
         PLUGIN
     }
+}
+impl Instruction {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        reg.turn()
+            .before(lash::hook_key!("before"), move |_this, _state| {
+                Ok(Arc::new(|_| {
+                    Box::pin(async {
+                        Ok(lash::plugins::TurnContributions {
+                            state: commands("before-turn"),
+                            ..Default::default()
+                        })
+                    })
+                }))
+            })?;
 
-    fn register(
-        &self,
-        reg: &mut lash::plugins::PluginRegistrar,
-    ) -> Result<(), lash::plugins::PluginError> {
-        reg.turn().before(
-            lash::hook_key!("before"),
-            Arc::new(|_| {
-                Box::pin(async {
-                    Ok(lash::plugins::TurnContributions {
-                        state: commands("before-turn"),
-                        ..Default::default()
+        reg.turn()
+            .checkpoint(lash::hook_key!("checkpoint"), move |_this, _state| {
+                Ok(Arc::new(|_| {
+                    Box::pin(async {
+                        Ok(lash::plugins::TurnContributions {
+                            state: commands("checkpoint"),
+                            ..Default::default()
+                        })
                     })
-                })
-            }),
-        )?;
-        reg.turn().checkpoint(
-            lash::hook_key!("checkpoint"),
-            Arc::new(|_| {
-                Box::pin(async {
-                    Ok(lash::plugins::TurnContributions {
-                        state: commands("checkpoint"),
-                        ..Default::default()
+                }))
+            })?;
+
+        reg.tool_calls()
+            .check_result(lash::hook_key!("after-tool"), move |_this, _state| {
+                Ok(Arc::new(|_| {
+                    Box::pin(async {
+                        Ok(lash::plugins::AfterToolContributions {
+                            state: commands("after-tool"),
+                            ..Default::default()
+                        })
                     })
-                })
-            }),
-        )?;
-        reg.tool_calls().check_result(
-            lash::hook_key!("after-tool"),
-            Arc::new(|_| {
-                Box::pin(async {
-                    Ok(lash::plugins::AfterToolContributions {
-                        state: commands("after-tool"),
-                        ..Default::default()
+                }))
+            })?;
+
+        reg.turn()
+            .after(lash::hook_key!("after"), move |_this, _state| {
+                Ok(Arc::new(|_| {
+                    Box::pin(async {
+                        Ok(lash::plugins::AfterTurnContributions {
+                            state: commands("after-turn"),
+                            ..Default::default()
+                        })
                     })
-                })
-            }),
-        )?;
-        reg.turn().after(
-            lash::hook_key!("after"),
-            Arc::new(|_| {
-                Box::pin(async {
-                    Ok(lash::plugins::AfterTurnContributions {
-                        state: commands("after-turn"),
-                        ..Default::default()
-                    })
-                })
-            }),
-        )?;
+                }))
+            })?;
+
         reg.prompt().section(
-            PromptSectionSpec::new(
-                PromptSectionKey::new("instruct").expect("valid section key"),
-                PromptPlacement::InitialInstructions,
+            lash_core::plugin::prompt::PromptSectionSpec::new(
+                lash_core::prompt_sections::PromptSectionKey::new("instruct")
+                    .expect("valid section key"),
+                lash_core::prompt_sections::PromptPlacement::InitialInstructions,
             ),
-            Arc::new(|input: &PromptInput<'_>| {
-                let text = CHANNELS
-                    .iter()
-                    .map(|channel| input.state().get_as::<String>(channel))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                Ok::<_, PromptRenderError>(SectionText::text(text))
-            }),
-        )
+            move |_this, _state| {
+                Ok(Arc::new(
+                    |input: &lash_core::plugin::prompt::PromptInput<'_>| {
+                        let text = CHANNELS
+                            .iter()
+                            .map(|channel| input.state().get_as::<String>(channel))
+                            .collect::<Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        Ok::<_, lash_core::plugin::prompt::PromptRenderError>(
+                            lash_core::plugin::prompt::SectionText::text(text),
+                        )
+                    },
+                ))
+            },
+        )?;
+        Ok(())
     }
 }
 
@@ -213,7 +234,7 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
                 .expect("register the test model"),
         ))
         .tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::new(lash::tools::StaticToolProvider::new(
                 vec![
                     lash::tools::ToolDefinition::raw(

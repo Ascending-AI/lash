@@ -1,4 +1,5 @@
 use lash::SessionId;
+
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -401,7 +402,7 @@ fn build_turn_core(
             model,
             lash::RegisteredLlmProfile::new(profile_metadata(model)?, provider),
         )?))
-        .tools(lash::hook_key!("tools"), if channel == crate::ChannelSelection::Standard {
+        .tools(lash::tool_provider_key!("tools"), if channel == crate::ChannelSelection::Standard {
             world.standard_provider()
         } else {
             world.provider()
@@ -533,12 +534,19 @@ mod tests {
             "toolbench_timeout_shutdown_witness"
         }
 
-        fn build(
-            &self,
-            _ctx: &lash::plugins::PluginSessionContext,
-        ) -> std::result::Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError>
-        {
-            Ok(Arc::new(ShutdownWitnessSession))
+        fn recipe(
+            self: Arc<Self>,
+        ) -> std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+            let mut reg = lash::plugins::PluginRegistrar::<ShutdownWitnessSession>::new(
+                lash::plugins::PluginFactory::id(self.as_ref()),
+            );
+            ShutdownWitnessSession::declare(&mut reg)?;
+            let id = self.id();
+            Ok(lash::plugins::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| Ok(Arc::new(ShutdownWitnessSession)),
+            ))
         }
 
         async fn shutdown(&self) -> std::result::Result<(), lash::plugins::PluginError> {
@@ -547,9 +555,14 @@ mod tests {
         }
     }
 
-    impl lash::plugins::PluginDefinition for ShutdownWitness {
-        fn declaration() -> lash::plugins::PluginDeclaration {
+    impl ShutdownWitness {
+        pub fn declaration() -> lash::plugins::PluginDeclaration {
             lash::plugins::PluginDeclaration::initial("toolbench_timeout_shutdown_witness")
+        }
+    }
+    impl lash::plugins::PluginMetadata for ShutdownWitness {
+        fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+            Self::declaration()
         }
     }
 
@@ -559,10 +572,10 @@ mod tests {
         fn id(&self) -> &'static str {
             "toolbench_timeout_shutdown_witness"
         }
-
-        fn register(
-            &self,
-            _registrar: &mut lash::plugins::PluginRegistrar,
+    }
+    impl ShutdownWitnessSession {
+        fn declare(
+            _reg: &mut lash::plugins::PluginRegistrar<Self>,
         ) -> std::result::Result<(), lash::plugins::PluginError> {
             Ok(())
         }

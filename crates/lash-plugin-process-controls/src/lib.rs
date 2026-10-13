@@ -11,10 +11,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use lash_core::plugin::{
-    PluginError, PluginFactory, PluginSessionContext, PluginSpec, SessionPlugin,
-    StaticPluginFactory,
-};
+use lash_core::plugin::{PluginFactory, PluginSpec, StaticPluginFactory};
 use lash_core::{ProcessId, ToolCall, ToolDefinition, ToolOutcome, ToolProvider};
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolBinding, ToolDefinitionBindingExt,
@@ -89,7 +86,7 @@ impl SessionProcessAdminPluginFactory {
     ) -> Self {
         Self {
             inner: StaticPluginFactory::new(
-                <Self as lash_core::plugin::PluginDefinition>::declaration(),
+                Self::declaration(),
                 controls_spec(lifetime, environment, include_cancel_process),
             ),
         }
@@ -112,14 +109,32 @@ fn controls_spec(
         },
     );
     PluginSpec::new().with_tool_provider(
-        lash_core::hook_key!("tools"),
+        CONTROLS_PROVIDER_KEY,
         Arc::new(provider) as Arc<dyn ToolProvider>,
     )
 }
 
+const CONTROLS_OWNER: &str = "processes";
+const CONTROLS_PROVIDER_KEY: lash_core::plugin::ToolProviderKey =
+    lash_core::tool_provider_key!("tools");
+/// The provider to link when a process environment installs process controls.
+pub const PROCESS_CONTROLS_PROVIDER: lash_core::plugin::ToolProviderHandle =
+    lash_core::plugin::ToolProviderHandle::literal(
+        lash_core::plugin::RegistryKind::Process,
+        CONTROLS_OWNER,
+        CONTROLS_PROVIDER_KEY,
+    );
+/// The session plugin's provider; session and process addresses are distinct.
+pub const SESSION_PROCESS_CONTROLS_PROVIDER: lash_core::plugin::ToolProviderHandle =
+    lash_core::plugin::ToolProviderHandle::literal(
+        lash_core::plugin::RegistryKind::Session,
+        CONTROLS_OWNER,
+        CONTROLS_PROVIDER_KEY,
+    );
+
 /// The config key of the process-controls component: its config is `()`.
 pub const PROCESS_CONTROLS_CONFIG: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("processes", lash_core::FormatVersion::ONE);
+    lash_core::ProcessConfigKey::new(CONTROLS_OWNER, lash_core::FormatVersion::ONE);
 
 /// The process controls as a process component (FIG-6034 §3.2): a process
 /// whose environment names `processes` gets `start_process` and its siblings,
@@ -156,8 +171,7 @@ impl ProcessControlsComponent {
         include_cancel_process: bool,
     ) -> Self {
         let factory = StaticPluginFactory::new(
-            <SessionProcessAdminPluginFactory as lash_core::plugin::PluginDefinition>::declaration(
-            ),
+            SessionProcessAdminPluginFactory::declaration(),
             controls_spec(lifetime, environment, include_cancel_process),
         );
         Self {
@@ -185,11 +199,10 @@ impl lash_core::plugin::ProcessComponentFactory for ProcessControlsComponent {
         self.inner.validate(entry, env)
     }
 
-    fn build(
-        &self,
-        cx: &lash_core::plugin::ProcessComponentContext<'_>,
-    ) -> Result<lash_core::plugin::ProcessComponentSpec, PluginError> {
-        self.inner.build(cx)
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::ProcessRecipe, lash_core::plugin::PluginError> {
+        Arc::new(self.inner.clone()).recipe()
     }
 }
 
@@ -198,14 +211,21 @@ impl PluginFactory for SessionProcessAdminPluginFactory {
         self.inner.id()
     }
 
-    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        self.inner.build(ctx)
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        Arc::new(self.inner.clone()).recipe()
     }
 }
 
-impl lash_core::plugin::PluginDefinition for SessionProcessAdminPluginFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial("processes")
+impl SessionProcessAdminPluginFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(CONTROLS_OWNER)
+    }
+}
+impl lash_core::plugin::PluginMetadata for SessionProcessAdminPluginFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 

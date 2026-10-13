@@ -139,7 +139,7 @@ pub use registry::{
     ProcessRegistrar, ProcessRegistry, ProcessRegistryCursor, ProcessRetention, ProcessToolIntents,
     ProjectionWatermark,
 };
-pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
+pub use service::{ProcessService, ProcessToolVisibilityFilter};
 pub use start_staging::{
     ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,
     ReferrerAcquisition, RegisteredProcessStart, SessionTurnAdmission, StagedProcessStart,

@@ -222,7 +222,7 @@ fn body_state(
         .tool_provider(tool_id, context.routed_provider(tool_id, granted))
         .map(|provider| {
             crate::plugin::Proposal::for_tool(
-                provider.owner,
+                provider.owner().to_owned(),
                 crate::plugin::StateCommandOrigin::ToolAttempt {
                     call_id: ids.call_id.clone(),
                     attempt: lash_core_store::tool_run::AttemptOrdinal::new(attempt)

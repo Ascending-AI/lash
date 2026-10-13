@@ -30,20 +30,26 @@ fn plugin_view_cannot_capture_foreign_namespace() {
         ) -> Result<BTreeMap<String, Value>, PluginError> {
             Ok(BTreeMap::from([("secret".into(), Value::from(self.id))]))
         }
-        fn build(
-            &self,
-            _: &crate::PluginSessionContext,
-        ) -> Result<Arc<dyn crate::SessionPlugin>, PluginError> {
-            Ok(Arc::new(self.clone()))
+        fn recipe(
+            self: Arc<Self>,
+        ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+            let mut reg = crate::plugin::PluginRegistrar::<Probe>::new(
+                crate::plugin::PluginFactory::id(self.as_ref()),
+            );
+            Probe::declare(&mut reg)?;
+            let id = self.id();
+            Ok(crate::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+            ))
         }
     }
     impl crate::SessionPlugin for Probe {
         fn id(&self) -> &'static str {
             self.id
         }
-        fn register(&self, _: &mut crate::PluginRegistrar) -> Result<(), PluginError> {
-            Ok(())
-        }
+
         fn session_ready(
             &self,
             ctx: crate::plugin::SessionReadyContext,
@@ -51,6 +57,13 @@ fn plugin_view_cannot_capture_foreign_namespace() {
             assert_eq!(ctx.state.get("secret"), Some(Value::from(self.id)));
             let session = ctx.host.session(ctx.owner.session_id().unwrap()).unwrap();
             self.handles.lock_recover().insert(self.id.into(), session);
+            Ok(())
+        }
+    }
+    impl Probe {
+        fn declare(
+            _reg: &mut crate::plugin::PluginRegistrar<Self>,
+        ) -> std::result::Result<(), crate::plugin::PluginError> {
             Ok(())
         }
     }
@@ -296,40 +309,36 @@ impl crate::PluginFactory for FormatProbe {
         }
     }
 
-    fn register_config(
-        &self,
-        _: &mut crate::ConfigRegistrar,
-    ) -> Result<(), crate::ConfigRegistrationError> {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(())
-    }
-
-    fn build(
-        &self,
-        _: &crate::PluginSessionContext,
-    ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(Arc::new(self.clone()))
+    fn recipe(self: Arc<Self>) -> Result<crate::plugin::PluginRecipe, crate::PluginError> {
+        let id = crate::PluginFactory::id(self.as_ref());
+        Ok(crate::plugin::PluginRecipe::new(
+            id,
+            crate::PluginRegistrar::<Self>::new(id),
+            move |_, _| {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Arc::clone(&self))
+            },
+        ))
     }
 }
 
-impl crate::plugin::PluginDefinition for FormatProbe {
-    fn declaration() -> crate::plugin::PluginDeclaration {
+impl FormatProbe {
+    pub fn declaration() -> crate::plugin::PluginDeclaration {
         let mut declaration = crate::plugin::PluginDeclaration::initial("format-probe");
         declaration.format_version = crate::FormatVersion::new(2).unwrap();
         declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
         declaration
     }
 }
+impl crate::plugin::PluginMetadata for FormatProbe {
+    fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+        Self::declaration()
+    }
+}
 
 impl crate::SessionPlugin for FormatProbe {
     fn id(&self) -> &'static str {
         "format-probe"
-    }
-
-    fn register(&self, _: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(())
     }
 
     fn session_ready(
@@ -446,12 +455,16 @@ impl crate::PluginFactory for DeclaredAs {
         "registered"
     }
 
-    fn build(
-        &self,
-        _: &crate::PluginSessionContext,
-    ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
-        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(Arc::new(self.clone()))
+    fn recipe(self: Arc<Self>) -> Result<crate::plugin::PluginRecipe, crate::PluginError> {
+        let id = crate::PluginFactory::id(self.as_ref());
+        Ok(crate::plugin::PluginRecipe::new(
+            id,
+            crate::PluginRegistrar::<Self>::new(crate::plugin::PluginFactory::id(self.as_ref())),
+            move |_, _state| {
+                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Arc::clone(&self))
+            },
+        ))
     }
 }
 
@@ -464,11 +477,6 @@ impl crate::plugin::PluginMetadata for DeclaredAs {
 impl crate::SessionPlugin for DeclaredAs {
     fn id(&self) -> &'static str {
         "registered"
-    }
-
-    fn register(&self, _: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {
-        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(())
     }
 
     fn session_ready(
@@ -490,32 +498,36 @@ impl crate::PluginFactory for NoMigrateProbe {
         "no-migrate"
     }
 
-    fn build(
-        &self,
-        _: &crate::PluginSessionContext,
-    ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(Arc::new(self.clone()))
+    fn recipe(self: Arc<Self>) -> Result<crate::plugin::PluginRecipe, crate::PluginError> {
+        let id = crate::PluginFactory::id(self.as_ref());
+        Ok(crate::plugin::PluginRecipe::new(
+            id,
+            crate::PluginRegistrar::<Self>::new(crate::plugin::PluginFactory::id(self.as_ref())),
+            move |_, _state| {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Arc::clone(&self))
+            },
+        ))
     }
 }
 
-impl crate::plugin::PluginDefinition for NoMigrateProbe {
-    fn declaration() -> crate::plugin::PluginDeclaration {
+impl NoMigrateProbe {
+    pub fn declaration() -> crate::plugin::PluginDeclaration {
         let mut declaration = crate::plugin::PluginDeclaration::initial("no-migrate");
         declaration.format_version = crate::FormatVersion::new(2).unwrap();
         declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
         declaration
     }
 }
+impl crate::plugin::PluginMetadata for NoMigrateProbe {
+    fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+        Self::declaration()
+    }
+}
 
 impl crate::SessionPlugin for NoMigrateProbe {
     fn id(&self) -> &'static str {
         "no-migrate"
-    }
-
-    fn register(&self, _: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(())
     }
 
     fn session_ready(
@@ -529,7 +541,7 @@ impl crate::SessionPlugin for NoMigrateProbe {
 
 /// The remaining negative legs of the materialization boundary (FIG-4859):
 /// every corrupt or misowned record is refused by its own typed outcome
-/// before a single factory build, registration or readiness callback runs.
+/// before a single owner binder or readiness callback runs.
 #[test]
 fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     let calls = || Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1088,11 +1100,14 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
                 .insert("converted".into(), Value::Bool(true));
             Ok(value)
         }
-        fn build(
-            &self,
-            _: &crate::PluginSessionContext,
-        ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
-            panic!("transition cannot materialize a factory")
+        fn recipe(
+            self: Arc<Self>,
+        ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+            let id = self.id();
+            Ok(crate::plugin::PluginRecipe::empty(
+                id,
+                move |_ctx, _state| panic!("transition cannot materialize a factory"),
+            ))
         }
     }
 
@@ -1230,7 +1245,7 @@ fn transition_request(
 }
 
 #[tokio::test]
-async fn pure_initialization_precedes_read_only_registration_and_readiness() {
+async fn pure_initialization_precedes_read_only_binding_and_readiness() {
     #[derive(Clone)]
     struct ReadOnly(Arc<std::sync::atomic::AtomicUsize>);
     impl crate::PluginFactory for ReadOnly {
@@ -1246,31 +1261,36 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(BTreeMap::from([("initial".into(), serde_json::json!(17))]))
         }
-        fn build(
-            &self,
-            _: &crate::PluginSessionContext,
-        ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
-            Ok(Arc::new(self.clone()))
+        fn recipe(self: Arc<Self>) -> Result<crate::plugin::PluginRecipe, crate::PluginError> {
+            let id = crate::PluginFactory::id(self.as_ref());
+            Ok(crate::plugin::PluginRecipe::new(
+                id,
+                crate::PluginRegistrar::<Self>::new(crate::plugin::PluginFactory::id(
+                    self.as_ref(),
+                )),
+                move |_, state| {
+                    assert_eq!(state.get("initial"), Some(serde_json::json!(17)));
+                    Ok(Arc::clone(&self))
+                },
+            ))
         }
     }
 
-    impl crate::plugin::PluginDefinition for ReadOnly {
-        fn declaration() -> crate::plugin::PluginDeclaration {
+    impl ReadOnly {
+        pub fn declaration() -> crate::plugin::PluginDeclaration {
             crate::plugin::PluginDeclaration::initial("read-only")
+        }
+    }
+    impl crate::plugin::PluginMetadata for ReadOnly {
+        fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+            Self::declaration()
         }
     }
     impl crate::SessionPlugin for ReadOnly {
         fn id(&self) -> &'static str {
             "read-only"
         }
-        fn register(
-            &self,
-            registrar: &mut crate::PluginRegistrar,
-        ) -> Result<(), crate::PluginError> {
-            let state = registrar.state();
-            assert_eq!(state.get("initial"), Some(serde_json::json!(17)));
-            Ok(())
-        }
+
         fn session_ready(
             &self,
             ctx: crate::plugin::SessionReadyContext,

@@ -5,6 +5,7 @@
 //! deleted with the engine double).
 
 use super::*;
+
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 use crate::support::TurnInput;
@@ -123,9 +124,14 @@ fn completed(output: &crate::TurnOutput) -> bool {
 #[derive(Clone)]
 struct SwitchablePrompt(Arc<StdMutex<&'static str>>);
 
-impl lash_core::plugin::PluginDefinition for SwitchablePrompt {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl SwitchablePrompt {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("switchable-prompt")
+    }
+}
+impl lash_core::plugin::PluginMetadata for SwitchablePrompt {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -134,12 +140,19 @@ impl PluginFactory for SwitchablePrompt {
         "switchable-prompt"
     }
 
-    fn build(
-        &self,
-        _: &crate::plugins::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn crate::plugins::SessionPlugin>, crate::plugins::PluginError>
-    {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<SwitchablePrompt>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        SwitchablePrompt::declare(&mut reg)?;
+        let id = self.id();
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -147,23 +160,26 @@ impl crate::plugins::SessionPlugin for SwitchablePrompt {
     fn id(&self) -> &'static str {
         "switchable-prompt"
     }
-
-    fn register(
-        &self,
-        reg: &mut crate::plugins::PluginRegistrar,
+}
+impl SwitchablePrompt {
+    fn declare(
+        reg: &mut crate::plugins::PluginRegistrar<Self>,
     ) -> std::result::Result<(), crate::plugins::PluginError> {
-        let text = Arc::clone(&self.0);
         reg.prompt().section(
             crate::plugins::PromptSectionSpec::new(
                 crate::prompt::PromptSectionKey::new("switchable").expect("valid section key"),
                 crate::prompt::PromptPlacement::InitialInstructions,
             ),
-            Arc::new(move |_: &crate::plugins::PromptInput<'_>| {
-                Ok::<_, crate::plugins::PromptRenderError>(crate::plugins::SectionText::text(
-                    *text.lock_recover(),
-                ))
-            }),
-        )
+            move |this, _state| {
+                let text = Arc::clone(&this.0);
+                Ok(Arc::new(move |_: &crate::plugins::PromptInput<'_>| {
+                    Ok::<_, crate::plugins::PromptRenderError>(crate::plugins::SectionText::text(
+                        *text.lock_recover(),
+                    ))
+                }))
+            },
+        )?;
+        Ok(())
     }
 }
 
@@ -409,8 +425,11 @@ impl SchemaChangingTool {
 
 #[async_trait]
 impl ToolProvider for SchemaChangingTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![self.definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![self.definition().manifest()])
     }
 
     fn resolve_contract(
@@ -439,7 +458,7 @@ async fn composition_trace_fires_once_when_same_member_tool_schema_changes() -> 
             text_call("unchanged second schema"),
         ])
         .into_handle(),
-        |builder| builder.tools(crate::hook_key!("tools"), tools),
+        |builder| builder.tools(crate::tool_provider_key!("tools"), tools),
     )
     .await?;
     let session = traced.session("tool-schema").await?;
@@ -557,7 +576,7 @@ async fn assert_standard_tool_lifecycle(
         .into_handle(),
         |builder| {
             plugins.into_iter().fold(
-                builder.tools(crate::hook_key!("tools"), Arc::new(EchoTool)),
+                builder.tools(crate::tool_provider_key!("tools"), Arc::new(EchoTool)),
                 |builder, plugin| builder.plugin(plugin),
             )
         },
@@ -735,8 +754,11 @@ struct PendingEchoTool(tokio::sync::mpsc::UnboundedSender<(lash_core::PinnedKey,
 
 #[async_trait]
 impl ToolProvider for PendingEchoTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![pending_echo_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![pending_echo_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -797,7 +819,12 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() -> R
             text_call("done"),
         ])
         .into_handle(),
-        |builder| builder.tools(crate::hook_key!("tools"), Arc::new(PendingEchoTool(keys))),
+        |builder| {
+            builder.tools(
+                crate::tool_provider_key!("tools"),
+                Arc::new(PendingEchoTool(keys)),
+            )
+        },
     )
     .await?;
     let session = traced.session("pending-tool").await?;
@@ -1322,7 +1349,10 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     // The golden run: one node from the send to the turn's end.
     let (keys, mut published) = tokio::sync::mpsc::unbounded_channel();
     let golden = Traced::new(tree_provider(), |builder| {
-        builder.tools(crate::hook_key!("tools"), Arc::new(PendingEchoTool(keys)))
+        builder.tools(
+            crate::tool_provider_key!("tools"),
+            Arc::new(PendingEchoTool(keys)),
+        )
     })
     .await?;
     let session = golden.session(TREE_SESSION).await?;
@@ -1342,7 +1372,12 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
             crate::persistence::LeaseIncarnationId::new("node-a"),
         ),
         tree_provider(),
-        |builder| builder.tools(crate::hook_key!("tools"), Arc::new(PendingEchoTool(keys))),
+        |builder| {
+            builder.tools(
+                crate::tool_provider_key!("tools"),
+                Arc::new(PendingEchoTool(keys)),
+            )
+        },
     )?;
     let session = node_a.session(TREE_SESSION).await?;
     let parked = tokio::spawn(send(&session));
@@ -1359,7 +1394,12 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
             crate::persistence::LeaseIncarnationId::new("node-b"),
         ),
         mock_provider(vec![text_call("done")]).into_handle(),
-        |builder| builder.tools(crate::hook_key!("tools"), Arc::new(PendingEchoTool(keys))),
+        |builder| {
+            builder.tools(
+                crate::tool_provider_key!("tools"),
+                Arc::new(PendingEchoTool(keys)),
+            )
+        },
     )?;
     let session = node_b
         .core

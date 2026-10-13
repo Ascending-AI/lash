@@ -24,7 +24,7 @@ pub mod host_graph {
 mod feedback;
 mod native;
 mod plugin;
-pub use native::{NATIVE_EXECUTE_TOOL_NAME, RlmNativeToolPlugin};
+pub use native::NATIVE_EXECUTE_TOOL_NAME;
 mod projection;
 mod prompt_sections;
 mod protocol;

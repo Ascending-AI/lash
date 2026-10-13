@@ -1,9 +1,6 @@
 //! ADR 0078 laws: the same plugin and runtime checkpoint path on every backend.
 use super::*;
-use crate::plugin::{
-    PluginFactory, PluginRegistrar, PluginSessionContext, SessionAuthorityContext, SessionPlugin,
-    SessionReadyContext,
-};
+use crate::plugin::{PluginFactory, SessionAuthorityContext, SessionPlugin, SessionReadyContext};
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::{PluginError, PluginStateError, PluginStateView, StateCommands};
 use lash_sansio::sync::MutexExt;

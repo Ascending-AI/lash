@@ -93,25 +93,28 @@ fn catalog(runs: &Arc<AtomicUsize>) -> PromptCatalog {
         (
             "lash.protocol",
             Box::new(move |reg| {
+                let intro = Arc::clone(&intro);
                 reg.prompt().section(
                     PromptSectionSpec::new(key("intro"), PromptPlacement::InitialInstructions),
-                    intro.clone(),
+                    move |_, _| Ok(intro.clone()),
                 )
             }),
         ),
         (
             "memory",
             Box::new(move |reg| {
+                let note = Arc::clone(&note);
+                let wrap = Arc::clone(&wrap);
                 reg.prompt().section(
                     PromptSectionSpec::new(key("note"), PromptPlacement::CurrentContext),
-                    note.clone(),
+                    move |_, _| Ok(note.clone()),
                 )?;
                 reg.prompt().wrap(
                     PromptWrapSpec::new(
                         PromptWrapKey::new("intro").expect("valid wrap key"),
                         PromptSectionId::new("lash.protocol", key("intro")),
                     ),
-                    wrap.clone(),
+                    move |_, _| Ok(wrap.clone()),
                 )
             }),
         ),

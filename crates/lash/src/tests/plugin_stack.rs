@@ -10,19 +10,19 @@ async fn duplicate_plugin_id_refused() -> Result<()> {
     use crate::plugins::{
         PluginComposition, PluginDeclaration, PluginDeclarationError, PluginSpec,
     };
-    let factory = |key| {
+    let factory = |key: crate::plugins::ToolProviderKey| {
         Arc::new(StaticPluginFactory::new(
             PluginDeclaration::initial("duplicate-owner"),
             PluginSpec::new()
                 .with_tool_provider(key, Arc::new(AppTools))
                 .with_before_turn(
-                    key,
+                    crate::plugins::HookKey::new(key.as_str()).unwrap(),
                     Arc::new(|_| Box::pin(async { Ok(Default::default()) })),
                 ),
         )) as Arc<dyn PluginFactory>
     };
-    let first = factory(crate::hook_key!("first"));
-    let second = factory(crate::hook_key!("second"));
+    let first = factory(crate::tool_provider_key!("first"));
+    let second = factory(crate::tool_provider_key!("second"));
     let result = explicit_ephemeral_facets(LashCore::standard_builder(
         sqlite_memory_store_backend().await,
     ))
@@ -51,7 +51,10 @@ async fn duplicate_plugin_id_refused() -> Result<()> {
         duplicate
     );
     assert_eq!(
-        crate::plugins::ConfigRegistry::build(&factories).unwrap_err(),
+        match crate::plugins::ConfigRegistry::build(&factories).unwrap_err() {
+            crate::plugins::PluginError::ConfigRegistration(error) => error,
+            other => panic!("typed config refusal: {other}"),
+        },
         crate::plugins::ConfigRegistrationError::DuplicatePluginId {
             id: "duplicate-owner".into()
         }
@@ -208,7 +211,7 @@ async fn tool_completed_activity_is_canonical_while_model_observation_is_project
                 crate::plugins::StandardProtocolPluginFactory::with_config(standard_config),
             )))
             .serve_test_llm_profile(standard_provider, mock_llm_profile_spec())
-            .tools(crate::hook_key!("tools"), Arc::new(LongTextTools))
+            .tools(crate::tool_provider_key!("tools"), Arc::new(LongTextTools))
             .build(crate::testing::runtime_lease_owner())?;
         let standard_session = standard_core
             .session(
@@ -256,7 +259,7 @@ await control.finish("done");"#,
                         )]),
                         mock_llm_profile_spec(),
                     )
-                    .tools(crate::hook_key!("tools"), Arc::new(LongTextTools))
+                    .tools(crate::tool_provider_key!("tools"), Arc::new(LongTextTools))
                     .build(crate::testing::runtime_lease_owner())?;
             let rlm_session = rlm_core
                 .session(crate::SessionId::parse("rlm-projection").expect("nonblank host identity"))
@@ -293,7 +296,10 @@ struct BuilderSentinelTools {
 
 #[async_trait]
 impl ToolProvider for BuilderSentinelTools {
-    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
         AppTools.tool_manifests(config)
     }
 
@@ -351,7 +357,7 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .tools(
-            crate::hook_key!("tools"),
+            crate::tool_provider_key!("tools"),
             Arc::new(BuilderSentinelTools {
                 calls: Arc::clone(&calls),
             }),
@@ -508,7 +514,7 @@ console.log("abcdefghijklmnopqrstuvwxyz");"#,
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
         .output_cuts(cuts)
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+        .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(SessionId::from("host-rlm-presentation"))

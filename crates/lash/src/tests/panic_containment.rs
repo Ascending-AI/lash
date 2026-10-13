@@ -22,8 +22,11 @@ struct PanicTool {
 }
 
 impl ToolProvider for PanicTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![panic_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![panic_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -95,7 +98,7 @@ async fn session(
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec());
     if let Some(tools) = tools {
-        builder = builder.tools(crate::hook_key!("tools"), tools);
+        builder = builder.tools(crate::tool_provider_key!("tools"), tools);
     }
     let core = builder.build(crate::testing::runtime_lease_owner())?;
     let session = core

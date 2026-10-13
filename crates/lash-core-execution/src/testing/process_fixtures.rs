@@ -38,7 +38,7 @@ pub fn tool_component(
         crate::plugin::StaticPluginFactory::new(
             crate::plugin::PluginDeclaration::initial(key.component()),
             crate::plugin::PluginSpec::new()
-                .with_tool_provider(crate::hook_key!("tools"), provider),
+                .with_tool_provider(crate::tool_provider_key!("tools"), provider),
         )
         .as_component(key.format())
         .expect("a tool provider is a process component"),
@@ -53,7 +53,8 @@ pub fn tool_plugin(
 ) -> Arc<dyn crate::plugin::PluginFactory> {
     Arc::new(crate::plugin::StaticPluginFactory::new(
         crate::plugin::PluginDeclaration::initial(key.component()),
-        crate::plugin::PluginSpec::new().with_tool_provider(crate::hook_key!("tools"), provider),
+        crate::plugin::PluginSpec::new()
+            .with_tool_provider(crate::tool_provider_key!("tools"), provider),
     ))
 }
 
@@ -398,8 +399,11 @@ impl crate::SessionPlugin for FixtureProcessEnginePlugin {
     fn id(&self) -> &'static str {
         "testing-fixture-process-engine"
     }
-
-    fn register(&self, _registrar: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {
+}
+impl FixtureProcessEnginePlugin {
+    fn declare(
+        _reg: &mut crate::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugin::PluginError> {
         Ok(())
     }
 }
@@ -413,28 +417,46 @@ impl crate::PluginFactory for FixtureProcessEngineFactory {
         "testing-fixture-process-engine"
     }
 
-    fn process_engine_contributions(
-        &self,
-        _context: &crate::ProcessEngineContributionContext<'_>,
-    ) -> Result<Vec<crate::ProcessEngineRegistration>, crate::PluginError> {
-        Ok(vec![
-            crate::ProcessEngineRegistration::accepting(Arc::new(FixtureProcessEngine)),
-            crate::ProcessEngineRegistration::accepting(Arc::new(HeldProcessEngine)),
-        ])
-    }
-
-    fn build(
-        &self,
-        _context: &crate::PluginSessionContext,
-    ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
-        Ok(Arc::new(FixtureProcessEnginePlugin))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+        let _recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> = {
+            let mut reg = crate::plugin::PluginRegistrar::<FixtureProcessEnginePlugin>::new(
+                crate::plugin::PluginFactory::id(self.as_ref()),
+            );
+            FixtureProcessEnginePlugin::declare(&mut reg)?;
+            let id = self.id();
+            Ok(crate::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |_context, _state| Ok(Arc::new(FixtureProcessEnginePlugin)),
+            ))
+        };
+        let mut recipe = recipe?;
+        recipe = recipe.with_process_engine("testing-fixture", |_| {
+            Ok(crate::ProcessEngineRegistration::accepting(Arc::new(
+                FixtureProcessEngine,
+            )))
+        });
+        recipe = recipe.with_process_engine(HELD_PROCESS_ENGINE_KIND, |_| {
+            Ok(crate::ProcessEngineRegistration::accepting(Arc::new(
+                HeldProcessEngine,
+            )))
+        });
+        Ok(recipe)
     }
 }
 
 #[cfg(any(test, feature = "testing"))]
-impl crate::plugin::PluginDefinition for FixtureProcessEngineFactory {
-    fn declaration() -> crate::plugin::PluginDeclaration {
+impl FixtureProcessEngineFactory {
+    pub fn declaration() -> crate::plugin::PluginDeclaration {
         crate::plugin::PluginDeclaration::initial("testing-fixture-process-engine")
+    }
+}
+impl crate::plugin::PluginMetadata for FixtureProcessEngineFactory {
+    fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 

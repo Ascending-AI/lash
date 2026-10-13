@@ -33,11 +33,10 @@ use lash::{LashCore, TurnInput};
 
 // ---- the wrapping protocol factory ------------------------------------------
 
-/// The host's protocol factory: the RLM factory, wrapped. Every method
-/// forwards; `process_engine_contributions` also records how many engines
-/// each forward handed on.
+/// The host's protocol factory: the RLM recipe, wrapped. Its engine
+/// decorator records how many declared engines the recipe contributes.
 struct HostRlmFactory {
-    inner: lash::rlm::RlmProtocolPluginFactory,
+    inner: Arc<lash::rlm::RlmProtocolPluginFactory>,
     contributed_engines: Arc<Mutex<Vec<usize>>>,
 }
 
@@ -51,34 +50,32 @@ impl lash::plugins::PluginFactory for HostRlmFactory {
         self.inner.shutdown().await
     }
 
-    fn extension_contributions(&self) -> Vec<lash::plugins::PluginExtensionContribution> {
-        self.inner.extension_contributions()
-    }
-
     fn bound_backend(&self) -> Option<&str> {
         self.inner.bound_backend()
     }
 
-    fn process_engine_contributions(
-        &self,
-        ctx: &lash::plugins::ProcessEngineContributionContext<'_>,
-    ) -> Result<Vec<lash::plugins::ProcessEngineRegistration>, lash::plugins::PluginError> {
-        let engines = self.inner.process_engine_contributions(ctx)?;
-        self.contributed_engines.lock_recover().push(engines.len());
-        Ok(engines)
-    }
-
-    fn build(
-        &self,
-        ctx: &lash::plugins::PluginSessionContext,
-    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
-        self.inner.build(ctx)
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let mut recipe = Arc::clone(&self.inner).recipe()?;
+        let witness = Arc::clone(&recipe_factory.contributed_engines);
+        recipe = recipe.decorate_process_engines(move |engine| {
+            witness.lock_recover().push(1);
+            Ok(engine)
+        });
+        Ok(recipe)
     }
 }
 
-impl lash::plugins::PluginDefinition for HostRlmFactory {
-    fn declaration() -> lash::plugins::PluginDeclaration {
-        <lash::rlm::RlmProtocolPluginFactory as lash::plugins::PluginDefinition>::declaration()
+impl HostRlmFactory {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
+        lash::rlm::RlmProtocolPluginFactory::declaration()
+    }
+}
+impl lash::plugins::PluginMetadata for HostRlmFactory {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -266,14 +263,14 @@ fn core(
         .build()
         .into_handle();
     let protocol = HostRlmFactory {
-        inner: lash::rlm::RlmProtocolPluginFactory::new(
+        inner: Arc::new(lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
             lash::rlm::CellDialect::typescript(),
-        ),
+        )),
         contributed_engines: Arc::clone(contributed_engines),
     };
     LashCore::builder(backend)

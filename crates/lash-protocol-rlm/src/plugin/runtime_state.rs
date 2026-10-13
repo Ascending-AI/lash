@@ -791,8 +791,8 @@ mod tests {
         fn tool_manifests(
             &self,
             _config: &lash_core::OwnerConfigView,
-        ) -> Vec<lash_core::ToolManifest> {
-            Vec::new()
+        ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+            Ok(Vec::new())
         }
 
         fn resolve_contract(
@@ -874,8 +874,11 @@ mod tests {
                 replay_key,
             ),
             (
-                "tests",
-                "parking",
+                lash_core::plugin::ToolProviderHandle::new(
+                    lash_core::RegistryKind::Session,
+                    "tests",
+                    lash_core::tool_provider_key!("parking"),
+                ),
                 Arc::clone(resolver) as Arc<dyn lash_core::DeferredToolProvider>,
             ),
         )

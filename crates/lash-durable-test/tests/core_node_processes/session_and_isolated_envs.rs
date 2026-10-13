@@ -374,11 +374,16 @@ fn stored_envs(database: &str) -> i64 {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for SessionTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![
-            explicit_definition().manifest(),
-            ordinary_definition().manifest(),
-        ]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            vec![
+                explicit_definition().manifest(),
+                ordinary_definition().manifest(),
+            ]
+        })
     }
 
     fn resolve_contract(
@@ -469,7 +474,7 @@ fn explicit_core(backend: &lash::Backend, tools: &Arc<SessionTools>) -> lash::La
     let b = lash_core::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial(B_COMPONENT.component()),
         lash_core::facade_support::PluginSpec::new().with_tool_provider(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::new(lash::tools::StaticToolProvider::new(
                 vec![object_tool(B_TOOL, ["b", "run"])],
                 AnswerB,
@@ -481,7 +486,7 @@ fn explicit_core(backend: &lash::Backend, tools: &Arc<SessionTools>) -> lash::La
     lash::LashCore::standard_builder(backend.clone())
         .serve_test_llm_profile(model, metadata())
         .tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::clone(tools) as Arc<dyn lash_core::ToolProvider>,
         )
         .process_component(Arc::new(check), CHECK_COMPONENT)

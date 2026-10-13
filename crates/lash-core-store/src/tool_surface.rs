@@ -24,7 +24,7 @@ use crate::{ToolDefinition, ToolId};
 /// The static, author-declared key a tool provider is registered under: the
 /// identity of its owning plugin or process component and the key it
 /// declared. A provider's existence never depends on config.
-pub type ProviderKey = crate::store::plugin_writers::PluginCallbackIdentity;
+pub type ProviderKey = crate::plugin_registrations::ToolProviderHandle;
 
 /// A refused change to a session's registered tool providers or the surface
 /// they advertise.
@@ -46,9 +46,6 @@ pub enum ReconfigureError {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SurfaceEntry {
-    #[serde(
-        deserialize_with = "crate::store::plugin_writers::declared_tool_provider::deserialize"
-    )]
     pub provider: ProviderKey,
     pub definition: ToolDefinition,
 }
@@ -69,11 +66,7 @@ impl SurfaceEntry {
 pub struct RecordedSurface {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     tools: BTreeMap<String, SurfaceEntry>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::store::plugin_writers::declared_tool_provider::option::deserialize"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     deferred: Option<ProviderKey>,
 }
 
@@ -320,9 +313,6 @@ pub enum LinkKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectLink {
-    #[serde(
-        deserialize_with = "crate::store::plugin_writers::declared_tool_provider::deserialize"
-    )]
     pub provider: ProviderKey,
     pub surface: ProcessSurface,
     pub kind: LinkKind,
@@ -352,9 +342,6 @@ impl EffectLink {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionBinding {
-    #[serde(
-        deserialize_with = "crate::store::plugin_writers::declared_tool_provider::deserialize"
-    )]
     pub codec: ProviderKey,
     pub format: FormatVersion,
     pub payload: serde_json::Value,
@@ -417,9 +404,6 @@ pub struct DeferredMatch {
 pub enum DeferredOutcome {
     /// The path resolved to a tool its provider executes.
     Resolved {
-        #[serde(
-            deserialize_with = "crate::store::plugin_writers::declared_tool_provider::deserialize"
-        )]
         provider: ProviderKey,
         definition: ToolDefinition,
         #[serde(default, skip_serializing_if = "Option::is_none")]

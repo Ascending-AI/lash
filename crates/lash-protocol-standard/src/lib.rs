@@ -25,8 +25,8 @@ use lash_core::facade_support::JsonSchema;
 use lash_core::llm::types::{ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta};
 use lash_core::plugin::{
     CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar, ConfigRegistrationError,
-    OwnerChange, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
-    ProtocolDriverPlugin, ProtocolSessionContext, ProtocolSessionPlugin, SessionPlugin,
+    OwnerChange, PluginError, PluginFactory, ProtocolDriverPlugin, ProtocolSessionContext,
+    ProtocolSessionPlugin, SessionPlugin,
 };
 use lash_core::sansio::{
     CheckpointResumeAction, CompletedToolCall, PendingToolCall, PendingWork, ProtocolDriverHandle,
@@ -512,7 +512,85 @@ impl PluginFactory for StandardProtocolPluginFactory {
 
     /// The session's standard-protocol namespace and its typed commands
     /// (FIG-4379).
-    fn register_config(
+    /// The session's plugin runs under the behaviour the session recorded
+    /// (FIG-4398). A session being created has recorded none yet and runs
+    /// under what its creation records, this deployment's; a rebuilt session
+    /// that recorded none is refused, never given this deployment's.
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_core::plugin::PluginError,
+        > = {
+            let mut reg = lash_core::plugin::PluginRegistrar::<StandardProtocolPlugin>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            StandardProtocolPlugin::declare(&mut reg)?;
+            let id = lash_core::plugin::PluginFactory::id(self.as_ref());
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |ctx, _state| {
+                    let recorded = ctx
+                        .plugin_config
+                        .decode::<StandardRecordedConfig>(STANDARD_PROTOCOL_PLUGIN_ID)
+                        .map_err(|error| {
+                            lash_core::plugin::PluginError::Session(format!(
+                                "invalid recorded standard-protocol session config: {error}"
+                            ))
+                        })?;
+                    // A session whose turns only a control call ends is offered
+                    // `finish`. A run that requires one of a session that is not is
+                    // offered no `finish` unless the host installed a tool that declares
+                    // it, and is refused when its turn is formed.
+                    let termination = recorded
+                        .as_ref()
+                        .and_then(|recorded| recorded.termination)
+                        .unwrap_or_default();
+                    let behaviour = match recorded {
+                        Some(recorded) => recorded.behaviour,
+                        None if matches!(
+                            ctx.materialization,
+                            lash_core::plugin::PluginSessionMaterialization::Rematerialization
+                        ) =>
+                        {
+                            return Err(
+                                lash_core::plugin::PluginError::MissingRecordedSessionConfig {
+                                    plugin_id: STANDARD_PROTOCOL_PLUGIN_ID.to_string(),
+                                    field: BEHAVIOUR_FIELD.to_string(),
+                                },
+                            );
+                        }
+                        None => self.config.recorded_behaviour(),
+                    };
+                    if let BatchSugar::Enabled { max_members } = behaviour.batch
+                        && max_members.get() > BATCH_MEMBER_CEILING
+                    {
+                        return Err(lash_core::plugin::PluginError::InvalidBatchMaximum {
+                            requested: max_members.get(),
+                            ceiling: BATCH_MEMBER_CEILING,
+                        });
+                    }
+                    Ok(Arc::new(StandardProtocolPlugin {
+                        config: self.config.clone().under_recorded_behaviour(&behaviour),
+                        termination,
+                    }))
+                },
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = lash_core::plugin::ConfigRegistrar::new(
+            lash_core::plugin::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
+    }
+}
+impl StandardProtocolPluginFactory {
+    pub fn declare_configuration(
         &self,
         registrar: &mut ConfigRegistrar,
     ) -> Result<(), ConfigRegistrationError> {
@@ -532,60 +610,16 @@ impl PluginFactory for StandardProtocolPluginFactory {
             })
         })
     }
-
-    /// The session's plugin runs under the behaviour the session recorded
-    /// (FIG-4398). A session being created has recorded none yet and runs
-    /// under what its creation records, this deployment's; a rebuilt session
-    /// that recorded none is refused, never given this deployment's.
-    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        let recorded = ctx
-            .plugin_config
-            .decode::<StandardRecordedConfig>(STANDARD_PROTOCOL_PLUGIN_ID)
-            .map_err(|error| {
-                PluginError::Session(format!(
-                    "invalid recorded standard-protocol session config: {error}"
-                ))
-            })?;
-        // A session whose turns only a control call ends is offered
-        // `finish`. A run that requires one of a session that is not is
-        // offered no `finish` unless the host installed a tool that declares
-        // it, and is refused when its turn is formed.
-        let termination = recorded
-            .as_ref()
-            .and_then(|recorded| recorded.termination)
-            .unwrap_or_default();
-        let behaviour = match recorded {
-            Some(recorded) => recorded.behaviour,
-            None if matches!(
-                ctx.materialization,
-                lash_core::plugin::PluginSessionMaterialization::Rematerialization
-            ) =>
-            {
-                return Err(PluginError::MissingRecordedSessionConfig {
-                    plugin_id: STANDARD_PROTOCOL_PLUGIN_ID.to_string(),
-                    field: BEHAVIOUR_FIELD.to_string(),
-                });
-            }
-            None => self.config.recorded_behaviour(),
-        };
-        if let BatchSugar::Enabled { max_members } = behaviour.batch
-            && max_members.get() > BATCH_MEMBER_CEILING
-        {
-            return Err(PluginError::InvalidBatchMaximum {
-                requested: max_members.get(),
-                ceiling: BATCH_MEMBER_CEILING,
-            });
-        }
-        Ok(Arc::new(StandardProtocolPlugin {
-            config: self.config.clone().under_recorded_behaviour(&behaviour),
-            termination,
-        }))
-    }
 }
 
-impl lash_core::plugin::PluginDefinition for StandardProtocolPluginFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl StandardProtocolPluginFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(STANDARD_PROTOCOL_PLUGIN_ID)
+    }
+}
+impl lash_core::plugin::PluginMetadata for StandardProtocolPluginFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -598,44 +632,53 @@ impl SessionPlugin for StandardProtocolPlugin {
     fn id(&self) -> &'static str {
         STANDARD_PROTOCOL_PLUGIN_ID
     }
+}
+impl StandardProtocolPlugin {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        prompt::register_sections(reg, |owner| prompt::StandardPromptBehaviour {
+            batch: owner.config.batch,
+            termination: owner.termination,
+        })?;
 
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        let renderer = self.config.renderer.clone();
-        reg.tool_results().presenter(Arc::new(move |input| {
-            let renderer = renderer.clone();
-            Box::pin(async move { render::present(input, &renderer).await })
-        }))?;
-        reg.protocol().session(Arc::new(StandardProtocolSession))?;
-        prompt::register_sections(
-            reg,
-            prompt::StandardPromptBehaviour {
-                batch: self.config.batch,
-                termination: self.termination,
-            },
-        )?;
+        reg.tool_results().presenter(move |this, _state| {
+            let renderer = this.config.renderer.clone();
+            Ok(Arc::new(move |input| {
+                let renderer = renderer.clone();
+                Box::pin(async move { render::present(input, &renderer).await })
+            }))
+        })?;
+
         reg.protocol()
-            .protocol_driver(Arc::new(StandardProtocolDriver {
-                config: self.config.clone(),
-            }))?;
-        // The finish provider exists in every session; the session's
-        // termination decides only what it advertises.
+            .session(move |_this, _state| Ok(Arc::new(StandardProtocolSession)))?;
+
+        reg.protocol().protocol_driver(move |this, _state| {
+            Ok(Arc::new(StandardProtocolDriver {
+                config: this.config.clone(),
+            }))
+        })?;
+
         reg.tools().provider(
-            lash_core::hook_key!("finish"),
-            Arc::new(finish::finish_tool_provider(self.termination)),
+            lash_core::tool_provider_key!("finish"),
+            move |this, _state| Ok(Arc::new(finish::finish_tool_provider(this.termination))),
         )?;
-        let discovery = self.config.discovery.clone();
-        let batch = self.config.batch;
+
         reg.tool_catalog().contribute(
             lash_core::hook_key!("standard-catalog"),
-            Arc::new(move |ctx| {
-                validate_discovery(&ctx.tools, discovery.as_ref())?;
-                validate_batch_name(&ctx.tools, batch)?;
-                // A host's own finish tool takes the place of `finish`.
-                Ok(lash_core::suppress_default_finish(
-                    &ctx,
-                    &finish::finish_tool_id(),
-                ))
-            }),
+            move |this, _state| {
+                let discovery = this.config.discovery.clone();
+                let batch = this.config.batch;
+                Ok(Arc::new(move |ctx| {
+                    validate_discovery(&ctx.tools, discovery.as_ref())?;
+                    validate_batch_name(&ctx.tools, batch)?;
+                    // A host's own finish tool takes the place of `finish`.
+                    Ok(lash_core::suppress_default_finish(
+                        &ctx,
+                        &finish::finish_tool_id(),
+                    ))
+                }))
+            },
         )?;
         Ok(())
     }

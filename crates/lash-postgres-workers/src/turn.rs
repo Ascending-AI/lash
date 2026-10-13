@@ -244,7 +244,10 @@ pub fn core(backend: &Backend, witness: Witness, hold: Hold) -> Result<lash::Las
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .serve_test_llm_profile(model(witness.clone(), hold), metadata())
-    .tools(lash::hook_key!("tools"), ext_write(witness.clone(), hold))
+    .tools(
+        lash::tool_provider_key!("tools"),
+        ext_write(witness.clone(), hold),
+    )
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
         lash::persistence::LeaseOwnerId::new("workers-deployment"),
         lash::persistence::LeaseIncarnationId::new(witness.node()),

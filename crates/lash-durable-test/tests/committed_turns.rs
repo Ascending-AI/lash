@@ -174,7 +174,7 @@ fn switch_frame() -> Arc<dyn lash_core::ToolProvider> {
 async fn a_cursor_reads_on_across_compaction_and_a_frame_switch(tier: Tier) {
     let Some(world) = World::new(tier, |backend| {
         lash::LashCore::standard_builder(backend.clone())
-            .tools(lash::hook_key!("tools"), switch_frame())
+            .tools(lash::tool_provider_key!("tools"), switch_frame())
             .plugin(Arc::new(
                 lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
             ))
@@ -584,7 +584,8 @@ fn echo() -> Arc<dyn lash_core::ToolProvider> {
 }
 
 fn standard_with_echo(backend: &lash::Backend) -> lash::LashCoreBuilder {
-    lash::LashCore::standard_builder(backend.clone()).tools(lash::hook_key!("tools"), echo())
+    lash::LashCore::standard_builder(backend.clone())
+        .tools(lash::tool_provider_key!("tools"), echo())
 }
 
 fn rlm_with_echo(backend: &lash::Backend) -> lash::LashCoreBuilder {
@@ -592,7 +593,7 @@ fn rlm_with_echo(backend: &lash::Backend) -> lash::LashCoreBuilder {
         backend.clone(),
         served::rlm(backend, sim::untimed_workers()),
     )
-    .tools(lash::hook_key!("tools"), echo())
+    .tools(lash::tool_provider_key!("tools"), echo())
 }
 
 /// A host's own rendering of committed history: one line per visible entry,

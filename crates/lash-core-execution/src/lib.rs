@@ -206,7 +206,6 @@ pub mod facade_support {
     pub use crate::plugin::PluginSessionMaterializationRequest;
     pub use crate::plugin::PluginSessionRequest;
     pub use crate::plugin::PluginSpec;
-    pub use crate::plugin::PluginSpecFactory;
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PluginTraceEmitter;
     pub use crate::plugin::SessionConfigChangedContext;
@@ -387,8 +386,6 @@ pub(crate) use crate::plugin::{
     RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
     SessionObserverIntent,
 };
-#[cfg(any(test, feature = "testing"))]
-pub(crate) use crate::runtime::UnavailableProcessService;
 pub(crate) use lash_sansio::{ToolCatalogBuildInput, validate_tool_input};
 
 pub mod sansio {

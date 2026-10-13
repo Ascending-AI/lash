@@ -110,11 +110,16 @@ struct Probe {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Probe {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        [PROBE, DEFERRED]
-            .into_iter()
-            .map(|name| probe_definition(name).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            [PROBE, DEFERRED]
+                .into_iter()
+                .map(|name| probe_definition(name).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(

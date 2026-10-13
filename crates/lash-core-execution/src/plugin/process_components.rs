@@ -95,7 +95,7 @@ pub trait ProcessComponentFactory: Send + Sync {
     /// # Errors
     ///
     /// The component cannot build under `cx`.
-    fn build(&self, cx: &ProcessComponentContext<'_>) -> Result<ProcessComponentSpec, PluginError>;
+    fn recipe(self: Arc<Self>) -> std::result::Result<ProcessRecipe, PluginError>;
 }
 
 /// What one component builds under.
@@ -189,32 +189,67 @@ impl ProcessComponentPorts {
     }
 }
 
-/// Only what process execution consumes. Nothing session-shaped.
+/// Ergonomic static component entries in the shared registration model.
 #[derive(Clone, Default)]
 pub struct ProcessComponentSpec {
-    /// Each provider under its declared key, the static identity its calls
-    /// bind and dispatch through.
-    pub tool_providers: Vec<(HookKey, Arc<dyn ToolProvider>)>,
-    /// The deferred provider, under its declared key: an env has at most
-    /// one.
-    pub deferred_provider: Option<(HookKey, Arc<dyn crate::DeferredToolProvider>)>,
-    pub tool_catalog_contributors: Vec<(HookKey, ToolCatalogContributor)>,
-    pub tool_args_transforms: Vec<(HookKey, ToolArgsTransformHook)>,
-    pub tool_args_checks: Vec<(HookKey, ToolArgsCheckHook)>,
-    pub tool_result_transforms: Vec<(HookKey, ToolResultTransformHook)>,
-    pub tool_result_checks: Vec<(HookKey, ToolResultCheckHook)>,
-    /// At most one per composition (D12).
-    pub presenter: Option<ToolPresentationPresenter>,
-    pub presentation_steps: Vec<(HookKey, ToolPresentationStep)>,
-    /// Sections of direct calls only (D16): any other purpose is refused.
-    pub direct_prompt_sections: Vec<(PromptSectionSpec, Arc<dyn PromptSection>)>,
-    /// The reducers the component's step state applies (FIG-5268).
-    pub state_reducers: Vec<(String, StateReducer)>,
+    pub(crate) registrations: PluginRegistrar<()>,
+    pub(crate) errors: Vec<PluginError>,
+}
+impl ProcessComponentSpec {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    fn admit(&mut self, result: Result<(), PluginError>) {
+        if let Err(error) = result {
+            self.errors.push(error);
+        }
+    }
+    pub fn with_tool_provider(
+        mut self,
+        key: ToolProviderKey,
+        provider: Arc<dyn ToolProvider>,
+    ) -> Self {
+        let result = self
+            .registrations
+            .tools()
+            .record_provider(key, move |_, _| Ok(Arc::clone(&provider)));
+        self.admit(result);
+        self
+    }
+    pub fn with_prompt_section(
+        mut self,
+        spec: PromptSectionSpec,
+        section: Arc<dyn PromptSection>,
+    ) -> Self {
+        let result = self
+            .registrations
+            .prompt()
+            .section(spec, move |_, _| Ok(Arc::clone(&section)));
+        self.admit(result);
+        self
+    }
+    pub fn with_state_reducer(mut self, name: impl Into<String>, reducer: StateReducer) -> Self {
+        let result = self
+            .registrations
+            .state_reducer(name, move |_, _| Ok(Arc::clone(&reducer)));
+        self.admit(result);
+        self
+    }
+    pub fn recipe(
+        self,
+        owner: &str,
+    ) -> std::result::Result<ProcessRecipe, crate::plugin::PluginError> {
+        if let Some(error) = self.errors.first() {
+            return Err(error.clone());
+        }
+        Ok(ProcessRecipe::from_spec(owner, self.registrations))
+    }
 }
 
 struct RegisteredComponent {
     factory: Arc<dyn ProcessComponentFactory>,
     declaration: ProcessComponentDeclaration,
+    recipe: Arc<ProcessRecipe>,
 }
 
 /// The components a deployment installs, by id, and the host services they
@@ -291,7 +326,7 @@ impl ProcessComponentRegistry {
                     return Err(ProcessEnvRefusal::ToolNotServed {
                         effect: effect.to_string(),
                         tool: link.tool().to_string(),
-                        provider: format!("{}/{}", link.provider.owner, link.provider.key),
+                        provider: format!("{}/{}", link.provider.owner(), link.provider.key()),
                     });
                 }
             }
@@ -344,12 +379,25 @@ impl ProcessComponentRegistry {
                 declaration.id
             )));
         }
+        let recipe = Arc::new(Arc::clone(&factory).recipe()?);
+        validate_process_entries(&recipe.entries)?;
+        if recipe
+            .entries
+            .iter()
+            .any(|entry| entry.key.owner() != declaration.id.as_str())
+        {
+            return Err(PluginError::Registration(format!(
+                "component `{}` declared another owner",
+                declaration.id
+            )));
+        }
         let mut components = (*self.components).clone();
         components.insert(
             declaration.id.as_str().to_owned(),
             Arc::new(RegisteredComponent {
                 factory,
                 declaration,
+                recipe,
             }),
         );
         self.components = Arc::new(components);
@@ -397,40 +445,28 @@ impl ProcessComponentRegistry {
     /// process's config and projects none; one that does not build is
     /// logged and projects none.
     fn served_callbacks(&self) -> Vec<String> {
-        let mut tokens = Vec::new();
-        for registered in self.components.values() {
-            if registered.factory.config_type() != TypeId::of::<()>() {
-                continue;
-            }
-            let declaration = &registered.declaration;
-            let entry = ProcessComponentEntry::from_parts(
-                declaration.id.clone(),
-                lash_core_store::process_env::ProcessComponentConfig::new(
-                    declaration.config_format,
-                    serde_json::Value::Null,
-                ),
-                BTreeSet::new(),
-            );
-            let composed = ProcessEnv::builder(crate::MaxToolCalls::new(1))
-                .entry(entry)
-                .build()
-                .and_then(|env| self.compose(&env, None));
-            match composed {
-                Ok(composition) => tokens.extend(crate::ObligationToken::of_callbacks(
-                    crate::RegistryKind::Process,
-                    composition
-                        .composition
-                        .contributions()
-                        .map(|(_, identity)| identity),
-                )),
-                Err(error) => tracing::error!(
-                    component = %declaration.id,
-                    %error,
-                    "a process component serves no callbacks"
-                ),
-            }
+        let callbacks = self
+            .components
+            .values()
+            .flat_map(|registered| &registered.recipe.entries)
+            .filter_map(|entry| match &entry.key {
+                ContributionKey::Callback(key) => Some(key),
+                _ => None,
+            });
+        crate::ObligationToken::of_callbacks(crate::RegistryKind::Process, callbacks)
+    }
+
+    pub fn installed_inventory(&self) -> InstalledInventory {
+        let entries = self
+            .components
+            .values()
+            .flat_map(|registered| registered.recipe.entries.clone())
+            .collect::<Vec<_>>();
+        InstalledInventory {
+            scope: InventoryScope::Deployment(crate::RegistryKind::Process),
+            readiness: vec![ContributionReadiness::Ready; entries.len()],
+            entries,
         }
-        tokens
     }
 
     /// What each installed component declares about the config formats it
@@ -513,63 +549,86 @@ impl ProcessComponentRegistry {
         state: &Arc<std::sync::Mutex<state::PluginStateRegistry>>,
     ) -> Result<BuiltComponents, ProcessEnvRefusal> {
         let mut contributions = PluginContributions::default();
-        let mut presenter_owner: Option<String> = None;
         let mut owners = Vec::with_capacity(env.components().len());
+        let entries = env
+            .components()
+            .iter()
+            .map(|entry| self.component(entry))
+            .collect::<Result<Vec<_>, _>>()?
+            .iter()
+            .flat_map(|registered| registered.recipe.entries.clone())
+            .collect::<Vec<_>>();
+        let inventory = InstalledInventory {
+            scope: process.map_or(
+                InventoryScope::Deployment(crate::RegistryKind::Process),
+                |process| InventoryScope::Owner(crate::RuntimeOwner::Process(process.clone())),
+            ),
+            readiness: vec![ContributionReadiness::Ready; entries.len()],
+            entries,
+        };
+        contributions.inventory = Some(inventory);
+        let mut presenter = None;
+        for entry in env.components() {
+            let registered = self.component(entry)?;
+            for service in &registered.recipe.requirements.services {
+                if *service != ServiceKind::GrantedSessionReads
+                    || self.host.sessions.is_none()
+                    || entry.sessions().is_empty()
+                {
+                    return Err(ProcessEnvRefusal::PluginPreflight {
+                        issue: PreflightIssue::MissingService {
+                            owner: entry.id().to_string(),
+                            service: *service,
+                        },
+                    });
+                }
+            }
+            if registered.recipe.entries.iter().any(|entry| {
+                entry.kind == ContributionKind::Callback(CallbackSlot::PresentationPresenter)
+            }) {
+                if let Some(first) = presenter {
+                    return Err(ProcessEnvRefusal::DuplicatePresenter {
+                        first,
+                        second: entry.id().to_string(),
+                    });
+                }
+                presenter = Some(entry.id().to_string());
+            }
+        }
         for entry in env.components() {
             let registered = self.component(entry)?;
             let id = entry.id().to_string();
             let ports = self.host.ports(entry);
-            let spec = registered
-                .factory
-                .build(&ProcessComponentContext {
-                    process,
-                    env,
-                    entry,
-                    capabilities: env.capabilities(),
-                    ports: &ports,
-                    state: process.map(|process| {
-                        PluginStateView::bind(
-                            &crate::RuntimeOwner::Process(process.clone()),
-                            &id,
-                            Arc::clone(state),
-                        )
-                    }),
-                })
+            let state_view = match process {
+                Some(process) => PluginStateView::bind(
+                    &crate::RuntimeOwner::Process(process.clone()),
+                    &id,
+                    Arc::clone(state),
+                ),
+                None => PluginStateView::detached(&id, Arc::clone(state)),
+            };
+            let mut reg = BoundRegistrar::for_process(id.clone());
+            reg.contributions = contributions;
+            registered
+                .recipe
+                .bind(
+                    &ProcessComponentContext {
+                        process,
+                        env,
+                        entry,
+                        capabilities: env.capabilities(),
+                        ports: &ports,
+                        state: process.map(|_| state_view.clone()),
+                    },
+                    &state_view,
+                    &mut reg,
+                )
                 .map_err(|error| ProcessEnvRefusal::ComponentBuildFailed {
                     id: id.clone(),
                     reason: error.to_string(),
                 })?;
-            if spec.presenter.is_some() {
-                if let Some(first) = presenter_owner.take() {
-                    return Err(ProcessEnvRefusal::DuplicatePresenter { first, second: id });
-                }
-                presenter_owner = Some(id.clone());
-            }
-            if let Some((section, _)) = spec.direct_prompt_sections.iter().find(|(section, _)| {
-                section
-                    .purposes
-                    .iter()
-                    .any(|purpose| !matches!(purpose, PromptPurpose::Direct { .. }))
-            }) {
-                return Err(ProcessEnvRefusal::ComponentBuildFailed {
-                    id,
-                    reason: format!(
-                        "prompt section `{}` serves a purpose other than a direct call",
-                        section.key
-                    ),
-                });
-            }
-            let owner = id.clone();
-            let mut reg = PluginRegistrar::new(owner.clone());
-            reg.contributions = contributions;
-            register_spec(&mut reg, spec).map_err(|error| {
-                ProcessEnvRefusal::ComponentBuildFailed {
-                    id: id.clone(),
-                    reason: error.to_string(),
-                }
-            })?;
             contributions = reg.contributions;
-            owners.push(owner);
+            owners.push(id);
         }
         let registry =
             super::runtime_impl::build_tool_registry(&contributions).map_err(|error| {
@@ -621,56 +680,6 @@ struct BuiltComponents {
     owners: Vec<String>,
     contributions: PluginContributions,
     registry: Arc<crate::ToolRegistry>,
-}
-
-fn register_spec(reg: &mut PluginRegistrar, spec: ProcessComponentSpec) -> Result<(), PluginError> {
-    let ProcessComponentSpec {
-        tool_providers,
-        deferred_provider,
-        tool_catalog_contributors,
-        tool_args_transforms,
-        tool_args_checks,
-        tool_result_transforms,
-        tool_result_checks,
-        presenter,
-        presentation_steps,
-        direct_prompt_sections,
-        state_reducers,
-    } = spec;
-    for (key, provider) in tool_providers {
-        reg.tools().provider(key, provider)?;
-    }
-    if let Some((key, provider)) = deferred_provider {
-        reg.tools().deferred(key, provider)?;
-    }
-    for (key, contributor) in tool_catalog_contributors {
-        reg.tool_catalog().contribute(key, contributor)?;
-    }
-    for (key, hook) in tool_args_transforms {
-        reg.tool_calls().transform_args(key, hook)?;
-    }
-    for (key, hook) in tool_args_checks {
-        reg.tool_calls().check_args(key, hook)?;
-    }
-    for (key, hook) in tool_result_transforms {
-        reg.tool_calls().transform_result(key, hook)?;
-    }
-    for (key, hook) in tool_result_checks {
-        reg.tool_calls().check_result(key, hook)?;
-    }
-    if let Some(presenter) = presenter {
-        reg.tool_results().presenter(presenter)?;
-    }
-    for (key, step) in presentation_steps {
-        reg.tool_results().presentation_step(key, step)?;
-    }
-    for (section, renderer) in direct_prompt_sections {
-        reg.prompt().section(section, renderer)?;
-    }
-    for (name, reducer) in state_reducers {
-        reg.state_reducer(name, reducer)?;
-    }
-    Ok(())
 }
 
 /// What a process's components make: its execution composition, the tool
@@ -845,6 +854,8 @@ impl ProcessComposition {
             .ok_or_else(|| {
                 PluginError::Registration("the process env links no call_dynamic endpoint".into())
             })?;
+        let config = super::OwnerConfigView::components(Arc::clone(env));
+        config.validate_provider(&link.provider)?;
         let provider = self
             .registry
             .deferred_provider(&link.provider)
@@ -854,13 +865,27 @@ impl ProcessComposition {
                     link.provider
                 ))
             })?;
-        let config = super::OwnerConfigView::components(Arc::clone(env));
-        let cx = crate::DeferredResolveContext::new(owner, None, env.capabilities(), &config);
+        let cx = crate::DeferredResolveContext::new(
+            &link.provider,
+            owner,
+            None,
+            env.capabilities(),
+            &config,
+        );
         let outcome = provider
             .resolve(&cx, &[path])
             .await
             .remove(path)
             .unwrap_or(crate::DeferredOutcome::Unavailable { note: None });
+        if let crate::DeferredOutcome::Resolved {
+            provider, binding, ..
+        } = &outcome
+        {
+            config.validate_provider(provider)?;
+            if let Some(binding) = binding {
+                config.validate_provider(&binding.codec)?;
+            }
+        }
         Ok(crate::DeferredMatch {
             requested: path.to_owned(),
             outcome: crate::bounded_deferred_outcome(outcome),
@@ -954,6 +979,7 @@ impl ProcessComposition {
 
 /// A [`StaticPluginFactory`]'s spec as a process component whose config is
 /// `()` (D12): what process controls and presentation-only plugins use.
+#[derive(Clone)]
 pub struct StaticProcessComponent {
     declaration: ProcessComponentDeclaration,
     spec: ProcessComponentSpec,
@@ -972,59 +998,37 @@ impl StaticPluginFactory {
         config_format: FormatVersion,
     ) -> Result<StaticProcessComponent, PluginError> {
         let spec = self.spec();
-        let session_only = [
-            (
-                "extension_contributions",
-                spec.extension_contributions.is_empty(),
-            ),
-            ("before_turn_hooks", spec.before_turn_hooks.is_empty()),
-            ("after_turn_hooks", spec.after_turn_hooks.is_empty()),
-            ("checkpoint_hooks", spec.checkpoint_hooks.is_empty()),
-            (
-                "assistant_stream_hooks",
-                spec.assistant_stream_hooks.is_empty(),
-            ),
-            (
-                "assistant_response_hooks",
-                spec.assistant_response_hooks.is_empty(),
-            ),
-            (
-                "assistant_stream_finished_hooks",
-                spec.assistant_stream_finished_hooks.is_empty(),
-            ),
-            ("runtime_event_hooks", spec.runtime_event_hooks.is_empty()),
-            ("plugin_operations", spec.plugin_operations.is_empty()),
-            ("context_compactors", spec.context_compactors.is_empty()),
-            (
-                "context_pressure_hooks",
-                spec.context_pressure_hooks.is_empty(),
-            ),
-        ];
-        if let Some((field, _)) = session_only.iter().find(|(_, empty)| !*empty) {
-            return Err(PluginError::Registration(format!(
-                "plugin `{}` fills `{field}`, which no process consumes",
-                self.plugin_declaration().id
-            )));
+        if let Some(error) = spec.errors.first() {
+            return Err(error.clone());
         }
         let declaration = self.plugin_declaration();
-        let component =
-            ProcessComponentDeclaration::initial(declaration.id.as_str(), config_format)?;
+        let registrations = spec.registrations.clone();
+        let recipe = ProcessRecipe::from_spec(declaration.id.as_str(), registrations.clone());
+        validate_process_entries(&recipe.entries)?;
         Ok(StaticProcessComponent {
-            declaration: component,
+            declaration: ProcessComponentDeclaration::initial(
+                declaration.id.as_str(),
+                config_format,
+            )?,
             spec: ProcessComponentSpec {
-                tool_providers: spec.tool_providers.clone(),
-                deferred_provider: spec.deferred_provider.clone(),
-                tool_catalog_contributors: spec.tool_catalog_contributors.clone(),
-                tool_args_transforms: spec.tool_args_transforms.clone(),
-                tool_args_checks: spec.tool_args_checks.clone(),
-                tool_result_transforms: spec.tool_result_transforms.clone(),
-                tool_result_checks: spec.tool_result_checks.clone(),
-                presenter: None,
-                presentation_steps: spec.presentation_steps.clone(),
-                direct_prompt_sections: Vec::new(),
-                state_reducers: spec.state_reducers.clone(),
+                registrations,
+                errors: Vec::new(),
             },
         })
+    }
+}
+
+impl StaticProcessComponent {
+    /// The scoped address of a provider in this component's declared entries.
+    pub fn provider_handle(&self, key: ToolProviderKey) -> Result<ToolProviderHandle, PluginError> {
+        if let Some(error) = self.spec.errors.first() {
+            return Err(error.clone());
+        }
+        self.spec.registrations.provider_handle(
+            self.declaration.id.as_str(),
+            RegistryKind::Process,
+            key,
+        )
     }
 }
 
@@ -1051,10 +1055,43 @@ impl ProcessComponentFactory for StaticProcessComponent {
             })
     }
 
-    fn build(
-        &self,
-        _cx: &ProcessComponentContext<'_>,
-    ) -> Result<ProcessComponentSpec, PluginError> {
-        Ok(self.spec.clone())
+    fn recipe(self: Arc<Self>) -> std::result::Result<ProcessRecipe, crate::plugin::PluginError> {
+        self.spec.clone().recipe(self.declaration.id.as_str())
     }
+}
+
+fn validate_process_entries(entries: &[ContributionDescriptor]) -> Result<(), PluginError> {
+    for entry in entries {
+        if entry.registry != RegistryKind::Process {
+            return Err(PluginError::Registration(
+                "process recipe declared a session address".into(),
+            ));
+        }
+        let allowed = match &entry.kind {
+            ContributionKind::Callback(slot) => matches!(
+                slot,
+                lash_core_store::tool_run::CallbackSlot::ToolProvider
+                    | lash_core_store::tool_run::CallbackSlot::ToolCatalog
+                    | lash_core_store::tool_run::CallbackSlot::ToolArgsTransform
+                    | lash_core_store::tool_run::CallbackSlot::ToolArgsCheck
+                    | lash_core_store::tool_run::CallbackSlot::ToolResultTransform
+                    | lash_core_store::tool_run::CallbackSlot::ToolResultCheck
+                    | lash_core_store::tool_run::CallbackSlot::PresentationPresenter
+                    | lash_core_store::tool_run::CallbackSlot::PresentationStep
+            ),
+            ContributionKind::PromptSection => {
+                matches!(&entry.details, ContributionDetails::PromptSection(spec) if spec.purposes.iter().all(|purpose| matches!(purpose, PromptPurpose::Direct { .. })))
+            }
+            ContributionKind::StateReducer => true,
+            _ => false,
+        };
+        if !allowed {
+            return Err(PluginError::Registration(format!(
+                "process component `{}` cannot supply {:?}",
+                entry.key.owner(),
+                entry.kind
+            )));
+        }
+    }
+    Ok(())
 }

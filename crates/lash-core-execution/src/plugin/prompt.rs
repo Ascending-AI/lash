@@ -1,7 +1,7 @@
 //! Prompt sections (FIG-5254, ADR 0133): the one contract by which plugins
 //! contribute model-facing instruction text.
 //!
-//! A plugin registers keyed sections through [`PluginRegistrar::prompt`].
+//! A plugin registers keyed sections through [`BoundRegistrar::prompt`].
 //! Each section is owned as `(plugin id, local key)`; registering one key
 //! twice is refused. Plugins are trusted: any plugin may wrap any section,
 //! protocol sections included, and a wrapper may prepend, append, replace or
@@ -19,6 +19,7 @@
 //! wrappers must be repeat-safe until the call is admitted: a crash before
 //! admission renders again. This is a trusted-code contract, not a sandbox.
 
+pub use super::recipe::PromptRecipeRegistrations as PromptRegistrations;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -33,7 +34,7 @@ pub use crate::prompt_sections::{
     ResolvedPromptWrap,
 };
 
-use super::{PluginError, PluginRegistrar, PluginStateError};
+use super::{BoundRegistrar, PluginError, PluginStateError};
 
 /// A section's or wrapper's output: exact text, or an explicit omission. An
 /// error is never an omission.
@@ -603,7 +604,6 @@ impl PromptInput<'_> {
 
 #[derive(Clone)]
 struct RegisteredPromptSection {
-    identity: super::PluginCallbackIdentity,
     owner: String,
     spec: PromptSectionSpec,
     renderer: Arc<dyn PromptSection>,
@@ -669,10 +669,6 @@ impl PromptRegistry {
             .map(|section| (section.owner.clone(), section.id()))
     }
 
-    pub(crate) fn identities(&self) -> impl Iterator<Item = &super::PluginCallbackIdentity> {
-        self.sections().map(|section| &section.identity)
-    }
-
     fn sections(&self) -> impl Iterator<Item = &RegisteredPromptSection> {
         self.entries.iter().filter_map(|entry| match entry {
             RegisteredPromptEntry::Section(section) => Some(section),
@@ -697,11 +693,11 @@ impl PromptRegistry {
 }
 
 /// Registers the plugin's prompt sections, families and wrappers.
-pub struct PromptRegistrations<'a> {
-    pub(super) reg: &'a mut PluginRegistrar,
+pub(crate) struct BoundPromptRegistrations<'a> {
+    pub(super) reg: &'a mut BoundRegistrar,
 }
 
-impl PromptRegistrations<'_> {
+impl BoundPromptRegistrations<'_> {
     /// Register a section under this plugin's id and `spec.key`.
     ///
     /// # Errors
@@ -724,10 +720,6 @@ impl PromptRegistrations<'_> {
         registry
             .entries
             .push(RegisteredPromptEntry::Section(RegisteredPromptSection {
-                identity: super::PluginCallbackIdentity {
-                    owner: owner.clone(),
-                    key: format!("prompt_section:{}", spec.key),
-                },
                 owner,
                 spec,
                 renderer,
@@ -1231,26 +1223,6 @@ impl ResolvedPromptComposition {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
-impl PromptCatalog {
-    /// The sections and wrappers `plugins` register, in order, as a session
-    /// build registers them.
-    ///
-    /// # Errors
-    ///
-    /// The [`PluginError`] a plugin's registration refuses with.
-    pub fn of_plugins(plugins: &[Arc<dyn super::SessionPlugin>]) -> Result<Self, PluginError> {
-        let mut contributions = super::PluginContributions::default();
-        for plugin in plugins {
-            let mut reg = PluginRegistrar::new(String::from(plugin.id()));
-            reg.contributions = contributions;
-            plugin.register(&mut reg)?;
-            contributions = reg.contributions;
-        }
-        Ok(Self::new(contributions.prompt))
-    }
-}
-
 impl super::PluginSession {
     /// The prompt sections, families and wrappers this session's plugins
     /// registered.
@@ -1267,10 +1239,10 @@ impl super::PluginSession {
     }
 }
 
-impl super::PluginRegistrar {
+impl super::BoundRegistrar {
     /// Register prompt sections and wrappers.
-    pub fn prompt(&mut self) -> PromptRegistrations<'_> {
-        PromptRegistrations { reg: self }
+    pub fn prompt(&mut self) -> BoundPromptRegistrations<'_> {
+        BoundPromptRegistrations { reg: self }
     }
 }
 

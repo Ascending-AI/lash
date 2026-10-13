@@ -63,8 +63,11 @@ fn runtime_lookup_definition() -> lash_core::ToolDefinition {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for RuntimeLookupTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![runtime_lookup_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![runtime_lookup_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -137,7 +140,10 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
                 )
                 .expect("register the test model"),
         ))
-        .tools(lash::hook_key!("tools"), Arc::new(RuntimeLookupTool))
+        .tools(
+            lash::tool_provider_key!("tools"),
+            Arc::new(RuntimeLookupTool),
+        )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))

@@ -13,14 +13,13 @@ pub struct PluginHost {
     prompt_render_pool: Option<Arc<super::prompt::PromptRenderPool>>,
     trace_runtime: crate::trace::TraceRuntime,
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
+    recipes: Arc<std::sync::OnceLock<Result<Vec<Arc<PluginRecipe>>, PluginError>>>,
     protocol_factory: Option<Arc<dyn PluginFactory>>,
     pub(super) export_plugin_namespaces: bool,
     extensions: PluginExtensions,
     sessions: Arc<StdMutex<BTreeMap<RuntimeOwner, Weak<PluginSession>>>>,
     /// Config registration is collected on first use, after format preflight.
-    config_registry: Arc<
-        std::sync::OnceLock<Result<Arc<super::ConfigRegistry>, super::ConfigRegistrationError>>,
-    >,
+    config_registry: Arc<std::sync::OnceLock<Result<Arc<super::ConfigRegistry>, PluginError>>>,
     execution_budgets: crate::ExecutionBudgets,
     /// The kinds of the process engines registered with the runtime this
     /// host's sessions run in: an isolated tool enters a session's catalog
@@ -158,16 +157,13 @@ impl PluginHost {
             all_factories.retain(|factory| !override_ids.contains(factory.id()));
         }
         all_factories.extend(factories);
-        let extensions = PluginExtensions::from_contributions(
-            all_factories
-                .iter()
-                .flat_map(|factory| factory.extension_contributions()),
-        );
+        let extensions = PluginExtensions::default();
         let config_registry = Arc::new(std::sync::OnceLock::new());
         Self {
             data_limits: crate::runtime::RuntimeDataLimits::standard(),
             prompt_render_pool: None,
             factories: Arc::new(all_factories),
+            recipes: Arc::default(),
             protocol_factory: None,
             export_plugin_namespaces: true,
             extensions,
@@ -181,6 +177,7 @@ impl PluginHost {
 
     /// Select the protocol factory without constructing a session.
     pub fn with_protocol_plugin(mut self, protocol: Arc<dyn PluginFactory>) -> Self {
+        self.recipes = Arc::default();
         let factories = Arc::make_mut(&mut self.factories);
         if let Some(existing) = factories
             .iter_mut()
@@ -228,6 +225,7 @@ impl PluginHost {
             data_limits: self.data_limits,
             prompt_render_pool: self.prompt_render_pool.clone(),
             factories: Arc::clone(&self.factories),
+            recipes: Arc::clone(&self.recipes),
             protocol_factory: self.protocol_factory.clone(),
             export_plugin_namespaces: self.export_plugin_namespaces,
             extensions: self.extensions.clone(),
@@ -245,8 +243,13 @@ impl PluginHost {
         self.isolation_engines.lock_recover().clone()
     }
 
-    pub fn extensions(&self) -> &PluginExtensions {
-        &self.extensions
+    pub fn extensions(&self) -> Result<PluginExtensions, PluginError> {
+        let extensions = PluginExtensions::from_contributions(
+            self.recipes()?
+                .iter()
+                .flat_map(|recipe| recipe.factory_extensions.clone()),
+        );
+        Ok(self.extensions.merged(&extensions))
     }
 
     pub fn factories(&self) -> &[Arc<dyn PluginFactory>] {
@@ -319,11 +322,11 @@ impl PluginHost {
     /// owner's (FIG-4379): the one list config creation, command ingress,
     /// resolution and the command catalog are generated from. A factory's
     /// invalid registration refuses here, on every use.
-    pub fn config_registry(
-        &self,
-    ) -> Result<Arc<super::ConfigRegistry>, super::ConfigRegistrationError> {
+    pub fn config_registry(&self) -> Result<Arc<super::ConfigRegistry>, PluginError> {
         self.config_registry
-            .get_or_init(|| super::ConfigRegistry::build(self.factories()).map(Arc::new))
+            .get_or_init(|| {
+                super::ConfigRegistry::from_recipes(self.factories(), self.recipes()?).map(Arc::new)
+            })
             .clone()
     }
 
@@ -341,7 +344,8 @@ impl PluginHost {
         let options = super::PluginConfig::from_recorded_parts(None, requested.plugins.clone());
         self.decode_config(&options)?;
         Ok(self
-            .config_registry()?
+            .config_registry()
+            .map_err(|error| super::CreationConfigError::Recipe(Box::new(error)))?
             .resolve_creation(protocol_plugin_id, requested, writers)?)
     }
 
@@ -366,9 +370,9 @@ impl PluginHost {
             &backend,
             &trace_runtime,
             process_lifecycle_available,
-        );
-        for factory in self.factories() {
-            for engine in factory.process_engine_contributions(&ctx)? {
+        )?;
+        for recipe in self.recipes()? {
+            for engine in recipe.bind_process_engines(&ctx)? {
                 runtime_host.install_contributed_process_engine(engine)?;
             }
         }
@@ -411,6 +415,7 @@ impl PluginHost {
         };
         self.composition()?;
         Ok(Arc::new(PluginSession {
+            bindings: Arc::default(),
             state: Arc::new(StdMutex::new({
                 let mut registry = if forked {
                     PluginStateRegistry::from_fork(snapshot)
@@ -432,7 +437,7 @@ impl PluginHost {
                     plugin_config: authority.plugin_config,
                 },
             )),
-            extensions: self.extensions.clone(),
+            extensions: self.extensions()?,
             materialized: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             materialization_lock: Arc::new(StdMutex::new(())),
             retains_state: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -505,23 +510,21 @@ impl PluginHost {
             // capabilities. Current admission limits must not re-judge those results.
             self.validate_native_formats(&snapshot, &authority.plugin_config.config)?;
             let ctx = PluginSessionContext {
+                bindings: session.service_bindings(),
                 tracing: self.trace_runtime.clone(),
                 trace: None,
                 owner: session.owner.clone(),
                 plugin_config: authority.plugin_config,
                 materialization: session.materialization,
-                extensions: self.extensions.clone(),
+                extensions: self.extensions()?,
             };
             let BuiltSessionContributions {
                 plugins,
                 mut contributions,
             } = self.build_session_contributions(&ctx, Arc::clone(&session.state))?;
             let registry = build_tool_registry(&contributions)?;
-            let session_extensions = PluginExtensions::from_contributions(
-                plugins
-                    .iter()
-                    .flat_map(|plugin| plugin.extension_contributions()),
-            );
+            let session_extensions =
+                PluginExtensions::from_contributions(contributions.extensions.clone());
             session.retains_state.store(
                 !contributions.state_retaining_plugins.is_empty(),
                 std::sync::atomic::Ordering::SeqCst,
@@ -580,12 +583,13 @@ impl PluginHost {
         plugin_config: super::AdmittedPluginConfig,
     ) -> Result<super::prompt::PromptCatalog, PluginError> {
         let ctx = PluginSessionContext {
+            bindings: std::sync::Arc::new(crate::plugin::ServiceBindings::default()),
             tracing: self.trace_runtime.clone(),
             trace: None,
             owner,
             plugin_config,
             materialization: PluginSessionMaterialization::Rematerialization,
-            extensions: self.extensions.clone(),
+            extensions: self.extensions()?,
         };
         let built = self.build_session_contributions(
             &ctx,
@@ -607,27 +611,95 @@ impl PluginHost {
     ///
     /// A plugin's build or registration error.
     pub fn served_obligations(&self) -> Result<Vec<String>, PluginError> {
-        let ctx = PluginSessionContext {
-            tracing: self.trace_runtime.clone(),
-            trace: None,
-            owner: RuntimeOwner::Session(
-                crate::SessionId::parse("serves-probe")
-                    .map_err(|error| PluginError::Registration(error.to_string()))?,
-            ),
-            plugin_config: super::AdmittedPluginConfig::default(),
-            materialization: PluginSessionMaterialization::Creation,
-            extensions: self.extensions.clone(),
-        };
-        let mut built = self.build_session_contributions(
-            &ctx,
-            Arc::new(StdMutex::new(PluginStateRegistry::from_snapshot(None))),
-        )?;
-        let registry = build_tool_registry(&built.contributions)?;
-        let composition = super::ExecutionComposition::new(&mut built.contributions, registry);
+        let inventory = self.installed_inventory()?;
         Ok(lash_core_store::obligations::ObligationToken::of_callbacks(
             lash_core_store::obligations::RegistryKind::Session,
-            composition.contributions().map(|(_, identity)| identity),
+            inventory.callbacks(),
         ))
+    }
+
+    fn recipes(&self) -> Result<&[Arc<PluginRecipe>], PluginError> {
+        self.recipes
+            .get_or_init(|| {
+                self.composition()?;
+                let recipes = self
+                    .factories()
+                    .iter()
+                    .map(|factory| Arc::clone(factory).recipe().map(Arc::new))
+                    .collect::<Result<Vec<_>, _>>()?;
+                for (factory, recipe) in self.factories().iter().zip(&recipes) {
+                    if recipe.owner() != factory.id()
+                        || recipe.entries.iter().any(|entry| {
+                            entry.key.owner() != factory.id()
+                                || entry.registry != RegistryKind::Session
+                        })
+                    {
+                        return Err(PluginError::Registration(format!(
+                            "factory `{}` declared another owner",
+                            factory.id()
+                        )));
+                    }
+                }
+                Ok(recipes)
+            })
+            .as_ref()
+            .map(Vec::as_slice)
+            .map_err(Clone::clone)
+    }
+
+    pub fn preflight_services(&self, bindings: &ServiceBindings) -> Result<(), PluginError> {
+        let recipes = self.recipes()?;
+        for (slot, port) in [
+            (
+                lash_core_store::tool_run::CallbackSlot::ProtocolSession,
+                RequiredPort::ProtocolSession,
+            ),
+            (
+                lash_core_store::tool_run::CallbackSlot::ProtocolDriver,
+                RequiredPort::ProtocolDriver,
+            ),
+        ] {
+            let owners = recipes
+                .iter()
+                .flat_map(|recipe| &recipe.entries)
+                .filter(|entry| entry.kind == ContributionKind::Callback(slot))
+                .map(|entry| entry.key.owner().to_owned())
+                .collect::<Vec<_>>();
+            match owners.len() {
+                0 => return Err(PluginError::Preflight(PreflightIssue::MissingPort { port })),
+                1 => {}
+                _ => {
+                    return Err(PluginError::Preflight(PreflightIssue::DuplicatePort {
+                        port,
+                        owners,
+                    }));
+                }
+            }
+        }
+        for (factory, recipe) in self.factories().iter().zip(self.recipes()?) {
+            bindings
+                .preflight(factory.id(), &recipe.requirements)
+                .map_err(PluginError::Preflight)?;
+        }
+        Ok(())
+    }
+    /// Deployment declarations; this never constructs an owner or executes callbacks.
+    pub fn installed_inventory(&self) -> Result<InstalledInventory, PluginError> {
+        let entries = self
+            .recipes()?
+            .iter()
+            .flat_map(|recipe| recipe.entries.clone())
+            .enumerate()
+            .map(|(index, mut entry)| {
+                entry.registration_order = u32::try_from(index).unwrap_or(u32::MAX);
+                entry
+            })
+            .collect::<Vec<_>>();
+        Ok(InstalledInventory {
+            scope: InventoryScope::Deployment(lash_core_store::obligations::RegistryKind::Session),
+            readiness: vec![ContributionReadiness::Ready; entries.len()],
+            entries,
+        })
     }
 
     fn build_session_contributions(
@@ -635,7 +707,9 @@ impl PluginHost {
         ctx: &PluginSessionContext,
         state: Arc<StdMutex<PluginStateRegistry>>,
     ) -> Result<BuiltSessionContributions, PluginError> {
-        self.composition()?;
+        self.preflight_services(&ctx.bindings)?;
+        let recipes = self.recipes()?;
+        let inventory = self.installed_inventory()?;
         let mut registry = state.lock_recover();
         for factory in self.factories() {
             registry
@@ -650,46 +724,36 @@ impl PluginHost {
         }
         drop(registry);
         let mut plugins = Vec::new();
-        let mut contributions = PluginContributions::default();
-        for factory in self.factories() {
-            let plugin = factory.build(ctx)?;
+        let mut contributions = PluginContributions {
+            inventory: Some(InstalledInventory {
+                scope: InventoryScope::Owner(ctx.owner.clone()),
+                ..inventory
+            }),
+            ..PluginContributions::default()
+        };
+        for (factory, recipe) in self.factories().iter().zip(recipes) {
+            let state_view = PluginStateView::bind(&ctx.owner, factory.id(), Arc::clone(&state));
+            let mut reg = BoundRegistrar::new(factory.id().into());
+            reg.contributions = contributions;
+            let plugin = recipe.bind(ctx, &state_view, &mut reg)?;
             if plugin.id() != factory.id() {
                 return Err(PluginError::Registration(format!(
-                    "factory `{}` built plugin `{}`",
+                    "factory `{}` bound owner `{}`",
                     factory.id(),
                     plugin.id()
                 )));
             }
-            let mut reg = PluginRegistrar::new(String::from(factory.id()));
-            reg.contributions = contributions;
-            reg.state = Some(PluginStateView::bind(
-                &ctx.owner,
-                plugin.id(),
-                Arc::clone(&state),
-            ));
-            plugin.register(&mut reg)?;
-            reg.validate_stream_state_pairs()?;
-            if let Some(store) = reg.state.take() {
-                let probe = store.retention_probe();
-                drop(store);
-                if Arc::strong_count(&probe) > 1 {
-                    reg.contributions
-                        .state_retaining_plugins
-                        .push(plugin.id().to_string());
-                }
+            let probe = state_view.retention_probe();
+            drop(state_view);
+            if Arc::strong_count(&probe) > 1 {
+                reg.contributions
+                    .state_retaining_plugins
+                    .push(factory.id().into());
             }
             contributions = reg.contributions;
             plugins.push(plugin);
         }
 
-        let protocol_session = contributions.protocol_session.take().ok_or_else(|| {
-            PluginError::Registration("missing protocol session capability".to_string())
-        })?;
-        let protocol_driver = contributions.protocol_driver.take().ok_or_else(|| {
-            PluginError::Registration("missing protocol driver capability".to_string())
-        })?;
-        contributions.protocol_session = Some(protocol_session);
-        contributions.protocol_driver = Some(protocol_driver);
         contributions
             .attachment_omission_policies
             .sort_by_key(|entry| std::cmp::Reverse(entry.0));

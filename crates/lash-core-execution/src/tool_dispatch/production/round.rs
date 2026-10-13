@@ -719,7 +719,7 @@ pub(super) fn member_pin(
     context: &RuntimeExecutionContext<'_>,
     manifest: Option<&crate::ToolManifest>,
     tool: crate::ToolId,
-    granted: Option<&crate::plugin::PluginCallbackIdentity>,
+    granted: Option<&crate::plugin::ToolProviderHandle>,
     now_ms: u64,
 ) -> MemberPin {
     if let Some(manifest) = manifest {

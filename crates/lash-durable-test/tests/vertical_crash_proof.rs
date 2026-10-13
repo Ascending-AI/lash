@@ -416,7 +416,10 @@ fn core(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(model(protocol, Arc::clone(seen)), metadata())
-        .tools(lash::hook_key!("tools"), ext_write(Arc::clone(world)))
+        .tools(
+            lash::tool_provider_key!("tools"),
+            ext_write(Arc::clone(world)),
+        )
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("v0-deployment"),
             lash::persistence::LeaseIncarnationId::new("v0-boot"),

@@ -121,7 +121,14 @@ pub(crate) fn deferred_cell_context(
         provider,
         catalog,
         lash_core::testing::exec_code_invocation(session, turn, 0, 0, "exec-code", replay_key),
-        ("tests", "deferred", deferred),
+        (
+            lash_core::plugin::ToolProviderHandle::new(
+                lash_core::RegistryKind::Session,
+                "tests",
+                lash_core::tool_provider_key!("deferred"),
+            ),
+            deferred,
+        ),
     )
 }
 
@@ -130,8 +137,11 @@ pub(crate) struct NoTools;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for NoTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_contract(
@@ -156,10 +166,15 @@ struct WithFinish {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for WithFinish {
-    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        let mut manifests = self.tools.tool_manifests(config);
-        manifests.push(self.finish.manifest());
-        manifests
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            let mut manifests = self.tools.tool_manifests(config)?;
+            manifests.push(self.finish.manifest());
+            manifests
+        })
     }
 
     fn resolve_manifest_by_id(
@@ -206,6 +221,7 @@ pub(crate) fn with_finish(
     let catalog = lash_core::ToolCatalog::from_tool_definitions(
         provider
             .tool_manifests(&lash_core::OwnerConfigView::default())
+            .expect("fixture provider advertises")
             .into_iter()
             .filter_map(|manifest| {
                 let contract = provider

@@ -167,8 +167,11 @@ struct Echo(Arc<AtomicUsize>);
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Echo {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![echo_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![echo_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -341,7 +344,7 @@ impl Spawn {
                             ),
                         ))
                         .tools(
-                            lash::hook_key!("tools"),
+                            lash::tool_provider_key!("tools"),
                             Arc::new(Echo(Arc::clone(&self.echoes))),
                         )
                 } else {

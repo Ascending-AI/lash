@@ -7,6 +7,7 @@
 //! until a serving core over the same stores runs it.
 
 use super::*;
+
 use lash_core::SessionId;
 
 /// Catalog wrapper that counts which seam a caller reached for, and fails
@@ -905,25 +906,37 @@ impl lash_core::facade_support::PluginFactory for RuntimeBuildProbeFactory {
         "durable-session-runtime-probe"
     }
 
-    fn build(
-        &self,
-        _ctx: &lash_core::facade_support::PluginSessionContext,
-    ) -> std::result::Result<
-        Arc<dyn lash_core::facade_support::SessionPlugin>,
-        lash_core::PluginError,
-    > {
-        self.counters
-            .plugin_materializations
-            .fetch_add(1, Ordering::SeqCst);
-        Ok(Arc::new(RuntimeBuildProbePlugin {
-            counters: Arc::clone(&self.counters),
-        }))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<RuntimeBuildProbePlugin>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        RuntimeBuildProbePlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| {
+                self.counters
+                    .plugin_materializations
+                    .fetch_add(1, Ordering::SeqCst);
+                Ok(Arc::new(RuntimeBuildProbePlugin {
+                    counters: Arc::clone(&self.counters),
+                }))
+            },
+        ))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for RuntimeBuildProbeFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl RuntimeBuildProbeFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("durable-session-runtime-probe")
+    }
+}
+impl lash_core::plugin::PluginMetadata for RuntimeBuildProbeFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -935,28 +948,30 @@ impl lash_core::facade_support::SessionPlugin for RuntimeBuildProbePlugin {
     fn id(&self) -> &'static str {
         "durable-session-runtime-probe"
     }
-
-    fn register(
-        &self,
-        reg: &mut lash_core::facade_support::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        let counters = Arc::clone(&self.counters);
+}
+impl RuntimeBuildProbePlugin {
+    fn declare(
+        reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
         reg.session().on_event(
             crate::hook_key!("session-on-event-1"),
-            Arc::new(move |event| {
-                let counters = Arc::clone(&counters);
-                Box::pin(async move {
-                    if matches!(
-                        event,
-                        lash_core::facade_support::PluginLifecycleEvent::SessionRestored(_)
-                    ) {
-                        counters
-                            .session_restored_events
-                            .fetch_add(1, Ordering::SeqCst);
-                    }
-                    Ok(())
-                })
-            }),
+            move |this, _state| {
+                let counters = Arc::clone(&this.counters);
+                Ok(Arc::new(move |event| {
+                    let counters = Arc::clone(&counters);
+                    Box::pin(async move {
+                        if matches!(
+                            event,
+                            lash_core::facade_support::PluginLifecycleEvent::SessionRestored(_)
+                        ) {
+                            counters
+                                .session_restored_events
+                                .fetch_add(1, Ordering::SeqCst);
+                        }
+                        Ok(())
+                    })
+                }))
+            },
         )?;
         Ok(())
     }
@@ -1006,7 +1021,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() {
     // A core that carries the session's tool source, to record its surface.
     let granting = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+        .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())
         .expect("granting core");
     let granted = create(&granting, session_id.as_str()).await;
@@ -1643,7 +1658,7 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
                 ),
                 mock_llm_profile_spec(),
             )
-            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+            .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
             .build(crate::testing::runtime_lease_owner())
     }
     let backend = sqlite_memory_store_backend().await;
@@ -1750,7 +1765,7 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
                 ),
                 mock_llm_profile_spec(),
             )
-            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+            .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
             .build(crate::testing::runtime_lease_owner())
     }
     let backend = sqlite_memory_store_backend().await;
@@ -1841,7 +1856,10 @@ struct SecondLookupHeld {
 #[cfg(feature = "rlm")]
 #[async_trait]
 impl ToolProvider for SecondLookupHeld {
-    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
         AppTools.tool_manifests(config)
     }
 
@@ -1906,7 +1924,7 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
                     mock_llm_profile_spec(),
                 )
                 .tools(
-                    crate::hook_key!("tools"),
+                    crate::tool_provider_key!("tools"),
                     Arc::new(SecondLookupHeld {
                         calls: std::sync::atomic::AtomicUsize::new(0),
                         entered: Arc::clone(&entered),
@@ -2023,7 +2041,7 @@ async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_th
                 ),
                 mock_llm_profile_spec(),
             )
-            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+            .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
             .plugin(Arc::new(plugin))
             .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -2084,7 +2102,7 @@ async fn a_cells_recorded_tool_calls_are_bounded_by_the_recorded_presentation() 
                 ),
                 mock_llm_profile_spec(),
             )
-            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+            .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
             .build(crate::testing::runtime_lease_owner())
     }
     let left_out = Some(lash_core::OmittedToolCalls {
@@ -2329,7 +2347,7 @@ async fn a_cell_at_its_tool_call_limit_can_still_finish() -> Result<()> {
                 ),
                 mock_llm_profile_spec(),
             )
-            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+            .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
             .build(crate::testing::runtime_lease_owner())?;
     let spec = crate::SessionSpec::new(
         mock_llm_profile_spec().wire_model,

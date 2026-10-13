@@ -65,7 +65,7 @@ async fn a_host_finish_replaces_the_default_and_types_the_value() -> Result<()> 
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
             .tools(
-                crate::hook_key!("tools"),
+                crate::tool_provider_key!("tools"),
                 Arc::new(lash_core::FinishToolProvider::new([answer_tool(
                     serde_json::json!({ "type": "integer" }),
                 )])),
@@ -222,8 +222,11 @@ fn submit_definition(value: lash_core::JsonSchema) -> lash_core::ToolDefinition 
 
 #[async_trait]
 impl ToolProvider for SubmitTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![submit_definition(self.value.clone()).manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![submit_definition(self.value.clone()).manifest()])
     }
 
     fn resolve_contract(
@@ -287,7 +290,7 @@ async fn run_submit_turn(
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .tools(
-        crate::hook_key!("tools"),
+        crate::tool_provider_key!("tools"),
         Arc::new(SubmitTool {
             body,
             value: lash_core::JsonSchema::any(),
@@ -491,7 +494,7 @@ async fn a_batch_member_finish_is_checked_against_its_value_schema() -> Result<(
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .tools(
-        crate::hook_key!("tools"),
+        crate::tool_provider_key!("tools"),
         Arc::new(SubmitTool {
             body: |args| lash_core::ToolOutcome::finish(args["answer"].clone()),
             value: lash_core::JsonSchema::admit(serde_json::json!({ "type": "integer" }))

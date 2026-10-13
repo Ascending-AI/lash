@@ -7,7 +7,7 @@
 //! namespace has one owner:
 //!
 //! - The host collects owners when configuration is first used, after format
-//!   preflight ([`PluginFactory::register_config`](super::PluginFactory::register_config)):
+//!   preflight, from the recipe's [`ConfigRegistrar`] facet:
 //!   its [`ConfigOwner`] creates the namespace from the creator's input and
 //!   its defaults, and validates every candidate. Creation reads no other
 //!   session: only a fork copies a recorded namespace (ADR 0134).
@@ -179,13 +179,44 @@ pub enum ConfigRegistrationError {
 
 /// Where a factory registers its config owner and commands. The namespace is
 /// the registering factory's id.
+#[derive(Clone)]
 pub struct ConfigRegistrar {
     owner_id: String,
     owner: Option<RegisteredOwner>,
 }
 
 impl ConfigRegistrar {
-    fn new(owner_id: impl Into<String>) -> Self {
+    pub(crate) fn descriptors(&self) -> Vec<super::ContributionDescriptor> {
+        let Some(owner) = &self.owner else {
+            return Vec::new();
+        };
+        let mut commands = owner.commands.iter().collect::<Vec<_>>();
+        commands.sort_by_key(|(_, command)| command.registration_order());
+        std::iter::once((
+            super::ContributionKind::ConfigNamespace,
+            self.owner_id.clone(),
+        ))
+        .chain(
+            commands
+                .into_iter()
+                .map(|(name, _)| (super::ContributionKind::ConfigCommand, name.clone())),
+        )
+        .enumerate()
+        .map(|(index, (kind, key))| super::ContributionDescriptor {
+            registry: super::RegistryKind::Session,
+            kind,
+            key: super::ContributionKey::Named {
+                owner: self.owner_id.clone(),
+                key,
+            },
+            registration_order: u32::try_from(index).unwrap_or(u32::MAX),
+            priority: None,
+            details: super::ContributionDetails::Named,
+        })
+        .collect()
+    }
+
+    pub fn new(owner_id: impl Into<String>) -> Self {
         Self {
             owner_id: owner_id.into(),
             owner: None,
@@ -268,6 +299,7 @@ impl ConfigRegistrar {
         owner.commands.insert(
             C::NAME.to_string(),
             Arc::new(TypedCommand::<C, _> {
+                registration_order: u32::try_from(owner.commands.len()).unwrap_or(u32::MAX),
                 reduce,
                 _command: std::marker::PhantomData,
             }),
@@ -312,6 +344,7 @@ impl ConfigRegistrar {
         owner.commands.insert(
             C::NAME.to_string(),
             Arc::new(LlmProfilesCommand::<C, _> {
+                registration_order: u32::try_from(owner.commands.len()).unwrap_or(u32::MAX),
                 reduce,
                 _command: std::marker::PhantomData,
             }),
@@ -385,6 +418,7 @@ enum ReducedFrom {
 }
 
 trait ErasedCommand: Send + Sync {
+    fn registration_order(&self) -> u32;
     fn decode(&self, args: &serde_json::Value) -> Result<(), String>;
     fn reduce(
         &self,
@@ -534,6 +568,7 @@ impl<O: ConfigOwner> ErasedOwner for TypedOwner<O> {
 }
 
 struct TypedCommand<C, F> {
+    registration_order: u32,
     reduce: F,
     _command: std::marker::PhantomData<fn() -> C>,
 }
@@ -546,6 +581,9 @@ where
         + Sync
         + 'static,
 {
+    fn registration_order(&self) -> u32 {
+        self.registration_order
+    }
     fn decode(&self, args: &serde_json::Value) -> Result<(), String> {
         serde_json::from_value::<C>(args.clone())
             .map(drop)
@@ -576,6 +614,7 @@ where
 /// A core command whose reducer also reads the host's models: the one place
 /// a reducer mints a model binding.
 struct LlmProfilesCommand<C, F> {
+    registration_order: u32,
     reduce: F,
     _command: std::marker::PhantomData<fn() -> C>,
 }
@@ -592,6 +631,9 @@ where
         + Sync
         + 'static,
 {
+    fn registration_order(&self) -> u32 {
+        self.registration_order
+    }
     fn decode(&self, args: &serde_json::Value) -> Result<(), String> {
         serde_json::from_value::<C>(args.clone())
             .map(drop)
@@ -652,8 +694,10 @@ fn reduce_typed<C: ConfigCommand>(
 /// Why a session's creation recorded no plugin config: an owner refused
 /// what the creator stated, or this deployment's config registrations
 /// cannot stand.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum CreationConfigError {
+    #[error("recipe registration is invalid: {0}")]
+    Recipe(Box<super::PluginError>),
     #[error(transparent)]
     Format(#[from] super::FormatRefusal),
     #[error(transparent)]
@@ -772,7 +816,15 @@ impl std::fmt::Debug for ConfigRegistry {
 impl ConfigRegistry {
     /// Collect every factory's config registration, and the core owner's.
     /// Duplicate factory ids refuse before any registration runs.
-    pub fn build(factories: &[Arc<dyn PluginFactory>]) -> Result<Self, ConfigRegistrationError> {
+    pub fn build(factories: &[Arc<dyn PluginFactory>]) -> Result<Self, super::PluginError> {
+        Self::check_ids(factories)?;
+        let recipes = factories
+            .iter()
+            .map(|factory| Arc::clone(factory).recipe().map(Arc::new))
+            .collect::<Result<Vec<_>, _>>()?;
+        Self::from_recipes(factories, &recipes)
+    }
+    fn check_ids(factories: &[Arc<dyn PluginFactory>]) -> Result<(), ConfigRegistrationError> {
         let mut ids = std::collections::BTreeSet::new();
         for factory in factories {
             if !ids.insert(factory.id()) {
@@ -780,20 +832,24 @@ impl ConfigRegistry {
                     id: factory.id().to_owned(),
                 });
             }
-        }
-        let mut owners = BTreeMap::new();
-        owners.insert(CORE_CONFIG_OWNER.to_string(), core::registration()?);
-        for factory in factories {
-            let plugin_id = factory.id();
-            if plugin_id == CORE_CONFIG_OWNER {
+            if factory.id() == CORE_CONFIG_OWNER {
                 return Err(ConfigRegistrationError::ReservedOwner {
-                    owner: plugin_id.to_string(),
+                    owner: factory.id().into(),
                 });
             }
-            let mut registrar = ConfigRegistrar::new(plugin_id);
-            factory.register_config(&mut registrar)?;
-            if let Some(owner) = registrar.owner {
-                owners.insert(plugin_id.to_string(), owner);
+        }
+        Ok(())
+    }
+    pub(crate) fn from_recipes(
+        factories: &[Arc<dyn PluginFactory>],
+        recipes: &[Arc<super::PluginRecipe>],
+    ) -> Result<Self, super::PluginError> {
+        Self::check_ids(factories)?;
+        let mut owners = BTreeMap::new();
+        owners.insert(CORE_CONFIG_OWNER.to_string(), core::registration()?);
+        for (factory, recipe) in factories.iter().zip(recipes) {
+            if let Some(owner) = recipe.configuration.owner.clone() {
+                owners.insert(factory.id().into(), owner);
             }
         }
         Ok(Self {

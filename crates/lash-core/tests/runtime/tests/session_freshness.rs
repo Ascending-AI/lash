@@ -9,6 +9,7 @@
 
 use super::*;
 use lash_core::SessionCommitStore as _;
+use lash_core::plugin::PluginRecipe;
 
 /// A store-backed runtime over a fresh SQLite memory store set, its store
 /// under the recording decorator, with [`DialectOwner`] installed.
@@ -35,14 +36,36 @@ impl lash_core::plugin::PluginFactory for DialectOwner {
         "dialect_owner"
     }
 
-    fn build(
-        &self,
-        _ctx: &lash_core::plugin::PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(DialectOwnerPlugin))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_core::plugin::PluginError,
+        > = {
+            let mut reg = lash_core::plugin::PluginRegistrar::<DialectOwnerPlugin>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            DialectOwnerPlugin::declare(&mut reg)?;
+            let id = self.id();
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| Ok(Arc::new(DialectOwnerPlugin)),
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = lash_core::plugin::ConfigRegistrar::new(
+            lash_core::plugin::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
     }
-
-    fn register_config(
+}
+impl DialectOwner {
+    pub fn declare_configuration(
         &self,
         registrar: &mut lash_core::ConfigRegistrar,
     ) -> Result<(), lash_core::ConfigRegistrationError> {
@@ -58,9 +81,14 @@ impl lash_core::plugin::PluginFactory for DialectOwner {
     }
 }
 
-impl lash_core::plugin::PluginDefinition for DialectOwner {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl DialectOwner {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("dialect_owner")
+    }
+}
+impl lash_core::plugin::PluginMetadata for DialectOwner {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -146,11 +174,11 @@ impl lash_core::plugin::SessionPlugin for DialectOwnerPlugin {
     fn id(&self) -> &'static str {
         "dialect_owner"
     }
-
-    fn register(
-        &self,
-        _reg: &mut lash_core::plugin::PluginRegistrar,
-    ) -> Result<(), lash_core::PluginError> {
+}
+impl DialectOwnerPlugin {
+    fn declare(
+        _reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
         Ok(())
     }
 }

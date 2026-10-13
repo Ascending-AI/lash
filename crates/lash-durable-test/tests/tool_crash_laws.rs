@@ -486,8 +486,11 @@ struct Probe {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Probe {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![probe_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![probe_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -559,8 +562,11 @@ impl Submit {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Submit {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![self.definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![self.definition().manifest()])
     }
 
     fn resolve_contract(
@@ -613,8 +619,11 @@ struct Puts {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Puts {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![put_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![put_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -694,9 +703,14 @@ struct StatePlugin {
     world: Arc<World>,
 }
 
-impl lash::plugins::PluginDefinition for StatePlugin {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl StatePlugin {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         lash::plugins::PluginDeclaration::initial(STATE_PLUGIN)
+    }
+}
+impl lash::plugins::PluginMetadata for StatePlugin {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -705,11 +719,19 @@ impl lash::plugins::PluginFactory for StatePlugin {
         STATE_PLUGIN
     }
 
-    fn build(
-        &self,
-        _: &lash::plugins::PluginSessionContext,
-    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<StatePlugin>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        StatePlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -717,19 +739,20 @@ impl lash::plugins::SessionPlugin for StatePlugin {
     fn id(&self) -> &'static str {
         STATE_PLUGIN
     }
-
-    fn register(
-        &self,
-        reg: &mut lash::plugins::PluginRegistrar,
-    ) -> Result<(), lash::plugins::PluginError> {
-        let view = reg.state();
-        reg.tools().provider(
-            lash::hook_key!("tools"),
-            Arc::new(StateTools {
-                world: Arc::clone(&self.world),
-                view: Some(view),
-            }),
-        )
+}
+impl StatePlugin {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        reg.tools()
+            .provider(lash::tool_provider_key!("tools"), move |this, state| {
+                let view = state.clone();
+                Ok(Arc::new(StateTools {
+                    world: Arc::clone(&this.world),
+                    view: Some(view),
+                }))
+            })?;
+        Ok(())
     }
 }
 
@@ -763,20 +786,33 @@ impl lash_core::plugin::ProcessComponentFactory for StateComponent {
         Ok(())
     }
 
-    fn build(
-        &self,
-        cx: &lash_core::plugin::ProcessComponentContext<'_>,
-    ) -> Result<lash_core::plugin::ProcessComponentSpec, lash::plugins::PluginError> {
-        Ok(lash_core::plugin::ProcessComponentSpec {
-            tool_providers: vec![(
-                lash::hook_key!("state"),
-                Arc::new(StateTools {
+    fn recipe(
+        self: Arc<Self>,
+    ) -> Result<lash_core::plugin::ProcessRecipe, lash::plugins::PluginError> {
+        struct Bound {
+            world: Arc<World>,
+            view: Option<lash::plugins::PluginStateView>,
+        }
+        let mut reg = lash_core::plugin::PluginRegistrar::<Bound>::for_process(
+            self.declaration().id.as_str(),
+        );
+        reg.tools()
+            .provider(lash::tool_provider_key!("state"), |this, _| {
+                Ok(Arc::new(StateTools {
+                    world: Arc::clone(&this.world),
+                    view: this.view.clone(),
+                }))
+            })?;
+        Ok(lash_core::plugin::ProcessRecipe::new(
+            self.declaration().id.as_str(),
+            reg,
+            move |cx| {
+                Ok(Arc::new(Bound {
                     world: Arc::clone(&self.world),
                     view: cx.state.clone(),
-                }),
-            )],
-            ..lash_core::plugin::ProcessComponentSpec::default()
-        })
+                }))
+            },
+        ))
     }
 }
 
@@ -789,10 +825,15 @@ struct StateTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for StateTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        [STATE_SET, STATE_OBSERVE]
-            .map(|name| state_definition(name).manifest())
-            .into()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            [STATE_SET, STATE_OBSERVE]
+                .map(|name| state_definition(name).manifest())
+                .into()
+        })
     }
 
     fn resolve_contract(
@@ -917,7 +958,7 @@ impl Crash {
                 };
                 let builder = if self.turn == Turn::Put {
                     builder.tools(
-                        lash::hook_key!("puts"),
+                        lash::tool_provider_key!("puts"),
                         Arc::new(Puts {
                             world: Arc::clone(&self.world),
                             backend: backend.clone(),
@@ -929,7 +970,7 @@ impl Crash {
                 };
                 let builder = if self.turn == Turn::Finish {
                     builder.tools(
-                        lash::hook_key!("submit"),
+                        lash::tool_provider_key!("submit"),
                         Arc::new(Submit {
                             world: Arc::clone(&self.world),
                         }),
@@ -954,7 +995,7 @@ impl Crash {
                         served::metadata(),
                     )
                     .tools(
-                        lash::hook_key!("probe"),
+                        lash::tool_provider_key!("probe"),
                         Arc::new(Probe {
                             world: Arc::clone(&self.world),
                         }),
@@ -1775,7 +1816,7 @@ fn process_environment() -> lash_core::ProcessEnv {
                 .component(STATE_COMPONENT, &()),
             |builder, tool| {
                 builder.link_tool(
-                    STATE_COMPONENT.tool_provider("state"),
+                    STATE_COMPONENT.tool_provider(lash::tool_provider_key!("state")),
                     &state_definition(tool),
                 )
             },

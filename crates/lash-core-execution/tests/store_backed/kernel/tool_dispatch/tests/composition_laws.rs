@@ -23,8 +23,11 @@ struct CountingTools {
 
 #[async_trait::async_trait]
 impl ToolProvider for CountingTools {
-    fn tool_manifests(&self, _config: &crate::plugin::OwnerConfigView) -> Vec<crate::ToolManifest> {
-        manifests(vec![named_beta_tool("beta")])
+    fn tool_manifests(
+        &self,
+        _config: &crate::plugin::OwnerConfigView,
+    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        Ok(manifests(vec![named_beta_tool("beta")]))
     }
 
     fn resolve_contract(
@@ -79,7 +82,7 @@ fn session(tools: &CountingTools, mut plugins: Vec<Arc<dyn PluginFactory>>) -> A
         plugin(
             "composition_tools",
             PluginSpec::new().with_tool_provider(
-                lash_core_execution::hook_key!("tools"),
+                lash_core_execution::tool_provider_key!("tools"),
                 Arc::new(tools.clone()),
             ),
         ),
@@ -693,6 +696,16 @@ async fn displaced_terminals_are_published_as_composition_evidence() {
         ) -> Result<(), crate::PluginError> {
             self.events.lock_recover().push(event);
             Ok(())
+        }
+
+        async fn append_session_nodes(
+            &self,
+            _session_id: &crate::SessionId,
+            _request: crate::AppendSessionNodesRequest,
+        ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
+            Err(crate::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
         }
     }
 

@@ -209,18 +209,28 @@ struct Memory(StoragePlugin);
 #[derive(Clone)]
 struct Notes(StoragePlugin);
 
-impl lash::plugins::PluginDefinition for Memory {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl Memory {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         lash::plugins::PluginDeclaration::initial(MEMORY)
     }
 }
+impl lash::plugins::PluginMetadata for Memory {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
+    }
+}
 
-impl lash::plugins::PluginDefinition for Notes {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl Notes {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         lash::plugins::PluginDeclaration {
             state_fork: lash::plugins::StateFork::Reset,
             ..lash::plugins::PluginDeclaration::initial(NOTES)
         }
+    }
+}
+impl lash::plugins::PluginMetadata for Notes {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -231,11 +241,35 @@ macro_rules! factory {
                 $id
             }
 
-            fn build(
-                &self,
-                _: &lash::plugins::PluginSessionContext,
-            ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
-                Ok(Arc::new(self.0.clone()))
+            fn recipe(
+                self: Arc<Self>,
+            ) -> Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+                let mut reg = lash::plugins::PluginRegistrar::<StoragePlugin>::new(
+                    lash_core::plugin::PluginFactory::id(self.as_ref()),
+                );
+                if $id == NOTES {
+                    reg.state_reducer(INCR, |this, _| {
+                        let world = Arc::clone(&this.world);
+                        Ok(Arc::new(
+                            move |reduction: lash::plugins::StateReduction<'_>| {
+                                world.reductions.fetch_add(1, Ordering::SeqCst);
+                                let current = reduction
+                                    .current
+                                    .and_then(serde_json::Value::as_u64)
+                                    .unwrap_or(0);
+                                let step = reduction.input.as_u64().unwrap_or(0);
+                                Ok(Some(serde_json::json!(current + step)))
+                            },
+                        ))
+                    })?;
+                }
+                reg.tools()
+                    .provider(lash::tool_provider_key!("tools"), |this, _| {
+                        Ok(Arc::new(this.clone()))
+                    })?;
+                Ok(lash::plugins::PluginRecipe::new($id, reg, move |_, _| {
+                    Ok(Arc::new(self.0.clone()))
+                }))
             }
         }
     };
@@ -248,35 +282,15 @@ impl lash::plugins::SessionPlugin for StoragePlugin {
     fn id(&self) -> &'static str {
         self.id
     }
-
-    fn register(
-        &self,
-        reg: &mut lash::plugins::PluginRegistrar,
-    ) -> Result<(), lash::plugins::PluginError> {
-        if self.id == NOTES {
-            let world = Arc::clone(&self.world);
-            reg.state_reducer(
-                INCR,
-                Arc::new(move |reduction: lash::plugins::StateReduction<'_>| {
-                    world.reductions.fetch_add(1, Ordering::SeqCst);
-                    let current = reduction
-                        .current
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or(0);
-                    let step = reduction.input.as_u64().unwrap_or(0);
-                    Ok(Some(serde_json::json!(current + step)))
-                }),
-            )?;
-        }
-        reg.tools()
-            .provider(lash::hook_key!("tools"), Arc::new(self.clone()))
-    }
 }
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for StoragePlugin {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![tool_definition(self.tool()).manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![tool_definition(self.tool()).manifest()])
     }
 
     fn resolve_contract(

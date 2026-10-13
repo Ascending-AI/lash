@@ -63,11 +63,16 @@ const TOOLS: [&str; 3] = ["bulk_ok", "bulk_fail", "small_ok"];
 
 #[async_trait]
 impl ToolProvider for RetentionTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        TOOLS
-            .iter()
-            .map(|name| retention_tool(name).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok({
+            TOOLS
+                .iter()
+                .map(|name| retention_tool(name).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -196,7 +201,7 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
             ..crate::DataRetention::standard()
         })
         .serve_test_llm_profile(tool_calling_provider(), mock_llm_profile_spec())
-        .tools(crate::hook_key!("tools"), Arc::new(RetentionTools))
+        .tools(crate::tool_provider_key!("tools"), Arc::new(RetentionTools))
         .plugin(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("output-retention-appendix"),
             lash_core::plugin::PluginSpec::new()

@@ -67,7 +67,7 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+    .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(
@@ -585,7 +585,7 @@ await control.finish("done");"#,
                 )]),
                 mock_llm_profile_spec(),
             )
-            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+            .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
             .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse("rlm-live-tool-events").expect("nonblank host identity"))
@@ -761,7 +761,10 @@ await control.finish("recovered");"#,
                     )]),
                     mock_llm_profile_spec(),
                 )
-                .tools(crate::hook_key!("tools"), Arc::new(FailingAppTools))
+                .tools(
+                    crate::tool_provider_key!("tools"),
+                    Arc::new(FailingAppTools),
+                )
                 .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session(
@@ -815,7 +818,7 @@ await control.finish("done");"#,
                 )]),
                 mock_llm_profile_spec(),
             )
-            .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+            .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
             .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse("rlm-aggregate-tool-ids").expect("nonblank host identity"))
@@ -1012,7 +1015,7 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lash_vm_await_inner
                 mock_llm_profile_spec(),
             )
             .tools(
-                crate::hook_key!("tools"),
+                crate::tool_provider_key!("tools"),
                 Arc::new(PendingAppTools::new(key_tx)),
             )
             .build(crate::testing::runtime_lease_owner())?;

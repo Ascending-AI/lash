@@ -2,6 +2,7 @@
 //! states, and which tools a session is offered by role. Ported from the
 //! deleted subagent crate's `spawn_parent_tests` and `outcome_tests`.
 
+use lash::plugins::PluginError;
 use std::sync::{Arc, Mutex};
 
 use lash::plugins::{
@@ -32,6 +33,31 @@ impl SessionStateService for NoSnapshots {
             .expect("the record lock")
             .push(session_id.clone());
         Err(PluginError::Session("a spawn reads no session".to_string()))
+    }
+
+    async fn turn_scope(
+        &self,
+        _session_id: &lash::SessionId,
+        _turn_id: &lash::TurnId,
+    ) -> Result<lash::runtime::ExecutionScope, lash::plugins::PluginError> {
+        Err(lash::plugins::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+    async fn snapshot_current(
+        &self,
+    ) -> Result<lash::runtime::SessionSnapshot, lash::plugins::PluginError> {
+        Err(lash::plugins::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+    async fn tool_catalog(
+        &self,
+        _session_id: &lash::SessionId,
+    ) -> Result<Vec<serde_json::Value>, lash::plugins::PluginError> {
+        Err(lash::plugins::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
     }
 }
 

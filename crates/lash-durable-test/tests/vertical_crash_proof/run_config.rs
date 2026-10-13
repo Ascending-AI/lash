@@ -186,7 +186,36 @@ impl lash::plugins::PluginFactory for HostPluginFactory {
         HOST
     }
 
-    fn register_config(
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_core::plugin::PluginError,
+        > = {
+            let mut reg = lash_core::plugin::PluginRegistrar::<HostPlugin>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            HostPlugin::declare(&mut reg)?;
+            let id = self.id();
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| Ok(Arc::new(HostPlugin)),
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = lash_core::plugin::ConfigRegistrar::new(
+            lash_core::plugin::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
+    }
+}
+impl HostPluginFactory {
+    pub fn declare_configuration(
         &self,
         registrar: &mut lash::plugins::ConfigRegistrar,
     ) -> Result<(), lash::plugins::ConfigRegistrationError> {
@@ -206,18 +235,16 @@ impl lash::plugins::PluginFactory for HostPluginFactory {
             })
         })
     }
-
-    fn build(
-        &self,
-        _ctx: &lash::plugins::PluginSessionContext,
-    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
-        Ok(Arc::new(HostPlugin))
-    }
 }
 
-impl lash::plugins::PluginDefinition for HostPluginFactory {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl HostPluginFactory {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         lash::plugins::PluginDeclaration::initial(HOST)
+    }
+}
+impl lash::plugins::PluginMetadata for HostPluginFactory {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -227,28 +254,31 @@ impl lash::plugins::SessionPlugin for HostPlugin {
     fn id(&self) -> &'static str {
         HOST
     }
-
-    fn register(
-        &self,
-        reg: &mut lash::plugins::PluginRegistrar,
-    ) -> Result<(), lash::plugins::PluginError> {
+}
+impl HostPlugin {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
         reg.prompt().section(
             lash::plugins::PromptSectionSpec::new(
                 lash::prompt::PromptSectionKey::new("host-facts")
                     .map_err(|error| lash::plugins::PluginError::Registration(error.to_string()))?,
                 lash::prompt::PromptPlacement::InitialInstructions,
             ),
-            Arc::new(|input: &lash::plugins::PromptInput<'_>| {
-                let prompt = input
-                    .config::<HostPrompt>()
-                    .map_err(|error| lash::plugins::PromptRenderError::new(error.to_string()))?
-                    .unwrap_or_default();
-                Ok(lash::plugins::SectionText::text(format!(
-                    "{HOST_SECTION_OPEN}audience={} facts={}]",
-                    prompt.audience, prompt.facts
-                )))
-            }),
-        )
+            move |_this, _state| {
+                Ok(Arc::new(|input: &lash::plugins::PromptInput<'_>| {
+                    let prompt = input
+                        .config::<HostPrompt>()
+                        .map_err(|error| lash::plugins::PromptRenderError::new(error.to_string()))?
+                        .unwrap_or_default();
+                    Ok(lash::plugins::SectionText::text(format!(
+                        "{HOST_SECTION_OPEN}audience={} facts={}]",
+                        prompt.audience, prompt.facts
+                    )))
+                }))
+            },
+        )?;
+        Ok(())
     }
 }
 

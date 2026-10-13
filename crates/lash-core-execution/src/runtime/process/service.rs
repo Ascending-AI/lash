@@ -40,24 +40,14 @@ pub trait ProcessService: Send + Sync {
         &self,
         owner: &crate::RuntimeOwner,
         mode: ProcessListMode,
-    ) -> Result<Vec<super::observation::ObservedProcess>, PluginError> {
-        let _ = (owner, mode);
-        Err(PluginError::Session(
-            "controller-free process reads are unavailable in this service".to_string(),
-        ))
-    }
+    ) -> Result<Vec<super::observation::ObservedProcess>, PluginError>;
 
     async fn start_from_request(
         &self,
         session_id: &SessionId,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessHandleView, PluginError> {
-        let _ = (session_id, request, scope);
-        Err(PluginError::Session(
-            "process start request composition is unavailable in this service".to_string(),
-        ))
-    }
+    ) -> Result<ProcessHandleView, PluginError>;
 
     /// Stage the single process start a recorded tool intent declares, as
     /// a store-local effect of the call that declares it (ADR 0132 §5): it
@@ -84,12 +74,7 @@ pub trait ProcessService: Send + Sync {
         &self,
         registration: ProcessStartRegistration,
         scope: ProcessOpScope<'_>,
-    ) -> Result<StagedProcessStart, PluginError> {
-        let _ = (registration, scope);
-        Err(PluginError::Session(
-            "bound process starts are unavailable in this runtime".to_owned(),
-        ))
-    }
+    ) -> Result<StagedProcessStart, PluginError>;
 
     /// Cancel the process a logical Run's declared start launched, as that
     /// start's discharge: the registry's cancel request and its delivery to
@@ -101,12 +86,7 @@ pub trait ProcessService: Send + Sync {
         &self,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
-    ) -> Result<(), PluginError> {
-        let _ = (process_id, scope);
-        Err(PluginError::Session(
-            "bound process cancellation is unavailable in this runtime".to_owned(),
-        ))
-    }
+    ) -> Result<(), PluginError>;
 
     async fn start(
         &self,
@@ -140,12 +120,7 @@ pub trait ProcessService: Send + Sync {
         &self,
         process_id: &ProcessId,
         key: &str,
-    ) -> Result<(), PluginError> {
-        let _ = (process_id, key);
-        Err(PluginError::Session(
-            "process consumer holds are unavailable in this service".to_string(),
-        ))
-    }
+    ) -> Result<(), PluginError>;
 
     /// Marks a call's consumer hold `key`, owned by `owner`, abandoned and
     /// returns the processes it holds that the call owes a cancel,
@@ -156,10 +131,7 @@ pub trait ProcessService: Send + Sync {
         &self,
         key: &str,
         owner: &crate::ScopeId,
-    ) -> Result<Vec<ProcessId>, PluginError> {
-        let _ = (key, owner);
-        Ok(Vec::new())
-    }
+    ) -> Result<Vec<ProcessId>, PluginError>;
 
     async fn list_visible(
         &self,
@@ -223,102 +195,4 @@ pub trait ProcessService: Send + Sync {
         process_ids: Vec<ProcessId>,
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError>;
-}
-
-pub struct UnavailableProcessService;
-
-#[async_trait::async_trait]
-impl ProcessService for UnavailableProcessService {
-    async fn stage_recorded_start(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        _request: ProcessStartRequest,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<StagedProcessStart, PluginError> {
-        Err(PluginError::Session(
-            "processes are unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn start(
-        &self,
-        _session_id: &SessionId,
-        _registration: ProcessStartRegistration,
-        _options: ProcessStartOptions,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<super::observation::ObservedProcess, PluginError> {
-        Err(PluginError::Session(
-            "processes are unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn await_process(
-        &self,
-        _process_id: &ProcessId,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessAwaitOutput, PluginError> {
-        Err(PluginError::Session(
-            "process awaiting is unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn list_visible(
-        &self,
-        _session_id: &SessionId,
-        _mode: ProcessListMode,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<Vec<super::observation::ObservedProcess>, PluginError> {
-        Err(PluginError::Session(
-            "process registry is unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn validate_visible(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        _process_ids: &[ProcessId],
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<(), PluginError> {
-        Err(PluginError::Session(
-            "process handle validation is unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn cancel(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        _process_id: &ProcessId,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<super::observation::ObservedProcess, PluginError> {
-        Err(PluginError::Session(
-            "process registry is unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn cancel_recorded_intent(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        _process_id: &ProcessId,
-        _identity: crate::ToolIntentIdentity,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<super::observation::ObservedProcess, PluginError> {
-        Err(PluginError::Session(
-            "processes are unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn transfer(
-        &self,
-        _from_session_id: &SessionId,
-        _to_session_id: &SessionId,
-        process_ids: Vec<ProcessId>,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<(), PluginError> {
-        if process_ids.is_empty() {
-            return Ok(());
-        }
-        Err(PluginError::Session(
-            "process handle transfer is unavailable in this runtime".to_string(),
-        ))
-    }
 }

@@ -26,8 +26,11 @@ struct DirectProbe;
 
 #[async_trait]
 impl ToolProvider for DirectProbe {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![direct_probe_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![direct_probe_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -108,7 +111,7 @@ async fn a_tools_direct_completion_runs_in_its_call_and_records_usage_and_trace(
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), Arc::new(DirectProbe))
+    .tools(crate::tool_provider_key!("tools"), Arc::new(DirectProbe))
     .trace_jsonl_path(trace_path.clone())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core

@@ -12,8 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash_core::plugin::{
     CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar, ConfigRegistrationError,
-    OwnerChange, PluginDeclaration, PluginError, PluginFactory, PluginMetadata, PluginRegistrar,
-    PluginSessionContext, SessionPlugin,
+    OwnerChange, PluginDeclaration, PluginError, PluginFactory, SessionPlugin,
 };
 use lash_core::{
     OwnerConfigView, ToolCall, ToolContract, ToolId, ToolManifest, ToolPrepareCall, ToolProvider,
@@ -137,7 +136,7 @@ impl SelectedToolsPlugin {
     }
 }
 
-impl PluginMetadata for SelectedToolsPlugin {
+impl lash_core::plugin::PluginMetadata for SelectedToolsPlugin {
     fn plugin_declaration(&self) -> PluginDeclaration {
         PluginDeclaration::initial(self.id)
     }
@@ -148,7 +147,47 @@ impl PluginFactory for SelectedToolsPlugin {
         self.id
     }
 
-    fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_core::plugin::PluginError,
+        > = {
+            let mut reg = lash_core::plugin::PluginRegistrar::<SelectedToolsSession>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            SelectedToolsSession::declare(&mut reg)?;
+            let id = lash_core::plugin::PluginFactory::id(self.as_ref());
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| {
+                    Ok(Arc::new(SelectedToolsSession {
+                        id: self.id,
+                        provider: Arc::new(Selected {
+                            owner: self.id,
+                            inner: Arc::clone(&self.provider),
+                        }),
+                    }))
+                },
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = lash_core::plugin::ConfigRegistrar::new(
+            lash_core::plugin::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
+    }
+}
+impl SelectedToolsPlugin {
+    pub fn declare_configuration(
+        &self,
+        reg: &mut ConfigRegistrar,
+    ) -> Result<(), ConfigRegistrationError> {
         reg.owner_with_run_options(ToolSelectionOwner, self.run_options())?;
         reg.command::<SetToolSelection>(|_recorded, command| {
             Ok(OwnerChange {
@@ -158,16 +197,6 @@ impl PluginFactory for SelectedToolsPlugin {
                 output: (),
             })
         })
-    }
-
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(SelectedToolsSession {
-            id: self.id,
-            provider: Arc::new(Selected {
-                owner: self.id,
-                inner: Arc::clone(&self.provider),
-            }),
-        }))
     }
 }
 
@@ -180,10 +209,16 @@ impl SessionPlugin for SelectedToolsSession {
     fn id(&self) -> &'static str {
         self.id
     }
-
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        reg.tools()
-            .provider(lash_core::hook_key!("tools"), Arc::clone(&self.provider))
+}
+impl SelectedToolsSession {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        reg.tools().provider(
+            lash_core::tool_provider_key!("tools"),
+            move |this, _state| Ok(Arc::clone(&this.provider)),
+        )?;
+        Ok(())
     }
 }
 
@@ -203,12 +238,21 @@ impl Selected {
 
 #[async_trait]
 impl ToolProvider for Selected {
-    fn tool_manifests(&self, config: &OwnerConfigView) -> Vec<ToolManifest> {
-        self.inner
-            .tool_manifests(config)
+    fn tool_manifests(
+        &self,
+        config: &OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        let selection =
+            ToolSelection::of(config, self.owner).map_err(|error| PluginError::ProviderConfig {
+                owner: self.owner.into(),
+                message: error.to_string(),
+            })?;
+        Ok(self
+            .inner
+            .tool_manifests(config)?
             .into_iter()
-            .filter(|manifest| self.admits(&manifest.id, config))
-            .collect()
+            .filter(|manifest| selection.admits(&manifest.id))
+            .collect())
     }
 
     fn resolve_manifest_by_id(
@@ -225,6 +269,7 @@ impl ToolProvider for Selected {
         let admitted = self
             .inner
             .tool_manifests(config)
+            .ok()?
             .into_iter()
             .any(|manifest| manifest.name == name && self.admits(&manifest.id, config));
         admitted
@@ -252,5 +297,38 @@ impl ToolProvider for Selected {
         call: lash_core::IsolatedProcessRequest<'_>,
     ) -> Result<lash_core::IsolatedStart, lash_core::ProcessEnvRefusal> {
         self.inner.isolated_start(call)
+    }
+}
+
+#[cfg(test)]
+mod advertisement_tests {
+    use super::*;
+
+    /// ADVERTISEMENT-REFUSES-CONFIG: a decode failure cannot advertise an empty catalog.
+    #[test]
+    fn advertisement_refuses_invalid_provider_configuration() {
+        let registry = lash_core::ToolRegistry::from_tool_provider(
+            lash_core::plugin::ToolProviderHandle::new(
+                lash_core::plugin::RegistryKind::Session,
+                "selected",
+                lash_core::tool_provider_key!("tools"),
+            ),
+            Arc::new(Selected {
+                owner: "selected",
+                inner: Arc::new(lash_core::testing::EmptyToolProvider),
+            }),
+        )
+        .unwrap();
+        let mut config = lash_core::plugin::PluginConfig::default();
+        config.insert(
+            "selected",
+            serde_json::json!({ "tools": "invalid-selection" }),
+        );
+        let config =
+            OwnerConfigView::session(lash_core::plugin::AdmittedPluginConfig::new(config, 1));
+        assert!(
+            matches!(registry.advertise(&config), Err(PluginError::ProviderConfig { owner, .. }) if owner == "selected"),
+            "a malformed provider configuration must refuse advertisement typed"
+        );
     }
 }

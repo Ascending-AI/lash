@@ -478,7 +478,7 @@ pub(super) fn build_core(
     plugins.push(Arc::new(lash::plugins::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("latency_tools"),
         lash::plugins::PluginSpec::new().with_tool_provider(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::new(crate::runtime_perf::providers::BenchmarkEchoTool::new(
                 effect_host.clone(),
             )),

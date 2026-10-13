@@ -146,8 +146,9 @@ impl ToolRegistry {
     ) -> Result<Vec<SurfaceEntry>, crate::PluginError> {
         let mut entries = Vec::new();
         for (key, provider) in &self.providers {
+            config.validate_provider(key)?;
             let mut ids = std::collections::BTreeSet::new();
-            for manifest in provider.tool_manifests(config) {
+            for manifest in provider.tool_manifests(config)? {
                 if !ids.insert(manifest.id.clone()) {
                     return Err(crate::PluginError::ResidentToolDuplicateId {
                         tool_id: manifest.id,
@@ -397,11 +398,16 @@ impl SurfaceTools {
 
 #[async_trait::async_trait]
 impl ToolProvider for SurfaceTools {
-    fn tool_manifests(&self, _config: &OwnerConfigView) -> Vec<ToolManifest> {
-        self.routes
-            .values()
-            .map(|entry| entry.definition.manifest.clone())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, crate::PluginError> {
+        Ok({
+            self.routes
+                .values()
+                .map(|entry| entry.definition.manifest.clone())
+                .collect()
+        })
     }
 
     fn resolve_manifest(&self, name: &str, _config: &OwnerConfigView) -> Option<ToolManifest> {

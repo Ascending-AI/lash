@@ -34,6 +34,7 @@
 //! PostgreSQL legs are ignored outside a PostgreSQL gate.
 
 use super::*;
+
 use crate::{SessionId, TurnInput};
 use lash_core::testing::runtime_helpers::LayeredStores;
 use lash_core::testing::{Call, Op, Phase, Script, StoreOp};
@@ -304,25 +305,37 @@ impl lash_core::facade_support::PluginFactory for RefusingFactory {
         "fig4597-refusing-factory"
     }
 
-    fn build(
-        &self,
-        _ctx: &lash_core::facade_support::PluginSessionContext,
-    ) -> std::result::Result<
-        Arc<dyn lash_core::facade_support::SessionPlugin>,
-        lash_core::PluginError,
-    > {
-        if self.refuse.load(Ordering::SeqCst) {
-            return Err(lash_core::PluginError::Session(
-                "the plugin refuses to build".to_string(),
-            ));
-        }
-        Ok(Arc::new(InertPlugin))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<InertPlugin>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        InertPlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| {
+                if self.refuse.load(Ordering::SeqCst) {
+                    return Err(lash_core::PluginError::Session(
+                        "the plugin refuses to build".to_string(),
+                    ));
+                }
+                Ok(Arc::new(InertPlugin))
+            },
+        ))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for RefusingFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl RefusingFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("fig4597-refusing-factory")
+    }
+}
+impl lash_core::plugin::PluginMetadata for RefusingFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -332,11 +345,11 @@ impl lash_core::facade_support::SessionPlugin for InertPlugin {
     fn id(&self) -> &'static str {
         "fig4597-refusing-factory"
     }
-
-    fn register(
-        &self,
-        _reg: &mut lash_core::facade_support::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+}
+impl InertPlugin {
+    fn declare(
+        _reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
         Ok(())
     }
 }

@@ -19,7 +19,7 @@ fn a_catalogue_tool_named_batch_is_refused_while_the_sugar_is_offered() {
                 Arc::new(lash_core::plugin::StaticPluginFactory::new(
                     lash_core::plugin::PluginDeclaration::initial("catalogue-batch"),
                     lash_core::facade_support::PluginSpec::new()
-                        .with_tool_provider(lash_core::hook_key!("tools"), tools),
+                        .with_tool_provider(lash_core::tool_provider_key!("tools"), tools),
                 )),
             ],
             lash_core::ExecutionBudgets::recommended(),
@@ -71,8 +71,11 @@ fn named_batch() -> lash_core::ToolDefinition {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for NamedBatch {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![named_batch().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![named_batch().manifest()])
     }
 
     fn resolve_contract(

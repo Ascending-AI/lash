@@ -147,22 +147,24 @@ impl lash_core::facade_support::SessionPlugin for ProbePlugin {
     fn id(&self) -> &'static str {
         PROBE
     }
-
-    fn register(
-        &self,
-        reg: &mut lash_core::facade_support::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        let hooks = Arc::clone(&self.hooks);
-        reg.turn().before(
-            crate::hook_key!("turn-before-1"),
-            Arc::new(move |ctx: lash_core::facade_support::TurnHookContext| {
-                hooks.lock_recover().push((
-                    ctx.plugin_config.revision,
-                    ctx.plugin_config.config.get(PROBE).cloned(),
-                ));
-                Box::pin(async { Ok(Default::default()) })
-            }),
-        )?;
+}
+impl ProbePlugin {
+    fn declare(
+        reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
+        reg.turn()
+            .before(crate::hook_key!("turn-before-1"), move |this, _state| {
+                let hooks = Arc::clone(&this.hooks);
+                Ok(Arc::new(
+                    move |ctx: lash_core::facade_support::TurnHookContext| {
+                        hooks.lock_recover().push((
+                            ctx.plugin_config.revision,
+                            ctx.plugin_config.config.get(PROBE).cloned(),
+                        ));
+                        Box::pin(async { Ok(Default::default()) })
+                    },
+                ))
+            })?;
         Ok(())
     }
 }
@@ -172,23 +174,41 @@ impl lash_core::facade_support::PluginFactory for ProbeFactory {
         PROBE
     }
 
-    fn build(
-        &self,
-        ctx: &lash_core::facade_support::PluginSessionContext,
-    ) -> std::result::Result<
-        Arc<dyn lash_core::facade_support::SessionPlugin>,
-        lash_core::PluginError,
-    > {
-        self.builds.lock_recover().push((
-            ctx.plugin_config.revision,
-            ctx.plugin_config.config.get(PROBE).cloned(),
-        ));
-        Ok(Arc::new(ProbePlugin {
-            hooks: Arc::clone(&self.hooks),
-        }))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> = {
+            let mut reg = crate::plugins::PluginRegistrar::<ProbePlugin>::new(
+                crate::plugins::PluginFactory::id(self.as_ref()),
+            );
+            ProbePlugin::declare(&mut reg)?;
+            let id = self.id();
+            Ok(crate::plugins::PluginRecipe::new(
+                id,
+                reg,
+                move |ctx, _state| {
+                    self.builds.lock_recover().push((
+                        ctx.plugin_config.revision,
+                        ctx.plugin_config.config.get(PROBE).cloned(),
+                    ));
+                    Ok(Arc::new(ProbePlugin {
+                        hooks: Arc::clone(&self.hooks),
+                    }))
+                },
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = crate::plugins::ConfigRegistrar::new(
+            crate::plugins::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
     }
-
-    fn register_config(
+}
+impl ProbeFactory {
+    pub fn declare_configuration(
         &self,
         registrar: &mut lash_core::ConfigRegistrar,
     ) -> std::result::Result<(), lash_core::ConfigRegistrationError> {
@@ -210,9 +230,14 @@ impl lash_core::facade_support::PluginFactory for ProbeFactory {
     }
 }
 
-impl lash_core::plugin::PluginDefinition for ProbeFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl ProbeFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(PROBE)
+    }
+}
+impl lash_core::plugin::PluginMetadata for ProbeFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 

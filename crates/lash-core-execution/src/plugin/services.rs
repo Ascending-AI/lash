@@ -111,15 +111,103 @@ impl std::ops::Deref for PersistentRuntimeServices {
 pub(crate) struct NoopSessionManager;
 
 #[cfg(test)]
-impl SessionReadService for NoopSessionManager {}
+#[async_trait::async_trait]
+impl SessionReadService for NoopSessionManager {
+    async fn snapshot_current(&self) -> Result<crate::SessionSnapshot, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+    async fn snapshot_session(
+        &self,
+        _session_id: &crate::SessionId,
+    ) -> Result<crate::SessionSnapshot, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+    async fn tool_catalog(
+        &self,
+        _session_id: &crate::SessionId,
+    ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+}
 #[cfg(test)]
-impl ProcessReadService for NoopSessionManager {}
+#[async_trait::async_trait]
+impl ProcessReadService for NoopSessionManager {
+    async fn list_visible(
+        &self,
+        _session_id: &crate::SessionId,
+        _mode: crate::ProcessListMode,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+}
 #[cfg(test)]
-impl SessionStateService for NoopSessionManager {}
+#[async_trait::async_trait]
+impl SessionStateService for NoopSessionManager {
+    async fn turn_scope(
+        &self,
+        _session_id: &crate::SessionId,
+        _turn_id: &crate::TurnId,
+    ) -> Result<crate::ExecutionScope, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+    async fn snapshot_current(&self) -> Result<crate::SessionSnapshot, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+    async fn snapshot_session(
+        &self,
+        _session_id: &crate::SessionId,
+    ) -> Result<crate::SessionSnapshot, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+    async fn tool_catalog(
+        &self,
+        _session_id: &crate::SessionId,
+    ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+}
 #[cfg(test)]
-impl SessionLifecycleService for NoopSessionManager {}
+#[async_trait::async_trait]
+impl SessionLifecycleService for NoopSessionManager {
+    async fn create_session(
+        &self,
+        _request: crate::SessionCreateRequest,
+    ) -> Result<crate::SessionHandle, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+}
 #[cfg(test)]
-impl SessionGraphService for NoopSessionManager {}
+#[async_trait::async_trait]
+impl SessionGraphService for NoopSessionManager {
+    async fn append_session_nodes(
+        &self,
+        _session_id: &crate::SessionId,
+        _request: crate::AppendSessionNodesRequest,
+    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+}
 impl RuntimeServices {
     /// Services over the attachment facade and process-exec-env store the
     /// caller's backend supplies. There is no in-memory default (ADR 0102):

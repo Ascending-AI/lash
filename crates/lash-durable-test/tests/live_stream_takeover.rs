@@ -378,7 +378,7 @@ async fn a_second_model_call_reset_preserves_the_first_calls_blocks_on_sqlite_me
     let world =
         served::World::with_model(served::Tier::SqliteMemory, Vec::new(), model, |backend| {
             lash::LashCore::standard_builder(backend.clone()).tools(
-                lash::hook_key!("tools"),
+                lash::tool_provider_key!("tools"),
                 Arc::new(lash_core::testing::runtime_helpers::EchoTool),
             )
         })

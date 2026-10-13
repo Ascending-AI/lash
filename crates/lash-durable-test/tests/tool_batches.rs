@@ -247,11 +247,16 @@ struct Leaves {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Leaves {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        [LEAF, DEFERRED_LEAF]
-            .into_iter()
-            .map(|name| leaf_definition(name).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            [LEAF, DEFERRED_LEAF]
+                .into_iter()
+                .map(|name| leaf_definition(name).manifest())
+                .collect()
+        })
     }
 
     fn resolve_manifest_by_id(
@@ -325,8 +330,11 @@ struct GrantedLeaves;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for GrantedLeaves {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_contract(
@@ -354,8 +362,10 @@ impl lash::tools::DeferredToolProvider for GrantedLeaves {
             .map(|path| {
                 let outcome = if *path == format!("tools.{GRANTED_LEAF}") {
                     lash::tools::DeferredOutcome::Resolved {
-                        provider: lash::plugins::PluginCallbackIdentity::tool_provider(
-                            "tools", "tools",
+                        provider: lash::plugins::ToolProviderHandle::new(
+                            lash::plugins::RegistryKind::Session,
+                            "tools",
+                            lash::tool_provider_key!("tools"),
                         ),
                         definition: leaf_definition(GRANTED_LEAF),
                         binding: None,
@@ -390,7 +400,7 @@ impl Producers {
                 .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
                     lash::plugins::PluginDeclaration::initial("granted-leaves"),
                     lash::plugins::PluginSpec::new().with_deferred_provider(
-                        lash::hook_key!("deferred"),
+                        lash::tool_provider_key!("deferred"),
                         Arc::new(GrantedLeaves),
                     ),
                 )))
@@ -398,7 +408,7 @@ impl Producers {
                 lash::LashCore::standard_builder(backend.clone())
             };
             builder.tools(
-                lash::hook_key!("tools"),
+                lash::tool_provider_key!("tools"),
                 Arc::new(Leaves {
                     rendezvous: leaves,
                     backend: backend.clone(),
@@ -1069,11 +1079,16 @@ struct SugarTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for SugarTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        SUGAR_TOOLS
-            .iter()
-            .map(|name| sugar_tool(name).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            SUGAR_TOOLS
+                .iter()
+                .map(|name| sugar_tool(name).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -1102,7 +1117,10 @@ impl lash_core::ToolProvider for SugarTools {
 fn sugar_plugin(witness: Arc<Witness>) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     let hooked = Arc::clone(&witness);
     let spec = lash_core::facade_support::PluginSpec::new()
-        .with_tool_provider(lash::hook_key!("tools"), Arc::new(SugarTools { witness }))
+        .with_tool_provider(
+            lash::tool_provider_key!("tools"),
+            Arc::new(SugarTools { witness }),
+        )
         .with_tool_args_check(
             lash_core::hook_key!("guard"),
             Arc::new(move |input| {

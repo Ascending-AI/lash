@@ -37,11 +37,16 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for RaceTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        [FAST, SLOW]
-            .into_iter()
-            .map(|name| definition(name).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok({
+            [FAST, SLOW]
+                .into_iter()
+                .map(|name| definition(name).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -87,7 +92,7 @@ fn race_core(
             queued_text_provider(vec![typescript_block(source), "The race settled.".into()]),
             mock_llm_profile_spec(),
         )
-        .tools(crate::hook_key!("tools"), tools)
+        .tools(crate::tool_provider_key!("tools"), tools)
         .build(crate::testing::runtime_lease_owner())
 }
 
@@ -167,11 +172,16 @@ struct ClosingTools {
 
 #[async_trait]
 impl ToolProvider for ClosingTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        [FAST, SLOW]
-            .into_iter()
-            .map(|name| definition(name).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok({
+            [FAST, SLOW]
+                .into_iter()
+                .map(|name| definition(name).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -343,11 +353,16 @@ fn backoff_definition(name: &str) -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for BackoffTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        [FAST, SLOW]
-            .into_iter()
-            .map(|name| backoff_definition(name).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok({
+            [FAST, SLOW]
+                .into_iter()
+                .map(|name| backoff_definition(name).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(

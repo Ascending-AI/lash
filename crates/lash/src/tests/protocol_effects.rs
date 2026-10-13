@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::TurnInput;
+
 use lash_core::facade_support::{TurnOutcome, TurnStop};
 use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 use lash_sansio::ReportedFailure;
@@ -22,20 +23,30 @@ impl lash_core::facade_support::PluginFactory for TestProtocolFactory {
         PROTOCOL
     }
 
-    fn build(
-        &self,
-        _ctx: &lash_core::facade_support::PluginSessionContext,
-    ) -> std::result::Result<
-        Arc<dyn lash_core::facade_support::SessionPlugin>,
-        lash_core::PluginError,
-    > {
-        Ok(Arc::new(TestProtocolPlugin(Arc::clone(&self.0))))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<TestProtocolPlugin>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        TestProtocolPlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(TestProtocolPlugin(Arc::clone(&self.0)))),
+        ))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for TestProtocolFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl TestProtocolFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(PROTOCOL)
+    }
+}
+impl lash_core::plugin::PluginMetadata for TestProtocolFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -45,17 +56,17 @@ impl lash_core::facade_support::SessionPlugin for TestProtocolPlugin {
     fn id(&self) -> &'static str {
         PROTOCOL
     }
+}
+impl TestProtocolPlugin {
+    fn declare(
+        reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
+        reg.protocol()
+            .session(move |_this, _state| Ok(Arc::new(TestProtocolSession)))?;
 
-    fn register(
-        &self,
-        registrar: &mut lash_core::facade_support::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        registrar
-            .protocol()
-            .session(Arc::new(TestProtocolSession))?;
-        registrar
-            .protocol()
-            .protocol_driver(Arc::new(TestProtocolDriver(Arc::clone(&self.0))))?;
+        reg.protocol().protocol_driver(move |this, _state| {
+            Ok(Arc::new(TestProtocolDriver(Arc::clone(&this.0))))
+        })?;
         Ok(())
     }
 }

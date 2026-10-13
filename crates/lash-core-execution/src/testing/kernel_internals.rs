@@ -17,7 +17,7 @@ pub use crate::plugin::{
     RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
     SessionObserverIntent,
 };
-pub use crate::runtime::UnavailableProcessService;
+
 pub use crate::runtime::load_process_env;
 pub use crate::session::{RuntimeExecutionTracing, Session};
 
@@ -270,9 +270,46 @@ pub fn prompt_catalog(
 ) -> Result<crate::plugin::prompt::PromptCatalog, PluginError> {
     let mut contributions = crate::plugin::PluginContributions::default();
     for (id, register) in plugins {
-        let mut reg = crate::plugin::PluginRegistrar::new(String::from(id));
+        let mut recipe = crate::plugin::PluginRegistrar::new(id);
+        register(&mut recipe)?;
+        let owner = crate::RuntimeOwner::Session("prompt-fixture".into());
+        let state = crate::plugin::PluginStateView::bind(&owner, id, std::sync::Arc::default());
+        let mut reg = crate::plugin::BoundRegistrar::new(id.into());
         reg.contributions = contributions;
-        register(&mut reg)?;
+        recipe.bind(&(), &state, &mut reg)?;
+        contributions = reg.contributions;
+    }
+    Ok(crate::plugin::prompt::PromptCatalog::new(
+        contributions.prompt,
+    ))
+}
+
+/// Explicitly binds prompt fixture recipes. This is an executable preview,
+/// never a diagnostics read or an installed owner observation.
+pub fn prompt_catalog_from_recipes(
+    recipes: &[crate::plugin::PluginRecipe],
+) -> Result<crate::plugin::prompt::PromptCatalog, PluginError> {
+    let owner = crate::RuntimeOwner::Session("prompt-recipe-fixture".into());
+    let context = crate::plugin::PluginSessionContext {
+        bindings: std::sync::Arc::new(crate::plugin::ServiceBindings::default()),
+        owner: owner.clone(),
+        tracing: crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+        trace: None,
+        plugin_config: crate::plugin::AdmittedPluginConfig::default(),
+        materialization: crate::plugin::PluginSessionMaterialization::Creation,
+        extensions: crate::plugin::PluginExtensions::default(),
+    };
+    let mut contributions = crate::plugin::PluginContributions::default();
+    for recipe in recipes {
+        let id = recipe
+            .entries
+            .first()
+            .map(|entry| entry.key.owner())
+            .unwrap_or("prompt-fixture");
+        let state = crate::plugin::PluginStateView::bind(&owner, id, std::sync::Arc::default());
+        let mut reg = crate::plugin::BoundRegistrar::new(id.into());
+        reg.contributions = contributions;
+        recipe.bind(&context, &state, &mut reg)?;
         contributions = reg.contributions;
     }
     Ok(crate::plugin::prompt::PromptCatalog::new(

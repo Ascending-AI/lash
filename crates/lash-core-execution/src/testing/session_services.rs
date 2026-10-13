@@ -61,4 +61,14 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
 }
 
 #[async_trait::async_trait]
-impl crate::plugin::SessionGraphService for MockSessionManager {}
+impl crate::plugin::SessionGraphService for MockSessionManager {
+    async fn append_session_nodes(
+        &self,
+        _session_id: &crate::SessionId,
+        _request: crate::AppendSessionNodesRequest,
+    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+}

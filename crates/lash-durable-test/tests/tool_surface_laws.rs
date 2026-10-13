@@ -142,11 +142,16 @@ impl Surface {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Surface {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        self.tools
-            .iter()
-            .map(|tool| tool.definition().manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            self.tools
+                .iter()
+                .map(|tool| tool.definition().manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -580,7 +585,12 @@ fn held() -> Spec {
 fn provider_token(owner: &str) -> String {
     lash_core::ObligationToken::for_callback(
         lash_core::RegistryKind::Session,
-        &lash_core::plugin::PluginCallbackIdentity::tool_provider(owner, "tools"),
+        &lash_core::plugin::ToolProviderHandle::new(
+            lash_core::plugin::RegistryKind::Session,
+            owner,
+            lash_core::tool_provider_key!("tools"),
+        )
+        .callback_identity(),
     )
 }
 
@@ -832,16 +842,21 @@ struct CellSurface {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for CellSurface {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        if self.deferred {
-            Vec::new()
-        } else {
-            self.surface
-                .tools
-                .iter()
-                .map(|tool| cell_definition(tool).manifest())
-                .collect()
-        }
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            if self.deferred {
+                Vec::new()
+            } else {
+                self.surface
+                    .tools
+                    .iter()
+                    .map(|tool| cell_definition(tool).manifest())
+                    .collect()
+            }
+        })
     }
 
     fn resolve_manifest_by_id(
@@ -883,8 +898,11 @@ struct CellResolver {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for CellResolver {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_contract(
@@ -916,8 +934,10 @@ impl lash::tools::DeferredToolProvider for CellResolver {
                     (*path).to_owned(),
                     if *path == "tools.surface_held" {
                         lash::tools::DeferredOutcome::Resolved {
-                            provider: lash_core::plugin::PluginCallbackIdentity::tool_provider(
-                                SURFACE, "tools",
+                            provider: lash::plugins::ToolProviderHandle::new(
+                                lash::plugins::RegistryKind::Session,
+                                SURFACE,
+                                lash::tool_provider_key!("tools"),
                             ),
                             definition: cell_definition(&held()),
                             binding: None,
@@ -967,11 +987,13 @@ impl Deployment {
             surface: Arc::clone(surface),
             deferred: resolver.is_some(),
         });
-        let mut spec =
-            lash::plugins::PluginSpec::new().with_tool_provider(lash::hook_key!("tools"), tools);
+        let mut spec = lash::plugins::PluginSpec::new()
+            .with_tool_provider(lash::tool_provider_key!("tools"), tools);
         if let Some(resolver) = resolver {
-            spec =
-                spec.with_deferred_provider(lash::hook_key!("deferred"), Arc::clone(resolver) as _);
+            spec = spec.with_deferred_provider(
+                lash::tool_provider_key!("deferred"),
+                Arc::clone(resolver) as _,
+            );
         }
         lash::LashCore::rlm_builder(self.backend.clone(), factory)
             .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(

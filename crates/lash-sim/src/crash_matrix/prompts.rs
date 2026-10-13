@@ -22,13 +22,8 @@ use std::sync::{Arc, Weak};
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse};
-use lash_core::plugin::prompt::{
-    PromptInput, PromptRenderError, PromptSectionSpec, PromptWrapSpec, PromptWrapTarget,
-    SectionText,
-};
-use lash_core::prompt_sections::{
-    PromptPlacement, PromptSectionId, PromptSectionKey, PromptWrapKey,
-};
+use lash_core::plugin::prompt::{PromptWrapSpec, PromptWrapTarget};
+use lash_core::prompt_sections::{PromptSectionId, PromptSectionKey, PromptWrapKey};
 use lash_core::{ExecutionPolicy, ToolCall};
 use lash_sansio::{SessionId, TurnId};
 
@@ -221,9 +216,14 @@ struct Memo {
     world: Weak<World>,
 }
 
-impl lash_core::plugin::PluginDefinition for Memo {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl Memo {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(MEMO)
+    }
+}
+impl lash_core::plugin::PluginMetadata for Memo {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -232,11 +232,19 @@ impl lash_core::plugin::PluginFactory for Memo {
         MEMO
     }
 
-    fn build(
-        &self,
-        _: &lash_core::plugin::PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<Memo>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        Memo::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -244,95 +252,117 @@ impl lash_core::plugin::SessionPlugin for Memo {
     fn id(&self) -> &'static str {
         MEMO
     }
+}
+impl Memo {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        reg.turn()
+            .before(lash_core::hook_key!("note-turn"), move |this, _state| {
+                let _world = this.world.clone();
+                let before = this.world.clone();
+                Ok(Arc::new(move |context| {
+                    if let Some(world) = before.upgrade() {
+                        world.note(format!("{BEFORE_TURN} {}", context.session_id));
+                    }
+                    Box::pin(async { Ok(lash_core::plugin::TurnContributions::default()) })
+                }))
+            })?;
 
-    fn register(
-        &self,
-        reg: &mut lash_core::plugin::PluginRegistrar,
-    ) -> Result<(), lash_core::PluginError> {
-        let world = self.world.clone();
-        let before = self.world.clone();
-        reg.turn().before(
-            lash_core::hook_key!("note-turn"),
-            Arc::new(move |context| {
-                if let Some(world) = before.upgrade() {
-                    world.note(format!("{BEFORE_TURN} {}", context.session_id));
-                }
-                Box::pin(async { Ok(lash_core::plugin::TurnContributions::default()) })
-            }),
-        )?;
         reg.prompt().section(
-            PromptSectionSpec::new(key("current"), PromptPlacement::CurrentContext),
-            Arc::new(move |input: &PromptInput<'_>| {
-                if let Some(world) = world.upgrade() {
-                    world.note(format!(
-                        "{RENDERED} {} call={}",
-                        input.call().session_id,
-                        input.call().call
-                    ));
-                }
-                let t = input.state().get_as::<String>("t")?;
-                let checkpoints = input.state().get_as::<u64>("checkpoints")?.unwrap_or(0);
-                // The previous round's outcome, as the cut's session view
-                // shows it.
-                let seen = input.session().is_some_and(|view| {
-                    view.messages()
-                        .iter()
-                        .flat_map(|message| message.parts.iter())
-                        .any(|part| {
-                            part.kind() == lash_core::PartKind::ToolResult
-                                && part.tool_name() == Some(SET_T)
-                        })
-                });
-                Ok::<_, PromptRenderError>(SectionText::Text(format!(
-                    "T={} checkpoints={checkpoints} set_t_seen={seen}",
-                    t.as_deref().unwrap_or("none")
-                )))
-            }),
+            lash_core::plugin::prompt::PromptSectionSpec::new(
+                key("current"),
+                lash_core::prompt_sections::PromptPlacement::CurrentContext,
+            ),
+            move |this, _state| {
+                let world = this.world.clone();
+                Ok(Arc::new(
+                    move |input: &lash_core::plugin::prompt::PromptInput<'_>| {
+                        if let Some(world) = world.upgrade() {
+                            world.note(format!(
+                                "{RENDERED} {} call={}",
+                                input.call().session_id,
+                                input.call().call
+                            ));
+                        }
+                        let t = input.state().get_as::<String>("t")?;
+                        let checkpoints = input.state().get_as::<u64>("checkpoints")?.unwrap_or(0);
+                        // The previous round's outcome, as the cut's session view
+                        // shows it.
+                        let seen = input.session().is_some_and(|view| {
+                            view.messages()
+                                .iter()
+                                .flat_map(|message| message.parts.iter())
+                                .any(|part| {
+                                    part.kind() == lash_core::PartKind::ToolResult
+                                        && part.tool_name() == Some(SET_T)
+                                })
+                        });
+                        Ok::<_, lash_core::plugin::prompt::PromptRenderError>(
+                            lash_core::plugin::prompt::SectionText::Text(format!(
+                                "T={} checkpoints={checkpoints} set_t_seen={seen}",
+                                t.as_deref().unwrap_or("none")
+                            )),
+                        )
+                    },
+                ))
+            },
         )?;
-        reg.state_reducer(
-            "count",
-            Arc::new(|reduction| {
+
+        reg.turn().checkpoint(
+            lash_core::hook_key!("count-checkpoints"),
+            move |_this, _state| {
+                Ok(Arc::new(|context| {
+                    Box::pin(async move {
+                        let mut contributions = lash_core::plugin::TurnContributions::default();
+                        if context.checkpoint == lash_core::CheckpointKind::AfterWork {
+                            contributions.state = lash_core::plugin::StateCommands::new().apply(
+                                "checkpoints",
+                                "count",
+                                serde_json::Value::Null,
+                            );
+                        }
+                        Ok(contributions)
+                    })
+                }))
+            },
+        )?;
+
+        reg.tool_calls().check_result(
+            lash_core::hook_key!("deny-speculation"),
+            move |_this, _state| {
+                Ok(Arc::new(|input| {
+                    Box::pin(async move {
+                        if input.context.tool_name != SPECULATE {
+                            return Ok(lash_core::plugin::AfterToolContributions::default());
+                        }
+                        Ok(lash_core::plugin::AfterToolDecision::Deny(
+                            lash_core::ToolFailure::invalid_request(
+                                "speculation_denied",
+                                "the memo keeps the T it has",
+                            ),
+                        )
+                        .into())
+                    })
+                }))
+            },
+        )?;
+
+        reg.tools()
+            .provider(lash::tool_provider_key!("tools"), move |_this, _state| {
+                tools()
+            })?;
+
+        reg.state_reducer("count", move |_this, _state| {
+            Ok(Arc::new(|reduction| {
                 let current = reduction
                     .current
                     .and_then(serde_json::Value::as_u64)
                     .unwrap_or(0);
                 Ok(Some(serde_json::json!(current + 1)))
-            }),
-        )?;
-        reg.turn().checkpoint(
-            lash_core::hook_key!("count-checkpoints"),
-            Arc::new(|context| {
-                Box::pin(async move {
-                    let mut contributions = lash_core::plugin::TurnContributions::default();
-                    if context.checkpoint == lash_core::CheckpointKind::AfterWork {
-                        contributions.state = lash_core::plugin::StateCommands::new().apply(
-                            "checkpoints",
-                            "count",
-                            serde_json::Value::Null,
-                        );
-                    }
-                    Ok(contributions)
-                })
-            }),
-        )?;
-        reg.tool_calls().check_result(
-            lash_core::hook_key!("deny-speculation"),
-            Arc::new(|input| {
-                Box::pin(async move {
-                    if input.context.tool_name != SPECULATE {
-                        return Ok(lash_core::plugin::AfterToolContributions::default());
-                    }
-                    Ok(lash_core::plugin::AfterToolDecision::Deny(
-                        lash_core::ToolFailure::invalid_request(
-                            "speculation_denied",
-                            "the memo keeps the T it has",
-                        ),
-                    )
-                    .into())
-                })
-            }),
-        )?;
-        reg.tools().provider(lash::hook_key!("tools"), tools()?)
+            }))
+        })?;
+        Ok(())
     }
 }
 
@@ -392,9 +422,14 @@ struct Frame {
     world: Weak<World>,
 }
 
-impl lash_core::plugin::PluginDefinition for Frame {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl Frame {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(FRAME)
+    }
+}
+impl lash_core::plugin::PluginMetadata for Frame {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -403,11 +438,19 @@ impl lash_core::plugin::PluginFactory for Frame {
         FRAME
     }
 
-    fn build(
-        &self,
-        _: &lash_core::plugin::PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<Frame>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        Frame::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -415,35 +458,43 @@ impl lash_core::plugin::SessionPlugin for Frame {
     fn id(&self) -> &'static str {
         FRAME
     }
-
-    fn register(
-        &self,
-        reg: &mut lash_core::plugin::PluginRegistrar,
-    ) -> Result<(), lash_core::PluginError> {
-        #[expect(
-            clippy::expect_used,
-            reason = "the simulator's prompt keys are valid literals"
-        )]
-        let wrap = PromptWrapKey::new("frame").expect("a valid prompt key");
-        let world = self.world.clone();
+}
+impl Frame {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        let wrap = PromptWrapKey::new("frame")
+            .map_err(|error| lash_core::PluginError::Registration(error.to_string()))?;
         reg.prompt().wrap(
             PromptWrapSpec::new(wrap, memo_section()),
-            Arc::new(
-                move |input: &PromptInput<'_>, _: PromptWrapTarget<'_>, previous: SectionText| {
-                    if let Some(world) = world.upgrade() {
-                        world.note(format!(
-                            "{WRAPPED} {} call={}",
-                            input.call().session_id,
-                            input.call().call
-                        ));
-                    }
-                    Ok(match previous {
-                        SectionText::Text(text) => SectionText::Text(format!("{text} (framed)")),
-                        SectionText::Omit => SectionText::Omit,
-                    })
-                },
-            ),
-        )
+            move |this, _state| {
+                let world = this.world.clone();
+                Ok(Arc::new(
+                    move |input: &lash_core::plugin::prompt::PromptInput<'_>,
+                          _: PromptWrapTarget<'_>,
+                          previous: lash_core::plugin::prompt::SectionText| {
+                        if let Some(world) = world.upgrade() {
+                            world.note(format!(
+                                "{WRAPPED} {} call={}",
+                                input.call().session_id,
+                                input.call().call
+                            ));
+                        }
+                        Ok(match previous {
+                            lash_core::plugin::prompt::SectionText::Text(text) => {
+                                lash_core::plugin::prompt::SectionText::Text(format!(
+                                    "{text} (framed)"
+                                ))
+                            }
+                            lash_core::plugin::prompt::SectionText::Omit => {
+                                lash_core::plugin::prompt::SectionText::Omit
+                            }
+                        })
+                    },
+                ))
+            },
+        )?;
+        Ok(())
     }
 }
 

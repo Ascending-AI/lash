@@ -14,8 +14,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context as _, Result, anyhow, ensure};
 use lash::direct::LlmOutputPart;
 use lash::plugins::{
-    PluginDeclaration, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
-    PluginStateView, SessionPlugin, StateCommands, StateReduction,
+    PluginDeclaration, PluginFactory, PluginStateView, SessionPlugin, StateCommands, StateReduction,
 };
 use lash::provider::{LlmContentBlock, LlmRequest, LlmResponse, LlmRole, ProviderHandle};
 use lash::sync::MutexExt as _;
@@ -323,96 +322,33 @@ impl<P: CaseId> PluginFactory for CasePlugin<P> {
         P::ID
     }
 
-    fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(Self(self.0.clone(), std::marker::PhantomData)))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+        let mut reg = lash::plugins::PluginRegistrar::<Self>::new(
+            lash::plugins::PluginFactory::id(self.as_ref()),
+        );
+        Self::declare(&mut reg)?;
+        Ok(lash::plugins::PluginRecipe::new(P::ID, reg, move |_, _| {
+            Ok(Arc::new(Self(self.0.clone(), std::marker::PhantomData)))
+        }))
     }
 }
 
-impl<P: CaseId> lash::plugins::PluginDefinition for CasePlugin<P> {
-    fn declaration() -> PluginDeclaration {
+impl<P: CaseId> CasePlugin<P> {
+    pub fn declaration() -> PluginDeclaration {
         PluginDeclaration::initial(P::ID)
+    }
+}
+impl<P: CaseId> lash::plugins::PluginMetadata for CasePlugin<P> {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
 impl<P: CaseId> SessionPlugin for CasePlugin<P> {
     fn id(&self) -> &'static str {
         P::ID
-    }
-
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        let shared = self.0.clone();
-        reg.state_reducer(
-            "append",
-            Arc::new(move |reduction: StateReduction<'_>| {
-                let mut list = match reduction.current {
-                    Some(Value::Array(items)) => items.clone(),
-                    _ => Vec::new(),
-                };
-                list.push(reduction.input.clone());
-                let mut line =
-                    json!({"plugin": P::ID, "key": reduction.key, "input": reduction.input})
-                        .to_string()
-                        .into_bytes();
-                line.push(b'\n');
-                let mut file = shared.reductions.lock_recover();
-                let _ = file.write_all(&line).and_then(|()| file.sync_data());
-                Ok(Some(Value::Array(list)))
-            }),
-        )?;
-        let plans: Vec<ToolPlan> = self
-            .0
-            .fixture
-            .tools
-            .iter()
-            .filter(|plan| plan.plugin == P::PLAN)
-            .cloned()
-            .collect();
-        if plans.is_empty() {
-            return Ok(());
-        }
-        let definitions = plans
-            .iter()
-            .map(|plan| {
-                let declaration = if plan.deferred {
-                    ToolDeclaration::deferring()
-                } else {
-                    ToolDeclaration::default()
-                };
-                let definition = ToolDefinition::raw(
-                    format!("tool:e2e.{}", plan.name),
-                    &plan.name,
-                    "A body the real-host case controls.",
-                    json!({"type":"object","properties":{},"additionalProperties":false}),
-                    json!({}),
-                )
-                .map_err(|error| PluginError::Registration(error.to_string()))?
-                .with_execution(std::time::Duration::from_secs(120))
-                .with_execution_policy(plan.policy);
-                // A deferred body parks until the case's host resolves it, or
-                // the turn that called it ends.
-                let park = declaration
-                    .may_defer
-                    .then_some(lash::tools::ParkBound::UntilScopeEnd);
-                definition
-                    .with_declaration(declaration, park)
-                    .map_err(|refusal| PluginError::ToolRegistrationRefused {
-                        source: Box::new(refusal),
-                    })
-            })
-            .collect::<Result<Vec<_>, PluginError>>()?;
-        let view = reg.state();
-        reg.tools().provider(
-            lash::hook_key!("tools"),
-            Arc::new(StaticToolProvider::new(
-                definitions,
-                Bodies {
-                    plans,
-                    shared: self.0.clone(),
-                    view,
-                },
-            )),
-        )?;
-        Ok(())
     }
 }
 
@@ -519,5 +455,84 @@ impl StaticToolExecute for Bodies {
                 ToolOutcome::err_fmt(format_args!("e2e case body failed: {error:#}")).into()
             }
         }
+    }
+}
+impl<P: CaseId> CasePlugin<P> {
+    fn declare(
+        reg: &mut lash::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash::plugins::PluginError> {
+        reg.state_reducer("append", |owner, _| {
+            let shared = owner.0.clone();
+            Ok(Arc::new(move |reduction: StateReduction<'_>| {
+                let mut list = match reduction.current {
+                    Some(Value::Array(items)) => items.clone(),
+                    _ => Vec::new(),
+                };
+                list.push(reduction.input.clone());
+                let mut line =
+                    json!({"plugin": P::ID, "key": reduction.key, "input": reduction.input})
+                        .to_string()
+                        .into_bytes();
+                line.push(b'\n');
+                let mut file = shared.reductions.lock_recover();
+                let _ = file.write_all(&line).and_then(|()| file.sync_data());
+                Ok(Some(Value::Array(list)))
+            }))
+        })?;
+        reg.tools()
+            .provider(lash::tool_provider_key!("tools"), |owner, state| {
+                let plans: Vec<ToolPlan> = owner
+                    .0
+                    .fixture
+                    .tools
+                    .iter()
+                    .filter(|plan| plan.plugin == P::PLAN)
+                    .cloned()
+                    .collect();
+                let definitions =
+                    plans
+                        .iter()
+                        .map(|plan| {
+                            let declaration = if plan.deferred {
+                                ToolDeclaration::deferring()
+                            } else {
+                                ToolDeclaration::default()
+                            };
+                            let definition = ToolDefinition::raw(
+                    format!("tool:e2e.{}", plan.name),
+                    &plan.name,
+                    "A body the real-host case controls.",
+                    json!({"type":"object","properties":{},"additionalProperties":false}),
+                    json!({}),
+                )
+                .map_err(|error| lash::plugins::PluginError::Registration(error.to_string()))?
+                .with_execution(std::time::Duration::from_secs(120))
+                .with_execution_policy(plan.policy);
+                            // A deferred body parks until the case's host resolves it, or
+                            // the turn that called it ends.
+                            let park = declaration
+                                .may_defer
+                                .then_some(lash::tools::ParkBound::UntilScopeEnd);
+                            definition
+                                .with_declaration(declaration, park)
+                                .map_err(|refusal| {
+                                    lash::plugins::PluginError::ToolRegistrationRefused {
+                                        source: Box::new(refusal),
+                                    }
+                                })
+                        })
+                        .collect::<Result<Vec<_>, lash::plugins::PluginError>>()?;
+                let view = state.clone();
+
+                Ok(Arc::new(StaticToolProvider::new(
+                    definitions,
+                    Bodies {
+                        plans,
+                        shared: owner.0.clone(),
+                        view,
+                    },
+                )))
+            })?;
+        Ok(())
     }
 }

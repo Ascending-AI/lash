@@ -48,7 +48,7 @@ fn builder(backend: &lash::Backend) -> lash::LashCoreBuilder {
             lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
         ),
     ))
-    .tools(lash::hook_key!("tools"), Arc::new(Fetch))
+    .tools(lash::tool_provider_key!("tools"), Arc::new(Fetch))
     .plugin(web_fetch::grant_fetch())
 }
 

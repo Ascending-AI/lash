@@ -1773,14 +1773,19 @@ impl lash::process::ProcessComponentFactory for HoldComponent {
         })
     }
 
-    fn build(
-        &self,
-        _cx: &lash::process::ProcessComponentContext<'_>,
-    ) -> Result<lash::process::ProcessComponentSpec, lash::plugins::PluginError> {
-        let mut spec = lash::process::ProcessComponentSpec::default();
-        spec.tool_providers
-            .push((lash::hook_key!("body"), Arc::clone(&self.body)));
-        Ok(spec)
+    fn recipe(self: Arc<Self>) -> Result<lash::plugins::ProcessRecipe, lash::plugins::PluginError> {
+        let mut registrations =
+            lash::plugins::PluginRegistrar::<Self>::for_process(HOLD.component());
+        registrations
+            .tools()
+            .provider(lash::tool_provider_key!("body"), |owner, _| {
+                Ok(Arc::clone(&owner.body))
+            })?;
+        Ok(lash::plugins::ProcessRecipe::new(
+            HOLD.component(),
+            registrations,
+            move |_| Ok(Arc::clone(&self)),
+        ))
     }
 }
 
@@ -1815,7 +1820,10 @@ fn hold_component_of(
 fn hold_environment() -> lash::process::ProcessEnv {
     lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
         .component(HOLD, &())
-        .link_tool(HOLD.tool_provider("body"), &hold_definition())
+        .link_tool(
+            HOLD.tool_provider(lash::tool_provider_key!("body")),
+            &hold_definition(),
+        )
         .build()
         .expect("the environment builds")
 }
@@ -2182,7 +2190,10 @@ main {{
 fn successor_hold_environment() -> lash::process::ProcessEnv {
     lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(32))
         .component(HOLD, &())
-        .link_tool(HOLD.tool_provider("body"), &hold_definition())
+        .link_tool(
+            HOLD.tool_provider(lash::tool_provider_key!("body")),
+            &hold_definition(),
+        )
         .build()
         .expect("the environment builds")
 }

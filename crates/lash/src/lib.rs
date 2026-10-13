@@ -244,9 +244,6 @@ pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy,
 };
-/// A plugin hook's [`HookKey`](plugins::HookKey) for a string literal,
-/// validated at compile time.
-pub use lash_core::hook_key;
 pub use lash_core::runtime::ExternalCompletionError;
 /// The immediate delivery verdict of an obligation relay's attempt.
 pub use lash_core::runtime::obligations::relay::RelayVerdict;
@@ -293,6 +290,9 @@ pub use lash_core::{
     ExecutionBudgets, ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit,
     ProviderAttemptLimits, RegistrationRefused,
 };
+/// A plugin hook's [`HookKey`](plugins::HookKey) for a string literal,
+/// validated at compile time.
+pub use lash_core::{hook_key, tool_provider_key};
 pub use pacing::{
     CommitAdmissionPolicy, CommitAdmissionPolicyError, ObserverPacing, PollPacing, RecoveryPacing,
     RelayPolicy, RelayPolicyError, RuntimePacingPolicy, WorkCadencePolicy,
@@ -429,7 +429,7 @@ pub mod tools {
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
         CompactToolContract, ExecutionOwner, IsolatedProcessRequest, IsolatedStart,
         PendingCompletion, PendingResolver, PreparedToolCall, ResolveTargetError,
-        StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
+        StartProcessIntent, SurfaceTools, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
         TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, ToolArgumentProjectionPolicy,
         ToolAttachmentClient, ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolCallOutput,
         ToolCallRecord, ToolCatalogEntry, ToolContract, ToolDefinition, ToolDirectCompletionClient,
@@ -604,7 +604,16 @@ pub mod prompt {
 /// their [`TraceSink`](crate::tracing::TraceSink) and installing it through
 /// [`LashCoreBuilder::trace_sink`](crate::core::LashCoreBuilder::trace_sink).
 pub mod plugins {
-    pub use lash_core_store::tool_run::StateCommandLimits;
+    pub use lash_core::plugin::ToolProviderHandle;
+    pub use lash_core::plugin::{
+        CurrentSessionSnapshotPort, NamedSessionSnapshotPort, ProcessAbandonHoldPort,
+        ProcessAwaitPort, ProcessBoundCancelPort, ProcessBoundStartPort, ProcessCancelPort,
+        ProcessListForAttemptPort, ProcessListPort, ProcessRecordedCancelPort,
+        ProcessRecordedStartPort, ProcessReleaseHoldPort, ProcessStartFromRequestPort,
+        ProcessStartPort, ProcessTransferPort, ProcessValidateVisiblePort, RecordedToolCatalogPort,
+        ServiceBindings, SessionCreatePort, SessionGraphAppendPort, TurnScopePort,
+    };
+    pub use lash_core_store::tool_run::{StateAuthority, StateCommandLimits};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::ConfigRegistry;
     pub use lash_core::plugin::{
@@ -614,7 +623,13 @@ pub mod plugins {
         ToolPresentationInput, ToolPresentationStep, TranscriptDecoderPlugin,
     };
     /// The neutral composition and state sink shared by execution owners.
-    pub use lash_core::plugin::{ContributionKind, ExecutionComposition, ExecutionState, Proposal};
+    pub use lash_core::plugin::{
+        CallbackSlot, ContributionDescriptor, ContributionDetails, ContributionKey,
+        ContributionKind, ContributionReadiness, ExecutionComposition, ExecutionState,
+        InstalledInventory, InventoryScope, PluginRecipe, PluginRecipeFactory, PreflightIssue,
+        ProcessRecipe, Proposal, RequiredPort, Requirements, ServiceKind, ToolProviderKey,
+        ToolProviderKeyError,
+    };
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{
         AttemptStream, AttemptStreamChannel, AttemptStreamEvent, AttemptStreamTruncation,
@@ -653,6 +668,7 @@ pub mod plugins {
     /// components installed on the deployment, and the environment ports a
     /// start's launch is held through (FIG-6034).
     pub use lash_core::ProcessEnvPorts;
+    pub use lash_core::RegistryKind;
     pub use lash_core::SurfaceTools;
     /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
     pub use lash_core::TurnDriverConfig;
@@ -707,9 +723,9 @@ pub mod plugins {
         CheckpointHook, CheckpointHookContext, CompactionContext, ContextCompaction,
         ContextCompactor, ContextError, ContextPressureContext, ContextPressureDecision,
         ContextPressureHook, ControlPhaseExpired, HookKey, PluginExtensionContribution,
-        PluginRecordContribution, PluginSessionMaterialization, PluginSpecBuilder,
-        PluginTraceEmitter, SessionContributions, StaticPluginFactory, ToolCatalogContext,
-        ToolPresentationPresenter, ToolResultProjectionContext, TurnContributions, TurnHookReport,
+        PluginRecordContribution, PluginSessionMaterialization, PluginTraceEmitter,
+        SessionContributions, StaticPluginFactory, ToolCatalogContext, ToolPresentationPresenter,
+        ToolResultProjectionContext, TurnContributions, TurnHookReport,
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
@@ -758,8 +774,8 @@ pub mod plugins {
     /// Plugin identities, namespace formats and readable stream-state formats.
     pub use lash_core::plugin::{
         FormatVersion, PluginCallbackIdentity, PluginComposition, PluginDeclaration,
-        PluginDeclarationError, PluginDefinition, PluginId, PluginMetadata,
-        RecordedCallbackUnavailable, StreamStateFormatRefusal,
+        PluginDeclarationError, PluginId, PluginMetadata, RecordedCallbackUnavailable,
+        StreamStateFormatRefusal,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus
@@ -784,9 +800,8 @@ pub mod plugins {
         PluginRuntimeDirective, PluginTask, PluginTaskContext, ProcessReadService, SessionParam,
         SessionReadService,
     };
-    /// What [`PluginFactory::process_engine_contributions`] is handed: a host
-    /// factory that wraps another (the RLM factory, say) forwards it so the
-    /// wrapped factory's process engines are still contributed (FIG-4373).
+    /// What a recipe's process-engine binders receive. A host factory that
+    /// wraps another preserves its recipe's engine entries (FIG-4373).
     pub use lash_core::plugin::{PluginExecutionTrace, ProcessEngineContributionContext};
     pub use lash_core::plugin::{ProcessComponentRegistry, ProcessComposition, StepLink};
     /// Engine registry and narrowed execution contexts used to host custom process engines.
@@ -871,9 +886,9 @@ pub mod plugins {
         ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind,
         facade_support::PluginFactory, facade_support::PluginHost, facade_support::PluginRegistrar,
         facade_support::PluginSession, facade_support::PluginSessionContext,
-        facade_support::PluginSpec, facade_support::PluginSpecFactory,
-        facade_support::SessionPlugin, facade_support::ToolCatalogContribution,
-        facade_support::TurnHookContext, facade_support::TurnResultHookContext,
+        facade_support::PluginSpec, facade_support::SessionPlugin,
+        facade_support::ToolCatalogContribution, facade_support::TurnHookContext,
+        facade_support::TurnResultHookContext,
     };
     /// Lifecycle observation: what a `reg.session().on_event(..)` hook receives
     /// when a turn is finalized, a session is restored, or its configuration
@@ -969,7 +984,8 @@ pub mod secrets {
 pub mod process {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::{
-        ConsumerHold, ProcessDefinitionStoredError, ProcessSpawnProvenance, ProcessStartDeclaration,
+        ConsumerHold, FitPolicy, ProcessDefinitionStoredError, ProcessSpawnProvenance,
+        ProcessStartDeclaration,
     };
     pub use lash_core_store::effect_opener::EffectOpenerError;
     pub use lash_sansio::HandleTarget;
@@ -1011,7 +1027,7 @@ pub mod process {
     pub use lash_core::{CALL_DYNAMIC_EFFECT, DynamicCall, call_dynamic_endpoint};
     pub use lash_core::{
         DeclaredDefinitionLaunch, DeclaredLaunch, EnclosingProcess, EngineLaunch, EngineSettings,
-        FitPolicy, HoldEnvError, ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId,
+        HoldEnvError, ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId,
         ProcessComponentIdError, ProcessConfigKey, ProcessEnv, ProcessEnvBuilder, ProcessEnvChoice,
         ProcessEnvCx, ProcessEnvPolicy, ProcessEnvPolicyError, ProcessEnvRefusal, ProcessLimits,
         ProcessModel, ProcessStartChoice, ResolvedStartTarget,
@@ -1301,7 +1317,8 @@ pub mod mcp {
 /// [`ProcessControlsComponent`].
 pub mod process_controls {
     pub use lash_plugin_process_controls::{
-        PROCESS_CONTROLS_CONFIG, ProcessControlTool, ProcessControlsComponent,
+        PROCESS_CONTROLS_CONFIG, PROCESS_CONTROLS_PROVIDER, ProcessControlTool,
+        ProcessControlsComponent, SESSION_PROCESS_CONTROLS_PROVIDER,
         SessionProcessAdminPluginFactory, process_tool_definition,
     };
 }

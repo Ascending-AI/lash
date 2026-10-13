@@ -516,7 +516,7 @@ async fn main() -> Result<()> {
                 )
                 .context("register the smoke model")?,
         ))
-        .tools(lash::hook_key!("tools"), workspace.provider())
+        .tools(lash::tool_provider_key!("tools"), workspace.provider())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())

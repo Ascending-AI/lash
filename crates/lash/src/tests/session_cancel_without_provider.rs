@@ -72,8 +72,11 @@ fn tool_definition() -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for HeldTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -118,7 +121,10 @@ fn tool_calling_model(calls: &Calls) -> ProviderHandle {
 fn deploy(backend: &lash_core::Backend, calls: &Calls) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(tool_calling_model(calls), mock_llm_profile_spec())
-        .tools(crate::hook_key!("tools"), Arc::new(HeldTool(calls.clone())))
+        .tools(
+            crate::tool_provider_key!("tools"),
+            Arc::new(HeldTool(calls.clone())),
+        )
         .build(crate::testing::runtime_lease_owner())
 }
 

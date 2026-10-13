@@ -189,8 +189,11 @@ fn definition() -> lash_core::ToolDefinition {
 }
 #[async_trait::async_trait]
 impl ToolProvider for NestedMedia {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![definition().manifest()])
     }
     fn resolve_contract(
         &self,
@@ -299,7 +302,7 @@ async fn send(url: bool, tools: bool) -> Sent {
                 .build()
                 .unwrap(),
         )
-        .tools(lash::hook_key!("tools"), Arc::new(NestedMedia))
+        .tools(lash::tool_provider_key!("tools"), Arc::new(NestedMedia))
         .data_retention(lash::DataRetention {
             attachments: lash::persistence::AttachmentPolicy {
                 max_attachment_bytes: Some(1024),
@@ -473,8 +476,11 @@ struct ReceiptTool {
 
 #[async_trait::async_trait]
 impl ToolProvider for ReceiptTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![definition().manifest()])
     }
 
     fn resolve_contract(
@@ -545,7 +551,7 @@ async fn tool_put_receipts_match_session_delivery_advice() {
                 .unwrap(),
         )
         .tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::new(ReceiptTool {
                 receipts: receipts.clone(),
             }),

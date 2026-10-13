@@ -26,8 +26,11 @@ fn definition() -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for Answering {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![definition().manifest()])
     }
 
     fn resolve_contract(
@@ -137,7 +140,7 @@ fn deploy(backend: &lash_core::Backend, seen: &Seen, hold: bool) -> Result<LashC
     };
     explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .tools(crate::hook_key!("tools"), Arc::new(Answering))
+        .tools(crate::tool_provider_key!("tools"), Arc::new(Answering))
         .plugin(Arc::new(chain(seen)))
         .build(crate::testing::runtime_lease_owner())
 }

@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use lash_core::PluginRuntimeEvent;
 use lash_core::plugin::{
     AssistantStreamFinishedContext, AssistantStreamHookContext, AssistantStreamTransform,
-    PluginError, PluginRegistrar,
+    PluginError,
 };
 
 use crate::cell_scan::{
@@ -20,61 +20,51 @@ use crate::cell_scan::{
 use crate::dialect::SessionDialect;
 
 /// Called by [`crate::plugin::RlmProtocolPlugin::register`] when the session is active.
-pub fn register_stream_mask(
-    reg: &mut PluginRegistrar,
-    dialect: Arc<SessionDialect>,
-) -> Result<(), PluginError> {
-    // One provider stream's scan. Only phase 1 touches it: the stream hook
-    // fills it and the stream-finished hook hands its end state to the
-    // journal and clears it. Phase 2 reads the journaled state alone, so it
-    // derives the same response on any worker, after any restart.
+pub(crate) struct StreamMaskBindings {
+    pub(crate) stream: lash_core::plugin::AssistantStreamHook,
+    pub(crate) finished: lash_core::plugin::AssistantStreamFinishedHook,
+    pub(crate) response: lash_core::plugin::AssistantResponseHook,
+}
+pub(crate) fn bind_stream_mask(dialect: Arc<SessionDialect>) -> StreamMaskBindings {
     let state = Arc::new(Mutex::new(CellDetector::with_dialect(Arc::clone(&dialect))));
-
     let stream_state = Arc::clone(&state);
-    reg.output().stream(
-        lash_core::hook_key!("cell-mask"),
+    let finished_state = Arc::clone(&state);
+    let stream: lash_core::plugin::AssistantStreamHook =
         Arc::new(move |ctx: AssistantStreamHookContext| {
             let state = Arc::clone(&stream_state);
             Box::pin(async move {
                 let mut detector = state.lock_recover();
                 Ok(detector.process_chunk(&ctx.chunk))
             })
-        }),
-    )?;
-
-    let finished_state = Arc::clone(&state);
-    reg.output().stream_finished(
-        lash_core::hook_key!("cell-mask"),
+        });
+    let finished: lash_core::plugin::AssistantStreamFinishedHook =
         Arc::new(move |ctx: AssistantStreamFinishedContext| {
             let state = Arc::clone(&finished_state);
             Box::pin(async move { state.lock_recover().finish_stream(ctx.reason) })
-        }),
-    )?;
-
-    reg.output().response(
-        lash_core::hook_key!("cell-mask"),
-        Some(lash_core::hook_key!("cell-mask")),
-        Arc::new(
-            move |ctx: lash_core::plugin::AssistantResponseHookContext| {
-                let dialect = Arc::clone(&dialect);
-                Box::pin(async move {
-                    let Some(recorded) = ctx.stream_state else {
-                        // Nothing streamed that phase 2 could splice.
-                        return Ok(lash_core::plugin::AssistantResponseTransform {
-                            response: ctx.response,
-                            events: Vec::new(),
-                        });
-                    };
-                    let mut detector = CellDetector::from_recorded(dialect, recorded)?;
-                    let events = detector.finish_response();
-                    let response = transform_final_response(&detector, ctx.response);
-                    Ok(lash_core::plugin::AssistantResponseTransform { response, events })
-                })
-            },
-        ),
-    )?;
-
-    Ok(())
+        });
+    let response: lash_core::plugin::AssistantResponseHook = Arc::new(
+        move |ctx: lash_core::plugin::AssistantResponseHookContext| {
+            let dialect = Arc::clone(&dialect);
+            Box::pin(async move {
+                let Some(recorded) = ctx.stream_state else {
+                    // Nothing streamed that phase 2 could splice.
+                    return Ok(lash_core::plugin::AssistantResponseTransform {
+                        response: ctx.response,
+                        events: Vec::new(),
+                    });
+                };
+                let mut detector = CellDetector::from_recorded(dialect, recorded)?;
+                let events = detector.finish_response();
+                let response = transform_final_response(&detector, ctx.response);
+                Ok(lash_core::plugin::AssistantResponseTransform { response, events })
+            })
+        },
+    );
+    StreamMaskBindings {
+        stream,
+        finished,
+        response,
+    }
 }
 
 fn transform_final_response(

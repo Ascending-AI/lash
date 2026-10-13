@@ -34,55 +34,76 @@ impl PluginFactory for MockPlugin {
             Default::default()
         })
     }
-    fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<Self>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        if self.writes_on_ready {
+            reg.turn()
+                .before(crate::hook_key!("failing-writer"), |_, _| {
+                    Ok(Arc::new(move |_| {
+                        Box::pin(async move {
+                            Err(lash_core::plugin::PluginError::Session(
+                                "deliberate hook failure before any command".into(),
+                            ))
+                        })
+                    }))
+                })?;
+        }
+        if self.writes_on_before {
+            reg.turn()
+                .before(crate::hook_key!("ingress-writer"), |_, _| {
+                    Ok(Arc::new(|_| {
+                        Box::pin(async {
+                            Ok(crate::plugin::TurnContributions {
+                                state: StateCommands::new().set("counter", serde_json::json!(17)),
+                                ..Default::default()
+                            })
+                        })
+                    }))
+                })?;
+        }
+        let id = lash_core::plugin::PluginFactory::id(self.as_ref());
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_, state| {
+                let state = state.clone();
+                if !matches!(self.registration, Registration::None) {
+                    assert_eq!(state.generation(), 5, "registration reads published state");
+                }
+                self.handles.lock_recover().insert(
+                    owner_key(state.owner().ok_or_else(|| {
+                        PluginError::Registration(
+                            "the fixture requires a materialized owner".into(),
+                        )
+                    })?),
+                    state,
+                );
+
+                Ok(Arc::new(self.as_ref().clone()))
+            },
+        ))
     }
 }
 
-impl crate::plugin::PluginDefinition for MockPlugin {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl MockPlugin {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("mock-state")
+    }
+}
+impl crate::plugin::PluginMetadata for MockPlugin {
+    fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 impl SessionPlugin for MockPlugin {
     fn id(&self) -> &'static str {
         "mock-state"
     }
-    fn register(&self, registrar: &mut PluginRegistrar) -> Result<(), PluginError> {
-        let state = registrar.state();
-        if !matches!(self.registration, Registration::None) {
-            assert_eq!(state.generation(), 5, "registration reads published state");
-        }
-        self.handles
-            .lock_recover()
-            .insert(owner_key(state.owner()), state);
-        if self.writes_on_ready {
-            registrar.turn().before(
-                crate::hook_key!("failing-writer"),
-                Arc::new(move |_| {
-                    Box::pin(async move {
-                        Err(PluginError::Session(
-                            "deliberate hook failure before any command".into(),
-                        ))
-                    })
-                }),
-            )?;
-        }
-        if self.writes_on_before {
-            registrar.turn().before(
-                crate::hook_key!("ingress-writer"),
-                Arc::new(|_| {
-                    Box::pin(async {
-                        Ok(crate::plugin::TurnContributions {
-                            state: StateCommands::new().set("counter", serde_json::json!(17)),
-                            ..Default::default()
-                        })
-                    })
-                }),
-            )?;
-        }
-        Ok(())
-    }
+
     fn session_ready(&self, context: SessionReadyContext) -> Result<(), PluginError> {
         self.ready_values
             .lock_recover()

@@ -515,7 +515,7 @@ async fn facade_final_value_execution_inner(
     if process_surface == ProcessSurface::Installed {
         builder = with_contract_processes(builder, tools, None);
     } else if let Some(tools) = tools {
-        builder = builder.tools(lash::hook_key!("tools"), tools);
+        builder = builder.tools(lash::tool_provider_key!("tools"), tools);
     }
     let core = builder
         .build(crate::sim_process_owner())

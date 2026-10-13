@@ -28,8 +28,7 @@ use std::sync::Arc;
 use lash::SessionSpec;
 use lash::plugins::{
     CandidateFacts, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, NoRunOptions,
-    PluginDeclaration, PluginDefinition, PluginError, PluginFactory, PluginRegistrar,
-    PluginSessionContext, PromptInput, PromptSectionSpec, SectionText, SessionPlugin,
+    PluginDeclaration, PluginFactory, SessionPlugin,
 };
 use lash::process::{Lifetime, LifetimePolicy, StartCx};
 
@@ -176,9 +175,9 @@ impl DelegationPluginFactory {
     pub fn component(&self) -> Arc<dyn lash::process::ProcessComponentFactory> {
         Arc::new(
             lash::plugins::StaticPluginFactory::new(
-                <Self as PluginDefinition>::declaration(),
+                Self::declaration(),
                 lash::plugins::PluginSpec::new().with_tool_provider(
-                    lash::hook_key!("spawn"),
+                    lash::tool_provider_key!("spawn"),
                     tool::spawn_provider(Arc::clone(&self.child), true),
                 ),
             )
@@ -192,9 +191,14 @@ impl DelegationPluginFactory {
 pub const DELEGATION_CONFIG: lash::process::ProcessConfigKey<()> =
     lash::process::ProcessConfigKey::new(DELEGATION_PLUGIN_ID, lash::plugins::FormatVersion::ONE);
 
-impl PluginDefinition for DelegationPluginFactory {
-    fn declaration() -> PluginDeclaration {
+impl DelegationPluginFactory {
+    pub fn declaration() -> PluginDeclaration {
         PluginDeclaration::initial(DELEGATION_PLUGIN_ID)
+    }
+}
+impl lash::plugins::PluginMetadata for DelegationPluginFactory {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -203,28 +207,53 @@ impl PluginFactory for DelegationPluginFactory {
         DELEGATION_PLUGIN_ID
     }
 
-    fn register_config(
+    /// A session's role is read from its own recorded namespace: one this
+    /// plugin created as a delegated child answers its task; any other
+    /// session, a process runtime included, may delegate.
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> = {
+            let mut reg = lash::plugins::PluginRegistrar::<DelegationSessionPlugin>::new(
+                lash::plugins::PluginFactory::id(self.as_ref()),
+            );
+            DelegationSessionPlugin::declare(&mut reg)?;
+            let id = lash::plugins::PluginFactory::id(self.as_ref());
+            Ok(lash::plugins::PluginRecipe::new(
+                id,
+                reg,
+                move |ctx, _state| {
+                    let delegated = match ctx.plugin_config.config.get(DELEGATION_PLUGIN_ID) {
+                        Some(recorded) => Some(
+                            serde_json::from_value::<DelegatedChild>(recorded.clone()).map_err(
+                                |error| lash::plugins::PluginError::Session(error.to_string()),
+                            )?,
+                        ),
+                        None => None,
+                    };
+                    Ok(Arc::new(DelegationSessionPlugin {
+                        child: Arc::clone(&self.child),
+                        delegated: delegated.is_some(),
+                    }))
+                },
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = lash::plugins::ConfigRegistrar::new(
+            lash::plugins::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
+    }
+}
+impl DelegationPluginFactory {
+    pub fn declare_configuration(
         &self,
         registrar: &mut ConfigRegistrar,
     ) -> Result<(), ConfigRegistrationError> {
         registrar.owner(DelegationConfigOwner)
-    }
-
-    /// A session's role is read from its own recorded namespace: one this
-    /// plugin created as a delegated child answers its task; any other
-    /// session, a process runtime included, may delegate.
-    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        let delegated = match ctx.plugin_config.config.get(DELEGATION_PLUGIN_ID) {
-            Some(recorded) => Some(
-                serde_json::from_value::<DelegatedChild>(recorded.clone())
-                    .map_err(|error| PluginError::Session(error.to_string()))?,
-            ),
-            None => None,
-        };
-        Ok(Arc::new(DelegationSessionPlugin {
-            child: Arc::clone(&self.child),
-            delegated: delegated.is_some(),
-        }))
     }
 }
 
@@ -237,39 +266,46 @@ impl SessionPlugin for DelegationSessionPlugin {
     fn id(&self) -> &'static str {
         DELEGATION_PLUGIN_ID
     }
+}
+impl DelegationSessionPlugin {
+    fn declare(
+        reg: &mut lash::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash::plugins::PluginError> {
+        reg.tools()
+            .provider(lash::tool_provider_key!("spawn"), move |this, _state| {
+                Ok(tool::spawn_provider(
+                    Arc::clone(&this.child),
+                    !this.delegated,
+                ))
+            })?;
 
-    /// Both providers exist in every session; the session's role decides
-    /// only which tool each offers.
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         reg.tools().provider(
-            lash::hook_key!("spawn"),
-            tool::spawn_provider(Arc::clone(&self.child), !self.delegated),
+            lash::tool_provider_key!("submit-error"),
+            move |this, _state| Ok(tool::submit_error_provider(this.delegated)),
         )?;
-        reg.tools().provider(
-            lash::hook_key!("submit-error"),
-            tool::submit_error_provider(self.delegated),
-        )?;
-        if !self.delegated {
-            return Ok(());
-        }
+
         reg.prompt().section(
-            PromptSectionSpec::new(
+            lash::plugins::PromptSectionSpec::new(
                 lash::prompt::PromptSectionKey::new(DELEGATED_CHILD_SECTION)
-                    .map_err(|error| PluginError::Registration(error.to_string()))?,
+                    .map_err(|error| lash::plugins::PluginError::Registration(error.to_string()))?,
                 lash::prompt::PromptPlacement::InitialInstructions,
             ),
-            Arc::new(|input: &PromptInput<'_>| {
-                Ok(
-                    match input
-                        .config::<DelegatedChild>()
-                        .map_err(|error| lash::plugins::PromptRenderError::new(error.to_string()))?
-                    {
-                        Some(_) => SectionText::text(DELEGATED_CHILD_INSTRUCTIONS),
-                        None => SectionText::Omit,
-                    },
-                )
-            }),
-        )
+            move |_this, _state| {
+                Ok(Arc::new(|input: &lash::plugins::PromptInput<'_>| {
+                    Ok(
+                        match input.config::<DelegatedChild>().map_err(|error| {
+                            lash::plugins::PromptRenderError::new(error.to_string())
+                        })? {
+                            Some(_) => {
+                                lash::plugins::SectionText::text(DELEGATED_CHILD_INSTRUCTIONS)
+                            }
+                            None => lash::plugins::SectionText::Omit,
+                        },
+                    )
+                }))
+            },
+        )?;
+        Ok(())
     }
 }
 

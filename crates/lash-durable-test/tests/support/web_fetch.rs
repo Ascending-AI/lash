@@ -30,8 +30,11 @@ pub struct Fetch;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Fetch {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_manifest_by_id(
@@ -62,8 +65,11 @@ pub struct GrantFetch;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for GrantFetch {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_contract(
@@ -91,8 +97,10 @@ impl lash::tools::DeferredToolProvider for GrantFetch {
             .map(|path| {
                 let outcome = if *path == "web.fetch" {
                     lash::tools::DeferredOutcome::Resolved {
-                        provider: lash::plugins::PluginCallbackIdentity::tool_provider(
-                            "tools", "tools",
+                        provider: lash::plugins::ToolProviderHandle::new(
+                            lash::plugins::RegistryKind::Session,
+                            "tools",
+                            lash::tool_provider_key!("tools"),
                         ),
                         definition: fetch_definition(),
                         binding: None,
@@ -112,6 +120,6 @@ pub fn grant_fetch() -> Arc<dyn lash::plugins::PluginFactory> {
     Arc::new(lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial("grant-fetch"),
         lash::plugins::PluginSpec::new()
-            .with_deferred_provider(lash::hook_key!("deferred"), Arc::new(GrantFetch)),
+            .with_deferred_provider(lash::tool_provider_key!("deferred"), Arc::new(GrantFetch)),
     ))
 }

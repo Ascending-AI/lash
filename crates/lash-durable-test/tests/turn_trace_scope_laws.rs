@@ -87,8 +87,11 @@ struct DeferredTool {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for DeferredTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![definition().manifest()])
     }
 
     fn resolve_contract(
@@ -120,7 +123,10 @@ fn builder(
     let keys = keys.clone();
     move |backend| {
         lash::LashCore::standard_builder(backend.clone())
-            .tools(lash::hook_key!("tools"), Arc::new(DeferredTool { keys }))
+            .tools(
+                lash::tool_provider_key!("tools"),
+                Arc::new(DeferredTool { keys }),
+            )
             .trace_runtime(telemetry.runtime())
     }
 }
@@ -294,8 +300,11 @@ impl Hold {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Hold {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![held_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![held_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -312,9 +321,14 @@ impl lash_core::ToolProvider for Hold {
     }
 }
 
-impl lash::plugins::PluginDefinition for Hold {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl Hold {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         lash::plugins::PluginDeclaration::initial(HOLD_PLUGIN)
+    }
+}
+impl lash::plugins::PluginMetadata for Hold {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -323,34 +337,31 @@ impl lash::plugins::PluginFactory for Hold {
         HOLD_PLUGIN
     }
 
-    fn build(
-        &self,
-        _: &lash::plugins::PluginSessionContext,
-    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(self: Arc<Self>) -> Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+        let mut reg = lash::plugins::PluginRegistrar::<Self>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        reg.turn().before(lash::hook_key!("hold"), |this, _| {
+            let hold = this.clone();
+            Ok(Arc::new(move |_| {
+                let hold = hold.clone();
+                Box::pin(async move {
+                    hold.hold().await;
+                    Ok(lash_core::plugin::TurnContributions::default())
+                })
+            }))
+        })?;
+        Ok(lash::plugins::PluginRecipe::new(
+            HOLD_PLUGIN,
+            reg,
+            move |_, _| Ok(Arc::clone(&self)),
+        ))
     }
 }
 
 impl lash::plugins::SessionPlugin for Hold {
     fn id(&self) -> &'static str {
         HOLD_PLUGIN
-    }
-
-    fn register(
-        &self,
-        reg: &mut lash::plugins::PluginRegistrar,
-    ) -> Result<(), lash::plugins::PluginError> {
-        let hold = self.clone();
-        reg.turn().before(
-            lash::hook_key!("hold"),
-            Arc::new(move |_| {
-                let hold = hold.clone();
-                Box::pin(async move {
-                    hold.hold().await;
-                    Ok(lash_core::plugin::TurnContributions::default())
-                })
-            }),
-        )
     }
 }
 
@@ -383,7 +394,7 @@ fn held_builder(
                 backend.clone(),
                 served::rlm(backend, sim::untimed_workers()),
             )
-            .tools(lash::hook_key!("tools"), Arc::new(hold)),
+            .tools(lash::tool_provider_key!("tools"), Arc::new(hold)),
         };
         builder.trace_runtime(telemetry.runtime())
     }

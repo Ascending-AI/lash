@@ -228,7 +228,10 @@ fn core(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(model(protocol, Arc::clone(seen)), metadata())
-        .tools(lash::hook_key!("tools"), touch(Arc::clone(touched)))
+        .tools(
+            lash::tool_provider_key!("tools"),
+            touch(Arc::clone(touched)),
+        )
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("pool-width-deployment"),
             lash::persistence::LeaseIncarnationId::new("pool-width-boot"),

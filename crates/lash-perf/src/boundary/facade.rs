@@ -80,7 +80,7 @@ pub(super) fn build(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::new(DeferredTools(definition()?)),
         );
     if registered {
@@ -109,8 +109,11 @@ fn definition() -> Result<lash_core::ToolDefinition> {
 struct DeferredTools(lash_core::ToolDefinition);
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for DeferredTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![self.0.manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![self.0.manifest()])
     }
     fn resolve_contract(
         &self,

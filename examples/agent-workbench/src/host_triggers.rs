@@ -1211,8 +1211,11 @@ pub(crate) fn register_trigger_tool_definition() -> ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for TriggerRegistrationProvider {
-    fn tool_manifests(&self, _config: &lash::tools::OwnerConfigView) -> Vec<ToolManifest> {
-        vec![register_trigger_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash::plugins::PluginError> {
+        Ok(vec![register_trigger_tool_definition().manifest()])
     }
 
     fn resolve_contract(

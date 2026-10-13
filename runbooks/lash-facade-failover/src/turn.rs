@@ -250,7 +250,10 @@ pub fn core(
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
     .serve_test_llm_profile(model(witness.clone(), hold), metadata())
-    .tools(lash::hook_key!("tools"), ext_write(witness.clone(), hold))
+    .tools(
+        lash::tool_provider_key!("tools"),
+        ext_write(witness.clone(), hold),
+    )
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
         lash::persistence::LeaseOwnerId::new(node),
         lash::persistence::LeaseIncarnationId::new(format!("{node}-boot")),

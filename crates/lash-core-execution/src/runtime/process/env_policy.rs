@@ -114,7 +114,8 @@ impl<'a> ProcessEnvCx<'a> {
     /// Capture (R8): the env of the starting turn's recorded `run` with
     /// `components`, linking each effect the target performs to the tool the
     /// run's recorded surface matched it to, served with that same surface by
-    /// its recorded provider among `components`.
+    /// the declared process twin of its recorded provider among `components`:
+    /// the same owner and local key in the process registry.
     /// Nothing is re-resolved: an effect the surface does not offer (one the
     /// run met only through a deferred match, say) is refused, as is one no
     /// component serves.
@@ -148,9 +149,21 @@ impl<'a> ProcessEnvCx<'a> {
                     effect: effect.to_string(),
                 })?;
             let tool = entry.tool();
+            let provider = composition
+                .registry
+                .keys()
+                .find(|provider| {
+                    provider.registry() == crate::RegistryKind::Process
+                        && provider.owner() == entry.provider.owner()
+                        && provider.key() == entry.provider.key()
+                })
+                .ok_or_else(|| ProcessEnvRefusal::CaptureMissing {
+                    effect: effect.to_string(),
+                    tool: tool.to_string(),
+                })?;
             let served = composition
                 .registry
-                .served(&entry.provider, tool, &config)
+                .served(provider, tool, &config)
                 .ok_or_else(|| ProcessEnvRefusal::CaptureMissing {
                     effect: effect.to_string(),
                     tool: tool.to_string(),
@@ -165,7 +178,7 @@ impl<'a> ProcessEnvCx<'a> {
             effects.insert(
                 effect.clone(),
                 crate::EffectLink {
-                    provider: entry.provider.clone(),
+                    provider: provider.clone(),
                     surface: retained,
                     kind: crate::LinkKind::Tool,
                 },

@@ -212,7 +212,10 @@ async fn boot(args: &Args, meter: Arc<measure::Meter>, owner: &str) -> Result<la
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .serve_test_llm_profile(provider(args, Arc::clone(&meter)), metadata()?)
-    .tools(lash::hook_key!("growturn-tools"), tools(args, meter)?)
+    .tools(
+        lash::tool_provider_key!("growturn-tools"),
+        tools(args, meter)?,
+    )
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
         lash::persistence::LeaseOwnerId::new(owner),
         lash::persistence::LeaseIncarnationId::new(format!("{owner}-{}", std::process::id())),

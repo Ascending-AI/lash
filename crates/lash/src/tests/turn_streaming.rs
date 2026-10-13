@@ -1,5 +1,6 @@
 use super::*;
 use crate::TurnEvent;
+
 use crate::support::{
     SessionObservationSubscription, SessionResume, TurnActivity, TurnInput, TurnOutcome,
 };
@@ -92,8 +93,11 @@ struct AppTools;
 
 #[async_trait]
 impl ToolProvider for AppTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![app_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![app_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -116,8 +120,11 @@ struct FailingAppTools;
 #[cfg(feature = "rlm")]
 #[async_trait]
 impl ToolProvider for FailingAppTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![app_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![app_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -149,8 +156,11 @@ impl PendingAppTools {
 
 #[async_trait]
 impl ToolProvider for PendingAppTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![app_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![app_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -314,21 +324,33 @@ impl lash_core::facade_support::PluginFactory for QueuedWorkHydrationProbeFactor
         "queued-work-hydration-probe"
     }
 
-    fn build(
-        &self,
-        _ctx: &lash_core::facade_support::PluginSessionContext,
-    ) -> std::result::Result<
-        Arc<dyn lash_core::facade_support::SessionPlugin>,
-        lash_core::PluginError,
-    > {
-        self.builds.fetch_add(1, Ordering::SeqCst);
-        Ok(Arc::new(QueuedWorkHydrationProbePlugin))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<QueuedWorkHydrationProbePlugin>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        QueuedWorkHydrationProbePlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| {
+                self.builds.fetch_add(1, Ordering::SeqCst);
+                Ok(Arc::new(QueuedWorkHydrationProbePlugin))
+            },
+        ))
     }
 }
 
-impl lash_core::plugin::PluginDefinition for QueuedWorkHydrationProbeFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl QueuedWorkHydrationProbeFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("queued-work-hydration-probe")
+    }
+}
+impl lash_core::plugin::PluginMetadata for QueuedWorkHydrationProbeFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -338,11 +360,11 @@ impl lash_core::facade_support::SessionPlugin for QueuedWorkHydrationProbePlugin
     fn id(&self) -> &'static str {
         "queued-work-hydration-probe"
     }
-
-    fn register(
-        &self,
-        _reg: &mut lash_core::facade_support::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+}
+impl QueuedWorkHydrationProbePlugin {
+    fn declare(
+        _reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
         Ok(())
     }
 }

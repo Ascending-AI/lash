@@ -275,7 +275,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
         )
         .tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::new(PendingToolProvider::new(
                 key_tx,
                 crate::invariants::ToolObserver::new(recorder.clone()),
@@ -728,8 +728,11 @@ impl PendingToolProvider {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for PendingToolProvider {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![pending_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![pending_tool_definition().manifest()])
     }
 
     fn resolve_contract(

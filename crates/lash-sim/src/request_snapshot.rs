@@ -5,10 +5,7 @@
 
 use std::sync::Arc;
 
-use lash::plugins::{
-    PluginDeclaration, PluginDefinition, PromptInput, PromptRenderError, PromptSectionSpec,
-    SectionText,
-};
+use lash::plugins::PluginDeclaration;
 use lash::prompt::{PromptPlacement, PromptPlan, PromptSectionId, PromptSectionKey};
 use lash_core::facade_support::TraceLevel;
 use serde_json::{Value, json};
@@ -24,9 +21,14 @@ const SNAPSHOT_PLUGIN: &str = "request-snapshot-instruction";
 #[derive(Clone)]
 struct SnapshotInstruction;
 
-impl PluginDefinition for SnapshotInstruction {
-    fn declaration() -> PluginDeclaration {
+impl SnapshotInstruction {
+    pub fn declaration() -> PluginDeclaration {
         PluginDeclaration::initial(SNAPSHOT_PLUGIN)
+    }
+}
+impl lash_core::plugin::PluginMetadata for SnapshotInstruction {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -35,11 +37,19 @@ impl lash::plugins::PluginFactory for SnapshotInstruction {
         SNAPSHOT_PLUGIN
     }
 
-    fn build(
-        &self,
-        _: &lash::plugins::PluginSessionContext,
-    ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
-        Ok(Arc::new(self.clone()))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<SnapshotInstruction>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        SnapshotInstruction::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(self.as_ref().clone())),
+        ))
     }
 }
 
@@ -47,19 +57,28 @@ impl lash::plugins::SessionPlugin for SnapshotInstruction {
     fn id(&self) -> &'static str {
         SNAPSHOT_PLUGIN
     }
-
-    fn register(
-        &self,
-        reg: &mut lash::plugins::PluginRegistrar,
-    ) -> Result<(), lash::plugins::PluginError> {
+}
+impl SnapshotInstruction {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
         reg.prompt().section(
-            PromptSectionSpec::new(
-                PromptSectionKey::new("intro").expect("valid section key"),
-                PromptPlacement::InitialInstructions,
+            lash_core::plugin::prompt::PromptSectionSpec::new(
+                lash_core::prompt_sections::PromptSectionKey::new("intro")
+                    .expect("valid section key"),
+                lash_core::prompt_sections::PromptPlacement::InitialInstructions,
             ),
-            Arc::new(|_: &PromptInput<'_>| {
-                Ok::<_, PromptRenderError>(SectionText::text("System snapshot instruction."))
-            }),
+            move |_this, _state| {
+                Ok(Arc::new(
+                    |_: &lash_core::plugin::prompt::PromptInput<'_>| {
+                        Ok::<_, lash_core::plugin::prompt::PromptRenderError>(
+                            lash_core::plugin::prompt::SectionText::text(
+                                "System snapshot instruction.",
+                            ),
+                        )
+                    },
+                ))
+            },
         )?;
         Ok(())
     }

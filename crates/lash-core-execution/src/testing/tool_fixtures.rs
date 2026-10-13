@@ -53,8 +53,11 @@ impl FixtureTools {
 
 #[async_trait::async_trait]
 impl ToolProvider for FixtureTools {
-    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<ToolManifest> {
-        vec![fixture_echo_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &crate::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, crate::PluginError> {
+        Ok(vec![fixture_echo_definition().manifest()])
     }
 
     fn resolve_contract(

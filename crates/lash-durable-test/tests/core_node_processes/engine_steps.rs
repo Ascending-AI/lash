@@ -97,11 +97,11 @@ impl lash_core::plugin::SessionPlugin for NoSessionPlugin {
     fn id(&self) -> &'static str {
         "core-node-engine-plugin"
     }
-
-    fn register(
-        &self,
-        _registrar: &mut lash_core::plugin::PluginRegistrar,
-    ) -> Result<(), lash_core::PluginError> {
+}
+impl NoSessionPlugin {
+    fn declare(
+        _reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
         Ok(())
     }
 }
@@ -111,11 +111,39 @@ impl lash_core::plugin::PluginFactory for EnginePlugin {
         "core-node-engine-plugin"
     }
 
-    fn process_engine_contributions(
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_core::plugin::PluginError,
+        > = {
+            let mut reg = lash_core::plugin::PluginRegistrar::<NoSessionPlugin>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            NoSessionPlugin::declare(&mut reg)?;
+            let id = self.id();
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| Ok(Arc::new(NoSessionPlugin)),
+            ))
+        };
+        let mut recipe = recipe?;
+        let engine_factory = Arc::clone(&recipe_factory);
+        recipe = recipe.with_process_engine(PLUGIN_ENGINE, move |context| {
+            engine_factory.bind_process_engine(context)
+        });
+        Ok(recipe)
+    }
+}
+impl EnginePlugin {
+    pub fn bind_process_engine(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError> {
-        Ok(vec![
+    ) -> Result<lash_core::ProcessEngineRegistration, lash_core::PluginError> {
+        Ok(
             lash_core::ProcessEngineRegistration::accepting(Arc::new(ScriptEngine {
                 kind: PLUGIN_ENGINE,
                 advance: if self.declarations.is_some() || self.catalog_failure {
@@ -129,20 +157,18 @@ impl lash_core::plugin::PluginFactory for EnginePlugin {
                 runs: Arc::clone(&self.runs),
                 declarations: self.declarations.clone(),
             })),
-        ])
-    }
-
-    fn build(
-        &self,
-        _ctx: &lash_core::plugin::PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(NoSessionPlugin))
+        )
     }
 }
 
-impl lash_core::plugin::PluginDefinition for EnginePlugin {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl EnginePlugin {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("core-node-engine-plugin")
+    }
+}
+impl lash_core::plugin::PluginMetadata for EnginePlugin {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -289,11 +315,11 @@ impl lash_core::plugin::SessionPlugin for NoRetrySessionPlugin {
     fn id(&self) -> &'static str {
         "core-node-retry-plugin"
     }
-
-    fn register(
-        &self,
-        _registrar: &mut lash_core::plugin::PluginRegistrar,
-    ) -> Result<(), lash_core::PluginError> {
+}
+impl NoRetrySessionPlugin {
+    fn declare(
+        _reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
         Ok(())
     }
 }
@@ -303,10 +329,38 @@ impl lash_core::plugin::PluginFactory for RetryPlugin {
         "core-node-retry-plugin"
     }
 
-    fn process_engine_contributions(
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_core::plugin::PluginError,
+        > = {
+            let mut reg = lash_core::plugin::PluginRegistrar::<NoRetrySessionPlugin>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            NoRetrySessionPlugin::declare(&mut reg)?;
+            let id = self.id();
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| Ok(Arc::new(NoRetrySessionPlugin)),
+            ))
+        };
+        let mut recipe = recipe?;
+        let engine_factory = Arc::clone(&recipe_factory);
+        recipe = recipe.with_process_engine(RETRY_ENGINE, move |context| {
+            engine_factory.bind_process_engine(context)
+        });
+        Ok(recipe)
+    }
+}
+impl RetryPlugin {
+    pub fn bind_process_engine(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError> {
+    ) -> Result<lash_core::ProcessEngineRegistration, lash_core::PluginError> {
         let registration =
             lash_core::ProcessEngineRegistration::accepting(Arc::new(ScriptEngine {
                 kind: RETRY_ENGINE,
@@ -317,25 +371,23 @@ impl lash_core::plugin::PluginFactory for RetryPlugin {
                 runs: Arc::clone(&self.runs),
                 retry: self.declared,
             }));
-        Ok(vec![match self.overridden {
+        Ok(match self.overridden {
             Some(policy) => {
                 registration.with_engine_step_retry(lash_core::EngineStepKind::new(FLAKY), policy)
             }
             None => registration,
-        }])
-    }
-
-    fn build(
-        &self,
-        _ctx: &lash_core::plugin::PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
-        Ok(Arc::new(NoRetrySessionPlugin))
+        })
     }
 }
 
-impl lash_core::plugin::PluginDefinition for RetryPlugin {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl RetryPlugin {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("core-node-retry-plugin")
+    }
+}
+impl lash_core::plugin::PluginMetadata for RetryPlugin {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 

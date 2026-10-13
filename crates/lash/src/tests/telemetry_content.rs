@@ -14,9 +14,14 @@ use std::sync::Mutex as StdMutex;
 #[derive(Default)]
 struct PolicyProbe(StdMutex<Vec<TelemetryContent>>);
 
-impl crate::plugins::PluginDefinition for PolicyProbe {
-    fn declaration() -> crate::plugins::PluginDeclaration {
+impl PolicyProbe {
+    pub fn declaration() -> crate::plugins::PluginDeclaration {
         crate::plugins::PluginDeclaration::initial("telemetry-policy-probe")
+    }
+}
+impl crate::plugins::PluginMetadata for PolicyProbe {
+    fn plugin_declaration(&self) -> crate::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -25,13 +30,22 @@ impl PluginFactory for PolicyProbe {
         "telemetry-policy-probe"
     }
 
-    fn build(
-        &self,
-        ctx: &crate::plugins::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn crate::plugins::SessionPlugin>, crate::plugins::PluginError>
-    {
-        self.0.lock_recover().push(ctx.telemetry_content());
-        Ok(Arc::new(PolicyProbePlugin))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let mut reg = crate::plugins::PluginRegistrar::<PolicyProbePlugin>::new(
+            crate::plugins::PluginFactory::id(self.as_ref()),
+        );
+        PolicyProbePlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(crate::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |ctx, _state| {
+                self.0.lock_recover().push(ctx.telemetry_content());
+                Ok(Arc::new(PolicyProbePlugin))
+            },
+        ))
     }
 }
 
@@ -41,10 +55,10 @@ impl crate::plugins::SessionPlugin for PolicyProbePlugin {
     fn id(&self) -> &'static str {
         "telemetry-policy-probe"
     }
-
-    fn register(
-        &self,
-        _: &mut crate::plugins::PluginRegistrar,
+}
+impl PolicyProbePlugin {
+    fn declare(
+        _reg: &mut crate::plugins::PluginRegistrar<Self>,
     ) -> std::result::Result<(), crate::plugins::PluginError> {
         Ok(())
     }
@@ -204,7 +218,7 @@ async fn tool_calling_turn(
     let core = configure(
         explicit_ephemeral_facets(LashCore::standard_builder(backend))
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
-            .tools(crate::hook_key!("tools"), Arc::new(EchoTool))
+            .tools(crate::tool_provider_key!("tools"), Arc::new(EchoTool))
             .trace_runtime(runtime)
             .trace_sink(Arc::new(lash_trace::TeeTraceSink::new([
                 Arc::new(lash_trace::JsonlTraceSink::new(path.clone())) as Arc<dyn TraceSink>,

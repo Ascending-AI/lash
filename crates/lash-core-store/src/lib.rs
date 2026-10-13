@@ -259,3 +259,5 @@ pub(crate) mod plugin {
 
 pub(crate) use runtime_error::RuntimeErrorCause;
 pub mod transcript;
+
+pub mod plugin_registrations;

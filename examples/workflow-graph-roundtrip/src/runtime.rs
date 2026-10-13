@@ -42,7 +42,7 @@ const HOST_TOOLS: ProcessConfigKey<()> =
 /// environment lash admits the workflow against: the host's tools, from the
 /// one component that provides them.
 fn environment() -> Result<ProcessEnv, RunError> {
-    let host_tools = HOST_TOOLS.tool_provider("tools");
+    let host_tools = HOST_TOOLS.tool_provider(lash::tool_provider_key!("tools"));
     Ok(crate::display::tool_definitions()
         .iter()
         .fold(
@@ -568,7 +568,8 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
         ));
     let host_tools = lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(HOST_TOOLS.component()),
-        lash::plugins::PluginSpec::new().with_tool_provider(lash::hook_key!("tools"), provider),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider(lash::tool_provider_key!("tools"), provider),
     )
     .as_component(HOST_TOOLS.format())?;
     let workers = lash::vm::WorkerService::default();

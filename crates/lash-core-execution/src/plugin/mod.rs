@@ -33,13 +33,15 @@ pub use process_components::{
     ProcessComposition, ProcessSessionReads, StaticProcessComponent, StepLink,
 };
 mod execution_views;
-pub use composition::{ContributionKind, ExecutionComposition};
+pub use composition::ExecutionComposition;
 pub use execution_state::ExecutionState;
 pub(crate) use execution_state::proposal_failure_message;
 pub use execution_views::{ExecutionFacts, OwnerConfigView, RecordedCallFacts};
 mod attachment_omission;
 pub mod config;
 mod error;
+pub use lash_core_store::plugin_registrations::ToolProviderHandle;
+
 #[cfg(test)]
 mod error_class_tests;
 pub(crate) mod history;
@@ -98,7 +100,7 @@ pub use history::{
     ContextPressureDecision, ContextPressureHook, DecidedContextPressure, PluginTraceEmitter,
     SessionReadView,
 };
-pub use hook_key::HookKey;
+pub use hook_key::{HookKey, ToolProviderKey, ToolProviderKeyError};
 pub(crate) use hooks::owner_trace_context;
 pub use hooks::require_session_owner;
 pub use hooks::{
@@ -118,19 +120,24 @@ pub use protocol::{
     ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView, StoredCell,
     TranscriptDecoderPlugin,
 };
-pub use registrar::{
-    ContextRegistrations, ExecutionRegistrations, OutputRegistrations,
-    PluginOperationRegistrations, PluginRegistrar, ProtocolRegistrations, SessionRegistrations,
-    ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations, ToolResultRegistrations,
-    TurnRegistrations,
+mod recipe;
+mod service_bindings;
+pub use recipe::{
+    CallbackSlot, ContextRegistrations, ContributionDescriptor, ContributionDetails,
+    ContributionKey, ContributionKind, ContributionReadiness, ExecutionRegistrations,
+    InstalledInventory, InventoryScope,
+    OperationRecipeRegistrations as PluginOperationRegistrations, OutputRegistrations,
+    PluginRecipe, PluginRecipeFactory, PluginRegistrar, PreflightIssue, ProcessRecipe,
+    ProtocolRegistrations, RegistryKind, RequiredPort, Requirements, ServiceKind,
+    SessionRegistrations, ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations,
+    ToolResultRegistrations, TurnRegistrations,
 };
-pub(crate) use registrar::{PluginContributions, RegisteredHook};
+pub(crate) use registrar::{BoundRegistrar, PluginContributions, RegisteredHook};
 pub use registry::{
-    FormatVersion, PluginComposition, PluginDeclaration, PluginDeclarationError, PluginDefinition,
+    FormatVersion, PluginComposition, PluginDeclaration, PluginDeclarationError,
     PluginExecutionTrace, PluginExtensionContribution, PluginExtensions, PluginFactory, PluginId,
     PluginMetadata, PluginSessionContext, PluginSessionMaterialization, PluginSpec,
-    PluginSpecBuilder, PluginSpecFactory, ProcessEngineContributionContext, SessionPlugin,
-    SessionReadyContext, StaticPluginFactory,
+    ProcessEngineContributionContext, SessionPlugin, SessionReadyContext, StaticPluginFactory,
 };
 pub use runtime_host::{
     AppendSessionNodesOutcome, AppendSessionNodesRequest, DirectCompletion, DirectLlmCompletion,
@@ -139,6 +146,7 @@ pub use runtime_host::{
 pub use runtime_impl::{
     PluginHost, PluginSessionMaterializationRequest, PluginSessionRequest, SessionAuthorityContext,
 };
+pub use service_bindings::*;
 #[cfg(test)]
 pub(crate) use services::NoopSessionManager;
 pub use services::{PersistentRuntimeServices, PluginOperationInvokeError, RuntimeServices};
@@ -403,11 +411,16 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ToolProvider for MockToolProvider {
-        fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<ToolManifest> {
-            self.tool_definitions()
-                .into_iter()
-                .map(|tool| tool.manifest())
-                .collect()
+        fn tool_manifests(
+            &self,
+            _config: &crate::OwnerConfigView,
+        ) -> std::result::Result<Vec<ToolManifest>, crate::PluginError> {
+            Ok({
+                self.tool_definitions()
+                    .into_iter()
+                    .map(|tool| tool.manifest())
+                    .collect()
+            })
         }
 
         fn resolve_contract(
@@ -454,17 +467,37 @@ mod tests {
             "mock"
         }
 
-        fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-            let session_id = ctx.owner.session_id().cloned().ok_or_else(|| {
-                PluginError::Session("the mock plugin serves sessions".to_string())
-            })?;
-            Ok(Arc::new(MockPlugin { session_id }))
+        fn recipe(
+            self: Arc<Self>,
+        ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+            let mut reg = crate::plugin::PluginRegistrar::<MockPlugin>::new(
+                crate::plugin::PluginFactory::id(self.as_ref()),
+            );
+            MockPlugin::declare(&mut reg)?;
+            let id = crate::plugin::PluginFactory::id(self.as_ref());
+            Ok(crate::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |ctx, _state| {
+                    let session_id = ctx.owner.session_id().cloned().ok_or_else(|| {
+                        crate::plugin::PluginError::Session(
+                            "the mock plugin serves sessions".to_string(),
+                        )
+                    })?;
+                    Ok(Arc::new(MockPlugin { session_id }))
+                },
+            ))
         }
     }
 
-    impl crate::plugin::PluginDefinition for MockPluginFactory {
-        fn declaration() -> crate::plugin::PluginDeclaration {
+    impl MockPluginFactory {
+        pub fn declaration() -> crate::plugin::PluginDeclaration {
             crate::plugin::PluginDeclaration::initial("mock")
+        }
+    }
+    impl crate::plugin::PluginMetadata for MockPluginFactory {
+        fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+            Self::declaration()
         }
     }
 
@@ -476,11 +509,16 @@ mod tests {
         fn id(&self) -> &'static str {
             "mock"
         }
-
-        fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+    }
+    impl MockPlugin {
+        fn declare(
+            reg: &mut crate::plugin::PluginRegistrar<Self>,
+        ) -> std::result::Result<(), crate::plugin::PluginError> {
             reg.tools()
-                .provider(crate::hook_key!("mock"), Arc::new(MockToolProvider))?;
-            let session_id = self.session_id.clone();
+                .provider(crate::tool_provider_key!("mock"), move |_this, _state| {
+                    Ok(Arc::new(MockToolProvider))
+                })?;
+
             reg.operations().query(
                 PluginOperationSpec {
                     name: "mock.echo".to_string(),
@@ -492,24 +530,29 @@ mod tests {
                     error_version: crate::FormatVersion::ONE,
                     error_schema: json!({"type": "object"}),
                 },
-                Arc::new(move |ctx, args| {
-                    let session_id = session_id.clone();
-                    Box::pin(async move {
-                        Ok(json!({
-                            "session_id": ctx.session_id,
-                            "plugin_session_id": session_id,
-                            "args": args,
-                        }))
-                    })
-                }),
+                move |this, _state| {
+                    let session_id = this.session_id.clone();
+                    Ok(Arc::new(move |ctx, args| {
+                        let session_id = session_id.clone();
+                        Box::pin(async move {
+                            Ok(json!({
+                                "session_id": ctx.session_id,
+                                "plugin_session_id": session_id,
+                                "args": args,
+                            }))
+                        })
+                    }))
+                },
             )?;
+
             reg.operations()
-                .typed_query::<TypedEchoOp, _, _>(move |ctx, args| async move {
+                .typed_query::<TypedEchoOp, _, _>(move |this, _state| { let _session_id = this.session_id.clone();
+Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::plugin::PluginOperation>::Args| async move {
                     Ok(TypedEchoOutput {
                         value: args.value,
                         session_id: ctx.session_id,
                     })
-                })?;
+                }) })?;
             Ok(())
         }
     }
@@ -533,8 +576,7 @@ mod tests {
                 json!({"ok":true}),
                 None,
                 true,
-                Arc::new(NoopSessionManager),
-                Arc::new(NoopSessionManager),
+                Arc::new(ServiceBindings::default()),
             )
             .await
             .expect("invoke");
@@ -609,8 +651,7 @@ mod tests {
                 .unwrap(),
                 None,
                 true,
-                Arc::new(NoopSessionManager),
-                Arc::new(NoopSessionManager),
+                Arc::new(ServiceBindings::default()),
             )
             .await
             .expect("typed invoke");
@@ -642,22 +683,29 @@ mod tests {
             fn id(&self) -> &'static str {
                 "cross_kind"
             }
+        }
+        impl CrossKindPlugin {
+            fn declare(
+                reg: &mut crate::plugin::PluginRegistrar<Self>,
+            ) -> std::result::Result<(), crate::plugin::PluginError> {
+                reg.operations()
+                    .typed_query::<TypedEchoOp, _, _>(move |_this, _state| {
+Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::plugin::PluginOperation>::Args| async move {
+                        Ok(TypedEchoOutput {
+                            value: args.value,
+                            session_id: ctx.session_id,
+                        })
+                    }) })?;
 
-            fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
                 reg.operations()
-                    .typed_query::<TypedEchoOp, _, _>(move |ctx, args| async move {
+                    .typed_task_value::<EchoTaskOp, _, _>(move |_this, _state| {
+Ok(move |ctx: crate::plugin::PluginTaskContext, args: <EchoTaskOp as crate::plugin::PluginOperation>::Args| async move {
                         Ok(TypedEchoOutput {
                             value: args.value,
                             session_id: ctx.session_id,
                         })
-                    })?;
-                reg.operations()
-                    .typed_task_value::<EchoTaskOp, _, _>(move |ctx, args| async move {
-                        Ok(TypedEchoOutput {
-                            value: args.value,
-                            session_id: ctx.session_id,
-                        })
-                    })
+                    }) })?;
+                Ok(())
             }
         }
 
@@ -667,17 +715,31 @@ mod tests {
                 "cross_kind"
             }
 
-            fn build(
-                &self,
-                _ctx: &PluginSessionContext,
-            ) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-                Ok(Arc::new(CrossKindPlugin))
+            fn recipe(
+                self: Arc<Self>,
+            ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError>
+            {
+                let mut reg = crate::plugin::PluginRegistrar::<CrossKindPlugin>::new(
+                    crate::plugin::PluginFactory::id(self.as_ref()),
+                );
+                CrossKindPlugin::declare(&mut reg)?;
+                let id = crate::plugin::PluginFactory::id(self.as_ref());
+                Ok(crate::plugin::PluginRecipe::new(
+                    id,
+                    reg,
+                    move |_ctx, _state| Ok(Arc::new(CrossKindPlugin)),
+                ))
             }
         }
 
-        impl crate::plugin::PluginDefinition for CrossKindFactory {
-            fn declaration() -> crate::plugin::PluginDeclaration {
+        impl CrossKindFactory {
+            pub fn declaration() -> crate::plugin::PluginDeclaration {
                 crate::plugin::PluginDeclaration::initial("cross_kind")
+            }
+        }
+        impl crate::plugin::PluginMetadata for CrossKindFactory {
+            fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+                Self::declaration()
             }
         }
 
@@ -798,8 +860,7 @@ mod tests {
                 json!({"ok":true}),
                 Some(SessionId::from("child")),
                 false,
-                Arc::new(NoopSessionManager),
-                Arc::new(NoopSessionManager),
+                Arc::new(ServiceBindings::default()),
             )
             .await
             .expect("invoke");

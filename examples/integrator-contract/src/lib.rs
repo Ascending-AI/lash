@@ -31,7 +31,10 @@ pub mod stores;
 
 #[lash::async_trait]
 impl ToolProvider for Integrator {
-    fn tool_manifests(&self, _config: &lash::tools::OwnerConfigView) -> Vec<ToolManifest> {
+    fn tool_manifests(
+        &self,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash::plugins::PluginError> {
         unreachable!("external signature witness")
     }
     fn resolve_manifest(
@@ -115,18 +118,29 @@ impl PluginFactory for Integrator {
         unreachable!("external signature witness")
     }
 
-    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        let recorded: &AdmittedPluginConfig = &ctx.plugin_config;
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
         unreachable!("external signature witness")
     }
-    fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
+}
+impl Integrator {
+    pub fn declare_configuration(
+        &self,
+        reg: &mut ConfigRegistrar,
+    ) -> Result<(), ConfigRegistrationError> {
         reg.owner(IntegratorConfigOwner)
     }
 }
 
-impl lash::plugins::PluginDefinition for Integrator {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl Integrator {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         unreachable!("external signature witness")
+    }
+}
+impl lash::plugins::PluginMetadata for Integrator {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 

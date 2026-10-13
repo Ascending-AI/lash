@@ -1,6 +1,7 @@
 //! H2's host engine processes: a receiver that runs until it is cancelled, a
 //! source that awaits its own pinned key, and a sleeper. The caller lends an
 //! admitted handler scope.
+use lash::plugins::PluginRecipe;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -441,28 +442,48 @@ impl PluginFactory for ReceiverEnginePlugin {
         RECEIVER_PLUGIN
     }
 
-    fn process_engine_contributions(
-        &self,
-        _context: &ProcessEngineContributionContext<'_>,
-    ) -> std::result::Result<Vec<ProcessEngineRegistration>, PluginError> {
-        Ok(vec![
-            ProcessEngineRegistration::accepting(Arc::new(ReceiverEngine)),
-            ProcessEngineRegistration::accepting(Arc::new(SourceEngine)),
-            ProcessEngineRegistration::accepting(Arc::new(SleeperEngine)),
-        ])
-    }
-
-    fn build(
-        &self,
-        _context: &PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(ReceiverEnginePlugin))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> = {
+            let mut reg = lash::plugins::PluginRegistrar::<ReceiverEnginePlugin>::new(
+                lash::plugins::PluginFactory::id(self.as_ref()),
+            );
+            ReceiverEnginePlugin::declare(&mut reg)?;
+            let id = lash::plugins::PluginFactory::id(self.as_ref());
+            Ok(lash::plugins::PluginRecipe::new(
+                id,
+                reg,
+                move |_context, _state| Ok(Arc::new(ReceiverEnginePlugin)),
+            ))
+        };
+        let mut recipe = recipe?;
+        recipe = recipe.with_process_engine(RECEIVER_ENGINE_KIND, |_| {
+            Ok(ProcessEngineRegistration::accepting(Arc::new(
+                ReceiverEngine,
+            )))
+        });
+        recipe = recipe.with_process_engine(SOURCE_ENGINE_KIND, |_| {
+            Ok(ProcessEngineRegistration::accepting(Arc::new(SourceEngine)))
+        });
+        recipe = recipe.with_process_engine(SLEEPER_ENGINE_KIND, |_| {
+            Ok(ProcessEngineRegistration::accepting(Arc::new(
+                SleeperEngine,
+            )))
+        });
+        Ok(recipe)
     }
 }
 
-impl lash::plugins::PluginDefinition for ReceiverEnginePlugin {
-    fn declaration() -> PluginDeclaration {
+impl ReceiverEnginePlugin {
+    pub fn declaration() -> PluginDeclaration {
         PluginDeclaration::initial(RECEIVER_PLUGIN)
+    }
+}
+impl lash::plugins::PluginMetadata for ReceiverEnginePlugin {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -470,8 +491,11 @@ impl SessionPlugin for ReceiverEnginePlugin {
     fn id(&self) -> &'static str {
         RECEIVER_PLUGIN
     }
-
-    fn register(&self, _registrar: &mut PluginRegistrar) -> std::result::Result<(), PluginError> {
+}
+impl ReceiverEnginePlugin {
+    fn declare(
+        reg: &mut lash::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash::plugins::PluginError> {
         Ok(())
     }
 }

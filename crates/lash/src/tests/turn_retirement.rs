@@ -69,11 +69,16 @@ struct ApprovalTools {
 
 #[async_trait]
 impl ToolProvider for ApprovalTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![
-            tool("app_lookup", false).manifest(),
-            tool("app_approve", true).manifest(),
-        ]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok({
+            vec![
+                tool("app_lookup", false).manifest(),
+                tool("app_approve", true).manifest(),
+            ]
+        })
     }
 
     fn resolve_contract(
@@ -117,7 +122,10 @@ impl World {
                 text_provider("turn-retirement", cell(finishes)),
                 mock_llm_profile_spec(),
             )
-            .tools(crate::hook_key!("tools"), Arc::new(ApprovalTools { keys }))
+            .tools(
+                crate::tool_provider_key!("tools"),
+                Arc::new(ApprovalTools { keys }),
+            )
             .build(crate::testing::runtime_lease_owner())?;
         Ok(Self {
             stores,

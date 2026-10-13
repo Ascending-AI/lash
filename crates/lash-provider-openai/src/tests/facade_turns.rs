@@ -48,7 +48,7 @@ pub(super) async fn durable_core(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended());
     let builder = match tools {
-        Some(tools) => builder.tools(lash::hook_key!("tools"), tools),
+        Some(tools) => builder.tools(lash::tool_provider_key!("tools"), tools),
         None => builder,
     };
     builder

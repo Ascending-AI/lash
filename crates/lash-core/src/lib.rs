@@ -70,10 +70,10 @@ pub mod panic_containment {
     pub(crate) use lash_core_ids::panic_containment::payload_message;
     pub use lash_core_ids::panic_containment::{is_loud, set_loud};
 }
-pub use lash_core_execution::hook_key;
 pub use lash_core_execution::plugin;
 pub(crate) use lash_core_execution::plugin_stack;
 pub(crate) use lash_core_execution::protocol_build;
+pub use lash_core_execution::{hook_key, tool_provider_key};
 #[cfg(feature = "perf-witness")]
 pub use lash_core_ids::perf_witness;
 /// Provider components for pluggable LLM backends.
@@ -211,7 +211,6 @@ pub mod facade_support {
     pub use crate::plugin::PluginSessionMaterializationRequest;
     pub use crate::plugin::PluginSessionRequest;
     pub use crate::plugin::PluginSpec;
-    pub use crate::plugin::PluginSpecFactory;
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PluginTraceEmitter;
     pub use crate::plugin::SessionConfigChangedContext;

@@ -179,12 +179,17 @@ fn large_tool_catalog_cache() -> &'static Arc<BenchmarkLargeToolCatalogCache> {
 
 #[async_trait::async_trait]
 impl ToolProvider for BenchmarkEchoTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
-        vec![
-            benchmark_echo_tool_definition().manifest(),
-            benchmark_slow_tool_definition().manifest(),
-            benchmark_async_tool_definition().manifest(),
-        ]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok({
+            vec![
+                benchmark_echo_tool_definition().manifest(),
+                benchmark_slow_tool_definition().manifest(),
+                benchmark_async_tool_definition().manifest(),
+            ]
+        })
     }
 
     fn resolve_contract(
@@ -227,11 +232,16 @@ impl ToolProvider for BenchmarkEchoTool {
 
 #[async_trait::async_trait]
 impl ToolProvider for BenchmarkObliqueTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
-        benchmark_oblique_tool_definitions()
-            .into_iter()
-            .map(|definition| definition.manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok({
+            benchmark_oblique_tool_definitions()
+                .into_iter()
+                .map(|definition| definition.manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -744,8 +754,11 @@ fn oblique_doc_text(index: usize) -> String {
 
 #[async_trait::async_trait]
 impl ToolProvider for BenchmarkLargeToolCatalog {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
-        self.cache.manifests.clone()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok(self.cache.manifests.clone())
     }
 
     fn resolve_contract(

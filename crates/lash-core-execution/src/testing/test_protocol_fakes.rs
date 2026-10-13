@@ -1,6 +1,7 @@
 //! Minimal protocol-plugin fakes shared by Lash tests.
 
 use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -8,8 +9,7 @@ use async_trait::async_trait;
 use super::*;
 use crate::plugin::{
     CandidateFacts, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, PluginFactory,
-    PluginRegistrar, PluginSessionContext, ProtocolDriverPlugin, ProtocolSessionContext,
-    ProtocolSessionPlugin, SessionPlugin,
+    ProtocolDriverPlugin, ProtocolSessionContext, ProtocolSessionPlugin, SessionPlugin,
 };
 use crate::sansio::{CompletedToolCall, PendingWork, ProtocolDriverHandle};
 use crate::{
@@ -106,20 +106,47 @@ impl PluginFactory for TestProtocolFactory {
 
     /// The code protocol records the create extras a creator states; the
     /// standard fake registers no config.
-    fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> = {
+            let mut reg = crate::plugin::PluginRegistrar::<TestProtocolPlugin>::new(
+                crate::plugin::PluginFactory::id(self.as_ref()),
+            );
+            TestProtocolPlugin::declare(&mut reg, self.code_executor.is_some())?;
+            let id = crate::plugin::PluginFactory::id(self.as_ref());
+            Ok(crate::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| {
+                    Ok(Arc::new(TestProtocolPlugin {
+                        id: self.id,
+                        session_override: self.session_override.clone(),
+                        code_executor: self.code_executor.clone(),
+                        driver: self.driver,
+                    }))
+                },
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = crate::plugin::ConfigRegistrar::new(
+            crate::plugin::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
+    }
+}
+impl TestProtocolFactory {
+    pub fn declare_configuration(
+        &self,
+        reg: &mut ConfigRegistrar,
+    ) -> Result<(), ConfigRegistrationError> {
         if self.decode_code_create_options {
             reg.owner_with_run_options(TestCodeConfigOwner, crate::RunOptionsKey::new(self.id))?;
         }
         Ok(())
-    }
-
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(TestProtocolPlugin {
-            id: self.id,
-            session_override: self.session_override.clone(),
-            code_executor: self.code_executor.clone(),
-            driver: self.driver,
-        }))
     }
 }
 
@@ -140,20 +167,34 @@ impl SessionPlugin for TestProtocolPlugin {
     fn id(&self) -> &'static str {
         self.id
     }
-
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        reg.protocol().session(
-            self.session_override
+}
+impl TestProtocolPlugin {
+    fn declare(
+        reg: &mut crate::plugin::PluginRegistrar<Self>,
+        code: bool,
+    ) -> std::result::Result<(), crate::plugin::PluginError> {
+        reg.protocol().session(move |this, _state| {
+            Ok(this
+                .session_override
                 .clone()
-                .unwrap_or_else(|| Arc::new(TestProtocolSession)),
-        )?;
-        if let Some(code_executor) = self.code_executor.as_ref() {
-            reg.execution().code_executor(code_executor.clone())?;
+                .unwrap_or_else(|| Arc::new(TestProtocolSession)))
+        })?;
+
+        if code {
+            reg.execution().code_executor(move |this, _| {
+                this.code_executor.clone().ok_or_else(|| {
+                    crate::plugin::PluginError::Registration(
+                        "declared code executor is absent".into(),
+                    )
+                })
+            })?;
         }
-        reg.protocol()
-            .protocol_driver(Arc::new(TestProtocolDriver {
-                driver: self.driver,
-            }))?;
+
+        reg.protocol().protocol_driver(move |this, _state| {
+            Ok(Arc::new(TestProtocolDriver {
+                driver: this.driver,
+            }))
+        })?;
         Ok(())
     }
 }
@@ -616,4 +657,17 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for EndsWithoutDoneDriver {
     ) -> Vec<DriverAction> {
         Vec::new()
     }
+}
+
+#[cfg(test)]
+pub(crate) fn register_inventory_protocol<T: Send + Sync + 'static>(
+    reg: &mut crate::plugin::PluginRegistrar<T>,
+) -> Result<(), PluginError> {
+    reg.protocol()
+        .session(|_, _| Ok(Arc::new(TestProtocolSession)))?;
+    reg.protocol().protocol_driver(|_, _| {
+        Ok(Arc::new(TestProtocolDriver {
+            driver: TestDriverKind::Standard,
+        }))
+    })
 }

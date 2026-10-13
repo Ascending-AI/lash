@@ -87,7 +87,8 @@ async fn world(
         SwitchFrame(sender, session),
     ));
     let world = World::new(tier, |backend| {
-        lash::LashCore::standard_builder(backend.clone()).tools(lash::hook_key!("tools"), tools)
+        lash::LashCore::standard_builder(backend.clone())
+            .tools(lash::tool_provider_key!("tools"), tools)
     })
     .await?;
     world.script(

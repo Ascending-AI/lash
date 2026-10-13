@@ -23,8 +23,8 @@ impl lash::tools::ToolProvider for Echo {
     fn tool_manifests(
         &self,
         _config: &lash::tools::OwnerConfigView,
-    ) -> Vec<lash::tools::ToolManifest> {
-        vec![definition().manifest()]
+    ) -> std::result::Result<Vec<lash::tools::ToolManifest>, lash::plugins::PluginError> {
+        Ok(vec![definition().manifest()])
     }
 
     fn resolve_contract(
@@ -100,7 +100,7 @@ async fn two_round_turn() -> (lash::persistence::SessionReadView, TurnId) {
                 .build()
                 .expect("profile"),
         )
-        .tools(lash::hook_key!("tools"), Arc::new(Echo))
+        .tools(lash::tool_provider_key!("tools"), Arc::new(Echo))
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))

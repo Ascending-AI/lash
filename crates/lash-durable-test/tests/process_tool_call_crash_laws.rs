@@ -117,8 +117,11 @@ struct Probe {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Probe {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![probe_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![probe_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -768,8 +771,11 @@ struct Resolver {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Resolver {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_contract(
@@ -813,7 +819,7 @@ impl lash_core::DeferredToolProvider for Resolver {
             resolved.push(((*path).to_owned(), at));
             let outcome = match *path {
                 RESOLVED_PATH => lash_core::DeferredOutcome::Resolved {
-                    provider: DYNAMIC_COMPONENT.tool_provider("deferred"),
+                    provider: DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred")),
                     definition: dynamic_target(if earlier { "dyn_second" } else { "dyn_first" }),
                     binding: None,
                 },
@@ -943,8 +949,10 @@ impl DynamicCalls {
                             lash::plugins::PluginDeclaration::initial(
                                 DYNAMIC_COMPONENT.component(),
                             ),
-                            lash::plugins::PluginSpec::new()
-                                .with_deferred_provider(lash::hook_key!("deferred"), resolver),
+                            lash::plugins::PluginSpec::new().with_deferred_provider(
+                                lash::tool_provider_key!("deferred"),
+                                resolver,
+                            ),
                         )
                         .as_component(DYNAMIC_COMPONENT.format())
                         .expect("a deferred provider is a process component"),
@@ -996,7 +1004,7 @@ impl DynamicCalls {
         .expect("the input encodes");
         let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(LIMIT))
             .component(DYNAMIC_COMPONENT, &())
-            .link_dynamic(DYNAMIC_COMPONENT.tool_provider("deferred"))
+            .link_dynamic(DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred")))
             .build()
             .map_err(|refusal| format!("the env builds: {refusal}"))?;
         let env_ref = core

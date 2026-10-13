@@ -29,6 +29,16 @@ impl From<PluginError> for RuntimeEffectControllerError {
                     terminal_reason,
                 })
                 .into(),
+            error @ (PluginError::Preflight(_)
+            | PluginError::ProviderConfig { .. }
+            | PluginError::ProviderRegistryMismatch { .. }) => {
+                let failure = crate::plugin::PluginOperationFailure::from(error);
+                let mut error = plugin_failure_error(&failure);
+                error.cause = Some(crate::RuntimeErrorCause::PluginOperation {
+                    failure: Box::new(failure),
+                });
+                error
+            }
             PluginError::Operation(failure) => {
                 let mut error = plugin_failure_error(&failure);
                 error.cause = Some(crate::RuntimeErrorCause::PluginOperation { failure });

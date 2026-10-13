@@ -390,8 +390,11 @@ pub(super) struct ContractAppTools;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for ContractAppTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![contract_app_lookup_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![contract_app_lookup_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -471,8 +474,11 @@ impl ContractDurableInputTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for ContractDurableInputTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![contract_durable_input_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![contract_durable_input_definition().manifest()])
     }
 
     fn resolve_contract(

@@ -139,11 +139,16 @@ impl ActivityTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for ActivityTools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        [GATED, DEFERRED]
-            .into_iter()
-            .map(|name| definition(name).manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok({
+            [GATED, DEFERRED]
+                .into_iter()
+                .map(|name| definition(name).manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -235,7 +240,7 @@ async fn world_with(
         vec![Arc::new(lash_core_execution::testing::HeldProcessEngine)],
         move |backend| {
             let mut builder = lash::LashCore::standard_builder(backend.clone()).tools(
-                lash::hook_key!("tools"),
+                lash::tool_provider_key!("tools"),
                 Arc::new(ActivityTools {
                     gate,
                     backend: backend.clone(),
@@ -978,7 +983,7 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
             served::metadata(),
         )
         .tools(
-            lash::hook_key!("tools"),
+            lash::tool_provider_key!("tools"),
             Arc::new(ActivityTools {
                 gate: gate.clone(),
                 backend: world.backend.clone(),

@@ -24,32 +24,35 @@ pub(crate) struct StandardPromptBehaviour {
     clippy::expect_used,
     reason = "the section key is a validated constant"
 )]
-pub(crate) fn register_sections(
-    reg: &mut PluginRegistrar,
-    behaviour: StandardPromptBehaviour,
+pub(crate) fn register_sections<T: Send + Sync + 'static>(
+    reg: &mut PluginRegistrar<T>,
+    behaviour: impl Fn(&T) -> StandardPromptBehaviour + Send + Sync + 'static,
 ) -> Result<(), PluginError> {
     reg.prompt().section(
         PromptSectionSpec::new(
             PromptSectionKey::new(section_keys::EXECUTION).expect("valid section key"),
             PromptPlacement::InitialInstructions,
         ),
-        Arc::new(move |input: &PromptInput<'_>| {
-            // The section names the finish tools the turn is actually
-            // offered: Lash's `finish`, or a host's own in its place.
-            let finishing = input
-                .offered()
-                .manifests()
-                .filter(|tool| {
-                    tool.declaration()
-                        .controls
-                        .contains(lash_core::TurnControlKind::Finish)
-                })
-                .map(|tool| tool.name.clone())
-                .collect::<Vec<_>>();
-            Ok(SectionText::Text(format!(
-                "## Execution\n\n{}",
-                standard_execution_section(behaviour.batch, behaviour.termination, &finishing)
-            )))
-        }),
+        move |owner, _| {
+            let behaviour = behaviour(owner);
+            Ok(Arc::new(move |input: &PromptInput<'_>| {
+                // The section names the finish tools the turn is actually
+                // offered: Lash's `finish`, or a host's own in its place.
+                let finishing = input
+                    .offered()
+                    .manifests()
+                    .filter(|tool| {
+                        tool.declaration()
+                            .controls
+                            .contains(lash_core::TurnControlKind::Finish)
+                    })
+                    .map(|tool| tool.name.clone())
+                    .collect::<Vec<_>>();
+                Ok(SectionText::Text(format!(
+                    "## Execution\n\n{}",
+                    standard_execution_section(behaviour.batch, behaviour.termination, &finishing)
+                )))
+            }))
+        },
     )
 }

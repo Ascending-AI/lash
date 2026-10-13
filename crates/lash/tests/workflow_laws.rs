@@ -134,7 +134,8 @@ fn echo_tool() -> Arc<lash::tools::StaticToolProvider<Echo>> {
 fn echo_component() -> lash::process::StaticProcessComponent {
     lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(ECHO_TOOLS.component()),
-        lash::plugins::PluginSpec::new().with_tool_provider(lash::hook_key!("tools"), echo_tool()),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider(lash::tool_provider_key!("tools"), echo_tool()),
     )
     .as_component(ECHO_TOOLS.format())
     .expect("the echo tools are a process component")
@@ -173,7 +174,7 @@ async fn core_with_process_tools(
             lash::vm::TYPESCRIPT_DIALECT,
             bounds,
         )))
-        .tools(lash::hook_key!("tools"), echo_tool())
+        .tools(lash::tool_provider_key!("tools"), echo_tool())
         .process_component(Arc::new(echo_component()), ECHO_TOOLS);
     // A process a workflow starts runs under its starter's environment.
     let builder = if process_tools {
@@ -215,14 +216,17 @@ fn environment(process_tools: bool) -> lash::process::ProcessEnv {
     let mut builder = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
         .component(ECHO_TOOLS, &());
     for tool in echo_definitions() {
-        builder = builder.link_tool(ECHO_TOOLS.tool_provider("tools"), &tool);
+        builder = builder.link_tool(
+            ECHO_TOOLS.tool_provider(lash::tool_provider_key!("tools")),
+            &tool,
+        );
     }
     if process_tools {
         use lash::process_controls::ProcessControlTool;
         builder = builder.component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &());
         for control in [ProcessControlTool::Start, ProcessControlTool::Await] {
             builder = builder.link_tool(
-                lash::process_controls::PROCESS_CONTROLS_CONFIG.tool_provider("tools"),
+                lash::process_controls::PROCESS_CONTROLS_PROVIDER,
                 &lash::process_controls::process_tool_definition(control),
             );
         }
@@ -259,7 +263,8 @@ async fn a_host_start_with_a_narrow_environment_is_refused_typed() {
     let list_env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
         .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &())
         .link_tool(
-            lash::process_controls::PROCESS_CONTROLS_CONFIG.tool_provider("tools"),
+            lash::process_controls::PROCESS_CONTROLS_CONFIG
+                .tool_provider(lash::tool_provider_key!("tools")),
             &lash::process_controls::process_tool_definition(
                 lash::process_controls::ProcessControlTool::List,
             ),
@@ -452,7 +457,11 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
         lash::workflow::document::EffectName::new("processes.await").expect("effect");
     let link = links.get_mut(&await_effect).expect("await link");
     let tool = link.tool().to_string();
-    link.provider.key = "tool_provider:unserved".into();
+    link.provider = lash::plugins::ToolProviderHandle::new(
+        lash::plugins::RegistryKind::Process,
+        link.provider.owner(),
+        lash::tool_provider_key!("unserved"),
+    );
     let unserved = lash::process::ProcessEnv::builder(candidate.max_tool_calls())
         .effects(links)
         .component(ECHO_TOOLS, &())

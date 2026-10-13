@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use lash_core::plugin::{
-    PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
-};
+use lash_core::plugin::{PluginError, PluginFactory, SessionPlugin};
 
 use super::registration::register_rlm_protocol_plugin;
 use super::{
@@ -225,7 +223,100 @@ impl PluginFactory for RlmProtocolPluginFactory {
 
     /// The session's RLM namespace and its one command (FIG-4379): the
     /// channel and dialect this host selected are recorded at creation.
-    fn register_config(
+    /// The kernel process engine: a process is an entry of an admitted
+    /// document, kept in the runtime's own backend and run on this
+    /// factory's workers.
+    /// The session's plugin runs under the behaviour the session recorded:
+    /// it is pinned at creation, so the value at build is every run's.
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_core::plugin::PluginError,
+        > = {
+            let mut reg = lash_core::plugin::PluginRegistrar::<RlmProtocolPlugin>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            match self.config.channel {
+                super::RlmChannel::Cell => register_rlm_protocol_plugin(&mut reg)?,
+                super::RlmChannel::NativeTool => {
+                    crate::native::plugin::register_native_plugin(&mut reg)?
+                }
+            }
+            let id = lash_core::plugin::PluginFactory::id(self.as_ref());
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |ctx, _state| {
+                    let behaviour =
+                        self.session_behaviour(&ctx.plugin_config.config, ctx.materialization)?;
+                    let config = self.config.clone().under_recorded_behaviour(&behaviour);
+                    let recorded = recorded_config(&ctx.plugin_config.config)?;
+                    super::channel::validate_channel(
+                        recorded.as_ref(),
+                        self.config.channel,
+                        ctx.materialization,
+                    )?;
+                    let dialect = self.session_dialect(recorded.as_ref(), ctx.materialization)?;
+                    #[cfg(feature = "synthetic-next")]
+                    let writes = self.kernel_writes;
+                    #[cfg(not(feature = "synthetic-next"))]
+                    let writes = None;
+                    let services = CodeModeDialectServices {
+                        presentation: config.presentation,
+                        workers: self.workers.clone(),
+                        code_renderer: config.code_renderer.clone(),
+                        execution_bounds: config.execution_bounds(),
+                        channel: config.channel,
+                        kernel: crate::executor::KernelCarry::new(
+                            self.worker_functions.clone(),
+                            writes,
+                        ),
+                        helpers: self.helpers.clone(),
+                    };
+                    let dialect = Arc::new(SessionDialect::new(dialect, services));
+
+                    let runtime_state = Arc::new(
+                        super::runtime_state::RlmRuntimeState::new(Arc::clone(&dialect)).map_err(
+                            |error| lash_core::plugin::PluginError::Session(error.to_string()),
+                        )?,
+                    );
+                    let code_executor = Arc::new(super::runtime_state::CodeModeCodeExecutor::new(
+                        Arc::clone(&runtime_state),
+                    ));
+                    let protocol_session =
+                        Arc::new(super::protocol_session::RlmProtocolSession::new(
+                            config.clone(),
+                            runtime_state,
+                        ));
+                    let mask = crate::stream_mask::bind_stream_mask(Arc::clone(&dialect));
+                    Ok(Arc::new(RlmProtocolPlugin {
+                        config,
+                        dialect,
+                        code_executor,
+                        protocol_session,
+                        mask,
+                    }))
+                },
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = lash_core::plugin::ConfigRegistrar::new(
+            lash_core::plugin::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        let engine_factory = Arc::clone(&recipe_factory);
+        recipe = recipe.with_process_engine(lash_vm_runtime::LASH_VM_ENGINE_KIND, move |context| {
+            engine_factory.bind_process_engine(context)
+        });
+        Ok(recipe)
+    }
+}
+impl RlmProtocolPluginFactory {
+    pub fn declare_configuration(
         &self,
         registrar: &mut lash_core::plugin::ConfigRegistrar,
     ) -> Result<(), lash_core::plugin::ConfigRegistrationError> {
@@ -238,14 +329,10 @@ impl PluginFactory for RlmProtocolPluginFactory {
             },
         )
     }
-
-    /// The kernel process engine: a process is an entry of an admitted
-    /// document, kept in the runtime's own backend and run on this
-    /// factory's workers.
-    fn process_engine_contributions(
+    pub fn bind_process_engine(
         &self,
         ctx: &lash_core::plugin::ProcessEngineContributionContext<'_>,
-    ) -> Result<Vec<lash_core::ProcessEngineRegistration>, PluginError> {
+    ) -> Result<lash_core::ProcessEngineRegistration, PluginError> {
         // The processes a session's cells start run documents written in
         // the session's dialect.
         let factory = lash_vm_runtime::KernelProcessPluginFactory::new(
@@ -262,48 +349,18 @@ impl PluginFactory for RlmProtocolPluginFactory {
             Some(writes) => factory.writing_kernel(writes),
             None => factory,
         };
-        factory.process_engine_contributions(ctx)
-    }
-
-    /// The session's plugin runs under the behaviour the session recorded:
-    /// it is pinned at creation, so the value at build is every run's.
-    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        let behaviour = self.session_behaviour(&ctx.plugin_config.config, ctx.materialization)?;
-        let config = self.config.clone().under_recorded_behaviour(&behaviour);
-        let recorded = recorded_config(&ctx.plugin_config.config)?;
-        super::channel::validate_channel(
-            recorded.as_ref(),
-            self.config.channel,
-            ctx.materialization,
-        )?;
-        let dialect = self.session_dialect(recorded.as_ref(), ctx.materialization)?;
-        #[cfg(feature = "synthetic-next")]
-        let writes = self.kernel_writes;
-        #[cfg(not(feature = "synthetic-next"))]
-        let writes = None;
-        let services = CodeModeDialectServices {
-            presentation: config.presentation,
-            workers: self.workers.clone(),
-            code_renderer: config.code_renderer.clone(),
-            execution_bounds: config.execution_bounds(),
-            channel: config.channel,
-            kernel: crate::executor::KernelCarry::new(self.worker_functions.clone(), writes),
-            helpers: self.helpers.clone(),
-        };
-        let dialect = Arc::new(SessionDialect::new(dialect, services));
-        if config.channel == super::RlmChannel::NativeTool {
-            return Ok(Arc::new(crate::native::RlmNativeToolPlugin {
-                config,
-                dialect,
-            }));
-        }
-        Ok(Arc::new(RlmProtocolPlugin { config, dialect }))
+        factory.bind_process_engine(ctx)
     }
 }
 
-impl lash_core::plugin::PluginDefinition for RlmProtocolPluginFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl RlmProtocolPluginFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(RLM_PROTOCOL_PLUGIN_ID)
+    }
+}
+impl lash_core::plugin::PluginMetadata for RlmProtocolPluginFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -318,18 +375,17 @@ fn recorded_config(
         })
 }
 
-struct RlmProtocolPlugin {
-    config: RlmProtocolPluginConfig,
-    dialect: Arc<SessionDialect>,
+pub(crate) struct RlmProtocolPlugin {
+    pub(crate) config: RlmProtocolPluginConfig,
+    pub(crate) dialect: Arc<SessionDialect>,
+    pub(crate) code_executor: Arc<super::runtime_state::CodeModeCodeExecutor>,
+    pub(crate) protocol_session: Arc<super::protocol_session::RlmProtocolSession>,
+    pub(crate) mask: crate::stream_mask::StreamMaskBindings,
 }
 
 impl SessionPlugin for RlmProtocolPlugin {
     fn id(&self) -> &'static str {
         RLM_PROTOCOL_PLUGIN_ID
-    }
-
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        register_rlm_protocol_plugin(reg, self.config.clone(), Arc::clone(&self.dialect))
     }
 }
 

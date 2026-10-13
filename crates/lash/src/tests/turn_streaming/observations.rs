@@ -451,7 +451,7 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+    .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(
@@ -1549,7 +1549,7 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
         ))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .tools(
-            crate::hook_key!("tools"),
+            crate::tool_provider_key!("tools"),
             Arc::new(crate::tools::StaticToolProvider::new(
                 vec![definition],
                 SwitchFrame,

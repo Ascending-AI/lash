@@ -5,7 +5,7 @@
 
 use super::*;
 
-use lash_core::facade_support::{PluginSpec, PluginSpecFactory};
+use crate::plugins::{PluginRecipe, PluginRecipeFactory};
 use lash_core::plugin::PluginDeclaration;
 
 const REFUSING: &str = "build-refusal-probe";
@@ -19,11 +19,11 @@ fn probe(
     builds: Arc<AtomicUsize>,
     refusal: impl Fn(usize) -> Option<lash_core::PluginError> + Send + Sync + 'static,
 ) -> Arc<dyn PluginFactory> {
-    Arc::new(PluginSpecFactory::new(
+    Arc::new(PluginRecipeFactory::new(
         PluginDeclaration::initial(REFUSING),
-        Arc::new(move |_ctx| {
+        PluginRecipe::empty(REFUSING, move |_ctx, _state| {
             let attempt = builds.fetch_add(1, Ordering::SeqCst) + 1;
-            refusal(attempt).map_or_else(|| Ok(PluginSpec::new()), Err)
+            refusal(attempt).map_or_else(|| Ok(()), Err)
         }),
     ))
 }

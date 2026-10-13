@@ -397,9 +397,9 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::process::ProcessTombstone| {
         let _ = &value.terminal_label;
     });
-    // W0532: lash::plugins::ProtocolBeforeLlmCallContext::processes [field]
+    // W0532: lash::plugins::ProtocolBeforeLlmCallContext::bindings [field]
     field_witness(|value: &lash::plugins::ProtocolBeforeLlmCallContext| {
-        let _ = &value.processes;
+        let _ = &value.bindings;
     });
     // W0536: lash::plugins::RuntimeExecutionContext::process_handle_json [function]
     let _ = lash::plugins::RuntimeExecutionContext::process_handle_json;

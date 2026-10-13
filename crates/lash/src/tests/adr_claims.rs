@@ -167,7 +167,7 @@ async fn multi_model_turn_keeps_per_call_evidence() -> Result<()> {
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(crate::hook_key!("tools"), Arc::new(AppTools))
+    .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse("per-call-evidence").expect("nonblank host identity"))

@@ -233,11 +233,11 @@ impl lash_core::plugin::SessionPlugin for IngressAdmissionEnginePlugin {
     fn id(&self) -> &'static str {
         "ingress-admission-engine-plugin"
     }
-
-    fn register(
-        &self,
-        _reg: &mut lash_core::plugin::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+}
+impl IngressAdmissionEnginePlugin {
+    fn declare(
+        _reg: &mut crate::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
         Ok(())
     }
 }
@@ -251,31 +251,52 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
         "ingress-admission-engine-factory"
     }
 
-    fn process_engine_contributions(
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<crate::plugins::PluginRecipe, crate::plugins::PluginError> = {
+            let mut reg = crate::plugins::PluginRegistrar::<IngressAdmissionEnginePlugin>::new(
+                crate::plugins::PluginFactory::id(self.as_ref()),
+            );
+            IngressAdmissionEnginePlugin::declare(&mut reg)?;
+            let id = self.id();
+            Ok(crate::plugins::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| Ok(Arc::new(IngressAdmissionEnginePlugin)),
+            ))
+        };
+        let mut recipe = recipe?;
+        let engine_factory = Arc::clone(&recipe_factory);
+        recipe = recipe.with_process_engine(INGRESS_ENGINE_KIND, move |context| {
+            engine_factory.bind_process_engine(context)
+        });
+        Ok(recipe)
+    }
+}
+impl IngressAdmissionEngineFactory {
+    pub fn bind_process_engine(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> std::result::Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError>
-    {
-        Ok(vec![lash_core::ProcessEngineRegistration::new(
+    ) -> std::result::Result<lash_core::ProcessEngineRegistration, lash_core::PluginError> {
+        lash_core::ProcessEngineRegistration::new(
             Arc::new(IngressAdmissionEngine {
                 defaults: self.defaults.clone(),
             }),
             lash_core::ProcessEngineAdmission::new(INGRESS_ENGINE_KIND, admit_ingress_engine),
-        )?])
-    }
-
-    fn build(
-        &self,
-        _ctx: &lash_core::plugin::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
-    {
-        Ok(Arc::new(IngressAdmissionEnginePlugin))
+        )
     }
 }
 
-impl lash_core::plugin::PluginDefinition for IngressAdmissionEngineFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl IngressAdmissionEngineFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("ingress-admission-engine-factory")
+    }
+}
+impl lash_core::plugin::PluginMetadata for IngressAdmissionEngineFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 

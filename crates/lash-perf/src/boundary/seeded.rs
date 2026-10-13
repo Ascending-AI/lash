@@ -126,8 +126,11 @@ impl Tools {
 }
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Tools {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        self.contracts.values().map(|d| d.manifest()).collect()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(self.contracts.values().map(|d| d.manifest()).collect())
     }
     fn resolve_contract(
         &self,

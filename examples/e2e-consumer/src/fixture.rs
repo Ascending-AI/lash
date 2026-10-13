@@ -6,9 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use lash::direct::LlmOutputPart;
 use lash::plugins::{
-    FormatVersion, PluginDeclaration, PluginError, PluginFactory, PluginOperation,
-    PluginOperationOutcome, PluginRegistrar, PluginSessionContext, PluginTask, SessionParam,
-    SessionPlugin,
+    FormatVersion, PluginDeclaration, PluginFactory, PluginOperation, PluginOperationOutcome,
+    PluginTask, SessionParam, SessionPlugin,
 };
 use lash::provider::{LlmContentBlock, LlmRole};
 use lash::provider::{LlmRequest, LlmResponse, ProviderHandle};
@@ -156,14 +155,30 @@ impl PluginFactory for ConsumerPlugin {
         "external-consumer"
     }
 
-    fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(Self(self.0.clone())))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+        let mut reg = lash::plugins::PluginRegistrar::<ConsumerPlugin>::new(
+            lash::plugins::PluginFactory::id(self.as_ref()),
+        );
+        ConsumerPlugin::declare(&mut reg)?;
+        let id = lash::plugins::PluginFactory::id(self.as_ref());
+        Ok(lash::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(Self(self.0.clone()))),
+        ))
     }
 }
 
-impl lash::plugins::PluginDefinition for ConsumerPlugin {
-    fn declaration() -> PluginDeclaration {
+impl ConsumerPlugin {
+    pub fn declaration() -> PluginDeclaration {
         PluginDeclaration::initial("external-consumer")
+    }
+}
+impl lash::plugins::PluginMetadata for ConsumerPlugin {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -171,23 +186,25 @@ impl SessionPlugin for ConsumerPlugin {
     fn id(&self) -> &'static str {
         "external-consumer"
     }
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        let definition = ToolDefinition::raw(
+}
+impl ConsumerPlugin {
+    fn declare(
+        reg: &mut lash::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash::plugins::PluginError> {
+        reg.tools().provider(lash::tool_provider_key!("tools"), move |this, _state| { let definition = ToolDefinition::raw(
             "consumer:echo", "echo", "Echo the admitted text",
             json!({"type":"object", "properties":{"text":{"type":"string"}, "hold":{"type":"boolean"}}, "required":["text","hold"], "additionalProperties":false}),
             json!({"type":"string"}),
-        ).map_err(|error| PluginError::Session(error.to_string()))?
+        ).map_err(|error| lash::plugins::PluginError::Session(error.to_string()))?
         .with_execution(std::time::Duration::from_secs(120));
-        reg.tools().provider(
-            lash::hook_key!("tools"),
-            Arc::new(StaticToolProvider::new(
+Ok(Arc::new(StaticToolProvider::new(
                 vec![definition],
-                Echo(self.0.clone()),
-            )),
-        )?;
-        let controls = self.0.clone();
+                Echo(this.0.clone()),
+            ))) })?;
+
         reg.operations()
-            .typed_task::<EchoTask, _, _>(move |ctx, text| {
+            .typed_task::<EchoTask, _, _>(move |this, _state| { let controls = this.0.clone();
+Ok(move |ctx: lash::plugins::PluginTaskContext, text: <EchoTask as lash::plugins::PluginOperation>::Args| {
                 let controls = controls.clone();
                 async move {
                     // A task body runs again when its run resumes after a crash. The
@@ -214,7 +231,7 @@ impl SessionPlugin for ConsumerPlugin {
                     }
                     Ok(PluginOperationOutcome::new(text))
                 }
-            })?;
+            }) })?;
         Ok(())
     }
 }

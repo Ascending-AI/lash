@@ -111,9 +111,9 @@ plugin_error_samples! {
         refusal: Box::new(crate::SurfaceRefusal::Collision(crate::SurfaceCollision {
             name: "sampled".to_string(),
             first_tool: crate::ToolId::from("tool:first"),
-            first_provider: crate::ProviderKey::tool_provider("first", "tools"),
+            first_provider: crate::ProviderKey::new(crate::plugin::RegistryKind::Session, "first", crate::tool_provider_key!("tools")),
             second_tool: crate::ToolId::from("tool:second"),
-            second_provider: crate::ProviderKey::tool_provider("second", "tools"),
+            second_provider: crate::ProviderKey::new(crate::plugin::RegistryKind::Session, "second", crate::tool_provider_key!("tools")),
         })),
     },
     SessionAlreadyExists { .. } => PluginError::SessionAlreadyExists { session_id: session() },
@@ -121,6 +121,9 @@ plugin_error_samples! {
         session_id: session(),
         owner: crate::store::SessionHeadOwner::CommandLane { enqueue_seq: 1 },
     },
+    ProviderRegistryMismatch { .. } => PluginError::ProviderRegistryMismatch { expected: super::RegistryKind::Session, provider: super::ToolProviderHandle::new(super::RegistryKind::Process, "component", crate::tool_provider_key!("tools")) },
+    ProviderConfig { .. } => PluginError::ProviderConfig { owner: "sampled".into(), message: "invalid selection".into() },
+    Preflight(_) => PluginError::Preflight(super::PreflightIssue::MissingPort { port: super::RequiredPort::ProtocolDriver }),
     Registration(_) => PluginError::Registration("sampled".to_string()),
     ConfigRegistration(_) => PluginError::ConfigRegistration(
         crate::ConfigRegistrationError::ReservedOwner {

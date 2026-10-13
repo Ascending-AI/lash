@@ -13,7 +13,20 @@ use std::collections::BTreeSet;
 use crate::store::plugin_writers::PluginCallbackIdentity;
 
 /// The registry a recorded callback resolves through.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum RegistryKind {
     /// A session's plugins.
     Session,

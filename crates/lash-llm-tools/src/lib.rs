@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lash_core::plugin::{PluginError, PluginFactory, PluginSessionContext};
+use lash_core::plugin::{PluginError, PluginFactory};
 use lash_core::{
     AttemptContext, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
     facade_support::DirectJsonSchema, facade_support::DirectMessage,
@@ -18,7 +18,8 @@ pub const LLM_TOOLS_PLUGIN_ID: &str = "llm_tools";
 
 /// The key the `llm_query` provider is declared under, in sessions and in
 /// process components alike.
-const LLM_QUERY_PROVIDER_KEY: lash_core::plugin::HookKey = lash_core::hook_key!("llm-query");
+const LLM_QUERY_PROVIDER_KEY: lash_core::plugin::ToolProviderKey =
+    lash_core::tool_provider_key!("llm-query");
 
 /// The usage source, and the name of the direct purpose, of every
 /// `llm_query` sub-question.
@@ -46,13 +47,23 @@ impl PluginFactory for LlmToolsPluginFactory {
         LLM_TOOLS_PLUGIN_ID
     }
 
-    fn build(
-        &self,
-        _ctx: &PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, PluginError> {
-        Ok(Arc::new(LlmToolsPlugin {
-            provider: Arc::new(llm_query_provider_with_limits(self.output_schema_limits)),
-        }))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let mut reg = lash_core::plugin::PluginRegistrar::<LlmToolsPlugin>::new(
+            lash_core::plugin::PluginFactory::id(self.as_ref()),
+        );
+        LlmToolsPlugin::declare(&mut reg)?;
+        let id = self.id();
+        Ok(lash_core::plugin::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| {
+                Ok(Arc::new(LlmToolsPlugin {
+                    provider: Arc::new(llm_query_provider_with_limits(self.output_schema_limits)),
+                }))
+            },
+        ))
     }
 }
 
@@ -64,12 +75,20 @@ impl lash_core::facade_support::SessionPlugin for LlmToolsPlugin {
     fn id(&self) -> &'static str {
         LLM_TOOLS_PLUGIN_ID
     }
-
-    fn register(&self, reg: &mut lash_core::plugin::PluginRegistrar) -> Result<(), PluginError> {
+}
+impl LlmToolsPlugin {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
         reg.tools()
-            .provider(LLM_QUERY_PROVIDER_KEY, Arc::clone(&self.provider))?;
+            .provider(LLM_QUERY_PROVIDER_KEY, move |this, _state| {
+                Ok(Arc::clone(&this.provider))
+            })?;
+
         let (section, renderer) = llm_query_section()?;
-        reg.prompt().section(section, renderer)
+        reg.prompt()
+            .section(section, move |_, _| Ok(Arc::clone(&renderer)))?;
+        Ok(())
     }
 }
 
@@ -133,21 +152,25 @@ impl lash_core::plugin::ProcessComponentFactory for LlmToolsComponent {
         Ok(())
     }
 
-    fn build(
-        &self,
-        _cx: &lash_core::plugin::ProcessComponentContext<'_>,
-    ) -> Result<lash_core::plugin::ProcessComponentSpec, PluginError> {
-        Ok(lash_core::plugin::ProcessComponentSpec {
-            tool_providers: vec![(LLM_QUERY_PROVIDER_KEY, Arc::new(llm_query_provider()))],
-            direct_prompt_sections: vec![llm_query_section()?],
-            ..lash_core::plugin::ProcessComponentSpec::default()
-        })
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::ProcessRecipe, lash_core::plugin::PluginError> {
+        let (section, renderer) = llm_query_section()?;
+        lash_core::plugin::ProcessComponentSpec::new()
+            .with_tool_provider(LLM_QUERY_PROVIDER_KEY, Arc::new(llm_query_provider()))
+            .with_prompt_section(section, renderer)
+            .recipe(LLM_TOOLS_PLUGIN_ID)
     }
 }
 
-impl lash_core::plugin::PluginDefinition for LlmToolsPluginFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl LlmToolsPluginFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("llm_tools")
+    }
+}
+impl lash_core::plugin::PluginMetadata for LlmToolsPluginFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -546,6 +569,16 @@ mod tests {
         ) -> Result<Vec<serde_json::Value>, PluginError> {
             Ok(Vec::new())
         }
+
+        async fn turn_scope(
+            &self,
+            _session_id: &lash_core::SessionId,
+            _turn_id: &lash_core::TurnId,
+        ) -> Result<lash_core::ExecutionScope, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
     }
 
     #[async_trait]
@@ -559,7 +592,17 @@ mod tests {
     }
 
     #[async_trait]
-    impl SessionGraphService for DirectCompletionManager {}
+    impl SessionGraphService for DirectCompletionManager {
+        async fn append_session_nodes(
+            &self,
+            _session_id: &lash_core::SessionId,
+            _request: lash_core::AppendSessionNodesRequest,
+        ) -> Result<lash_core::AppendSessionNodesOutcome, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
+    }
 
     fn direct_completion_attempt_context(
         manager: Arc<DirectCompletionManager>,

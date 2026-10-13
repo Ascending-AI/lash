@@ -55,8 +55,8 @@ const HOST_TOOLS: ProcessConfigKey<()> =
 /// defines inline.
 fn environment() -> Result<ProcessEnv> {
     use lash::process_controls::{ProcessControlTool, process_tool_definition};
-    let host_tools = HOST_TOOLS.tool_provider("tools");
-    let controls = lash::process_controls::PROCESS_CONTROLS_CONFIG.tool_provider("tools");
+    let host_tools = HOST_TOOLS.tool_provider(lash::tool_provider_key!("tools"));
+    let controls = lash::process_controls::PROCESS_CONTROLS_PROVIDER;
     let mut env = ProcessEnv::builder(lash::MaxToolCalls::new(1024))
         .component(HOST_TOOLS, &())
         .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &());
@@ -190,7 +190,7 @@ fn builder_over(backend: lash::Backend, bodies: &std::path::Path) -> Result<lash
     let host_tools = lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(HOST_TOOLS.component()),
         lash::plugins::PluginSpec::new()
-            .with_tool_provider(lash::hook_key!("tools"), Arc::clone(&tools)),
+            .with_tool_provider(lash::tool_provider_key!("tools"), Arc::clone(&tools)),
     )
     .as_component(HOST_TOOLS.format())?;
     // A process a turn starts runs the turn's recorded model and tools,
@@ -208,7 +208,7 @@ fn builder_over(backend: lash::Backend, bodies: &std::path::Path) -> Result<lash
             lash::vm::TYPESCRIPT_DIALECT,
             bounds,
         )))
-        .tools(lash::hook_key!("tools"), tools)
+        .tools(lash::tool_provider_key!("tools"), tools)
         .process_component(Arc::new(host_tools), HOST_TOOLS)
         .process_component(
             Arc::new(lash::process_controls::ProcessControlsComponent::new(

@@ -101,7 +101,7 @@ fn component(
         lash::plugins::StaticPluginFactory::new(
             lash::plugins::PluginDeclaration::initial(key.component()),
             lash::plugins::PluginSpec::new().with_tool_provider(
-                lash::hook_key!("tools"),
+                lash::tool_provider_key!("tools"),
                 Arc::new(lash::tools::StaticToolProvider::new(tools, Answer)),
             ),
         )
@@ -155,7 +155,12 @@ fn env(component: ProcessConfigKey<()>, tools: &[lash::tools::ToolDefinition]) -
         .iter()
         .fold(
             ProcessEnv::builder(lash::MaxToolCalls::new(4)).component(component, &()),
-            |builder, tool| builder.link_tool(component.tool_provider("tools"), tool),
+            |builder, tool| {
+                builder.link_tool(
+                    component.tool_provider(lash::tool_provider_key!("tools")),
+                    tool,
+                )
+            },
         )
         .build()
         .expect("the env builds")
@@ -301,7 +306,7 @@ async fn one_template_links_under_two_envs_and_an_unserved_tool_refuses() {
         Err(ProcessEnvRefusal::ToolNotServed {
             effect: "search.run".to_owned(),
             tool: "tool:search_b".to_owned(),
-            provider: format!("{}/tool_provider:tools", SEARCH_A.component()),
+            provider: format!("{}/tools", SEARCH_A.component()),
         })
     );
 }

@@ -1,91 +1,101 @@
 use std::sync::Arc;
 
-use super::RlmProtocolPluginConfig;
 use super::prose_projector::RlmAssistantProseProjector;
 use super::protocol_driver::RlmProtocolDriver;
-use super::protocol_session::RlmProtocolSession;
-use super::runtime_state::{CodeModeCodeExecutor, RlmRuntimeState};
+
 use super::tool_args::normalize_projected_tool_args;
-use crate::dialect::SessionDialect;
-use crate::stream_mask;
+
 use lash_core::plugin::{PluginError, PluginRegistrar};
 
 pub(super) fn register_rlm_protocol_plugin(
-    reg: &mut PluginRegistrar,
-    config: RlmProtocolPluginConfig,
-    dialect: Arc<SessionDialect>,
+    reg: &mut PluginRegistrar<crate::plugin::RlmProtocolPlugin>,
 ) -> Result<(), PluginError> {
-    // The catalog contribution carries the dialect that spells every catalog
-    // member's call path.
-    let catalog_dialect = Arc::clone(&dialect);
-    let discovery = config.discovery.clone();
-    let discovery_dialect = Arc::clone(&dialect);
-    let runtime_state = Arc::new(
-        RlmRuntimeState::new(Arc::clone(&dialect))
-            .map_err(|err| PluginError::Session(err.to_string()))?,
-    );
-    let code_executor = Arc::new(CodeModeCodeExecutor::new(Arc::clone(&runtime_state)));
-    let protocol_session = Arc::new(RlmProtocolSession::new(
-        config.clone(),
-        Arc::clone(&runtime_state),
-    ));
-    reg.protocol().session(protocol_session.clone())?;
-    crate::prompt_sections::register_sections(
-        reg,
+    crate::prompt_sections::register_sections(reg, |owner| {
         crate::prompt_sections::RlmSectionBehaviour {
-            dialect: Arc::clone(&dialect),
-            channel: config.channel,
-            prompt_features: config.prompt_features,
-            discovery: config.discovery.clone(),
-            budget_tokens: config.continue_as_soft_warn_tokens,
-        },
-    )?;
-    reg.execution().code_executor(code_executor)?;
+            dialect: Arc::clone(&owner.dialect),
+            channel: owner.config.channel,
+            prompt_features: owner.config.prompt_features,
+            discovery: owner.config.discovery.clone(),
+            budget_tokens: owner.config.continue_as_soft_warn_tokens,
+        }
+    })?;
     reg.output()
-        .assistant_prose_projector(Arc::new(RlmAssistantProseProjector {
+        .stream(lash_core::hook_key!("cell-mask"), |owner, _| {
+            Ok(Arc::clone(&owner.mask.stream))
+        })?;
+    reg.output()
+        .stream_finished(lash_core::hook_key!("cell-mask"), |owner, _| {
+            Ok(Arc::clone(&owner.mask.finished))
+        })?;
+    reg.output().response(
+        lash_core::hook_key!("cell-mask"),
+        Some(lash_core::hook_key!("cell-mask")),
+        |owner, _| Ok(Arc::clone(&owner.mask.response)),
+    )?;
+
+    reg.protocol().session(move |owner, _| {
+        let protocol_session = Arc::clone(&owner.protocol_session);
+        Ok(protocol_session.clone())
+    })?;
+    reg.execution().code_executor(move |owner, _| {
+        let code_executor = Arc::clone(&owner.code_executor);
+        Ok(code_executor)
+    })?;
+    reg.output().assistant_prose_projector(move |owner, _| {
+        let dialect = Arc::clone(&owner.dialect);
+        Ok(Arc::new(RlmAssistantProseProjector {
             dialect: Arc::clone(&dialect),
-        }))?;
-    reg.protocol().protocol_driver(Arc::new(RlmProtocolDriver {
-        config,
-        dialect: Arc::clone(&dialect),
-    }))?;
-    reg.tools().provider(
-        lash_core::hook_key!("control"),
-        Arc::new(crate::control_tools::RlmControlToolsProvider {
-            vocabulary: dialect.prompt_vocabulary(),
-        }),
-    )?;
-    reg.tools().provider(
-        lash_core::hook_key!("finish"),
-        Arc::new(crate::control_tools::RlmFinishProvider {
-            vocabulary: dialect.prompt_vocabulary(),
-        }),
-    )?;
-    reg.tool_catalog().contribute(
-        lash_core::hook_key!("rlm-catalog"),
-        Arc::new(move |ctx| {
-            crate::tool_catalog::validate_discovery(
-                &ctx.tools,
-                discovery.as_ref(),
-                discovery_dialect.as_ref(),
-            )?;
-            crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialect)
-        }),
-    )?;
-    reg.tool_calls().transform_args(
-        lash_core::hook_key!("projected-args"),
-        Arc::new(|input| Box::pin(async move { normalize_projected_tool_args(input) })),
-    )?;
-
-    let warn_session = protocol_session.clone();
-    reg.turn().checkpoint(
-        lash_core::hook_key!("soft-warnings"),
-        Arc::new(move |ctx| {
-            let session = warn_session.clone();
-            Box::pin(async move { session.soft_warn_contributions(ctx) })
-        }),
-    )?;
-
-    stream_mask::register_stream_mask(reg, dialect)?;
+        }))
+    })?;
+    reg.protocol().protocol_driver(move |owner, _| {
+        let config = owner.config.clone();
+        let dialect = Arc::clone(&owner.dialect);
+        Ok(Arc::new(RlmProtocolDriver {
+            config,
+            dialect: Arc::clone(&dialect),
+        }))
+    })?;
+    reg.tools()
+        .provider(lash_core::tool_provider_key!("control"), move |owner, _| {
+            let dialect = Arc::clone(&owner.dialect);
+            Ok(Arc::new(crate::control_tools::RlmControlToolsProvider {
+                vocabulary: dialect.prompt_vocabulary(),
+            }))
+        })?;
+    reg.tools()
+        .provider(lash_core::tool_provider_key!("finish"), move |owner, _| {
+            let dialect = Arc::clone(&owner.dialect);
+            Ok(Arc::new(crate::control_tools::RlmFinishProvider {
+                vocabulary: dialect.prompt_vocabulary(),
+            }))
+        })?;
+    reg.tool_catalog()
+        .contribute(lash_core::hook_key!("rlm-catalog"), move |owner, _| {
+            let catalog_dialect = Arc::clone(&owner.dialect);
+            let discovery = owner.config.discovery.clone();
+            let discovery_dialect = Arc::clone(&owner.dialect);
+            Ok(Arc::new(move |ctx| {
+                crate::tool_catalog::validate_discovery(
+                    &ctx.tools,
+                    discovery.as_ref(),
+                    discovery_dialect.as_ref(),
+                )?;
+                crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialect)
+            }))
+        })?;
+    reg.tool_calls()
+        .transform_args(lash_core::hook_key!("projected-args"), move |_owner, _| {
+            Ok(Arc::new(|input| {
+                Box::pin(async move { normalize_projected_tool_args(input) })
+            }))
+        })?;
+    reg.turn()
+        .checkpoint(lash_core::hook_key!("soft-warnings"), move |owner, _| {
+            let warn_session = Arc::clone(&owner.protocol_session);
+            Ok(Arc::new(move |ctx| {
+                let session = warn_session.clone();
+                Box::pin(async move { session.soft_warn_contributions(ctx) })
+            }))
+        })?;
     Ok(())
 }

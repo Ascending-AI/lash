@@ -61,9 +61,7 @@ use base64::Engine as _;
 use chrono::Utc;
 use futures_util::StreamExt;
 use lash::observe::SessionCursor;
-use lash::plugins::{
-    PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
-};
+use lash::plugins::{PluginError, PluginFactory, PluginRegistrar, SessionPlugin};
 use lash::provider::ProviderHandle;
 use lash::sync::MutexExt;
 use lash::{

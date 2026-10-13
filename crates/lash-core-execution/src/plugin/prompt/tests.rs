@@ -4,13 +4,13 @@ use lash_sansio::sync::MutexExt;
 
 mod composer;
 
-type Register = Box<dyn Fn(&mut PluginRegistrar) -> Result<(), PluginError>>;
+type Register = Box<dyn Fn(&mut super::super::BoundRegistrar) -> Result<(), PluginError>>;
 
 /// Register `plugins` in order, as a session build does.
 fn catalog(plugins: Vec<(&'static str, Register)>) -> Result<PromptCatalog, PluginError> {
     let mut contributions = PluginContributions::default();
     for (id, register) in plugins {
-        let mut reg = PluginRegistrar::new(String::from(id));
+        let mut reg = super::super::BoundRegistrar::new(String::from(id));
         reg.contributions = contributions;
         register(&mut reg)?;
         contributions = reg.contributions;

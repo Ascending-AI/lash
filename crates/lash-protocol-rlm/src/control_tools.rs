@@ -17,11 +17,16 @@ pub(crate) struct RlmControlToolsProvider {
 
 #[async_trait]
 impl ToolProvider for RlmControlToolsProvider {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
-        vec![
-            continue_as_tool_definition_for(self.vocabulary).manifest(),
-            read_output_tool_definition_for(self.vocabulary).manifest(),
-        ]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok({
+            vec![
+                continue_as_tool_definition_for(self.vocabulary).manifest(),
+                read_output_tool_definition_for(self.vocabulary).manifest(),
+            ]
+        })
     }
 
     fn resolve_contract(
@@ -86,8 +91,11 @@ impl RlmFinishProvider {
 
 #[async_trait]
 impl ToolProvider for RlmFinishProvider {
-    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
-        vec![self.definition(config).manifest()]
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok(vec![self.definition(config).manifest()])
     }
 
     fn resolve_contract(
@@ -363,6 +371,16 @@ mod tests {
         ) -> Result<Vec<serde_json::Value>, PluginError> {
             Ok(Vec::new())
         }
+
+        async fn turn_scope(
+            &self,
+            _session_id: &lash_core::SessionId,
+            _turn_id: &lash_core::TurnId,
+        ) -> Result<lash_core::ExecutionScope, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
     }
 
     #[async_trait]
@@ -386,7 +404,17 @@ mod tests {
     }
 
     #[async_trait]
-    impl SessionGraphService for BatonManager {}
+    impl SessionGraphService for BatonManager {
+        async fn append_session_nodes(
+            &self,
+            _session_id: &lash_core::SessionId,
+            _request: lash_core::AppendSessionNodesRequest,
+        ) -> Result<lash_core::AppendSessionNodesOutcome, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
+    }
 
     #[async_trait]
     impl lash_core::ProcessService for BatonManager {
@@ -475,6 +503,63 @@ mod tests {
         ) -> Result<(), PluginError> {
             Err(PluginError::Session(
                 "continue_as must not transfer process handles".to_string(),
+            ))
+        }
+
+        async fn list_visible_for_attempt(
+            &self,
+            _owner: &lash_core::RuntimeOwner,
+            _mode: lash_core::ProcessListMode,
+        ) -> Result<Vec<lash_core::facade_support::ObservedProcess>, lash_core::PluginError>
+        {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
+        async fn start_from_request(
+            &self,
+            _session_id: &lash_core::SessionId,
+            _request: lash_core::ProcessStartRequest,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessHandleView, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
+        async fn stage_bound(
+            &self,
+            _registration: lash_core::ProcessStartRegistration,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::StagedProcessStart, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
+        async fn cancel_bound(
+            &self,
+            _process_id: &lash_core::ProcessId,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<(), lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
+        async fn release_consumer_hold(
+            &self,
+            _process_id: &lash_core::ProcessId,
+            _key: &str,
+        ) -> Result<(), lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ))
+        }
+        async fn abandon_consumer_hold(
+            &self,
+            _key: &str,
+            _owner: &lash_core::ScopeId,
+        ) -> Result<Vec<lash_core::ProcessId>, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "operation is absent from this fixture".into(),
             ))
         }
     }

@@ -7,9 +7,7 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use lash::plugins::{
-    PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
-};
+use lash::plugins::{PluginError, PluginFactory, SessionPlugin};
 
 pub(crate) const MARKER_ENV: &str = "LASH_HOST_SHUTDOWN_MARKER";
 
@@ -36,8 +34,19 @@ impl PluginFactory for ShutdownMarkerFactory {
         "host_shutdown_marker"
     }
 
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(ShutdownMarkerSession))
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+        let mut reg = lash::plugins::PluginRegistrar::<ShutdownMarkerSession>::new(
+            lash::plugins::PluginFactory::id(self.as_ref()),
+        );
+        ShutdownMarkerSession::declare(&mut reg)?;
+        let id = lash::plugins::PluginFactory::id(self.as_ref());
+        Ok(lash::plugins::PluginRecipe::new(
+            id,
+            reg,
+            move |_ctx, _state| Ok(Arc::new(ShutdownMarkerSession)),
+        ))
     }
 
     async fn shutdown(&self) -> Result<(), PluginError> {
@@ -56,9 +65,14 @@ impl PluginFactory for ShutdownMarkerFactory {
     }
 }
 
-impl lash::plugins::PluginDefinition for ShutdownMarkerFactory {
-    fn declaration() -> lash::plugins::PluginDeclaration {
+impl ShutdownMarkerFactory {
+    pub fn declaration() -> lash::plugins::PluginDeclaration {
         lash::plugins::PluginDeclaration::initial("host_shutdown_marker")
+    }
+}
+impl lash::plugins::PluginMetadata for ShutdownMarkerFactory {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -68,8 +82,11 @@ impl SessionPlugin for ShutdownMarkerSession {
     fn id(&self) -> &'static str {
         "host_shutdown_marker"
     }
-
-    fn register(&self, _registrar: &mut PluginRegistrar) -> Result<(), PluginError> {
+}
+impl ShutdownMarkerSession {
+    fn declare(
+        _reg: &mut lash::plugins::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash::plugins::PluginError> {
         Ok(())
     }
 }

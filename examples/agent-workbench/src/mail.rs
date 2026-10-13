@@ -439,12 +439,17 @@ impl MockMailProvider {
 impl ToolProvider for MockMailProvider {
     /// The mail tools the workbench's recorded selection admits under
     /// `config` (the browser's tool catalog writes it).
-    fn tool_manifests(&self, config: &lash::tools::OwnerConfigView) -> Vec<ToolManifest> {
-        let selection = crate::plugins::workbench_tool_selection(config);
-        self.all_manifests()
-            .into_iter()
-            .filter(|manifest| selection.admits(&manifest.id))
-            .collect()
+    fn tool_manifests(
+        &self,
+        config: &lash::tools::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash::plugins::PluginError> {
+        Ok({
+            let selection = crate::plugins::workbench_tool_selection(config)?;
+            self.all_manifests()
+                .into_iter()
+                .filter(|manifest| selection.admits(&manifest.id))
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -452,7 +457,7 @@ impl ToolProvider for MockMailProvider {
         name: &str,
         config: &lash::tools::OwnerConfigView,
     ) -> Option<Arc<ToolContract>> {
-        let selection = crate::plugins::workbench_tool_selection(config);
+        let selection = crate::plugins::workbench_tool_selection(config).ok()?;
         let (slug, operation) = self.route(name)?;
         let summary = self
             .world

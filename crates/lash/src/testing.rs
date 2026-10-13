@@ -361,3 +361,5 @@ impl ArtifactCleanupFence {
         }
     }
 }
+
+pub use lash_core::testing::prompt_catalog_from_recipes;

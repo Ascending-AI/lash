@@ -36,7 +36,7 @@ fn core_with(
     let builder = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(model, mock_llm_profile_spec());
     match tools {
-        Some(tools) => builder.tools(crate::hook_key!("tools"), tools),
+        Some(tools) => builder.tools(crate::tool_provider_key!("tools"), tools),
         None => builder,
     }
     .build(crate::testing::runtime_lease_owner())
@@ -256,8 +256,11 @@ struct SendTool(Sender);
 
 #[async_trait]
 impl ToolProvider for SendTool {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
-        vec![send_tool_definition().manifest()]
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![send_tool_definition().manifest()])
     }
 
     fn resolve_contract(
@@ -457,7 +460,10 @@ async fn checkpoint_observer_failure_leaves_active_input_pending_without_applica
         scripted(Arc::clone(&requests), Arc::new(send_then_answer)),
         mock_llm_profile_spec(),
     )
-    .tools(crate::hook_key!("tools"), Arc::new(SendTool(sender)))
+    .tools(
+        crate::tool_provider_key!("tools"),
+        Arc::new(SendTool(sender)),
+    )
     .plugin(failing_checkpoint_observer())
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core");

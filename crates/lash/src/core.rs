@@ -703,7 +703,7 @@ pub struct LashCoreBuilder {
     delta_coalescing: Option<crate::DeltaCoalescing>,
     /// Each builder tool provider under its declared key: the plugin it is
     /// installed as, and its provider within that plugin (FIG-6073).
-    tool_providers: Vec<(lash_core::plugin::HookKey, Arc<dyn ToolProvider>)>,
+    tool_providers: Vec<(lash_core::plugin::ToolProviderKey, Arc<dyn ToolProvider>)>,
     plugin_stack: PluginStack,
     /// The process components a process environment may name (FIG-6034),
     /// and the first registration refused, reported at build.
@@ -925,7 +925,11 @@ impl LashCoreBuilder {
     /// names it as
     /// [`PluginCallbackIdentity::tool_provider(key, key)`](crate::plugins::PluginCallbackIdentity::tool_provider).
     /// A key used twice, or the id of another plugin, refuses the build.
-    pub fn tools(mut self, key: lash_core::plugin::HookKey, tools: Arc<dyn ToolProvider>) -> Self {
+    pub fn tools(
+        mut self,
+        key: lash_core::plugin::ToolProviderKey,
+        tools: Arc<dyn ToolProvider>,
+    ) -> Self {
         self.tool_providers.push((key, tools));
         self
     }
@@ -1287,7 +1291,7 @@ impl LashCoreBuilder {
             std::mem::take(&mut self.process_components).with_host(
                 lash_core::plugin::ProcessComponentHost {
                     tracing: core.tracing.clone(),
-                    extensions: default_plugin_host.extensions().clone(),
+                    extensions: default_plugin_host.extensions()?,
                     sessions: None,
                 },
             ),
@@ -1365,7 +1369,7 @@ impl LashCoreBuilder {
 /// Refuses a builder tool key used twice, or one that is another plugin's
 /// id: each key is the static identity of one plugin and its provider.
 fn refuse_duplicate_tool_keys(
-    tools: &[(lash_core::plugin::HookKey, Arc<dyn ToolProvider>)],
+    tools: &[(lash_core::plugin::ToolProviderKey, Arc<dyn ToolProvider>)],
     plugins: &PluginStack,
 ) -> Result<()> {
     let mut keys = std::collections::BTreeSet::new();

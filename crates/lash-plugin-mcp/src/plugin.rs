@@ -4,9 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lash_core::plugin::{
-    PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
-};
+use lash_core::plugin::{PluginError, PluginFactory, SessionPlugin};
 use lash_core::{ToolCall, ToolContract, ToolId, ToolManifest, ToolOutcome, ToolProvider};
 
 use crate::config::McpServerConfig;
@@ -151,7 +149,40 @@ impl PluginFactory for McpPluginFactory {
     /// The `mcp` namespace holds which servers' tools a run is offered:
     /// [`lash_tool_support::SetToolSelection`] changes it sticky, and the run
     /// options under [`MCP_RUN_OPTIONS`] for one run.
-    fn register_config(
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+        let recipe_factory = Arc::clone(&self);
+        let recipe: std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_core::plugin::PluginError,
+        > = {
+            let mut reg = lash_core::plugin::PluginRegistrar::<McpSessionPlugin>::new(
+                lash_core::plugin::PluginFactory::id(self.as_ref()),
+            );
+            McpSessionPlugin::declare(&mut reg)?;
+            let id = lash_core::plugin::PluginFactory::id(self.as_ref());
+            Ok(lash_core::plugin::PluginRecipe::new(
+                id,
+                reg,
+                move |_ctx, _state| {
+                    Ok(Arc::new(McpSessionPlugin {
+                        pool: Arc::clone(&self.pool),
+                    }))
+                },
+            ))
+        };
+        let mut recipe = recipe?;
+        let mut configuration = lash_core::plugin::ConfigRegistrar::new(
+            lash_core::plugin::PluginFactory::id(recipe_factory.as_ref()),
+        );
+        recipe_factory.declare_configuration(&mut configuration)?;
+        recipe = recipe.with_configuration(configuration);
+        Ok(recipe)
+    }
+}
+impl McpPluginFactory {
+    pub fn declare_configuration(
         &self,
         reg: &mut lash_core::plugin::ConfigRegistrar,
     ) -> Result<(), lash_core::plugin::ConfigRegistrationError> {
@@ -165,17 +196,16 @@ impl PluginFactory for McpPluginFactory {
             })
         })
     }
-
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(McpSessionPlugin {
-            pool: Arc::clone(&self.pool),
-        }))
-    }
 }
 
-impl lash_core::plugin::PluginDefinition for McpPluginFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
+impl McpPluginFactory {
+    pub fn declaration() -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial("mcp")
+    }
+}
+impl lash_core::plugin::PluginMetadata for McpPluginFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        Self::declaration()
     }
 }
 
@@ -187,25 +217,31 @@ impl SessionPlugin for McpSessionPlugin {
     fn id(&self) -> &'static str {
         "mcp"
     }
-
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+}
+impl McpSessionPlugin {
+    fn declare(
+        reg: &mut lash_core::plugin::PluginRegistrar<Self>,
+    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
         reg.tools().provider(
-            lash_core::hook_key!("servers"),
-            Arc::new(McpToolProvider {
-                pool: Arc::clone(&self.pool),
-            }) as Arc<dyn ToolProvider>,
+            lash_core::tool_provider_key!("servers"),
+            move |this, _state| {
+                Ok(Arc::new(McpToolProvider {
+                    pool: Arc::clone(&this.pool),
+                }) as Arc<dyn ToolProvider>)
+            },
         )?;
         let family = lash_core::plugin::prompt::PromptSectionKey::new(
             crate::pool::guidance::McpGuidanceSections::FAMILY,
         )
-        .map_err(|error| PluginError::Registration(error.to_string()))?;
+        .map_err(|error| lash_core::plugin::PluginError::Registration(error.to_string()))?;
         reg.prompt().family(
             lash_core::plugin::prompt::PromptSectionFamilySpec::new(
                 family,
                 lash_core::plugin::prompt::PromptPlacement::InitialInstructions,
             ),
-            Arc::new(crate::pool::guidance::McpGuidanceSections),
-        )
+            move |_this, _state| Ok(Arc::new(crate::pool::guidance::McpGuidanceSections)),
+        )?;
+        Ok(())
     }
 }
 
@@ -223,15 +259,24 @@ impl McpToolProvider {
     /// under `config`. A selection that does not decode offers nothing.
     ///
     /// [`ToolSelection`]: lash_tool_support::ToolSelection
-    fn offered(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolDefinition> {
-        let Ok(selection) = lash_tool_support::ToolSelection::of(config, MCP_PLUGIN_ID) else {
-            return Vec::new();
-        };
-        self.pool
-            .advertised_tools()
-            .into_iter()
-            .filter(|tool| selection.admits(&tool.manifest.id))
-            .collect()
+    fn offered(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> Result<Vec<lash_core::ToolDefinition>, PluginError> {
+        Ok({
+            let selection =
+                lash_tool_support::ToolSelection::of(config, MCP_PLUGIN_ID).map_err(|error| {
+                    PluginError::ProviderConfig {
+                        owner: MCP_PLUGIN_ID.into(),
+                        message: error.to_string(),
+                    }
+                })?;
+            self.pool
+                .advertised_tools()
+                .into_iter()
+                .filter(|tool| selection.admits(&tool.manifest.id))
+                .collect()
+        })
     }
 }
 
@@ -298,11 +343,16 @@ impl McpDeferredToolProvider {
 
 #[async_trait]
 impl ToolProvider for McpToolProvider {
-    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
-        self.offered(config)
-            .into_iter()
-            .map(|tool| tool.manifest())
-            .collect()
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok({
+            self.offered(config)?
+                .into_iter()
+                .map(|tool| tool.manifest())
+                .collect()
+        })
     }
 
     fn resolve_contract(
@@ -311,6 +361,7 @@ impl ToolProvider for McpToolProvider {
         config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<ToolContract>> {
         self.offered(config)
+            .ok()?
             .into_iter()
             .find(|tool| tool.name() == name)
             .map(|tool| Arc::new(tool.contract()))
@@ -330,8 +381,11 @@ impl ToolProvider for McpToolProvider {
 
 #[async_trait]
 impl ToolProvider for McpDeferredToolProvider {
-    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
-        Vec::new()
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+        Ok(Vec::new())
     }
 
     fn resolve_manifest(
@@ -412,7 +466,11 @@ impl ToolProvider for McpDeferredToolProvider {
 #[cfg(test)]
 pub(crate) fn mcp_binding(payload: serde_json::Value) -> lash_core::ExecutionBinding {
     lash_core::ExecutionBinding {
-        codec: lash_core::plugin::PluginCallbackIdentity::tool_provider(MCP_PLUGIN_ID, "deferred"),
+        codec: lash_core::plugin::ToolProviderHandle::new(
+            lash_core::plugin::RegistryKind::Session,
+            MCP_PLUGIN_ID,
+            lash_core::tool_provider_key!("deferred"),
+        ),
         format: MCP_BINDING_FORMAT,
         payload,
     }
