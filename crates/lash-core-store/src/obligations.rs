@@ -5,7 +5,7 @@
 //! that resolves it: a session's plugins or a process's components. A node
 //! serves the token of every callback its installed registrations resolve,
 //! without invoking any; an actor whose outstanding work names a callback
-//! the node does not resolve is claimed only for its cancel. Config-format
+//! the node does not resolve is claimed only for its cancel. Component-format
 //! tokens are a separate family of the same codec.
 //!
 //! [`ObligationToken`] is the one encoder: a requirement and a served
@@ -65,12 +65,12 @@ impl ObligationToken {
         ))
     }
 
-    /// The token of process component `component`'s config at `format`:
-    /// `component:<id>@cfg<format>`. A process naming the component at that
+    /// The token of process component `component`'s state and config at `format`:
+    /// `component:<id>@fmt<format>`. A process naming the component at that
     /// format requires it, and a node whose component reads it serves it.
     #[must_use]
-    pub fn for_config(component: &ProcessComponentId, format: FormatVersion) -> Self {
-        Self(format!("component:{component}@cfg{format}"))
+    pub fn for_component(component: &ProcessComponentId, format: FormatVersion) -> Self {
+        Self(format!("component:{component}@fmt{format}"))
     }
 
     /// The token as the scheduler stores it.

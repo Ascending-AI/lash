@@ -239,8 +239,18 @@ pub(super) async fn apply(
             process,
             expected_rev,
             driver_json,
+        }
+        | ProcessWrite::ComponentFormats {
+            process,
+            expected_rev,
+            driver_json,
         } => {
-            let moved: Option<i64> = crate::observed_sql::query_scalar(SQL.process.advance.sql())
+            let statement = if matches!(write, ProcessWrite::ComponentFormats { .. }) {
+                SQL.process.component_formats.sql()
+            } else {
+                SQL.process.advance.sql()
+            };
+            let moved: Option<i64> = crate::observed_sql::query_scalar(statement)
                 .bind(process.as_str())
                 .bind(integer::<i64>(*expected_rev)?)
                 .bind(driver_json)

@@ -605,6 +605,7 @@ impl StateDesk<'_> {
                 let resolution = StateResolution {
                     publisher: address.clone(),
                     plugin: batch.plugin,
+                    format_version: namespace.format_version,
                     origin: batch.origin,
                     segment,
                     ordinal: namespace.publication.next(),
@@ -876,6 +877,17 @@ fn publish_one(
     match namespace.publication.step(resolution) {
         Ok(FrontierStep::AlreadyApplied) => Ok(Published::AlreadyApplied),
         Ok(FrontierStep::Apply) => {
+            if namespace.publication.applied().is_none() {
+                namespace.format_version = resolution.format_version;
+            } else if namespace.format_version != resolution.format_version {
+                return Err(PluginStateError::Decode {
+                    key: resolution.plugin.clone(),
+                    message: format!(
+                        "publication format {} differs from namespace format {}",
+                        resolution.format_version, namespace.format_version
+                    ),
+                });
+            }
             match &resolution.outcome {
                 StateResolutionOutcome::Applied { changes } => {
                     for change in changes {
@@ -1002,4 +1014,46 @@ fn session_budget(
         );
     }
     Ok(())
+}
+
+/// Replay a whole recorded namespace view without constructing capabilities.
+pub(in crate::plugin) fn replay_state(
+    mut state: PluginState,
+    resolutions: &[StateResolution],
+) -> Result<PluginState, PluginStateError> {
+    let mut owed = BTreeMap::<String, BTreeMap<u64, StateResolution>>::new();
+    for resolution in resolutions {
+        let namespace = state.plugins.entry(resolution.plugin.clone()).or_default();
+        match publish_one(namespace, resolution.segment, resolution)? {
+            Published::Ahead => {
+                if let Some(previous) = owed
+                    .entry(resolution.plugin.clone())
+                    .or_default()
+                    .insert(resolution.ordinal.0, resolution.clone())
+                    && previous != *resolution
+                {
+                    return Err(PluginStateError::Frontier {
+                        plugin: resolution.plugin.clone(),
+                        refusal: FrontierRefusal::ReceiptMismatch {
+                            found: resolution.ordinal.0,
+                        },
+                    });
+                }
+            }
+            Published::Applied | Published::AlreadyApplied => {}
+        }
+        settle_owed(&mut state, &mut owed, resolution.segment)?;
+    }
+    if let Some((plugin, pending)) = owed.first_key_value() {
+        return Err(PluginStateError::Frontier {
+            plugin: plugin.clone(),
+            refusal: FrontierRefusal::OutOfOrder {
+                found: *pending
+                    .first_key_value()
+                    .map(|(ordinal, _)| ordinal)
+                    .unwrap_or(&0),
+            },
+        });
+    }
+    Ok(state)
 }

@@ -26,6 +26,13 @@ crate::statements! {
              WHERE process_id = ?1 AND state_rev = ?2 AND status IN ('running', 'waiting')
              RETURNING state_rev";
 
+        /// Record component state/config postimages at an owner cut, leaving
+        /// the engine revision unchanged (including before Started).
+        component_formats = "UPDATE processes
+             SET driver_json = ?3, written_epoch = ?4
+             WHERE process_id = ?1 AND state_rev = ?2 AND status IN ('running', 'waiting')
+             RETURNING state_rev";
+
         /// Move process `?1`'s publication mark forward to `?2`; an older
         /// mark leaves it as it is.
         publish = "UPDATE processes SET published_event_sequence = ?2

@@ -747,7 +747,7 @@ pub struct ProcessRegistration<I = ProcessInput> {
     #[serde(default, skip_serializing_if = "lash_trace::TraceScopeOffer::is_empty")]
     pub trace: lash_trace::TraceScopeOffer,
     /// The claim requirements the process's actor is created with: one
-    /// `component:<id>@cfg<format>` for every component its environment
+    /// `component:<id>@fmt<format>` for every component its environment
     /// names (FIG-6034 §6.2). Start staging derives them from the held
     /// environment; a node runs the process only when it serves them all.
     /// It is no part of the start, like [`Self::trace`].

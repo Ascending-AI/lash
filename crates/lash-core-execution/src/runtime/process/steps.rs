@@ -301,8 +301,22 @@ pub trait ProcessSteps: Send + Sync {
         Ok(())
     }
 
+    /// Pure conversion of a component's whole recorded state/config view.
+    /// The activation records this postimage before building any step tools.
+    #[doc(hidden)]
+    async fn convert_components(
+        &self,
+        process: &ProcessRecord,
+    ) -> Result<
+        Option<crate::runtime::actor::process::component_formats::ComponentFormatCut>,
+        PluginError,
+    > {
+        let _ = process;
+        Ok(None)
+    }
+
     /// The component claim requirements `process` carries while it holds
-    /// `steps` (§6.2): its environment's components' config tokens. `None`
+    /// `steps` (§6.2): its environment's components' state/config format tokens. `None`
     /// when it keeps none. The activation adds the callbacks its unsettled
     /// steps were admitted under (S7).
     ///

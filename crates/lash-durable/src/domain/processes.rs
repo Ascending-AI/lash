@@ -72,6 +72,12 @@ pub enum ProcessWrite {
         /// The driver state after the transition.
         driver_json: String,
     },
+    /// Record a whole component format postimage without advancing the engine.
+    ComponentFormats {
+        process: ProcessId,
+        expected_rev: u64,
+        driver_json: String,
+    },
     /// Record that the owner's host sinks were handed `process`'s log
     /// through sequence `through`. The mark only moves forward: an older
     /// one leaves it as it is.

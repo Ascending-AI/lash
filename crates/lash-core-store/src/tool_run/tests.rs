@@ -628,6 +628,7 @@ fn only_sequential_turn_and_tool_result_check_callbacks_publish_state() {
 #[test]
 fn the_state_frontier_applies_each_publication_once_in_order() {
     let resolution = |ordinal: u64, predecessor: Option<u64>, segment: u32| StateResolution {
+        format_version: lash_core_ids::FormatVersion::ONE,
         publisher: crate::EffectAddress::new(
             ExecutionScope::turn("session-1", "turn-1"),
             "attempt:a",

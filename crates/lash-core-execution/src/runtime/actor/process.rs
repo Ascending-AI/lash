@@ -6,6 +6,8 @@
 
 mod activation;
 mod carry;
+#[doc(hidden)]
+pub mod component_formats;
 mod driver;
 mod effects;
 mod session_turn;

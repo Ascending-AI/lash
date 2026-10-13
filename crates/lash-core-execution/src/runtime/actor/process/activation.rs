@@ -183,7 +183,7 @@ pub(super) struct Live {
     /// outcomes it holds until they commit.
     pub(super) lifecycle: Lifecycle,
     /// What the lifecycle's bodies are built from.
-    bodies: Arc<StepBodies>,
+    pub(super) bodies: Arc<StepBodies>,
     /// The actor's park as of the claim.
     pub(super) park: Option<String>,
     /// The claims in a row that committed nothing, as of the claim.
@@ -515,6 +515,13 @@ impl ProcessActivation {
                 };
                 return self.park(owned, tx, &reason).await;
             }
+        };
+        let tx = match self
+            .component_format_cut(owned, tx, &record, &row, &driver, live)
+            .await?
+        {
+            Ok(tx) => tx,
+            Err(pass) => return Ok(pass),
         };
         // The composition builds before any step is admitted or resumed: one
         // this node cannot build parks the process and settles nothing, so
@@ -1412,7 +1419,7 @@ pub(super) struct StepBodies {
     /// What step bodies run under: the process actor's claimed context, and
     /// the process's namespaces, which this activation's committed step
     /// outcomes publish into.
-    runtime: Arc<StepRuntime>,
+    pub(super) runtime: Arc<StepRuntime>,
     seen: Mutex<SeenSteps>,
 }
 

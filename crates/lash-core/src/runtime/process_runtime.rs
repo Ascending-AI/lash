@@ -58,16 +58,32 @@ impl EngineProcessRuntime {
                 "process `{process_id}` runs a session turn, which has no environment"
             )));
         };
-        let env = Arc::new(
-            crate::runtime::load_process_env(
-                ports.host.durability.process_env_store.as_ref(),
-                env_ref,
-            )
-            .await?,
-        );
+        use lash_core_execution::runtime::actor::process::component_formats::{
+            recorded_component_cut, recorded_component_state,
+        };
+        let backend = ports.host.backend();
+        let cut = recorded_component_cut(backend.durable().as_ref(), process)
+            .await
+            .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
+        let (env, snapshot) = match cut {
+            Some(cut) => (cut.env, Some(cut.state)),
+            None => (
+                crate::runtime::load_process_env(
+                    ports.host.durability.process_env_store.as_ref(),
+                    env_ref,
+                )
+                .await?,
+                None,
+            ),
+        };
+        let snapshot =
+            recorded_component_state(backend.durable().as_ref(), process, &env, snapshot)
+                .await
+                .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
+        let env = Arc::new(env);
         let components = ports.host.process_engines.components();
         let composition = components
-            .compose(&env, Some(&process_id))
+            .compose_with_state(&env, Some(&process_id), &snapshot)
             .map_err(|refusal| crate::PluginError::ProcessEnvRefused { refusal })?;
         let state = Arc::new(crate::plugin::ComponentState::new(
             process_id.clone(),

@@ -141,7 +141,7 @@ impl ProcessComponentId {
         &self.0
     }
 
-    /// The fleet writer-record key this component's config format is
+    /// The fleet writer-record key this component's state/config format is
     /// admitted under: `component:<id>`, never a session plugin's key.
     pub fn writer_key(&self) -> String {
         format!("component:{}", self.0)
@@ -526,6 +526,13 @@ impl ProcessEnv {
     /// The link of each effect the process performs.
     pub fn effects(&self) -> &BTreeMap<EffectName, EffectLink> {
         &self.effects
+    }
+
+    /// Replace only the component representations at a recorded format cut.
+    #[doc(hidden)]
+    pub fn with_component_entries(mut self, entries: Vec<ProcessComponentEntry>) -> Self {
+        self.components = entries;
+        self
     }
 
     /// The named components, in composition order.

@@ -149,7 +149,7 @@ impl ProcessActivation {
         owned: &Owned,
         mut tx: ActorTx,
         current: &Current<'_>,
-        driver: Driver,
+        mut driver: Driver,
         request: ProcessSuccessorRequest,
         state: Option<&EngineState>,
         fold: Option<&RunFold>,
@@ -195,16 +195,16 @@ impl ProcessActivation {
                 },
             },
         };
-        if current.row.state_rev > 0 {
-            tx.write(DomainWrite::Process(ProcessWrite::Advance {
-                process: current.process.clone(),
-                expected_rev: current.row.state_rev,
-                driver_json: driver.encode(),
-            }));
-        }
         let (carried, own_formats) = match carried {
             Ok(carried) => carried,
             Err(refusal) => {
+                if current.row.state_rev > 0 {
+                    tx.write(DomainWrite::Process(ProcessWrite::Advance {
+                        process: current.process.clone(),
+                        expected_rev: current.row.state_rev,
+                        driver_json: driver.encode(),
+                    }));
+                }
                 tracing::info!(process_id = %current.process, %refusal, "successor pair refused");
                 append_event(
                     &mut tx,
@@ -219,6 +219,38 @@ impl ProcessActivation {
                 return Ok(Succession::Ended(Pass::Again));
             }
         };
+        let mut next = current.record.clone();
+        crate::runtime::process::apply_successor_input(&mut next, &request)
+            .map_err(|error| corrupt("a successor request", error))?;
+        match self.steps.convert_components(&next).await {
+            Ok(Some(cut)) => driver.component_formats = Some(cut),
+            Ok(None) => {}
+            Err(crate::PluginError::Format(refusal)) => {
+                return self
+                    .park(
+                        owned,
+                        tx,
+                        &super::ProcessParkReason::ComponentFormatRefused { refusal },
+                    )
+                    .await
+                    .map(Succession::Ended);
+            }
+            Err(error) => return Err(unavailable(error)),
+        }
+        if current.row.state_rev == 0 && driver.component_formats.is_some() {
+            tx.write(DomainWrite::Process(ProcessWrite::ComponentFormats {
+                process: current.process.clone(),
+                expected_rev: 0,
+                driver_json: driver.encode(),
+            }));
+        }
+        if current.row.state_rev > 0 {
+            tx.write(DomainWrite::Process(ProcessWrite::Advance {
+                process: current.process.clone(),
+                expected_rev: current.row.state_rev,
+                driver_json: driver.encode(),
+            }));
+        }
         if own_formats && let Some(formats) = self.backend.formats().process(kind) {
             tx.stamp_formats(formats.clone());
         }
@@ -238,14 +270,18 @@ impl ProcessActivation {
         );
         // The new env's components are what the process requires from now
         // on, beside the callbacks its unsettled steps were admitted under.
-        let mut next = current.record.clone();
-        crate::runtime::process::apply_successor_input(&mut next, &request)
-            .map_err(|error| corrupt("a successor request", error))?;
-        let environment = self
-            .steps
-            .requirements(&next, &super::step_admission::step_requests(&driver))
-            .await?
-            .unwrap_or_default();
+        let environment = match driver
+            .component_formats
+            .as_ref()
+            .filter(|cut| cut.env_ref == request.env)
+        {
+            Some(cut) => crate::plugin::ProcessComponentDeclaration::env_requirements(&cut.env),
+            None => self
+                .steps
+                .requirements(&next, &super::step_admission::step_requests(&driver))
+                .await?
+                .unwrap_or_default(),
+        };
         tx.set_requires(
             super::step_admission::outstanding_work(current.process, environment, &driver, fold)
                 .requires(),

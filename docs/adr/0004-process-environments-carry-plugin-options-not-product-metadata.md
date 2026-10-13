@@ -4,7 +4,8 @@
 
 An engine process runs under the complete immutable `ProcessEnv` its starter
 states. It carries model data, attachment rules, limits, Restricted tool
-access, capability refs and ordered process component configs. A component
+access, capability refs and ordered process component configs. Each component
+declares one format for both its config and step-state namespace. A component
 decodes its own config to reconstruct its providers, catalog contributions,
 hooks, presentation and named-session read grants. These are process
 components from a separate registry; session plugin options are a session's
@@ -21,6 +22,19 @@ Publication admits the environment against the installed process components.
 A process builds only the components its environment names. Submission admits
 immutable process identity and recorded input; worker execution checks the
 linked requirements before compilation or effects.
+
+Component state publications carry this format, and claim requirements use
+`ObligationToken::for_component` for every component's recorded state/config
+format. A node serves each format its installed component can read.
+
+On reopen, before any component binds or step runs, the owner reconstructs
+the complete committed namespace view. A readable older view converts through
+the same namespace machinery as session plugins. The owner records the whole
+state and config postimage with the new requirements in one fenced driver
+cut. Original publication receipts remain intact; later reopens install the
+recorded postimage and replay subsequent publications without reconverting.
+The immutable starting environment retains its identity; the cut changes its
+component representations, without selecting new configuration or authority.
 
 ## Consequences
 

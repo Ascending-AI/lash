@@ -96,36 +96,13 @@ impl PluginHost {
         let Some(factory) = self.factories().iter().find(|factory| factory.id() == id) else {
             return Ok(namespace);
         };
-        // A namespace this plugin owns must satisfy the store's invariants
-        // as recorded, at whatever stamp: a malformed payload is refused
-        // before the converter or any callback sees it.
-        super::state::validate_namespace(&namespace.values, self.data_limits().plugin_state)?;
-        let native = factory.plugin_declaration().format_version;
-        if namespace.format_version == native {
-            return Ok(namespace);
-        }
-        let value = serde_json::to_value(&namespace.values).map_err(|error| {
-            PluginError::StoredDataCorrupt {
-                record_kind: "plugin_state".into(),
-                message: error.to_string(),
-            }
-        })?;
-        let value =
-            factory.migrate_format(namespace.format_version, FormatNamespace::State, value)?;
-        let values =
-            serde_json::from_value(value).map_err(|error| PluginError::StoredDataCorrupt {
-                record_kind: "plugin_state".into(),
-                message: error.to_string(),
-            })?;
-        super::state::validate_namespace(&values, self.data_limits().plugin_state)?;
-        namespace.values = std::sync::Arc::new(values);
-        namespace.format_version = native;
-        namespace.generation = namespace.generation.checked_add(1).ok_or_else(|| {
-            PluginError::MonotonicCounterOverflow {
-                counter: format!("plugin {} migration generation", factory.id()),
-                current: namespace.generation,
-            }
-        })?;
+        decode_namespace_for(
+            id,
+            &mut namespace,
+            factory.plugin_declaration().format_version,
+            self.data_limits().plugin_state,
+            |from, value| factory.migrate_format(from, FormatNamespace::State, value),
+        )?;
         Ok(namespace)
     }
 
@@ -241,4 +218,112 @@ pub(super) fn decode_config_for(
         }
     }
     Ok(decoded)
+}
+
+/// The whole-view conversion shared by session plugins and process components.
+fn decode_namespace_for(
+    id: &str,
+    namespace: &mut super::PluginNamespaceState,
+    native: FormatVersion,
+    limits: crate::tool_run::StateCommandLimits,
+    migrate: impl FnOnce(FormatVersion, serde_json::Value) -> Result<serde_json::Value, FormatRefusal>,
+) -> Result<(), PluginError> {
+    super::state::validate_namespace(&namespace.values, limits)?;
+    if namespace.format_version == native {
+        return Ok(());
+    }
+    let value = serde_json::to_value(&namespace.values).map_err(|error| {
+        PluginError::StoredDataCorrupt {
+            record_kind: "plugin_state".into(),
+            message: error.to_string(),
+        }
+    })?;
+    let value = migrate(namespace.format_version, value)?;
+    let values = serde_json::from_value(value).map_err(|error| PluginError::StoredDataCorrupt {
+        record_kind: "plugin_state".into(),
+        message: error.to_string(),
+    })?;
+    super::state::validate_namespace(&values, limits)?;
+    namespace.values = std::sync::Arc::new(values);
+    namespace.format_version = native;
+    namespace.generation = namespace.generation.checked_add(1).ok_or_else(|| {
+        PluginError::MonotonicCounterOverflow {
+            counter: format!("plugin {id} migration generation"),
+            current: namespace.generation,
+        }
+    })?;
+    Ok(())
+}
+
+impl super::ProcessComponentRegistry {
+    /// Convert the complete state and config view, for the owner to record
+    /// before binding capabilities. Original publication receipts survive.
+    #[doc(hidden)]
+    pub fn decode_components(
+        &self,
+        env: &crate::ProcessEnv,
+        state: &PluginState,
+        limits: crate::tool_run::StateCommandLimits,
+    ) -> Result<(crate::ProcessEnv, PluginState), PluginError> {
+        let mut decoded = state.clone();
+        let mut entries = Vec::with_capacity(env.components().len());
+        for entry in env.components() {
+            let registered = self.components.get(entry.id().as_str()).ok_or_else(|| {
+                PluginError::ProcessEnvRefused {
+                    refusal: crate::ProcessEnvRefusal::ComponentNotInstalled {
+                        id: entry.id().to_string(),
+                    },
+                }
+            })?;
+            let declaration = &registered.declaration;
+            let native = declaration.format_version;
+            let namespace = decoded
+                .plugins
+                .entry(entry.id().to_string())
+                .or_insert_with(|| super::PluginNamespaceState {
+                    format_version: entry.config().format_version(),
+                    ..Default::default()
+                });
+            for (kind, stored) in [
+                (FormatNamespace::State, namespace.format_version),
+                (FormatNamespace::Config, entry.config().format_version()),
+            ] {
+                if !declaration.readable_formats.contains(&stored) {
+                    return Err(FormatRefusal {
+                        plugin: entry.id().to_string(),
+                        namespace: kind,
+                        stored,
+                        readable: native,
+                    }
+                    .into());
+                }
+            }
+            decode_namespace_for(
+                entry.id().as_str(),
+                namespace,
+                native,
+                limits,
+                |from, value| {
+                    registered
+                        .factory
+                        .migrate_format(from, FormatNamespace::State, value)
+                },
+            )?;
+            let config = if entry.config().format_version() == native {
+                entry.config().value().clone()
+            } else {
+                registered.factory.migrate_format(
+                    entry.config().format_version(),
+                    FormatNamespace::Config,
+                    entry.config().value().clone(),
+                )?
+            };
+            entries.push(crate::ProcessComponentEntry::from_parts(
+                entry.id().clone(),
+                crate::ProcessComponentConfig::new(native, config),
+                entry.sessions().clone(),
+            ));
+        }
+        Ok((env.clone().with_component_entries(entries), decoded))
+    }
 }

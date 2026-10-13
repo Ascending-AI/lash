@@ -291,9 +291,19 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
             process,
             expected_rev,
             driver_json,
+        }
+        | ProcessWrite::ComponentFormats {
+            process,
+            expected_rev,
+            driver_json,
         } => {
+            let statement = if matches!(write, ProcessWrite::ComponentFormats { .. }) {
+                SQL.process.component_formats.sql()
+            } else {
+                SQL.process.advance.sql()
+            };
             let moved = tx
-                .prepare_cached(SQL.process.advance.sql())?
+                .prepare_cached(statement)?
                 .query_row(
                     rusqlite::params![
                         process.as_str(),

@@ -328,8 +328,61 @@ impl ProcessSteps for WorkerSteps {
         }
     }
 
+    async fn convert_components(
+        &self,
+        process: &ProcessRecord,
+    ) -> Result<
+        Option<lash_core_execution::runtime::actor::process::component_formats::ComponentFormatCut>,
+        crate::PluginError,
+    > {
+        use lash_core_execution::runtime::actor::process::component_formats::{
+            ComponentFormatCut, recorded_component_cut, recorded_component_state,
+        };
+        use lash_core_execution::runtime::actor::process::registry_error;
+        let backend = self.0.config.runtime_host.backend();
+        let Some(env_ref) = process.env_ref() else {
+            return Ok(None);
+        };
+        let cut = recorded_component_cut(backend.durable().as_ref(), process)
+            .await
+            .map_err(registry_error)?;
+        let (env, state) = match cut {
+            Some(cut) => (cut.env, Some(cut.state)),
+            None => (
+                lash_core_execution::runtime::load_process_env(
+                    backend.process_env_store().as_ref(),
+                    env_ref,
+                )
+                .await?,
+                None,
+            ),
+        };
+        let state = recorded_component_state(backend.durable().as_ref(), process, &env, state)
+            .await
+            .map_err(registry_error)?;
+        let (decoded_env, decoded_state) = self
+            .0
+            .config
+            .runtime_host
+            .process_engines
+            .components()
+            .decode_components(
+                &env,
+                &state,
+                self.0.config.runtime_host.data_limits.plugin_state,
+            )?;
+        if decoded_env == env && decoded_state == state {
+            return Ok(None);
+        }
+        Ok(Some(ComponentFormatCut {
+            env_ref: env_ref.clone(),
+            env: decoded_env,
+            state: decoded_state,
+        }))
+    }
+
     /// What an engine process carries while it holds `steps` (§6.2): its
-    /// environment's components at their config formats. A
+    /// environment's components at their state/config formats. A
     /// session-turn process keeps none.
     async fn requirements(
         &self,

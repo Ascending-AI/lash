@@ -78,6 +78,8 @@ pub enum ProcessParkReason {
         /// Why, in words.
         message: String,
     },
+    /// A component refused conversion of its recorded state/config format.
+    ComponentFormatRefused { refusal: crate::FormatRefusal },
     /// The store refused its commits as corrupt, its terminal too.
     CommitRefused {
         /// The store's account.
@@ -186,6 +188,7 @@ impl ProcessParkReason {
             Self::UnservedSessionTurn => "unserved_session_turn",
             Self::CommitRefused { .. } => "commit_refused",
             Self::CompositionUnavailable { .. } => "composition_unavailable",
+            Self::ComponentFormatRefused { .. } => "component_format_refused",
         }
     }
 }

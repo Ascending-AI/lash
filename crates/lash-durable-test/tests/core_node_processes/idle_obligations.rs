@@ -386,3 +386,343 @@ async fn a_typed_config_components_unsettled_step_is_served_after_release(tier: 
 }
 
 on_every_tier!(a_typed_config_components_unsettled_step_is_served_after_release);
+
+/// COMPONENT-STATE-FORMAT-FENCES-OLD-NODES: native state written by a
+/// format-2 component is fenced even when its starting config was format 1.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
+    let world = Arc::new(World::default());
+    let (stores, _keep) = stores(Tier::SqliteMemory).await;
+    let two = lash_core::FormatVersion::new(2).unwrap();
+    let (backend, core) = node_over(
+        Arc::clone(&stores),
+        lash_core_execution::DurableSettings::default(),
+        vec![Arc::new(ScriptEngine {
+            kind: IDLE_ENGINE,
+            advance: idle_engine_advance,
+            performs: writes,
+        })],
+        |backend| {
+            lash::LashCore::standard_builder(backend.clone()).process_component(
+                Arc::new(FormatWrite {
+                    world: Arc::clone(&world),
+                    native: lash_core::FormatVersion::ONE,
+                    conversions: Arc::new(AtomicUsize::new(0)),
+                    seen: Arc::default(),
+                }),
+                WRITE_COMPONENT,
+            )
+        },
+    );
+    let process = start_under(
+        &core,
+        &write_environment(),
+        IDLE_ENGINE,
+        serde_json::json!({ "until_ms": wall_millis() + 60_000 }),
+        |request| request,
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while world.writes.lock().unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the native component writes");
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let old_serves = lash::testing::node_serves(&core);
+    core.shutdown().await.unwrap();
+    wake_format_process(&backend, &process).await;
+    let converted_view = Arc::new(Mutex::new(Vec::new()));
+    let (_, newer) = node_over(
+        stores,
+        lash_core_execution::DurableSettings::default(),
+        vec![Arc::new(ScriptEngine {
+            kind: IDLE_ENGINE,
+            advance: idle_engine_advance,
+            performs: writes,
+        })],
+        |backend| {
+            lash::LashCore::standard_builder(backend.clone()).process_component(
+                Arc::new(FormatWrite {
+                    world: Arc::clone(&world),
+                    native: two,
+                    conversions: Arc::new(AtomicUsize::new(0)),
+                    seen: Arc::clone(&converted_view),
+                }),
+                lash_core::ProcessConfigKey::<()>::new(WRITE_COMPONENT.component(), two),
+            )
+        },
+    );
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if converted_view
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(_, joined)| *joined == serde_json::json!([7, 11]))
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the converted view is durably recorded before binding");
+    let serves = lash::testing::node_serves(&newer);
+    newer.shutdown().await.unwrap();
+    wake_format_process(&backend, &process).await;
+    use lash_core::durable_port::{NodeId, NodeSpec};
+    let old = backend
+        .durable()
+        .register_node(&NodeSpec {
+            node: NodeId::new("format-one-probe"),
+            decodes: backend.formats().decodes(),
+            serves: old_serves,
+            ttl_millis: 15_000,
+        })
+        .await
+        .unwrap();
+    assert!(
+        backend
+            .durable()
+            .claim(&old, 64)
+            .await
+            .unwrap()
+            .iter()
+            .all(|claim| claim.actor
+                != lash_core::durable_port::ActorKey::process(process.as_str()).unwrap()),
+        "an old node cannot claim the format-2 state"
+    );
+    backend.durable().release_node(&old).await.unwrap();
+    let requires = claimed_requirements(&backend, &process, serves).await;
+    assert!(
+        requires.contains(
+            &lash_core::ObligationToken::for_component(
+                &lash_core::ProcessComponentId::new(WRITE_COMPONENT.component()).unwrap(),
+                two
+            )
+            .to_string()
+        ),
+        "native component state requires format 2, even with format-1 starting config: {requires:?}"
+    );
+}
+
+struct FormatWrite {
+    world: Arc<World>,
+    native: lash_core::FormatVersion,
+    conversions: Arc<AtomicUsize>,
+    seen: Arc<Mutex<Vec<(serde_json::Value, serde_json::Value)>>>,
+}
+impl lash::process::ProcessComponentFactory for FormatWrite {
+    fn declaration(&self) -> lash::process::ProcessComponentDeclaration {
+        let mut declaration = lash::process::ProcessComponentDeclaration::initial(
+            WRITE_COMPONENT.component(),
+            self.native,
+        )
+        .unwrap();
+        if self.native.get() == 2 {
+            declaration
+                .readable_formats
+                .insert(0, lash_core::FormatVersion::ONE);
+        }
+        declaration
+    }
+    fn config_type(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<()>()
+    }
+    fn validate(
+        &self,
+        _entry: &lash_core::ProcessComponentEntry,
+        _env: &lash::process::ProcessEnv,
+    ) -> Result<(), lash_core::ProcessEnvRefusal> {
+        Ok(())
+    }
+    fn migrate_format(
+        &self,
+        from: lash_core::FormatVersion,
+        namespace: lash::plugins::FormatNamespace,
+        value: serde_json::Value,
+    ) -> Result<serde_json::Value, lash::plugins::FormatRefusal> {
+        assert_eq!(from, lash_core::FormatVersion::ONE);
+        assert_eq!(self.native.get(), 2);
+        match namespace {
+            lash::plugins::FormatNamespace::State => {
+                self.conversions.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(
+                    value,
+                    serde_json::json!({ "left": 7, "right": 11 }),
+                    "the converter sees the whole committed view"
+                );
+                Ok(serde_json::json!({ "joined": [value["left"], value["right"]] }))
+            }
+            lash::plugins::FormatNamespace::Config => Ok(value),
+        }
+    }
+    fn recipe(self: Arc<Self>) -> Result<lash::plugins::ProcessRecipe, lash_core::PluginError> {
+        let mut reg =
+            lash::plugins::PluginRegistrar::<StateWrite>::for_process(WRITE_COMPONENT.component());
+        reg.tools()
+            .provider(lash::tool_provider_key!("tools"), |this, _| {
+                Ok(Arc::new(lash::tools::StaticToolProvider::new(
+                    vec![write_definition()],
+                    this.clone(),
+                )))
+            })?;
+        Ok(lash::plugins::ProcessRecipe::new(
+            WRITE_COMPONENT.component(),
+            reg,
+            move |cx| {
+                if let Some(view) = &cx.state {
+                    self.seen.lock().unwrap().push((
+                        view.get("left").unwrap_or_default(),
+                        view.get("joined").unwrap_or_default(),
+                    ));
+                }
+                Ok(Arc::new(StateWrite {
+                    world: Arc::clone(&self.world),
+                }))
+            },
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct StateWrite {
+    world: Arc<World>,
+}
+#[async_trait::async_trait]
+impl lash::tools::StaticToolExecute for StateWrite {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.world
+            .writes
+            .lock()
+            .unwrap()
+            .push((call.context.call_id().clone(), call.args.clone()));
+        lash_core::ToolAttemptOutcome::Done {
+            result: lash_core::ToolOutcomeDone::ok(serde_json::json!({ "wrote": true }))
+                .with_state(
+                    lash::plugins::StateCommands::new()
+                        .set("left", 7.into())
+                        .set("right", 11.into()),
+                ),
+            intents: Default::default(),
+        }
+    }
+}
+
+/// COMPONENT-STATE-CONVERTS-AT-A-CUT: convert the whole namespace once,
+/// then reopen on the recorded postimage without invoking the converter.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn component_state_converts_at_a_cut_on_sqlite_memory() {
+    let world = Arc::new(World::default());
+    let conversions = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let (stores, _keep) = stores(Tier::SqliteMemory).await;
+    let engine = || -> Vec<Arc<dyn lash_core::ProcessEngine>> {
+        vec![Arc::new(ScriptEngine {
+            kind: IDLE_ENGINE,
+            advance: idle_engine_advance,
+            performs: writes,
+        })]
+    };
+    let build = |native| {
+        let world = Arc::clone(&world);
+        let conversions = Arc::clone(&conversions);
+        let seen = Arc::clone(&seen);
+        move |backend: &lash::Backend| {
+            lash::LashCore::standard_builder(backend.clone()).process_component(
+                Arc::new(FormatWrite {
+                    world,
+                    native,
+                    conversions,
+                    seen,
+                }),
+                lash_core::ProcessConfigKey::<()>::new(WRITE_COMPONENT.component(), native),
+            )
+        }
+    };
+    let (backend, first) = node_over(
+        Arc::clone(&stores),
+        lash_core_execution::DurableSettings::default(),
+        engine(),
+        build(lash_core::FormatVersion::ONE),
+    );
+    let process = start_under(
+        &first,
+        &write_environment(),
+        IDLE_ENGINE,
+        serde_json::json!({ "until_ms": wall_millis() + 120_000 }),
+        |request| request,
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let facts = backend
+                .durable()
+                .run_facts(&lash_core::durable_port::domain::OwnerKey::Process(
+                    process.clone(),
+                ))
+                .await
+                .unwrap();
+            if facts
+                .rows
+                .iter()
+                .any(|row| row.kind == lash_core::durable_port::domain::RunFactKind::XOutcome)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    first.shutdown().await.unwrap();
+    for reopen in 0..2 {
+        wake_format_process(&backend, &process).await;
+        seen.lock().unwrap().clear();
+        let (_, next) = node_over(
+            Arc::clone(&stores),
+            lash_core_execution::DurableSettings::default(),
+            engine(),
+            build(lash_core::FormatVersion::new(2).unwrap()),
+        );
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|(left, joined)| left.is_null() && *joined == serde_json::json!([7, 11]))
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("a binder sees the recorded whole postimage");
+        next.shutdown().await.unwrap();
+        assert_eq!(
+            conversions.load(Ordering::SeqCst),
+            1,
+            "reopen {reopen} never reconverts a recorded postimage"
+        );
+    }
+    assert_eq!(
+        world.writes.lock().unwrap().len(),
+        1,
+        "reopening never reruns a settled body"
+    );
+}
+
+async fn wake_format_process(backend: &lash::Backend, process: &lash_core::ProcessId) {
+    use lash_core::durable_port as durable;
+    let mut tx = durable::MailTx::new();
+    tx.wake(durable::ActorKey::process(process.as_str()).unwrap());
+    backend
+        .durable()
+        .commit_mail(tx, durable::CommitLabel::MAIL_PROCESS)
+        .await
+        .unwrap();
+}

@@ -23,41 +23,41 @@ use super::*;
 use crate::prompt_sections::PromptPurpose;
 use crate::{ProcessId, SessionId, ToolProvider};
 
-/// What a component declares about itself: its id and config formats.
+/// What a component declares about itself: its id and formats for stored state and config.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessComponentDeclaration {
     pub id: ProcessComponentId,
-    /// The config format the component writes natively.
-    pub config_format: FormatVersion,
-    /// Every config format it reads. Contains `config_format`.
-    pub readable_config_formats: Vec<FormatVersion>,
-    /// Every config format it writes. Contains `config_format`.
-    pub writable_config_formats: Vec<FormatVersion>,
+    /// The format of stored state and config the component reads natively.
+    pub format_version: FormatVersion,
+    /// Every state and config format it reads. Contains `format_version`.
+    pub readable_formats: Vec<FormatVersion>,
+    /// Every state and config format it writes. Contains `format_version`.
+    pub writable_formats: Vec<FormatVersion>,
 }
 
 impl ProcessComponentDeclaration {
-    /// The declaration of a component that reads and writes only `config_format`.
+    /// The declaration of a component that reads and writes only `format_version`.
     ///
     /// # Errors
     ///
     /// The id is refused.
-    pub fn initial(id: &str, config_format: FormatVersion) -> Result<Self, PluginError> {
+    pub fn initial(id: &str, format_version: FormatVersion) -> Result<Self, PluginError> {
         Ok(Self {
             id: ProcessComponentId::new(id)
                 .map_err(|error| PluginError::Registration(error.to_string()))?,
-            config_format,
-            readable_config_formats: vec![config_format],
-            writable_config_formats: vec![config_format],
+            format_version,
+            readable_formats: vec![format_version],
+            writable_formats: vec![format_version],
         })
     }
 
     /// The claim requirements a process under `env` carries from its
-    /// start: one config token for every component `env` names.
+    /// start: one format token for every component `env` names.
     pub fn env_requirements(env: &ProcessEnv) -> BTreeSet<crate::ObligationToken> {
         env.components()
             .iter()
             .map(|entry| {
-                crate::ObligationToken::for_config(entry.id(), entry.config().format_version())
+                crate::ObligationToken::for_component(entry.id(), entry.config().format_version())
             })
             .collect()
     }
@@ -66,6 +66,44 @@ impl ProcessComponentDeclaration {
 /// A process component as a host installs it.
 pub trait ProcessComponentFactory: Send + Sync {
     fn declaration(&self) -> ProcessComponentDeclaration;
+
+    /// Pure whole-namespace conversion into the component's native format.
+    fn migrate_format(
+        &self,
+        from: FormatVersion,
+        namespace: FormatNamespace,
+        value: serde_json::Value,
+    ) -> Result<serde_json::Value, FormatRefusal> {
+        if from == self.declaration().format_version {
+            Ok(value)
+        } else {
+            Err(FormatRefusal {
+                plugin: self.declaration().id.to_string(),
+                namespace,
+                stored: from,
+                readable: self.declaration().format_version,
+            })
+        }
+    }
+
+    /// Pure encoding into a declared writer format. Native encoding is identity.
+    fn encode_format(
+        &self,
+        to: FormatVersion,
+        namespace: FormatNamespace,
+        value: &serde_json::Value,
+    ) -> Result<serde_json::Value, FormatRefusal> {
+        if to == self.declaration().format_version {
+            Ok(value.clone())
+        } else {
+            Err(FormatRefusal {
+                plugin: self.declaration().id.to_string(),
+                namespace,
+                stored: to,
+                readable: self.declaration().format_version,
+            })
+        }
+    }
 
     /// The type its config decodes as; checked against the key it is
     /// registered under.
@@ -240,9 +278,9 @@ impl ProcessComponentSpec {
     }
 }
 
-struct RegisteredComponent {
-    factory: Arc<dyn ProcessComponentFactory>,
-    declaration: ProcessComponentDeclaration,
+pub(super) struct RegisteredComponent {
+    pub(super) factory: Arc<dyn ProcessComponentFactory>,
+    pub(super) declaration: ProcessComponentDeclaration,
     recipe: Arc<ProcessRecipe>,
 }
 
@@ -250,7 +288,7 @@ struct RegisteredComponent {
 /// build against. Separate from the session plugin registry.
 #[derive(Clone)]
 pub struct ProcessComponentRegistry {
-    components: Arc<BTreeMap<String, Arc<RegisteredComponent>>>,
+    pub(super) components: Arc<BTreeMap<String, Arc<RegisteredComponent>>>,
     host: ProcessComponentHost,
 }
 
@@ -334,7 +372,7 @@ impl ProcessComponentRegistry {
     ///
     /// A key naming another component than the declaration, a config type
     /// other than the key's, a duplicate id, or a declaration whose formats
-    /// do not contain its own config format.
+    /// do not contain its own native format.
     pub fn register<T: 'static>(
         &mut self,
         factory: Arc<dyn ProcessComponentFactory>,
@@ -354,16 +392,16 @@ impl ProcessComponentRegistry {
                 declaration.id
             )));
         }
-        if key.format() != declaration.config_format
+        if key.format() != declaration.format_version
             || !declaration
-                .readable_config_formats
-                .contains(&declaration.config_format)
+                .readable_formats
+                .contains(&declaration.format_version)
             || !declaration
-                .writable_config_formats
-                .contains(&declaration.config_format)
+                .writable_formats
+                .contains(&declaration.format_version)
         {
             return Err(PluginError::Registration(format!(
-                "process component `{}` declares formats that do not contain its config format",
+                "process component `{}` declares formats that do not contain its native format",
                 declaration.id
             )));
         }
@@ -415,14 +453,17 @@ impl ProcessComponentRegistry {
             .map(|registered| &registered.declaration)
     }
 
-    /// The claim tokens this registry serves (§6.2, S7): every config
+    /// The claim tokens this registry serves (§6.2, S7): every state and config
     /// format each component reads, and the callback tokens of its
     /// installed registrations.
     pub fn served_tokens(&self) -> BTreeSet<crate::ObligationToken> {
         let mut served = self.installed_inventory().served_tokens();
         for declaration in self.declarations() {
-            for format in &declaration.readable_config_formats {
-                served.insert(crate::ObligationToken::for_config(&declaration.id, *format));
+            for format in &declaration.readable_formats {
+                served.insert(crate::ObligationToken::for_component(
+                    &declaration.id,
+                    *format,
+                ));
             }
         }
         served
@@ -452,8 +493,8 @@ impl ProcessComponentRegistry {
             .map(
                 |declaration| crate::store::plugin_writers::PluginWriterRegistration {
                     plugin: declaration.id.writer_key(),
-                    native: declaration.config_format,
-                    writable: declaration.writable_config_formats.clone(),
+                    native: declaration.format_version,
+                    writable: declaration.writable_formats.clone(),
                 },
             )
             .collect()
@@ -477,17 +518,13 @@ impl ProcessComponentRegistry {
                 }
             })?;
             let format = entry.config().format_version();
-            if !registered
-                .declaration
-                .readable_config_formats
-                .contains(&format)
-            {
+            if !registered.declaration.readable_formats.contains(&format) {
                 return Err(ProcessEnvRefusal::ConfigFormatUnreadable {
                     id: entry.id().to_string(),
                     format: format.get(),
                     readable: registered
                         .declaration
-                        .readable_config_formats
+                        .readable_formats
                         .iter()
                         .map(|format| format.get())
                         .collect(),
@@ -627,7 +664,30 @@ impl ProcessComponentRegistry {
         env: &ProcessEnv,
         process: Option<&ProcessId>,
     ) -> Result<ProcessComposition, ProcessEnvRefusal> {
-        let state = Arc::default();
+        let mut snapshot = PluginState::default();
+        for entry in env.components() {
+            snapshot.plugins.insert(
+                entry.id().to_string(),
+                PluginNamespaceState {
+                    format_version: entry.config().format_version(),
+                    ..Default::default()
+                },
+            );
+        }
+        self.compose_with_state(env, process, &snapshot)
+    }
+
+    /// Build from a recorded whole component view, before any binder sees it.
+    #[doc(hidden)]
+    pub fn compose_with_state(
+        &self,
+        env: &ProcessEnv,
+        process: Option<&ProcessId>,
+        snapshot: &PluginState,
+    ) -> Result<ProcessComposition, ProcessEnvRefusal> {
+        let state = Arc::new(std::sync::Mutex::new(
+            state::PluginStateRegistry::from_snapshot(Some(snapshot)),
+        ));
         let BuiltComponents {
             owners,
             mut contributions,
@@ -643,6 +703,16 @@ impl ProcessComponentRegistry {
             registry,
             owners,
             reducers,
+            formats: env
+                .components()
+                .iter()
+                .map(|entry| {
+                    Ok((
+                        entry.id().to_string(),
+                        self.component(entry)?.declaration.format_version,
+                    ))
+                })
+                .collect::<Result<_, ProcessEnvRefusal>>()?,
             state,
         })
     }
@@ -662,6 +732,7 @@ pub struct ProcessComposition {
     pub registry: Arc<crate::ToolRegistry>,
     pub owners: Vec<String>,
     pub(crate) reducers: BTreeMap<String, BTreeMap<String, StateReducer>>,
+    pub(crate) formats: BTreeMap<String, FormatVersion>,
     /// The step state the components' views read (FIG-5268).
     pub(in crate::plugin) state: Arc<std::sync::Mutex<state::PluginStateRegistry>>,
 }
@@ -958,7 +1029,7 @@ pub struct StaticProcessComponent {
 }
 
 impl StaticPluginFactory {
-    /// This factory's spec as a process component at `config_format`.
+    /// This factory's spec as a process component at `format_version`.
     ///
     /// # Errors
     ///
@@ -967,7 +1038,7 @@ impl StaticPluginFactory {
     /// state reducers), or the id is refused.
     pub fn as_component(
         &self,
-        config_format: FormatVersion,
+        format_version: FormatVersion,
     ) -> Result<StaticProcessComponent, PluginError> {
         let spec = self.spec();
         if let Some(error) = spec.errors.first() {
@@ -980,7 +1051,7 @@ impl StaticPluginFactory {
         Ok(StaticProcessComponent {
             declaration: ProcessComponentDeclaration::initial(
                 declaration.id.as_str(),
-                config_format,
+                format_version,
             )?,
             spec: ProcessComponentSpec {
                 registrations,

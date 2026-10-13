@@ -3,9 +3,10 @@
 //!
 //! The process has no plugin session: its namespaces are keyed by component
 //! id, reduced by the components' own reducers and admitted against their
-//! declared formats. They live only in committed step outcomes: an
-//! activation builds an empty state and its lifecycle republishes every
-//! committed step outcome's resolutions into it before any step runs.
+//! declared formats. An activation reconstructs their committed step
+//! publications over the last recorded format postimage before binding any
+//! component. Its lifecycle deduplicates those original receipts and publishes
+//! later outcomes before another step reads them.
 
 use super::publication::{StateAuthority, StateDesk};
 use super::*;
@@ -17,13 +18,13 @@ pub struct ComponentState {
     state: Arc<Mutex<PluginStateRegistry>>,
     owner: crate::RuntimeOwner,
     reducers: BTreeMap<String, BTreeMap<String, StateReducer>>,
-    owners: std::collections::BTreeSet<String>,
+    formats: BTreeMap<String, FormatVersion>,
     trace_limits: lash_trace::TraceLimits,
     data_limits: crate::runtime::RuntimeDataLimits,
 }
 
 impl ComponentState {
-    /// The empty state of `process`, reduced and admitted by `composition`'s
+    /// The recorded state of `process`, reduced and admitted by `composition`'s
     /// components, which its components' views read, under the deployment's
     /// `data_limits`.
     #[must_use]
@@ -38,10 +39,19 @@ impl ComponentState {
             state: Arc::clone(&composition.state),
             owner: crate::RuntimeOwner::Process(process),
             reducers: composition.reducers.clone(),
-            owners: composition.owners.iter().cloned().collect(),
+            formats: composition.formats.clone(),
             trace_limits,
             data_limits,
         }
+    }
+
+    /// Reconstruct recorded publications without constructing a component.
+    #[doc(hidden)]
+    pub fn replay_snapshot(
+        state: PluginState,
+        resolutions: &[StateResolution],
+    ) -> Result<PluginState, PluginStateError> {
+        super::publication::replay_state(state, resolutions)
     }
 
     fn desk(&self) -> StateDesk<'_> {
@@ -55,10 +65,9 @@ impl ComponentState {
 }
 
 impl StateAuthority for ComponentState {
-    /// A component's step state is at the first format: it is never stored
-    /// outside the step outcomes that carry it.
+    /// The single declared format of the component's state and config.
     fn declared(&self, plugin: &str) -> Option<FormatVersion> {
-        self.owners.contains(plugin).then_some(FormatVersion::ONE)
+        self.formats.get(plugin).copied()
     }
 
     fn reducer(&self, plugin: &str, name: &str) -> Option<StateReducer> {

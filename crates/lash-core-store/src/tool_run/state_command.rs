@@ -463,6 +463,8 @@ pub struct StateResolution {
     /// The recorded effect address binds the logical Run and callback phase.
     pub publisher: crate::EffectAddress,
     pub plugin: String,
+    /// The format of the namespace this resolution changes.
+    pub format_version: lash_core_ids::FormatVersion,
     pub origin: StateCommandOrigin,
     /// The segment that published it.
     pub segment: SegmentOrdinal,

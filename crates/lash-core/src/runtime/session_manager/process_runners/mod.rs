@@ -70,12 +70,24 @@ impl RuntimeSessionServices {
     }
 
     /// The claim requirements an engine process carries while it holds tool
-    /// steps (§6.2): its environment's components' config tokens.
+    /// steps (§6.2): its environment's components' state/config format tokens.
     pub(in crate::runtime) fn process_component_requirements(
         &self,
     ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, crate::PluginError> {
         let (_, engine) = self.current.engine_process()?;
-        Ok(crate::plugin::ProcessComponentDeclaration::env_requirements(&engine.env))
+        let mut requires =
+            crate::plugin::ProcessComponentDeclaration::env_requirements(&engine.env);
+        for entry in engine.env.components() {
+            let namespace = crate::plugin::ExecutionState::owner_state(
+                engine.state.as_ref(),
+                entry.id().as_str(),
+            );
+            requires.insert(crate::ObligationToken::for_component(
+                entry.id(),
+                namespace.format_version,
+            ));
+        }
+        Ok(requires)
     }
 
     /// The tools `process`'s steps run (ADR 0132 §10): its catalog, the
