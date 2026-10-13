@@ -17,6 +17,8 @@ use crate::{DomainWrite, DurableError};
 /// A row lock a law holds in a transaction of its own.
 #[async_trait::async_trait]
 pub trait LockHold: Send {
+    /// Waits until the server observes a transaction blocked by this holder.
+    async fn wait_for_blocked(&mut self);
     /// Ends the holding transaction.
     async fn release(self: Box<Self>);
 }
@@ -36,9 +38,6 @@ pub trait ServerProbe: Send + Sync {
         limits: DecodeLimits,
     ) -> (Result<HydratedGraph, GraphRefusal>, u64);
 }
-
-/// How long a law holds a lock while the operation it blocks waits.
-const HOLD: std::time::Duration = std::time::Duration::from_millis(300);
 
 fn release_pin(release: &str, root: NodeId) -> DomainWrite {
     DomainWrite::ReleasePin(ReleasePinWrite::Install {
@@ -351,7 +350,6 @@ pub async fn commits_and_reads_progress_while_the_audit_runs(
     tier: &dyn GraphTier,
     probe: &dyn ServerProbe,
 ) -> LawOutcome {
-    use std::sync::atomic::{AtomicBool, Ordering};
     let owner = owned(tier, "graph-audit-load").await?;
     let limits = DecodeLimits::within_total(1 << 30);
     let mut nodes = staging();
@@ -370,54 +368,53 @@ pub async fn commits_and_reads_progress_while_the_audit_runs(
         bytes: b"held orphan".to_vec(),
     })
     .await;
-    let held = probe.hold(&orphan).await;
-    let released = AtomicBool::new(false);
-    let (audited, beside, ()) = tokio::join!(
-        async {
-            let answer = tier.audit().await;
-            (answer, released.load(Ordering::SeqCst))
-        },
-        async {
-            tokio::time::sleep(HOLD / 4).await;
-            let mut more = staging();
-            let root = value(&mut more, &[&big("load-write")], &[]);
-            let committed = owner_commit(
-                tier,
-                &owner,
-                more.into_nodes(),
-                vec![release_pin("write", root)],
-            )
-            .await;
-            let hydrated = hydrate(
-                tier,
-                RootOwner::ReleasePin {
-                    release: "read".into(),
-                },
-                None,
-                limits,
-            )
-            .await;
-            (committed, hydrated, !released.load(Ordering::SeqCst))
-        },
-        async {
-            tokio::time::sleep(HOLD).await;
-            released.store(true, Ordering::SeqCst);
-            held.release().await;
-        },
-    );
-    let (committed, hydrated, during) = beside;
+    let mut held = probe.hold(&orphan).await;
+    // Keep the lock until all three operations finish or the server observes
+    // a waiter. Scheduling latency is not evidence of a database lock wait.
+    // The timeout is only a watchdog; it never releases the lock to let a
+    // blocked operation finish successfully.
+    let progress = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::select! {
+            () = held.wait_for_blocked() => Err(LawBroken(
+                "the audit or a commit beside it waited for a transaction that held an orphan"
+                    .into(),
+            )),
+            answers = async {
+                tokio::join!(tier.audit(), async {
+                    let mut more = staging();
+                    let root = value(&mut more, &[&big("load-write")], &[]);
+                    let committed = owner_commit(
+                        tier,
+                        &owner,
+                        more.into_nodes(),
+                        vec![release_pin("write", root)],
+                    )
+                    .await;
+                    let hydrated = hydrate(
+                        tier,
+                        RootOwner::ReleasePin {
+                            release: "read".into(),
+                        },
+                        None,
+                        limits,
+                    )
+                    .await;
+                    (committed, hydrated)
+                })
+            } => Ok(answers),
+        }
+    })
+    .await;
+    held.release().await;
+    let (answer, (committed, hydrated)) = progress.map_err(|_| {
+        LawBroken("the audit, commit and read did not finish with the orphan held".into())
+    })??;
     committed.map_err(|error| refused("a commit beside the audit", error))?;
     ensure!(
         hydrated.as_ref().is_ok_and(|graph| graph.root == read),
         "a hydration beside the audit answered {hydrated:?}"
     );
-    ensure!(during, "a commit and a read waited for the audit");
-    let (answer, after) = audited;
     let deleted = answer.map_err(|error| refused("the audit", error))?;
-    ensure!(
-        !after,
-        "the audit waited for a transaction that held an orphan"
-    );
     ensure!(
         deleted == 0,
         "the audit peeled {deleted} blobs another transaction held"

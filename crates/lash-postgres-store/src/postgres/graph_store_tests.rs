@@ -220,10 +220,32 @@ impl GraphTier for Tier {
 /// A row lock held by a transaction of the law's own.
 struct Held {
     tx: Transaction<'static, Postgres>,
+    pool: PgPool,
+    pid: i32,
 }
 
 #[async_trait::async_trait]
 impl LockHold for Held {
+    async fn wait_for_blocked(&mut self) {
+        loop {
+            let blocked: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                     SELECT 1 FROM pg_stat_activity
+                     WHERE datname = current_database()
+                       AND $1 = ANY(pg_blocking_pids(pid))
+                 )",
+            )
+            .bind(self.pid)
+            .fetch_one(&self.pool)
+            .await
+            .expect("observe waiters blocked by the orphan holder");
+            if blocked {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    }
+
     async fn release(self: Box<Self>) {
         self.tx.commit().await.expect("the lock's holder commits");
     }
@@ -233,14 +255,19 @@ impl LockHold for Held {
 impl ServerProbe for Tier {
     async fn hold(&self, hash: &str) -> Box<dyn LockHold> {
         let mut tx = self.pool.begin().await.expect("a lock holder");
-        let locked: Option<String> =
-            sqlx::query_scalar("SELECT hash FROM lash_blobs WHERE hash = $1 FOR KEY SHARE")
-                .bind(hash)
-                .fetch_optional(&mut *tx)
-                .await
-                .expect("the blob is locked");
-        assert!(locked.is_some(), "the held blob {hash} is stored");
-        Box::new(Held { tx })
+        let locked: Option<(String, i32)> = sqlx::query_as(
+            "SELECT hash, pg_backend_pid() FROM lash_blobs WHERE hash = $1 FOR KEY SHARE",
+        )
+        .bind(hash)
+        .fetch_optional(&mut *tx)
+        .await
+        .expect("the blob is locked");
+        let (_, pid) = locked.unwrap_or_else(|| panic!("the held blob {hash} is stored"));
+        Box::new(Held {
+            tx,
+            pool: self.pool.clone(),
+            pid,
+        })
     }
 
     async fn hydration_round_trips(
