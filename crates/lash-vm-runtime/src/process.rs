@@ -31,6 +31,7 @@ use lash_core::{EngineStepKind, EngineStepRun, SettledOutput};
 use lash_kernel_doc::{Document, DocumentId, Name, Signature};
 use tokio_util::sync::CancellationToken;
 
+pub(crate) use documents::ProcessPreparations;
 pub use documents::{DocumentStoreError, KernelDocuments};
 pub use helpers::{
     AdoptedRun, HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession,
@@ -211,6 +212,7 @@ pub fn definition_of_entry(
 #[derive(Clone)]
 pub struct KernelProcessEngine {
     pub(crate) documents: KernelDocuments,
+    effect_preparations: Arc<std::sync::Mutex<documents::EffectPreparations>>,
     /// The library functions the engine's workers hold, by identity: what a
     /// document is linked and admitted against in the parent.
     pub(crate) functions: Arc<lash_kernel_doc::FunctionRegistry>,
@@ -296,6 +298,9 @@ impl KernelProcessEngine {
     ) -> Self {
         Self {
             documents,
+            effect_preparations: Arc::new(std::sync::Mutex::new(
+                documents::EffectPreparations::default(),
+            )),
             functions,
             workers,
             dialect: dialect.to_owned(),
@@ -356,8 +361,8 @@ impl KernelProcessEngine {
     pub(crate) async fn entry(
         &self,
         definition: &KernelProcessDefinition,
-    ) -> Result<Result<(Document, Signature), String>, DocumentStoreError> {
-        let Some(document) = self.documents.get(&definition.document).await? else {
+    ) -> Result<Result<(Arc<Document>, Signature), String>, DocumentStoreError> {
+        let Some(document) = self.documents.get_shared(&definition.document).await? else {
             return Ok(Err(format!(
                 "document `{}` is not published",
                 definition.document
@@ -409,17 +414,15 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
             .await
             .map_err(|error| uncertified(error.to_string()))?
             .map_err(uncertified)?;
-        // The entry's own code is checked where it runs; the closure reads
-        // the document's structure only.
-        let graph = lash_kernel_check::derive_view(&document, self.functions.as_ref())
-            .map_err(|refusal| uncertified(refusal.to_string()))?;
-        lash_kernel_check::entry_effects(
-            &document,
-            &graph,
-            self.functions.as_ref(),
-            &definition.entry,
-        )
-        .map_err(|refusal| uncertified(refusal.to_string()))
+        self.effect_preparations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .effects(
+                definition.document,
+                &document,
+                &self.functions,
+                &definition.entry,
+            )
     }
 
     /// A process runs the document its payload names and resumes under the

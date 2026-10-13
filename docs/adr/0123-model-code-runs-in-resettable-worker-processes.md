@@ -22,11 +22,11 @@ embedder at every park and fuel slice. Where it runs is the embedder's choice
 
 ## Decision
 
-### 1. One machine owns every guest-derived byte
+### 1. One machine owns each run's mutable bytes
 
 A worker hosts one `lash_kernel_vm::KernelMachine` for one execution between
-resets: its tasks, heap, scratch and parked-state export. Nothing
-guest-derived lives in a `static`, `thread_local!`, `OnceLock` or
+resets: its tasks, heap, scratch and parked-state export. No mutable
+run state lives in a `static`, `thread_local!`, `OnceLock` or
 `LazyLock`:
 
 - `scripts/check-vm-static-state.py` refuses a static in a `lash-kernel-*`,
@@ -45,8 +45,32 @@ guest-derived lives in a `static`, `thread_local!`, `OnceLock` or
 
 `Reset` drops the hosted machine, its host wire, its owner and its CPU
 ceiling; the next `Start` builds a new machine from the document it carries.
-Nothing is cleared field by field, so state added to the machine later is
-covered by the same drop. A worker is reset only after a clean end or
+A worker also retains a bounded cache of immutable document preparations
+(FIG-6148): sixteen documents whose encoded content totals at most eight MiB.
+Exact document bytes identify each entry, including its kernel format and
+content-addressed helper function pins; the worker's immutable embedding owns
+the prepared library, so admission never crosses a registry or release boundary.
+A hit retains the same document allocation, reusing its admission and compiled
+code. Eviction drops that allocation; the library reclaims dead weak entries at
+the next admission. Oversized documents run uncached. This cache holds no run,
+guest heap, host wire, owner, bindings, outcomes or authority, and changes no
+charge or resume behaviour. A reset drops all execution state while immutable
+preparation can serve another activation. The hosting plugin factory and
+worker service each retain the same sixteen-document/eight-MiB bound for
+decoded content and transport encodings. The factory shares pure preparation
+across its per-activation engine bindings. The RLM hosting factory retains
+that kernel factory across bindings and resets it when worker or registry
+configuration changes. Every binding keeps its own
+current store port, trace context and recorded settings. A store read still
+fetches and checks current bytes, including absence, before reusing decoding.
+The hosting factory also retains at most sixteen derived entry-effect sets
+totalling eight MiB encoded,
+keyed by verified document identity, entry and the immutable registry it holds.
+The checker graphs and helper-body scratch are dropped after derivation; every
+lookup still reads and checks the document and entry before reusing the result.
+
+Execution state is never cleared field by field, so state added to the machine
+later is covered by the same drop. A worker is reset only after a clean end or
 release. Any guest crash, native panic, exhausted limit, protocol violation
 or timeout discards the worker instead.
 
@@ -83,7 +107,7 @@ document. Laws in `crates/lash-vm-worker/tests/pool_laws.rs`:
 
 ### 4. Authority stays with the parent
 
-The worker holds the machine and nothing else. The parent holds the grants
+The worker holds the machine and its immutable preparations. The parent holds the grants
 and their `execution_binding`s, the effect ledger, admissions and
 `ToolCallId` derivation (ADR 0117). It admits every effect a run requests
 against the admitted execution context: a worker's identity, the bytes it
@@ -318,7 +342,8 @@ run to completion (FIG-4776).
 ## Consequences
 
 Sealed parked graph state lets the broker store and fence a run without
-restoring guest values. A reset drops all guest-derived state by construction.
+restoring guest values. A reset drops the run's mutable execution state by construction; immutable
+document preparation has separate bounded ownership.
 Field-by-field cleanup could miss a newly added state owner; keeping grants
 in returned guest state would let that state replace parent-owned bindings.
 

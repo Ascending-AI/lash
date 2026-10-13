@@ -18,6 +18,10 @@ pub struct RlmProtocolPluginFactory {
     /// The library functions the workers were assembled with; `None` is
     /// the embedding lash ships.
     worker_functions: Option<Arc<lash_kernel_doc::FunctionRegistry>>,
+    /// The host's process preparation owner survives runtime binding.
+    process_factory: std::sync::OnceLock<lash_vm_runtime::KernelProcessPluginFactory>,
+    #[cfg(test)]
+    process_factory_preparations: std::sync::atomic::AtomicUsize,
     /// The kernel version this host's process engine writes, when it
     /// stands in for the build before the synthetic successor.
     #[cfg(feature = "synthetic-next")]
@@ -41,6 +45,9 @@ impl RlmProtocolPluginFactory {
             dialects: vec![dialect],
             workers: lash_vm_client::service::Service::default(),
             worker_functions: None,
+            process_factory: std::sync::OnceLock::new(),
+            #[cfg(test)]
+            process_factory_preparations: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(feature = "synthetic-next")]
             kernel_writes: None,
             helpers: None,
@@ -63,6 +70,7 @@ impl RlmProtocolPluginFactory {
     /// Select the host's worker entry, pool bounds and deadlines. This
     /// service lowers every cell and hosts every cell's machine.
     pub fn with_worker_service(mut self, workers: lash_vm_client::service::Service) -> Self {
+        self.process_factory.take();
         self.workers = workers;
         self
     }
@@ -78,6 +86,7 @@ impl RlmProtocolPluginFactory {
     #[cfg(feature = "synthetic-next")]
     #[must_use]
     pub fn writing_kernel(mut self, writes: lash_kernel_doc::KernelVersion) -> Self {
+        self.process_factory.take();
         self.kernel_writes = Some(writes);
         self
     }
@@ -113,6 +122,7 @@ impl RlmProtocolPluginFactory {
         mut self,
         functions: Arc<lash_kernel_doc::FunctionRegistry>,
     ) -> Self {
+        self.process_factory.take();
         self.worker_functions = Some(functions);
         self
     }
@@ -333,23 +343,32 @@ impl RlmProtocolPluginFactory {
         &self,
         ctx: &lash_core::plugin::ProcessEngineContributionContext<'_>,
     ) -> Result<lash_core::ProcessEngineRegistration, PluginError> {
-        // The processes a session's cells start run documents written in
-        // the session's dialect.
-        let factory = lash_vm_runtime::KernelProcessPluginFactory::new(
-            self.workers.clone(),
-            self.creation_dialect().name(),
-            self.process_bounds(),
-        );
-        let factory = match &self.worker_functions {
-            Some(functions) => factory.with_functions(Arc::clone(functions)),
-            None => factory,
-        };
-        #[cfg(feature = "synthetic-next")]
-        let factory = match self.kernel_writes {
-            Some(writes) => factory.writing_kernel(writes),
-            None => factory,
-        };
-        factory.bind_process_engine(ctx)
+        self.process_factory().bind_process_engine(ctx)
+    }
+
+    fn process_factory(&self) -> &lash_vm_runtime::KernelProcessPluginFactory {
+        self.process_factory.get_or_init(|| {
+            #[cfg(test)]
+            self.process_factory_preparations
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            // The processes a session's cells start run documents written in
+            // the session's dialect.
+            let factory = lash_vm_runtime::KernelProcessPluginFactory::new(
+                self.workers.clone(),
+                self.creation_dialect().name(),
+                self.process_bounds(),
+            );
+            let factory = match &self.worker_functions {
+                Some(functions) => factory.with_functions(Arc::clone(functions)),
+                None => factory,
+            };
+            #[cfg(feature = "synthetic-next")]
+            let factory = match self.kernel_writes {
+                Some(writes) => factory.writing_kernel(writes),
+                None => factory,
+            };
+            factory
+        })
     }
 }
 
@@ -409,6 +428,43 @@ mod tests {
             dialect: dialect.map(str::to_owned),
             behaviour: config.recorded_behaviour(),
         }
+    }
+
+    /// FIG-6148: the RLM hosting factory must preserve the process
+    /// preparation owner across independently created runtime bindings.
+    #[test]
+    fn process_runtime_bindings_prepare_their_factory_once() {
+        let factory = factory();
+        for _ in 0..3 {
+            let _binding = factory.process_factory();
+        }
+        assert_eq!(
+            factory
+                .process_factory_preparations
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+        let factory =
+            factory.with_worker_functions(Arc::new(lash_kernel_doc::FunctionRegistry::new()));
+        for _ in 0..3 {
+            let _binding = factory.process_factory();
+        }
+        assert_eq!(
+            factory
+                .process_factory_preparations
+                .load(std::sync::atomic::Ordering::Relaxed),
+            2
+        );
+        let factory = factory.with_worker_service(lash_vm_client::service::Service::default());
+        for _ in 0..3 {
+            let _binding = factory.process_factory();
+        }
+        assert_eq!(
+            factory
+                .process_factory_preparations
+                .load(std::sync::atomic::Ordering::Relaxed),
+            3
+        );
     }
 
     fn factory() -> RlmProtocolPluginFactory {

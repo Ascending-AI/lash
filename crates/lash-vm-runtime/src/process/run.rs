@@ -130,7 +130,7 @@ async fn kernel_run(
             ));
         }
     };
-    let document = match engine.documents.get(&process_input.document).await {
+    let document = match engine.documents.get_shared(&process_input.document).await {
         Ok(Some(document)) => document,
         Ok(None) => {
             return ended(failure(

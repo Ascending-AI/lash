@@ -120,6 +120,7 @@ pub struct Service {
     receipts: Option<Arc<Mutex<Vec<WorkerReceipt>>>>,
     #[cfg(feature = "testing")]
     call_hold: Option<CallHold>,
+    pub(crate) documents: Arc<Mutex<crate::machine::DocumentEncodings>>,
     config: Arc<PoolConfig>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
     pub(crate) budget: Option<ExecutionBudget>,
@@ -140,6 +141,7 @@ impl Service {
             receipts: None,
             #[cfg(feature = "testing")]
             call_hold: None,
+            documents: Arc::new(Mutex::new(crate::machine::DocumentEncodings::default())),
             config: Arc::new(config),
             pool: Arc::new(Mutex::new(None)),
             budget: None,

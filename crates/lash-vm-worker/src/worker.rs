@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 #[cfg(test)]
@@ -56,11 +57,18 @@ pub(crate) struct Server<'embedding> {
     codec: FrameCodec,
     bootstrap: Bootstrap,
     hosted: Option<Hosted>,
+    /// Immutable preparation survives reset, scoped to this embedding's
+    /// fixed registry. Exact wire content includes format and helper ids.
+    /// At most sixteen documents and eight MiB of encoded input are held;
+    /// a larger document runs normally without becoming resident.
+    documents: VecDeque<(EncodedPayload, Program, String)>,
     fences: Arc<Mutex<Fences>>,
     owner: Option<VmOwner>,
     /// Whether the lease's one `Prepare` crossed, and no run started since.
     prepared: bool,
     cpu_ceiling: Option<libc::rlim_t>,
+    #[cfg(test)]
+    document_decodes: usize,
 }
 
 pub(crate) struct Fences {
@@ -136,6 +144,7 @@ impl<'embedding> Server<'embedding> {
             codec,
             bootstrap,
             hosted: None,
+            documents: VecDeque::new(),
             fences: Arc::new(Mutex::new(Fences {
                 incoming: None,
                 outgoing: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
@@ -144,6 +153,8 @@ impl<'embedding> Server<'embedding> {
             owner: None,
             prepared: false,
             cpu_ceiling: None,
+            #[cfg(test)]
+            document_decodes: 0,
         };
         server.send(WorkerMessage::Ready {
             protocol_version: WORKER_PROTOCOL_VERSION,
@@ -459,27 +470,8 @@ impl<'embedding> Server<'embedding> {
                 detail: Detail::new(error),
             })
         };
-        let document = wire::unwrap(PayloadKind::Document, &start.document)?;
-        let document = std::str::from_utf8(&document)
-            .map_err(|error| undecodable(RunInput::Document, &error))
-            .and_then(|text| {
-                Document::from_json_with_limits(text, self.bootstrap.tuning.kernel_data)
-                    .map_err(|error| undecodable(RunInput::Document, &error))
-            })?;
-        let identity = document
-            .identity()
-            .map_err(|error| undecodable(RunInput::Document, &error))?
-            .to_string();
-        let kernel = document.manifest.kernel;
-        let library = self.embedding.prepared_for(kernel).map_err(|error| {
-            PoolError::breach(ProtocolBreach::Machine {
-                detail: Detail::new(error),
-            })
-        })?;
-        let program = Program {
-            document: Arc::new(document),
-            library: library.clone(),
-        };
+        let (program, identity) = self.program(&start.document)?;
+        let kernel = program.document.manifest.kernel;
         let bounds = Bounds {
             charge: start.bounds.charge,
             memory: start.bounds.memory,
@@ -566,6 +558,70 @@ impl<'embedding> Server<'embedding> {
             staged: None,
         })
     }
+    /// The content key is verified bytes rather than a claimed identity.
+    /// Holding the same Arc also reuses PreparedLibrary's admission and code;
+    /// eviction lets its weak document entries be reclaimed on admission.
+    fn program(&mut self, encoded: &EncodedPayload) -> Result<(Program, String), PoolError> {
+        if let Some(index) = self
+            .documents
+            .iter()
+            .position(|(bytes, _, _)| bytes == encoded)
+            && let Some(hit) = self.documents.remove(index)
+        {
+            let result = (hit.1.clone(), hit.2.clone());
+            self.documents.push_back(hit);
+            return Ok(result);
+        }
+        let undecodable = |input: RunInput, error: &dyn std::fmt::Display| {
+            PoolError::refused(RunRefusal::Undecodable {
+                input,
+                detail: Detail::new(error),
+            })
+        };
+        #[cfg(test)]
+        {
+            self.document_decodes += 1;
+        }
+        let document = wire::unwrap(PayloadKind::Document, encoded)?;
+        let document = std::str::from_utf8(&document)
+            .map_err(|error| undecodable(RunInput::Document, &error))
+            .and_then(|text| {
+                Document::from_json_with_limits(text, self.bootstrap.tuning.kernel_data)
+                    .map_err(|error| undecodable(RunInput::Document, &error))
+            })?;
+        let identity = document
+            .identity()
+            .map_err(|error| undecodable(RunInput::Document, &error))?
+            .to_string();
+        let kernel = document.manifest.kernel;
+        let library = self.embedding.prepared_for(kernel).map_err(|error| {
+            PoolError::breach(ProtocolBreach::Machine {
+                detail: Detail::new(error),
+            })
+        })?;
+        let program = Program {
+            document: Arc::new(document),
+            library: library.clone(),
+        };
+        const BYTES: usize = 8 * 1024 * 1024;
+        if encoded.0.len() <= BYTES {
+            while self.documents.len() >= 16
+                || self
+                    .documents
+                    .iter()
+                    .map(|(bytes, _, _)| bytes.0.len())
+                    .sum::<usize>()
+                    + encoded.0.len()
+                    > BYTES
+            {
+                self.documents.pop_front();
+            }
+            self.documents
+                .push_back((encoded.clone(), program.clone(), identity.clone()));
+        }
+        Ok((program, identity))
+    }
+
     /// Runs the machine one slice and says where the run stands. What it
     /// printed leaves first, in frames of its own.
     fn slice(&mut self, slice: u64, cancel: bool) -> Result<WorkerMessage, PoolError> {
@@ -868,6 +924,149 @@ fn machine_breach(error: impl std::fmt::Display) -> PoolError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-6148: fresh activations and a resumed process prepare identical
+    /// content once per worker, without changing charge or restored state.
+    #[test]
+    fn process_activations_decode_one_document_per_worker() {
+        let config =
+            lash_vm_client::PoolConfig::codemode(lash_vm_client::WorkerEntry::helper("unused"));
+        let codec = FrameCodec::new(config.protocol.decode);
+        let (pipe, mut parent) = UnixStream::pair().expect("pipe");
+        let embedding =
+            crate::embedding::tests::typescript_only(&config.tuning).expect("embedding");
+        let mut server =
+            Server::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding).expect("server");
+        read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1)).expect("ready");
+        let add = embedding
+            .library()
+            .iter()
+            .find(|(name, _)| name.to_string() == "num.add")
+            .map(|(_, id)| id)
+            .expect("helper");
+        let document = lash_kernel_doc::parse_document(&format!(
+            "kernel 1\nnumbers float\nuse num.add = @{add}\nfn work() {{ let n = num.add(3, 4) return n }}\nentry work() -> Any\nmain {{ return null }}",
+        )).expect("document");
+        let start = Start {
+            owner: VmOwner::new("process:law"),
+            dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
+            document: wire::wrap(
+                PayloadKind::Document,
+                document.to_json().expect("json").as_bytes(),
+            )
+            .expect("document payload"),
+            from: StartFrom::Fresh(
+                wire::encode(
+                    PayloadKind::Start,
+                    &StartWire::from(lash_kernel_vm::Start {
+                        target: lash_kernel_vm::Target::Entry(lash_kernel_doc::Name::new("work")),
+                        args: Vec::new(),
+                        bindings: Default::default(),
+                    }),
+                )
+                .expect("start"),
+            ),
+            bounds: config.run_bounds,
+            export: None,
+        };
+        struct Quiet;
+        impl lash_kernel_vm::Host for Quiet {
+            fn clock(&mut self) -> lash_kernel_doc::Timestamp {
+                lash_kernel_doc::Timestamp {
+                    nanoseconds: 0.into(),
+                }
+            }
+            fn random(&mut self) -> u64 {
+                0
+            }
+            fn read(
+                &mut self,
+                _: &lash_kernel_doc::Handle,
+                _: &Datum,
+            ) -> Result<Datum, lash_kernel_doc::ErrorDatum> {
+                Ok(Datum::Null)
+            }
+            fn print(&mut self, _: &Datum) {}
+            fn cancel_requested(&mut self) -> bool {
+                false
+            }
+        }
+        let mut first = server.start(start.clone()).expect("first activation");
+        assert_eq!(
+            first.machine.run(&mut Quiet, 1).expect("slice"),
+            Step::Slice
+        );
+        let parked = graph::export_parked(
+            &mut first.machine,
+            start.owner.clone(),
+            &OwnerBinding::Process {
+                process: "law".to_owned(),
+            },
+            first.release,
+            &first.document,
+            config.protocol.max_vm_state_bytes,
+        )
+        .expect("export");
+        let meters = first.machine.meters();
+        drop(first);
+        let mut second = server.start(start.clone()).expect("second activation");
+        assert_eq!(
+            second.machine.run(&mut Quiet, 1).expect("slice"),
+            Step::Slice
+        );
+        assert_eq!(second.machine.meters().charged, meters.charged);
+        let end = second.machine.run(&mut Quiet, u64::MAX).expect("end");
+        let final_meters = second.machine.meters();
+        drop(second);
+        let mut resumed = start.clone();
+        resumed.from = StartFrom::ParkedGraph(ParkedGraph {
+            state: parked,
+            admissions: Vec::new(),
+        });
+        let mut restored = server.start(resumed).expect("resumed activation");
+        assert_eq!(restored.machine.meters().charged, meters.charged);
+        assert_eq!(
+            restored.machine.run(&mut Quiet, u64::MAX).expect("end"),
+            end
+        );
+        assert_eq!(restored.machine.meters().charged, final_meters.charged);
+        assert!(final_meters.charged > 0);
+        assert_eq!(
+            server.document_decodes, 1,
+            "three activations share one preparation"
+        );
+        // Another format cannot reuse the earlier document's preparation.
+        let mut changed = document;
+        changed.manifest.kernel = 999;
+        let mut other = start.clone();
+        other.document = wire::wrap(
+            PayloadKind::Document,
+            changed.to_json().expect("json").as_bytes(),
+        )
+        .expect("document payload");
+        assert!(server.start(other).is_err());
+        server
+            .start(start)
+            .expect("original preparation remains valid");
+        assert_eq!(server.document_decodes, 2);
+        // Distinct identities evict old residency rather than growing it.
+        for n in 0..17 {
+            let next = lash_kernel_doc::parse_document(&format!(
+                "kernel 1\nnumbers float\nmain {{ return {n} }}",
+            ))
+            .expect("document");
+            server
+                .program(
+                    &wire::wrap(
+                        PayloadKind::Document,
+                        next.to_json().expect("json").as_bytes(),
+                    )
+                    .expect("payload"),
+                )
+                .expect("preparation");
+        }
+        assert_eq!(server.documents.len(), 16);
+    }
 
     /// FIG-5497: the worker must obey the parent's response IO deadline.
     #[test]

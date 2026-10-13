@@ -13,6 +13,9 @@ pub struct KernelProcessPluginFactory {
     dialect: String,
     bounds: RunBounds,
     functions: Option<Arc<lash_kernel_doc::FunctionRegistry>>,
+    /// Content preparation survives per-activation engine construction; it
+    /// carries no backend, execution context, recorded settings or authority.
+    preparations: crate::process::ProcessPreparations,
     #[cfg(feature = "synthetic-next")]
     writes: Option<lash_kernel_doc::KernelVersion>,
 }
@@ -28,6 +31,7 @@ impl KernelProcessPluginFactory {
             dialect: dialect.into(),
             bounds,
             functions: None,
+            preparations: crate::process::ProcessPreparations::default(),
             #[cfg(feature = "synthetic-next")]
             writes: None,
         }
@@ -86,7 +90,23 @@ impl KernelProcessPluginFactory {
         &self,
         ctx: &lash_core::plugin::ProcessEngineContributionContext<'_>,
     ) -> Result<lash_core::ProcessEngineRegistration, PluginError> {
-        let documents = crate::KernelDocuments::new(ctx.backend().module_artifacts());
+        let engine = self
+            .engine(ctx.backend().module_artifacts())?
+            .with_trace_runtime(ctx.trace_runtime().clone());
+        #[cfg(feature = "synthetic-next")]
+        let engine = match self.writes {
+            Some(writes) => engine.writing(writes),
+            None => engine,
+        };
+        Ok(crate::kernel_process_engine_registration(engine))
+    }
+    /// Constructs one runtime binding without retaining its backend authority.
+    /// The contribution boundary supplies trace and format policy separately.
+    pub(crate) fn engine(
+        &self,
+        store: Arc<dyn lash_core::ModuleArtifactStore>,
+    ) -> Result<crate::KernelProcessEngine, PluginError> {
+        let documents = crate::KernelDocuments::new(store);
         let bounds = lash_kernel_vm::Bounds {
             charge: self.bounds.charge,
             memory: self.bounds.memory,
@@ -110,14 +130,8 @@ impl KernelProcessPluginFactory {
                 bounds,
             )
             .map_err(|error| PluginError::Registration(error.to_string()))?,
-        }
-        .with_trace_runtime(ctx.trace_runtime().clone());
-        #[cfg(feature = "synthetic-next")]
-        let engine = match self.writes {
-            Some(writes) => engine.writing(writes),
-            None => engine,
         };
-        Ok(crate::kernel_process_engine_registration(engine))
+        Ok(self.preparations.bind(engine))
     }
 }
 
