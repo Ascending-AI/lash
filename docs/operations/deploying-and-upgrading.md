@@ -204,6 +204,69 @@ affected state while investigating the refusal.
    (re-arm it once its cause is fixed), and keep the ones no build can decode,
    with the listing, in the release record.
 
+## Roll a build that changes the helpers
+
+A build whose library helpers differ from the running build's ships a new
+helper release. Nothing moves unfinished work onto it on its own: a process,
+an open turn's cells and a session's saved functions stay pinned to the
+helper functions they were written against, across every deploy, until they
+end or their host moves them ([kernel design](../kernel/design.md), helper
+releases). Work written against a later release is never claimed by a node
+that lacks it: actor format sets name the release (`kernel-helpers@N`).
+
+**Is the pinned work still serviceable?** A build serves pinned work only
+while it *retains* that work's release: it holds the functions of every
+release it retains beside its own, and resumes each run on exactly the
+functions it pins. Your readiness probe does not tell you this, since a probe
+that lowers a fresh workflow runs on the build's own helpers. Ask the store:
+run the next build's `lashctl kernel-migration list` (or
+`lash::vm::survey_kernel_migration`) before the deploy. It writes nothing,
+and it lists:
+
+- `helper_processes`: each unfinished process that pins a function of an
+  earlier release, with the functions it pins and `refused`, the typed
+  reason its run would not carry onto this build's helpers (`null` when it
+  would);
+- `helper_sessions`: each session whose open turn's cells or saved
+  functions reach one.
+
+While the next build still retains every listed release, deploy it as in
+[the roll above](#roll-postgresql-workers-from-n-to-n1): the old work drains
+onto it and resumes as written.
+
+**When to carry a process.** Move a process onto the build's helpers when
+it should pick up a helper fix, or when a build that stops retaining its
+release is next. Publish the process's workflow again on the new build, so
+that its document calls the build's helpers, under the same entry and
+arguments. Then name that document and the env the process should run under:
+
+```rust
+let asked = core
+    .processes()
+    .succeed(&process, lash::process::ProcessSuccessor::new(payload, env_ref))
+    .await?;
+```
+
+Lash link-checks and holds the new pair, and records the request. The
+process's owner applies it at the run's next park, carrying the parked run
+onto the new document; a crash leaves the old pair or the whole new one.
+Steps already admitted keep the match and call id they were admitted with.
+`AlreadyCurrent` means the process already runs that pair, and a resend
+records nothing. A `ProcessSuccessorRefused` names its typed reason, for
+example `engine` with the survey's `refused` reason when no correspondence
+carries the run, or `admitted_step_relinked` when an admitted step's effect
+would link elsewhere. Nothing is recorded, and the process goes on as
+written. Let it finish on a build that retains its release, or cancel it.
+Sessions have no successor operation: their pinned turns and saved functions
+end, or are ended, on a build that retains the release.
+
+**When to retire a release.** A build that stops retaining a release refuses
+to start while anything still pins it (`DurableError::RetiredDependents`,
+naming `lashctl kernel-migration list`). Deploy it only after that listing,
+run with the retiring build's `lashctl` against the live store, shows no
+`helper_processes` and no `helper_sessions` for the release. Until then, keep
+a build that retains the release serving the drain.
+
 ## Finalize the release
 
 No build moves the fleet epoch `F` now: the release cut owns moving it

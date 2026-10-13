@@ -404,6 +404,12 @@ impl Lifecycle {
         }
     }
 
+    /// Whether it runs a body or holds an outcome not yet committed.
+    #[must_use]
+    pub fn busy(&self) -> bool {
+        !self.running.is_empty() || !self.finished.is_empty()
+    }
+
     /// Drop every running body and every outcome held: the owner ended
     /// without them.
     pub fn abandon(&mut self) {

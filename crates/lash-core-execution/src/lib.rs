@@ -752,6 +752,11 @@ pub(crate) use runtime::{
     prepare_process_start, prepare_process_transition, process_event_invocation,
 };
 pub use runtime::{ConsumerHold, SessionTurnOutcome};
+pub use runtime::{
+    EngineSuccession, ProcessSuccession, ProcessSuccessor, ProcessSuccessorRefusal,
+    ProcessSuccessorRequest, SUCCESSOR_MAIL, SuccessionError, SuccessorCarry,
+    request_process_successor,
+};
 pub use runtime::{ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal};
 pub use runtime::{
     ProcessStartRegistration, ProcessStartTarget, RetiredProcessStatus, TerminalProcessStatus,

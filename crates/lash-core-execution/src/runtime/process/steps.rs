@@ -318,6 +318,14 @@ pub trait ProcessSteps: Send + Sync {
         Ok(None)
     }
 
+    /// How `process`'s engine carries it onto a successor pair its host
+    /// names (D2): what its registration declares, or `None`, which refuses
+    /// every successor request.
+    fn succession(&self, process: &ProcessRecord) -> Option<Arc<dyn super::EngineSuccession>> {
+        let _ = process;
+        None
+    }
+
     /// How long a step body whose token was cancelled may still answer:
     /// the runtime's
     /// [`ExecutionBudgets::stop_grace`](lash_sansio::ExecutionBudgets::stop_grace).

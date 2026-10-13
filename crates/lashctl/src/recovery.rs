@@ -28,8 +28,12 @@ pub(super) enum Command {
     /// version, each one this build's kernel migration would refuse with its
     /// typed reason (a session's by the cell its open turn stopped in), and
     /// each retired library function with the processes that depend on it.
-    /// Run with the next build's `lashctl` before the upgrade; it writes
-    /// nothing.
+    /// It also lists the processes and sessions that still pin an earlier
+    /// helper release. Each such process stays on the helpers it pins until
+    /// it ends or its host carries it onto a successor pair
+    /// (`Processes::succeed`); the listing gives the typed reason its run
+    /// would not carry onto this build's helpers. Run with the next build's
+    /// `lashctl` before the upgrade; it writes nothing.
     KernelMigrationList,
     /// Wake every listed process and session, so a live node of the next
     /// build carries it forward: what an operator runs before rolling out

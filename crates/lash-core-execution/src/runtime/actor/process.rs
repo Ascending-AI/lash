@@ -12,8 +12,11 @@ mod session_turn;
 #[doc(hidden)]
 pub mod state_graph;
 mod step_admission;
+mod succession;
 mod terminal;
 mod waiting;
+
+pub(crate) use driver::in_flight_effects;
 
 pub use activation::ProcessActivation;
 pub use carry::stored_engine_state;

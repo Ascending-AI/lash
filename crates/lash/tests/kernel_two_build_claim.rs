@@ -22,6 +22,12 @@
 //! only once no live node lacks them, and stamps what it writes so such a
 //! node never claims it; and the build that stops retaining the earlier
 //! helpers does not start while a run depends on them.
+//!
+//! The successor laws (FIG-6121, D2) carry a process onto a pair its host
+//! names over the later helpers: its admitted step keeps its call and its
+//! match, a run no correspondence carries is refused typed and goes on as
+//! written, and a process so carried no longer holds back the build that
+//! stops retaining the earlier helpers.
 
 #![cfg(all(feature = "synthetic-next", feature = "rlm", feature = "sqlite"))]
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -1460,24 +1466,111 @@ async fn a_rolling_fleet_never_hands_later_helper_work_to_a_node_that_holds_only
     );
 }
 
-/// HELPER-PIN (FIG-6074 law 16, D2), the refusal: the build that stops
-/// retaining build N's helpers does not start while a process build N
-/// wrote still pins one, and its refusal names how many and the command
-/// that lists them. The process stands outside the helper it pins, so its
-/// run would carry onto the changed helper; a node of the later build
-/// still leaves it pinned, and the build starts once an operator has ended
-/// it.
+/// The identity this build gives `ts.array.forEach`: the counterpart of
+/// helper release 1.0's, which the synthetic successor changed.
+fn current_for_each() -> String {
+    let released = released_for_each();
+    lash_vm_runtime::standard_retired_helpers(1)
+        .expect("the retired helpers of release 1.0")
+        .into_iter()
+        .find(|(function, _)| function.to_string() == released)
+        .and_then(|(_, counterpart)| counterpart)
+        .expect("this build has its own ts.array.forEach")
+        .to_string()
+}
+
+/// [`after_for_each_sleeper`] over this build's `ts.array.forEach`: the
+/// document a host names as the sleeper's successor.
+fn successor_sleeper() -> String {
+    after_for_each_sleeper().replace(&released_for_each(), &current_for_each())
+}
+
+/// The record of `process`.
+async fn record(
+    backend: &lash::Backend,
+    process: &lash_core::ProcessId,
+) -> lash_core::ProcessRecord {
+    backend
+        .process_registry()
+        .get_process(process)
+        .await
+        .expect("the process is read")
+        .expect("the process is retained")
+}
+
+/// The payload and env reference `process`'s record runs under.
+async fn pair(
+    backend: &lash::Backend,
+    process: &lash_core::ProcessId,
+) -> (serde_json::Value, lash_core::ProcessEnvRef) {
+    match record(backend, process).await.input.as_ref() {
+        lash_core::ProcessInput::Engine {
+            payload, launch, ..
+        } => (payload.clone(), launch.env.clone()),
+        other => panic!("a kernel process runs an engine: {other:?}"),
+    }
+}
+
+/// The record of `process` once its owner carried it onto `payload`.
+async fn carried_onto(
+    backend: &lash::Backend,
+    process: &lash_core::ProcessId,
+    payload: &serde_json::Value,
+) -> lash_core::ProcessRecord {
+    for _ in 0..3000 {
+        let record = record(backend, process).await;
+        if matches!(record.input.as_ref(), lash_core::ProcessInput::Engine { payload: now, .. } if now == payload)
+        {
+            return record;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the process was not carried onto its successor within half a minute")
+}
+
+/// The kinds of the events `process` committed, in order.
+async fn event_kinds(
+    core: &lash::LashCore,
+    process: &lash_core::ProcessId,
+) -> Vec<lash::process::ProcessEventKind> {
+    let read = core
+        .processes()
+        .events(
+            lash::process::ProcessHistoryContinuation::start(process.clone()),
+            std::num::NonZeroUsize::new(500).expect("a page size"),
+            lash::process::ProcessEventQueryMode::Lite,
+        )
+        .await
+        .expect("the events are read");
+    let lash::process::ProcessEventReadOutcome::Retained(page) = read.outcome else {
+        panic!("the events are retained");
+    };
+    let lash::process::ProcessEventPageEvents::Lite(events) = page.events else {
+        panic!("a lite page");
+    };
+    events.into_iter().map(|event| event.kind).collect()
+}
+
+/// HELPER-PIN (FIG-6074 law 16, D2) and SUCCESSOR-PAIR-CARRIES-WAITS
+/// (FIG-6121 law 17), the retirement: the build that stops retaining build
+/// N's helpers does not start while a process build N wrote still pins
+/// one, and its refusal names how many and the command that lists them.
+/// The process stands outside the helper it pins, so its run would carry
+/// onto the changed helper. A node of the later build still leaves it
+/// pinned until its host names a successor pair over the later helpers;
+/// carried onto it, the process no longer depends on build N's release,
+/// the closing build starts, and a node of it serves the process.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allowed_after_it_ends()
-{
+async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allowed_after_its_host_carries_it()
+ {
     let stores: Arc<dyn StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("an in-memory store set opens"),
     );
     let (old_backend, old) = serving(&stores, Build::N, "build-n", &[]);
-    let payload = payload(&old_backend, &after_for_each_sleeper()).await;
-    let process = start(&old, payload).await;
+    let started = payload(&old_backend, &after_for_each_sleeper()).await;
+    let process = start(&old, started).await;
     let actor = ActorKey::process(process.as_str()).expect("a process actor key");
     waiting(&old_backend, &actor).await;
     old.drain().await.expect("build N's node drains");
@@ -1516,17 +1609,60 @@ async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allo
         serde_json::json!([{"process": process, "functions": [released_for_each()], "refused": null}]),
         "{listed}"
     );
-    new.processes()
-        .cancel(&process, new.effect_host())
+    let (_, env_ref) = pair(&new_backend, &process).await;
+    let successor = payload(&new_backend, &successor_sleeper()).await;
+    let asked = new
+        .processes()
+        .succeed(
+            &process,
+            lash::process::ProcessSuccessor::new(successor.clone(), env_ref.clone()),
+        )
         .await
-        .expect("the cancel is requested");
-    tokio::time::timeout(
-        Duration::from_secs(60),
-        new.processes().await_output(&process),
-    )
-    .await
-    .expect("the cancelled process ends within a minute")
-    .expect("its end is read");
+        .expect("the successor pair is requested");
+    assert_eq!(asked, lash::process::ProcessSuccession::Requested);
+    let carried = carried_onto(&new_backend, &process, &successor).await;
+    assert_eq!(carried.env_ref(), Some(&env_ref));
+    // The carried run is written against the later helpers: its actor is
+    // in the later build's own set, which no retirement of release 1.0
+    // strands.
+    let lash_core::ProcessInput::Engine { kind, .. } = carried.input.as_ref() else {
+        panic!("a kernel process runs an engine");
+    };
+    let stamped = new_backend
+        .durable()
+        .actor(&actor)
+        .await
+        .expect("the process actor is read")
+        .expect("the process actor exists")
+        .formats;
+    let (node, _) =
+        lash::testing::node_activation(&new, Arc::new(lash_core::durable_port::NoProbe))
+            .expect("the later build's node activation");
+    assert_eq!(Some(&stamped), node.formats().process(kind));
+    let listed = survey(&new_backend).await;
+    assert!(
+        listed.get("helper_processes").is_none(),
+        "the carried process pins only the later helpers: {listed}"
+    );
+    assert_eq!(
+        new.processes()
+            .succeed(
+                &process,
+                lash::process::ProcessSuccessor::new(successor.clone(), env_ref),
+            )
+            .await
+            .expect("a resend is answered"),
+        lash::process::ProcessSuccession::AlreadyCurrent,
+        "a resend of the pair the process runs records nothing"
+    );
+    assert_eq!(
+        event_kinds(&new, &process)
+            .await
+            .into_iter()
+            .filter(|kind| *kind == lash::process::ProcessEventKind::Succeeded)
+            .count(),
+        1
+    );
     new.drain().await.expect("the later build's node drains");
 
     let (_closing_backend, closing) =
@@ -1535,6 +1671,101 @@ async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allo
     assert!(
         started.is_err(),
         "the closing build's node serves once no run depends on the retired helpers: {started:?}"
+    );
+    closing
+        .processes()
+        .cancel(&process, closing.effect_host())
+        .await
+        .expect("the cancel is requested");
+    let ended = tokio::time::timeout(
+        Duration::from_secs(60),
+        closing.processes().await_output(&process),
+    )
+    .await
+    .expect("a node of the closing build ends the carried process within a minute")
+    .expect("its end is read");
+    assert!(
+        matches!(&ended, lash_core::ProcessAwaitOutput::Settled { output }
+            if matches!(output.outcome, lash_core::ToolCallOutcome::Cancelled(_))),
+        "{ended:?}"
+    );
+}
+
+/// `worker()` calls helper release 1.0's `ts.array.forEach` with a
+/// callback that sleeps four seconds, twice, so its run stands inside the
+/// helper's changed body for at least that long once it parks.
+fn long_inside_for_each_worker() -> String {
+    inside_for_each_worker().replace("do sleep 1500", "do sleep 4000")
+}
+
+/// SUCCESSOR-PAIR-CARRIES-WAITS (FIG-6121 law 17), the refusal: a run that
+/// stands inside `ts.array.forEach`, which the later build changed, has no
+/// correspondence onto a successor over the later helper. The host's
+/// request is refused with the typed reason, nothing is recorded, and the
+/// process goes on as written to its answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_successor_no_correspondence_carries_the_run_onto_is_refused_and_the_process_goes_on() {
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let (backend, core) = serving(&stores, Build::Helpers, "successor-refused", &[]);
+    let written = long_inside_for_each_worker();
+    let started = payload(&backend, &written).await;
+    let process = start(&core, started.clone()).await;
+    let actor = ActorKey::process(process.as_str()).expect("a process actor key");
+    waiting(&backend, &actor).await;
+    let (_, env_ref) = pair(&backend, &process).await;
+    let successor = payload(
+        &backend,
+        &written.replace(&released_for_each(), &current_for_each()),
+    )
+    .await;
+    let refused = core
+        .processes()
+        .succeed(
+            &process,
+            lash::process::ProcessSuccessor::new(successor, env_ref.clone()),
+        )
+        .await
+        .expect_err("no correspondence carries the run");
+    let lash::EmbedError::Plugin(lash::plugins::PluginError::ProcessSuccessorRefused {
+        process: named,
+        refusal,
+    }) = refused
+    else {
+        panic!("the refusal is typed: {refused:?}");
+    };
+    assert_eq!(named, process);
+    let lash::process::ProcessSuccessorRefusal::Engine { refusal, .. } = *refusal else {
+        panic!("the engine refused the carry: {refusal:?}");
+    };
+    assert_eq!(refusal["refused"], "parked_inside_changed", "{refusal}");
+    assert_eq!(refusal["function"], serde_json::json!(released_for_each()));
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(60),
+        core.processes().await_output(&process),
+    )
+    .await
+    .expect("the process ends within a minute")
+    .expect("the process's end is read");
+    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("the process ended without an answer: {output:?}");
+    };
+    assert!(output.is_success(), "the process failed: {output:?}");
+    assert_eq!(output.value_for_projection(), serde_json::json!("done"));
+    assert_eq!(
+        pair(&backend, &process).await,
+        (started, env_ref),
+        "the process ran as written"
+    );
+    let kinds = event_kinds(&core, &process).await;
+    assert!(
+        !kinds.contains(&lash::process::ProcessEventKind::Succeeded)
+            && !kinds.contains(&lash::process::ProcessEventKind::SuccessorRefused),
+        "a refused request records nothing: {kinds:?}"
     );
 }
 
@@ -1587,6 +1818,8 @@ fn hold_definition() -> lash::tools::ToolDefinition {
 struct Holds {
     deliveries: std::sync::atomic::AtomicUsize,
     entered: tokio::sync::Notify,
+    /// The call and tool of each delivery, in order.
+    calls: std::sync::Mutex<Vec<(String, String)>>,
 }
 
 /// The hold tool's body: it holds forever on a build that `holds`, and
@@ -1598,7 +1831,11 @@ struct HoldBody {
 
 #[async_trait::async_trait]
 impl lash::tools::StaticToolExecute for HoldBody {
-    async fn execute(&self, _call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+        self.seen.calls.lock().expect("the deliveries").push((
+            call.context.call_id().to_string(),
+            call.tool_id().to_string(),
+        ));
         self.seen
             .deliveries
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -2013,4 +2250,161 @@ async fn a_changed_tool_answers_a_new_process_call_with_a_typed_catchable_error(
         "no body ran"
     );
     later.shutdown().await.expect("the later build stops");
+}
+
+// --- SUCCESSOR-PAIR-CARRIES-WAITS (FIG-6121 law 17, D2) --------------------
+
+/// `worker()` calls `ts.array.forEach` of identity `for_each`, then
+/// performs the hold tool once and answers what it answered.
+fn holding_after_for_each(for_each: &str) -> String {
+    format!(
+        r#"kernel 1
+numbers float
+use ts.array.forEach = @{for_each}
+effect hold.run(input: Any) -> Any
+entry worker() -> Any
+
+fn worker() {{
+  let note = fn(this, args) {{ return null }}
+  let items = ["first", "second"]
+  let args = [note]
+  let out = invoke ts.array.forEach(items, args)
+  let request = {{n: 1}}
+  let got = perform hold.run(request) as Any
+  return got
+}}
+
+main {{
+  finish null
+}}
+"#
+    )
+}
+
+/// The env a held process's successor runs under: the hold tool linked as
+/// before, under another call budget, so the pair names another env.
+fn successor_hold_environment() -> lash::process::ProcessEnv {
+    lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(32))
+        .component(HOLD, &())
+        .link_tool(HOLD.tool_provider("body"), &hold_definition())
+        .build()
+        .expect("the environment builds")
+}
+
+/// SUCCESSOR-PAIR-CARRIES-WAITS (FIG-6121 law 17, D2): a process written
+/// against helper release 1.0 has called `ts.array.forEach` and stands at
+/// an admitted hold step whose body runs. Its host names a successor pair:
+/// the document over this build's `ts.array.forEach` and an env that links
+/// the hold tool as before. While the body runs the run is not at rest, so
+/// the owner records the request and applies nothing; its node dies, and
+/// the process is still on its old pair. A node of the same build claims
+/// it, carries it onto the successor pair in one commit and resumes it
+/// there. The admitted step keeps its call and its tool: its body runs
+/// again under the same call id, nothing is re-matched, and the process
+/// answers what the step answered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_host_carries_a_process_onto_a_successor_pair_and_its_admitted_step_keeps_its_call() {
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let seen = Arc::new(Holds::default());
+    let helpers = |boot: &str, holds: bool| {
+        serving_under(
+            &stores,
+            Build::Helpers,
+            boot,
+            &[],
+            lash::durable::DurableSettings::standard(),
+            vec![hold_component(holds, &seen)],
+            None,
+        )
+    };
+    let env = hold_environment();
+    let (backend, first) = helpers("successor-before", true);
+    let written = payload_under(
+        &first,
+        &backend,
+        &env,
+        &holding_after_for_each(&released_for_each()),
+    )
+    .await;
+    let process = start_under(&first, &env, written.clone()).await;
+    tokio::time::timeout(Duration::from_secs(60), seen.entered.notified())
+        .await
+        .expect("the hold step is delivered");
+    let before = record(&backend, &process).await;
+    let (old_payload, old_env) = pair(&backend, &process).await;
+    assert_eq!(old_payload, written);
+
+    let successor_env = successor_hold_environment();
+    let env_ref = first
+        .host_artifacts()
+        .publish_process_env(&lash_core::HostArtifactPin::mint(), &successor_env)
+        .await
+        .expect("the successor env is published");
+    assert_ne!(env_ref, old_env, "the successor names another env");
+    let successor = payload_under(
+        &first,
+        &backend,
+        &successor_env,
+        &holding_after_for_each(&current_for_each()),
+    )
+    .await;
+    let asked = first
+        .processes()
+        .succeed(
+            &process,
+            lash::process::ProcessSuccessor::new(successor.clone(), env_ref.clone()),
+        )
+        .await
+        .expect("the successor pair is requested");
+    assert_eq!(asked, lash::process::ProcessSuccession::Requested);
+    first.shutdown().await.expect("the node stops");
+    drop(first);
+    assert_eq!(
+        pair(&backend, &process).await,
+        (old_payload, old_env),
+        "a crash before the apply leaves the old pair"
+    );
+
+    let (_, second) = helpers("successor-after", false);
+    let output = tokio::time::timeout(
+        Duration::from_secs(60),
+        second.processes().await_output(&process),
+    )
+    .await
+    .expect("the process ends within a minute")
+    .expect("its end is read");
+    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("the process ended without an answer: {output:?}");
+    };
+    assert!(output.is_success(), "{output:?}");
+    assert_eq!(output.value_for_projection(), serde_json::json!("released"));
+    let after = record(&backend, &process).await;
+    assert_eq!(
+        pair(&backend, &process).await,
+        (successor, env_ref),
+        "the process ran on its successor pair"
+    );
+    assert_ne!(
+        after.identity.definition_id, before.identity.definition_id,
+        "the record names the successor's definition"
+    );
+    let calls = seen.calls.lock().expect("the deliveries").clone();
+    assert_eq!(calls.len(), 2, "one delivery per owner: {calls:?}");
+    assert_eq!(
+        calls[0], calls[1],
+        "the admitted step ran again under its call and its tool"
+    );
+    assert_eq!(
+        event_kinds(&second, &process)
+            .await
+            .into_iter()
+            .filter(|kind| *kind == lash::process::ProcessEventKind::Succeeded)
+            .count(),
+        1
+    );
+    second.shutdown().await.expect("the node stops");
 }

@@ -173,6 +173,8 @@ process_event_kinds! {
     ObserverAdded => "process.observer_added",
     ObserverRemoved => "process.observer_removed",
     ExternalRefSet => "process.external_ref_set",
+    Succeeded => "process.succeeded",
+    SuccessorRefused => "process.successor_refused",
     Completed => "process.completed",
     Failed => "process.failed",
     Cancelled => "process.cancelled",
@@ -258,6 +260,15 @@ pub enum ProcessLifecycleFact {
     },
     /// The process was bound to durable backend work.
     ExternalRefSet { external_ref: ProcessExternalRef },
+    /// The process's owner carried it onto the successor pair its host named
+    /// (FIG-6121): its input and definition id are the request's from here on.
+    Succeeded(super::ProcessSuccessorRequest),
+    /// The process's owner refused the successor pair its host named; the
+    /// process goes on as written.
+    SuccessorRefused {
+        request: super::ProcessSuccessorRequest,
+        refusal: super::ProcessSuccessorRefusal,
+    },
     /// The process ended in `outcome`, written under `authority`.
     Terminal {
         outcome: ProcessTerminal,
@@ -278,6 +289,8 @@ impl ProcessLifecycleFact {
             Self::ObserverAdded { .. } => ProcessEventKind::ObserverAdded,
             Self::ObserverRemoved { .. } => ProcessEventKind::ObserverRemoved,
             Self::ExternalRefSet { .. } => ProcessEventKind::ExternalRefSet,
+            Self::Succeeded(_) => ProcessEventKind::Succeeded,
+            Self::SuccessorRefused { .. } => ProcessEventKind::SuccessorRefused,
             Self::Terminal { outcome, .. } => ProcessEventKind::for_terminal(outcome.status()),
         }
     }
@@ -318,6 +331,10 @@ impl ProcessLifecycleFact {
             }
             Self::ExternalRefSet { external_ref } => {
                 serde_json::json!({ "external_ref": external_ref })
+            }
+            Self::Succeeded(request) => serde_json::json!({ "request": request }),
+            Self::SuccessorRefused { request, refusal } => {
+                serde_json::json!({ "request": request, "refusal": refusal })
             }
             Self::Terminal { outcome, authority } => {
                 let mut payload = serde_json::json!({ "await_output": outcome });
@@ -422,6 +439,16 @@ impl ProcessLifecycleFact {
                     .map_err(invalid)?
                     .external_ref,
             },
+            ProcessEventKind::Succeeded => Self::Succeeded(
+                serde_json::from_value::<SucceededPayload>(payload)
+                    .map_err(invalid)?
+                    .request,
+            ),
+            ProcessEventKind::SuccessorRefused => {
+                let SuccessorRefusedPayload { request, refusal } =
+                    serde_json::from_value(payload).map_err(invalid)?;
+                Self::SuccessorRefused { request, refusal }
+            }
             ProcessEventKind::Completed => terminal(TerminalProcessStatus::Completed, payload)?,
             ProcessEventKind::Failed => terminal(TerminalProcessStatus::Failed, payload)?,
             ProcessEventKind::Cancelled => terminal(TerminalProcessStatus::Cancelled, payload)?,
@@ -485,6 +512,19 @@ struct ObserverPayload {
 #[serde(deny_unknown_fields)]
 struct ExternalRefPayload {
     external_ref: ProcessExternalRef,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SucceededPayload {
+    request: super::ProcessSuccessorRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SuccessorRefusedPayload {
+    request: super::ProcessSuccessorRequest,
+    refusal: super::ProcessSuccessorRefusal,
 }
 
 #[derive(Deserialize)]
@@ -1292,6 +1332,27 @@ impl ProcessEventAppendRequest {
             "process:{process_id}:observer:{session}:remove:{}",
             by.replay_component()
         ))
+    }
+
+    /// The owner's append of `request` carried onto `process`, keyed by the
+    /// request: a repeated commit appends it once.
+    pub fn succeeded(process_id: &ProcessId, request: &super::ProcessSuccessorRequest) -> Self {
+        Self::new(ProcessLifecycleFact::Succeeded(request.clone()))
+            .with_replay_key(request.replay_key(process_id, "process.succeeded"))
+    }
+
+    /// The owner's append of `request` refused with `refusal`, keyed by the
+    /// request.
+    pub fn successor_refused(
+        process_id: &ProcessId,
+        request: &super::ProcessSuccessorRequest,
+        refusal: &super::ProcessSuccessorRefusal,
+    ) -> Self {
+        Self::new(ProcessLifecycleFact::SuccessorRefused {
+            request: request.clone(),
+            refusal: refusal.clone(),
+        })
+        .with_replay_key(request.replay_key(process_id, "process.successor_refused"))
     }
 
     /// The runtime append of one effect occurrence, keyed by the effect's

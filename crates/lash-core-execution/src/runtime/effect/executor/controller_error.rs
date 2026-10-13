@@ -163,7 +163,8 @@ impl From<PluginError> for RuntimeEffectControllerError {
             }
             err @ (PluginError::UnusableSchema { .. }
             | PluginError::UnusableToolSchema { .. }
-            | PluginError::ValueMismatch { .. }) => {
+            | PluginError::ValueMismatch { .. }
+            | PluginError::ProcessSuccessorRefused { .. }) => {
                 err.into_turn_failure(RuntimeErrorCode::Plugin).into()
             }
             err @ (PluginError::AppendReceiptRequestedNodeCountCorrupt { .. }

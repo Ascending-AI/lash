@@ -513,9 +513,11 @@ pub struct KernelMigrationSurvey {
     /// identity, with the processes whose documents list it.
     pub retired_functions: std::collections::BTreeMap<lash_kernel_doc::FunctionId, Vec<ProcessId>>,
     /// Each unfinished kernel process that pins a function of a helper
-    /// release before this build's own, with why a node that adopts would
-    /// not adopt it (FIG-5799). A build that stops retaining the release
-    /// does not start while one is listed.
+    /// release before this build's own, with why its run would not carry
+    /// onto a successor pair over this build's helpers (FIG-5799, FIG-6121).
+    /// It ends, or its host names such a pair, before a build that stops
+    /// retaining the release starts: that build does not start while one is
+    /// listed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub helper_processes: Vec<super::HelperDependentProcess>,
     /// Each session that pins one.

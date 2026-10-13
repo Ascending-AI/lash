@@ -33,6 +33,7 @@ pub mod registry_transitions;
 mod service;
 mod start_staging;
 pub mod steps;
+mod succession;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
 #[cfg(test)]
@@ -148,8 +149,15 @@ pub use start_staging::{
 pub use steps::{
     ProcessStepTools, ProcessSteps, StepAdmission, StepRefusal, StepRuntime, StepToolsError,
 };
+pub use succession::{
+    EngineSuccession, ProcessSuccession, ProcessSuccessor, ProcessSuccessorRefusal,
+    ProcessSuccessorRequest, SUCCESSOR_MAIL, SuccessionError, SuccessorCarry,
+    request_process_successor,
+};
+pub(crate) use succession::{carry_refusal, relinked_step};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
+pub(crate) use validation::apply_successor_input;
 pub use validation::{
     CanonicalProcessEventAppend, ProcessEventAppendPlan, ProcessRegistrationRefusal,
     ProcessStartPlan, ProcessTransition, ProcessTransitionPlan, abandoned_consumer_refusal,

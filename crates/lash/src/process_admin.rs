@@ -632,6 +632,42 @@ impl Processes {
         Ok(())
     }
 
+    /// Carry `id` onto the successor pair its host names (D2): the engine
+    /// payload it goes on as (for a kernel process, its entry over another
+    /// document) and the published env that payload links under. A process
+    /// stays pinned to the pair it was started as; this is the one way it
+    /// moves, and only when its host asks.
+    ///
+    /// The pair is link-checked as a start's is, under `successor.fits`, and
+    /// held under the process's own referrer. Its engine plans the carry of
+    /// the stored run: for a kernel process, a correspondence that replaces
+    /// each library function its document lists by the successor's function
+    /// of the same name, carrying the parked run and its admitted waits
+    /// without re-matching any. Then the request is recorded, and the
+    /// process's owner applies it at the run's next rest under its claim
+    /// fence, rewriting the engine state and the process's recorded input
+    /// in one commit. A request the owner refuses after all is recorded as
+    /// the `process.successor_refused` event.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::ProcessSuccessorRefused`](lash_core::PluginError::ProcessSuccessorRefused)
+    /// with the typed reason: nothing was recorded, and the process goes on
+    /// as written.
+    pub async fn succeed(
+        &self,
+        id: &ProcessId,
+        successor: lash_core::ProcessSuccessor,
+    ) -> Result<lash_core::ProcessSuccession> {
+        Ok(lash_core::request_process_successor(
+            &self.core.backend,
+            &self.core.host_process_engines,
+            id,
+            successor,
+        )
+        .await?)
+    }
+
     /// Recover a published environment from its content reference, including
     /// capability binding ids, contracts and arguments. One store read, without
     /// component builds or session reads. Absent bytes return `None`; corrupt

@@ -419,6 +419,7 @@ pub struct ProcessEngineRegistration {
     engine_steps: Option<Arc<dyn super::engine_state::EngineSteps>>,
     document_provider: Option<Arc<dyn ProcessDocumentProvider>>,
     state_migration: Option<Arc<dyn super::engine_state::EngineStateMigration>>,
+    succession: Option<Arc<dyn super::succession::EngineSuccession>>,
     /// The host's retry policies for engine step kinds, over the engine's.
     engine_step_retries:
         BTreeMap<super::engine_state::EngineStepKind, lash_sansio::ExecutionPolicy>,
@@ -442,6 +443,7 @@ impl ProcessEngineRegistration {
             engine_steps: None,
             document_provider: None,
             state_migration: None,
+            succession: None,
             engine_step_retries: BTreeMap::new(),
         })
     }
@@ -455,6 +457,7 @@ impl ProcessEngineRegistration {
             engine_steps: None,
             document_provider: None,
             state_migration: None,
+            succession: None,
             engine_step_retries: BTreeMap::new(),
         }
     }
@@ -487,6 +490,18 @@ impl ProcessEngineRegistration {
         self
     }
 
+    /// Declare how this engine carries a process onto a successor pair its
+    /// host names (D2, FIG-6121); an engine registered without one refuses
+    /// every successor request.
+    #[must_use]
+    pub fn with_succession(
+        mut self,
+        succession: Arc<dyn super::succession::EngineSuccession>,
+    ) -> Self {
+        self.succession = Some(succession);
+        self
+    }
+
     /// Retry the engine's `kind` steps under `policy` instead of the policy
     /// its [`EngineSteps`](super::engine_state::EngineSteps) declare: the
     /// host's override of the engine author's default, for this deployment.
@@ -508,6 +523,7 @@ pub struct ProcessEngineRegistry {
     engine_steps: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
     document_providers: Arc<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
     state_migrations: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineStateMigration>>>,
+    successions: Arc<BTreeMap<String, Arc<dyn super::succession::EngineSuccession>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
     /// The process components a new environment is admitted against and a
     /// process is composed from (FIG-6034).
@@ -523,6 +539,7 @@ pub struct WeakProcessEngineRegistry {
     document_providers: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
     state_migrations:
         std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineStateMigration>>>,
+    successions: std::sync::Weak<BTreeMap<String, Arc<dyn super::succession::EngineSuccession>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
     components: crate::plugin::ProcessComponentRegistry,
 }
@@ -537,6 +554,7 @@ impl WeakProcessEngineRegistry {
             engine_steps: self.engine_steps.upgrade()?,
             document_providers: self.document_providers.upgrade()?,
             state_migrations: self.state_migrations.upgrade()?,
+            successions: self.successions.upgrade()?,
             artifact_ports: self.artifact_ports.clone(),
             components: self.components.clone(),
         })
@@ -589,6 +607,7 @@ impl ProcessEngineRegistry {
             engine_steps: Arc::downgrade(&self.engine_steps),
             document_providers: Arc::downgrade(&self.document_providers),
             state_migrations: Arc::downgrade(&self.state_migrations),
+            successions: Arc::downgrade(&self.successions),
             artifact_ports: self.artifact_ports.clone(),
             components: self.components.clone(),
         }
@@ -632,12 +651,14 @@ impl ProcessEngineRegistry {
         let mut engine_steps = (*self.engine_steps).clone();
         let mut document_providers = (*self.document_providers).clone();
         let mut state_migrations = (*self.state_migrations).clone();
+        let mut successions = (*self.successions).clone();
         let ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: steps,
             document_provider,
             state_migration,
+            succession,
             engine_step_retries: retries,
         } = registration;
         match steps {
@@ -658,6 +679,10 @@ impl ProcessEngineRegistry {
             Some(migration) => state_migrations.insert(engine.kind().to_string(), migration),
             None => state_migrations.remove(engine.kind()),
         };
+        match succession {
+            Some(succession) => successions.insert(engine.kind().to_string(), succession),
+            None => successions.remove(engine.kind()),
+        };
         engines.insert(engine.kind().to_string(), engine);
         admissions.insert(admission.kind().to_string(), admission);
         Self {
@@ -666,6 +691,7 @@ impl ProcessEngineRegistry {
             engine_steps: Arc::new(engine_steps),
             document_providers: Arc::new(document_providers),
             state_migrations: Arc::new(state_migrations),
+            successions: Arc::new(successions),
             artifact_ports: self.artifact_ports,
             components: self.components,
         }
@@ -755,6 +781,12 @@ impl ProcessEngineRegistry {
         self.state_migrations
             .iter()
             .map(|(kind, migration)| (kind.as_str(), migration))
+    }
+
+    /// How the `kind` engine carries a process onto a successor pair, when
+    /// its registration declares it.
+    pub fn succession(&self, kind: &str) -> Option<Arc<dyn super::succession::EngineSuccession>> {
+        self.successions.get(kind).cloned()
     }
 
     /// Every registered engine, by kind.

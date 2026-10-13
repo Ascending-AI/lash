@@ -105,9 +105,9 @@ pub enum DurableError {
     /// The node's build no longer holds `retired`, the functions an earlier
     /// release shipped, while `dependents` unfinished actors still pin one
     /// of them (FIG-5799): serving, it would strand them, so it does not
-    /// start. Each ends, is adopted onto this build's functions, or is
-    /// refused by an operator first; `command` lists them with a node of
-    /// the build before this one serving.
+    /// start. Each ends, is carried by its host onto a successor pair over
+    /// this build's functions, or is ended by an operator first; `command`
+    /// lists them with a node of the build before this one serving.
     #[error(
         "{dependents} unfinished actors still depend on {retired}, which this build no longer holds: run `{command}` with a node of the build before this one serving, then start this one"
     )]

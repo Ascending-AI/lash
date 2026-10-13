@@ -48,6 +48,10 @@ pub(super) struct Driver {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(super) omitted_effects:
         BTreeMap<String, crate::runtime::process::ProcessEffectOmittedCounts>,
+    /// A host's successor request (FIG-6121), recorded by the pass that read
+    /// its mail and applied, or refused, once the run is at rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) successor: Option<crate::ProcessSuccessorRequest>,
 }
 
 /// One admitted step.
@@ -167,7 +171,31 @@ impl<'de> Deserialize<'de> for StoredWaitId {
     }
 }
 
+/// The effects of the tool steps the driver stored as `stored` holds
+/// admitted and unsettled.
+///
+/// # Errors
+///
+/// The decode error of a driver that does not decode.
+pub(crate) fn in_flight_effects(
+    stored: Option<&str>,
+) -> Result<Vec<lash_kernel_doc::EffectName>, serde_json::Error> {
+    Ok(Driver::decode(stored)?.in_flight_effects())
+}
+
 impl Driver {
+    /// The effects of the tool steps it holds admitted and unsettled: what
+    /// a successor env must link as their admissions matched them.
+    pub(super) fn in_flight_effects(&self) -> Vec<lash_kernel_doc::EffectName> {
+        self.steps
+            .values()
+            .filter_map(|step| match &step.request {
+                StepRequest::Tool { effect, .. } => Some(effect.clone()),
+                StepRequest::Engine { .. } => None,
+            })
+            .collect()
+    }
+
     /// The driver state stored on a process row, or the state before the
     /// first transition.
     pub(super) fn decode(stored: Option<&str>) -> Result<Self, serde_json::Error> {

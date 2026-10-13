@@ -18,6 +18,7 @@ mod helpers;
 mod migrate;
 mod run;
 mod state;
+mod succession;
 mod trace;
 mod workflow;
 
@@ -674,7 +675,10 @@ pub fn kernel_process_engine_registration(
     .with_document_provider(Arc::new(workflow::KernelDocumentProvider {
         engine: Arc::clone(&engine),
     }))
-    .with_engine_steps(Arc::new(KernelEngineSteps::new(Arc::clone(&engine))));
+    .with_engine_steps(Arc::new(KernelEngineSteps::new(Arc::clone(&engine))))
+    .with_succession(Arc::new(succession::KernelSuccession {
+        engine: Arc::clone(&engine),
+    }));
     // A build that interprets the kernel version before its own carries
     // that version's parked processes forward when it claims them.
     match KernelStateMigration::of(engine) {

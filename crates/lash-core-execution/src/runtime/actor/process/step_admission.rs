@@ -378,7 +378,7 @@ fn tool_call_limit(exceeded: crate::ToolCallLimitExceeded) -> crate::ProcessOutc
 
 /// The steps `driver` holds: those admitted and not yet answered to the
 /// engine.
-fn step_requests(driver: &Driver) -> Vec<StepRequest> {
+pub(super) fn step_requests(driver: &Driver) -> Vec<StepRequest> {
     driver
         .steps
         .values()

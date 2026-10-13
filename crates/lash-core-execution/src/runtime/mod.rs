@@ -150,6 +150,11 @@ pub use process::{
     TestProcessRegistryWriteExt, accepted_process_registration, refused_process_registrations,
 };
 pub use process::{ConsumerHold, SessionTurnOutcome};
+pub use process::{
+    EngineSuccession, ProcessSuccession, ProcessSuccessor, ProcessSuccessorRefusal,
+    ProcessSuccessorRequest, SUCCESSOR_MAIL, SuccessionError, SuccessorCarry,
+    request_process_successor,
+};
 pub use process::{FitPolicy, check_links};
 pub use queued_drain_policy::default_queued_drain_policy;
 pub(crate) use queued_drain_policy::shared_drain_mode_policy;

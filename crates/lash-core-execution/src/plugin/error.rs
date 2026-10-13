@@ -234,6 +234,22 @@ define_plugin_errors! {
         => Self::ProcessEnvRefused { .. }
         => "process_env_refused"
         => crate::ToolFailureClass::InvalidRequest;
+/// A host's successor request for a process was refused (FIG-6121, D2):
+    /// nothing was recorded, and the process goes on as written.
+    #[error("process `{process}` is not carried onto its successor: {refusal}")]
+    ProcessSuccessorRefused {
+        process: ProcessId,
+        refusal: Box<crate::ProcessSuccessorRefusal>,
+    }
+        => PluginError::ProcessSuccessorRefused { process, refusal }
+        => {
+        process: ProcessId,
+        refusal: Box<crate::ProcessSuccessorRefusal>,
+    }
+        => Self::ProcessSuccessorRefused { process: process.clone(), refusal: refusal.clone() }
+        => Self::ProcessSuccessorRefused { .. }
+        => "process_successor_refused"
+        => crate::ToolFailureClass::InvalidRequest;
 /// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]
     InvalidToolDiscovery { operation: String }
@@ -990,7 +1006,8 @@ impl PluginError {
             | Self::ProcessAlreadyTerminal { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }
             | Self::UnknownProcessEventKind { .. }
-            | Self::ProcessRegistryCursorBackendMismatch { .. } => Terminal,
+            | Self::ProcessRegistryCursorBackendMismatch { .. }
+            | Self::ProcessSuccessorRefused { .. } => Terminal,
         }
     }
 

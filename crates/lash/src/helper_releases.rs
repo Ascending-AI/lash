@@ -14,13 +14,16 @@
 //! the newest release every live node holds ([`FleetHelperWrites`]).
 //!
 //! A process stays pinned to the functions it was written against: nothing
-//! moves it onto the build's own helpers on its own (FIG-6074, D2). Before
-//! a build that stops retaining a release starts, every process and session
-//! that still pins one of its functions ends, or is ended by an operator.
-//! `lashctl kernel-migration list` names each, a process with why its run
-//! would not carry onto the build's helpers; the build's node refuses to
-//! start while one is left ([`DurableError::RetiredDependents`]), naming
-//! that command. Nothing expires by calendar.
+//! moves it onto the build's own helpers on its own. Its host may carry it
+//! onto a successor pair it names (`Processes::succeed`, FIG-6121, D2),
+//! whose document calls the build's helpers. Before a build that stops
+//! retaining a release starts, every process and session that still pins
+//! one of its functions ends, is ended by an operator, or, for a process,
+//! is carried by its host. `lashctl kernel-migration list` names each, a
+//! process with why its run would not carry onto the build's helpers; the
+//! build's node refuses to start while one is left
+//! ([`DurableError::RetiredDependents`]), naming that command. Nothing
+//! expires by calendar.
 //!
 //! [`DurableError::RetiredDependents`]: lash_core::durable_port::DurableError::RetiredDependents
 
@@ -62,7 +65,8 @@ pub(crate) fn retired_helpers(release: u32) -> Result<RetiredHelpers, KernelMigr
 
 /// Every process and session of `backend` that pins a function of
 /// `retired`, a helper release about to be dropped, with whether each
-/// process's run would carry onto the build's helpers; `functions` is the
+/// process's run would carry onto the build's helpers were its host to name
+/// a successor pair over them (`Processes::succeed`); `functions` is the
 /// build's library. It reads the store and writes nothing.
 ///
 /// # Errors
@@ -233,8 +237,9 @@ impl lash_core::RetirementCheck for HelperRetirement {
         names.join(", ")
     }
 
-    /// The listing that names each dependent, which ends or an operator
-    /// ends: nothing wakes it onto the build's helpers (FIG-6074, D2).
+    /// The listing that names each dependent, which ends, an operator
+    /// ends, or, for a process, its host carries onto a successor pair:
+    /// nothing moves it onto the build's helpers on its own (FIG-6121, D2).
     fn command(&self) -> String {
         HELPER_DEPENDENTS_LIST.to_owned()
     }

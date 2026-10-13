@@ -62,6 +62,7 @@ use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};
 use super::effects::{record_effect, record_omitted_effects};
 use super::session_turn::SessionTurns;
 use super::step_admission::{Admission, Consumed, Handoff, Hold};
+use super::succession::{Current, Succession};
 use super::terminal::{ProcessParkReason, cancelled, record_park, record_terminal};
 use super::{CascadeProgress, end_scope};
 use crate::runtime::actor::activation_loop;
@@ -196,6 +197,14 @@ pub(super) struct Live {
     published: Option<u64>,
     /// The `requires` the actor's row holds: claimed, then as written.
     pub(super) requires: Vec<String>,
+}
+
+impl Live {
+    /// Whether a step body of this activation runs, or holds an outcome
+    /// not yet committed.
+    pub(super) fn busy(&self) -> bool {
+        self.lifecycle.busy()
+    }
 }
 
 pub(super) fn corrupt(what: &str, error: impl std::fmt::Display) -> DurableError {
@@ -519,7 +528,7 @@ impl ProcessActivation {
             }
         }
         let written = state.format.clone();
-        let mut tx = match self
+        let tx = match self
             .carry_forward(
                 owned,
                 tx,
@@ -534,6 +543,17 @@ impl ProcessActivation {
         {
             super::carry::Carry::Ended(pass) => return Ok(pass),
             super::carry::Carry::AsWritten(tx) => *tx,
+        };
+        let current = Current {
+            process,
+            row: &row,
+            record: &record,
+            engine: engine.as_ref(),
+            root: root.as_ref(),
+        };
+        let mut tx = match self.record_successor(owned, tx, &current, &driver).await? {
+            Succession::Ended(pass) => return Ok(pass),
+            Succession::AsWritten(tx) => *tx,
         };
         let now = owned.store().now().await?;
         if let (Some(origin), Some(until)) = (cancel, driver.grace_until)
@@ -573,6 +593,15 @@ impl ProcessActivation {
             owned.drain_release(tx).await?;
             return Ok(Pass::Released);
         }
+        // A successor pair the host asked for is applied once the run is at
+        // rest, before anything else of it moves.
+        let mut tx = match self
+            .apply_recorded_successor(owned, tx, &current, &driver, &state, &fold, live)
+            .await?
+        {
+            Succession::Ended(pass) => return Ok(pass),
+            Succession::AsWritten(tx) => *tx,
+        };
         let event = match self
             .next_event(
                 &mut tx,

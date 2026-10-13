@@ -597,6 +597,13 @@ pub use runtime::{ObservationSource, work_with_observations};
 /// artifacts through (ADR 0113 §3.3), for hosts that assemble a registry
 /// outside `RuntimeHostConfig`.
 pub use lash_core_execution::runtime::{ArtifactReferrerPorts, ReferrerAcquisition};
+/// A host's successor pair for a process, and how an engine carries a
+/// process onto one (FIG-6121, D2).
+pub use lash_core_execution::{
+    EngineSuccession, ProcessSuccession, ProcessSuccessor, ProcessSuccessorRefusal,
+    ProcessSuccessorRequest, SUCCESSOR_MAIL, SuccessionError, SuccessorCarry,
+    request_process_successor,
+};
 pub use runtime::{
     AbandonEvidence, AbandonWriter, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope,
     AdmittedTurnInputs, Ancestry, ArgsMismatch, ArgsMode, AssistantResponseHookEvents,

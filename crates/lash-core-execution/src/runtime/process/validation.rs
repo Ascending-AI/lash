@@ -423,8 +423,10 @@ pub fn apply_process_event_projection(
                 }
             }
         }
+        ProcessLifecycleFact::Succeeded(request) => apply_successor_input(record, request)?,
         ProcessLifecycleFact::Terminal { outcome, .. } => ends = Some(outcome.clone()),
-        ProcessLifecycleFact::ObserverAdded { .. }
+        ProcessLifecycleFact::SuccessorRefused { .. }
+        | ProcessLifecycleFact::ObserverAdded { .. }
         | ProcessLifecycleFact::ObserverRemoved { .. }
         | ProcessLifecycleFact::EffectOutcome(_)
         | ProcessLifecycleFact::EffectOmissions(_) => {}
@@ -442,6 +444,40 @@ pub fn apply_process_event_projection(
     }
     record.updated_at_ms = event.occurred_at;
     record.last_event_sequence = event.sequence;
+    Ok(())
+}
+
+/// `record` going on as the successor pair `request` names: its engine
+/// input's payload and env, under the engine settings it was started with,
+/// and the definition id the request's payload is admitted as. The input's
+/// only rewrite, which its owner makes under its fence once the run was
+/// carried onto the pair (FIG-6121).
+///
+/// # Errors
+///
+/// A terminal process, or one that runs no engine.
+pub(crate) fn apply_successor_input(
+    record: &mut ProcessRecord,
+    request: &super::ProcessSuccessorRequest,
+) -> Result<(), PluginError> {
+    if record.is_terminal() {
+        return Err(PluginError::ProcessAlreadyTerminal {
+            process_id: record.id.clone(),
+            status: record.status(),
+        });
+    }
+    let crate::ProcessInput::Engine { kind, launch, .. } = record.input.as_ref() else {
+        return Err(PluginError::Session(format!(
+            "process `{}` runs no engine, and has no successor",
+            record.id
+        )));
+    };
+    record.input = std::sync::Arc::new(crate::ProcessInput::Engine {
+        kind: kind.clone(),
+        payload: request.payload.clone(),
+        launch: crate::EngineLaunch::new(request.env.clone(), launch.settings.clone()),
+    });
+    record.identity.definition_id = request.definition_id.clone();
     Ok(())
 }
 

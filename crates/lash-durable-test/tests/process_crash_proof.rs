@@ -37,6 +37,19 @@
 //! whole tree ends, every descendant `ParentEnded`. A run always makes the
 //! same batches, but which node makes each depends on which claims an actor
 //! first, so the cuts are counted across both nodes.
+//!
+//! The succession scenario (FIG-6121, D2) carries a process S onto a
+//! successor pair its host names: another payload and another published
+//! env. S runs a step, whose first admission has the host send the
+//! request, then awaits H with a one-second deadline, and once that wait times out
+//! runs a second step and ends. Its engine's state names the document it
+//! runs, and so does each step it asks for. Every `process.advance` commit,
+//! the owner's recording of the request and its apply among them, is cut
+//! under every fault: a crash before the apply leaves the old pair with the
+//! request pending, and one after it the new pair whole. No step is ever
+//! admitted under a record whose pair is not the state's, the step after
+//! the carry runs on the new pair, S ends on it, and one
+//! `process.succeeded` is recorded.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -59,10 +72,11 @@ use lash_core_execution::runtime::actor::round::{
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     Ancestry, Backend, BackendParts, CancelOrigin, DurableSettings, EngineAction, EngineEvent,
-    EngineState, EngineStateFormat, LifetimeDecision, NoProjectionProviders, ProcessEngine,
-    ProcessId, ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, ScopeGrant, ScopeId, StepName, StepRequest, ToolCallId, ToolCallOutput,
-    ToolCancellation,
+    EngineState, EngineStateFormat, EngineSuccession, LifetimeDecision, NoProjectionProviders,
+    ProcessEngine, ProcessId, ProcessInfraError, ProcessInput, ProcessLifecycleFact,
+    ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessSuccessorRequest,
+    SUCCESSOR_MAIL, ScopeGrant, ScopeId, StepName, StepRequest, SuccessionError, SuccessorCarry,
+    ToolCallId, ToolCallOutput, ToolCancellation,
 };
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_durable::domain::{OwnerKey, RunFactKind};
@@ -107,6 +121,49 @@ fn step(name: &str, tool: &str) -> StepRequest {
         input: json!({ "step": name }),
         site: None,
         matched: None,
+    }
+}
+
+/// A step of the succession scenario, naming the document `script` runs.
+fn carried_step(name: &str, tool: &str, script: &Value) -> StepRequest {
+    StepRequest::Tool {
+        step: StepName(name.to_owned()),
+        effect: lash_core_execution::testing::effect(tool),
+        input: json!({ "step": name, "doc": script["doc"] }),
+        site: None,
+        matched: None,
+    }
+}
+
+/// How the proof engine carries a run onto a successor: its state names
+/// the successor's document from then on.
+struct ProofSuccession;
+
+#[async_trait::async_trait]
+impl EngineSuccession for ProofSuccession {
+    async fn carry(
+        &self,
+        _process: &ProcessId,
+        _from: &Value,
+        to: &Value,
+        state: Option<&EngineState>,
+    ) -> Result<SuccessorCarry, SuccessionError> {
+        let Some(state) = state else {
+            return Ok(SuccessorCarry::Carried {
+                state: None,
+                own_formats: false,
+            });
+        };
+        let unreadable = |error: serde_json::Error| SuccessionError::Unavailable(error.to_string());
+        let mut script: Value = serde_json::from_slice(&state.bytes).map_err(unreadable)?;
+        script["doc"] = to["doc"].clone();
+        Ok(SuccessorCarry::Carried {
+            state: Some(EngineState {
+                format: state.format.clone(),
+                bytes: serde_json::to_vec(&script).map_err(unreadable)?,
+            }),
+            own_formats: false,
+        })
     }
 }
 
@@ -192,7 +249,32 @@ impl ProcessEngine for ProofEngine {
         ));
         script["n"] = json!(script["n"].as_u64().unwrap_or(0) + 1);
         let root = script["act"] == "root";
+        let carried = script["act"] == "carry";
         let action = match event {
+            EngineEvent::Started { .. } if carried => EngineAction::Steps {
+                steps: vec![carried_step("once", ONCE, &script)],
+                wake: None,
+            },
+            EngineEvent::StepSettled { .. } if carried => {
+                let settled = script["settled"].as_u64().unwrap_or(0) + 1;
+                script["settled"] = json!(settled);
+                if settled == 1 {
+                    EngineAction::AwaitProcess {
+                        process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
+                            .map_err(infra)?,
+                        bound: lash_core::ParkBound::Within(Duration::from_millis(WAIT_MS)),
+                        site: None,
+                    }
+                } else {
+                    EngineAction::Terminal(ProcessOutcome::from_tool_output(
+                        ToolCallOutput::success(json!({ "done": true, "doc": script["doc"] })),
+                    ))
+                }
+            }
+            EngineEvent::ProcessWaitTimedOut { .. } if carried => EngineAction::Steps {
+                steps: vec![carried_step("after", AGAIN, &script)],
+                wake: None,
+            },
             EngineEvent::Started { .. } if root => EngineAction::Steps {
                 steps: vec![step("once", ONCE), step("again", AGAIN)],
                 wake: None,
@@ -278,6 +360,13 @@ impl ProcessEngine for ProofEngine {
 struct World {
     entries: Mutex<Vec<(ToolCallId, String)>>,
     unadmitted: Mutex<Vec<(ToolCallId, String)>>,
+    /// The successor request the host sends to S when its first step is
+    /// admitted, until it is sent.
+    successor: Mutex<Option<(ProcessId, ProcessSuccessorRequest)>>,
+    /// Each step of the succession scenario at its first admission: the
+    /// document its input names, and the document and env of the record it
+    /// was admitted under.
+    pairs: Mutex<BTreeMap<String, (Value, Value, String)>>,
 }
 
 impl World {
@@ -320,16 +409,54 @@ impl ProcessSteps for ProofSteps {
 
     async fn admit(
         &self,
-        _process: &ProcessRecord,
+        process: &ProcessRecord,
         step: &StepRequest,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
+        if let (
+            StepRequest::Tool {
+                step: name, input, ..
+            },
+            ProcessInput::Engine {
+                payload, launch, ..
+            },
+        ) = (step, &*process.input)
+            && let Some(doc) = input.get("doc")
+        {
+            self.world
+                .pairs
+                .lock_recover()
+                .entry(name.0.clone())
+                .or_insert_with(|| (doc.clone(), payload["doc"].clone(), launch.env.to_string()));
+            // The host, outside the deployment, asks for S's successor as
+            // S's first step is first admitted: its send is uncut, and no
+            // kill of the node admitting the step stops it.
+            if let Some((process, request)) = self.world.successor.lock_recover().take() {
+                let database = Arc::clone(&self.database);
+                tokio::spawn(async move {
+                    let mut tx = lash_durable::MailTx::new();
+                    tx.append(
+                        actor(&process),
+                        lash_durable::MailKind::new(SUCCESSOR_MAIL),
+                        serde_json::to_string(&request).expect("the request encodes"),
+                    );
+                    database
+                        .commit_mail(tx, CommitLabel::MAIL_PROCESS)
+                        .await
+                        .expect("the host's request commits");
+                });
+            }
+        }
         Ok(StepAdmission::new(
             lash_core_execution::testing::step_tool(step, KIND),
             policy(&lash_core_execution::testing::step_tool(step, KIND)),
             ExecutionLimit::starting_at(now_ms, Duration::from_secs(60), Duration::from_secs(60)),
             None,
         ))
+    }
+
+    fn succession(&self, _process: &ProcessRecord) -> Option<Arc<dyn EngineSuccession>> {
+        Some(Arc::new(ProofSuccession))
     }
 
     /// Never asked: no step of these parks.
@@ -466,6 +593,8 @@ enum Shape {
     Run,
     /// A cancelled tree three levels deep.
     Cascade,
+    /// S, carried onto a successor pair while it runs.
+    Succession,
 }
 
 struct Proof {
@@ -479,6 +608,8 @@ struct Proof {
     backend: Mutex<Option<Backend>>,
     database: Mutex<Option<Arc<dyn DurableStore>>>,
     seeded: Mutex<Seeded>,
+    /// The pair the succession scenario's host names.
+    successor: Mutex<Option<ProcessSuccessorRequest>>,
 }
 
 impl Proof {
@@ -493,6 +624,7 @@ impl Proof {
             backend: Mutex::default(),
             database: Mutex::default(),
             seeded: Mutex::default(),
+            successor: Mutex::default(),
         }
     }
 
@@ -656,6 +788,47 @@ impl Scenario for Proof {
                     .map_err(|error| error.to_string())?;
                 seeded.root = Some(root);
             }
+            Shape::Succession => {
+                let backend = self.backend();
+                let envs = backend.process_env_store();
+                let env =
+                    lash_core_execution::testing::process_execution_env_fixture(envs.as_ref())
+                        .await;
+                let next = lash_core_execution::testing::publish_process_env_for_testing(
+                    envs.as_ref(),
+                    &lash_core_execution::testing::host_pin_claim_for_testing(),
+                    &lash_core_execution::testing::process_env_with_limit(2 * 1024),
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+                assert_eq!(
+                    env,
+                    lash_core_execution::testing::process_execution_env_fixture_ref()
+                );
+                let held = self.register(registration(hold("h"), None)).await?;
+                let started =
+                    json!({ "tag": "s", "act": "carry", "await": held.as_str(), "doc": 1 });
+                let process = self.register(registration(started, None)).await?;
+                let record = backend
+                    .process_registry()
+                    .get_process(&process)
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .ok_or("S is registered")?;
+                // The successor is another program, under its own tag: a
+                // start of it is no replay of S's first transition (S2),
+                // which a request that lands before that transition commits
+                // replaces.
+                let successor = ProcessSuccessorRequest {
+                    payload: json!({ "tag": "s2", "act": "carry", "await": held.as_str(), "doc": 2 }),
+                    env: next,
+                    definition_id: record.identity.definition_id.clone(),
+                };
+                *self.successor.lock_recover() = Some(successor.clone());
+                *self.world.successor.lock_recover() = Some((process.clone(), successor));
+                seeded.others.push(held);
+                seeded.root = Some(process);
+            }
         }
         *self.seeded.lock_recover() = seeded;
         // A starts and claims first, B once A is settled, as in V0.
@@ -706,6 +879,9 @@ impl Scenario for Proof {
             Shape::Cascade => {
                 find(&end, "origin").and_then(Value::as_str) == Some("operator_requested")
             }
+            Shape::Succession => {
+                find(&end, "done") == Some(&json!(true)) && find(&end, "doc") == Some(&json!(2))
+            }
         };
         if !expected {
             violations.push(format!("the root did not end as its shape says: {end}"));
@@ -737,6 +913,9 @@ impl Scenario for Proof {
         if self.shape == Shape::Run {
             violations.extend(self.step_laws(nodes.database(), &root, &entries).await);
         }
+        if self.shape == Shape::Succession {
+            violations.extend(self.succession_laws(&root).await);
+        }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &nodes.script().trace()));
         }
@@ -745,6 +924,64 @@ impl Scenario for Proof {
 }
 
 impl Proof {
+    /// S ran each step on one whole pair, carried onto the successor's
+    /// before the step after its wait, and ended on it, with one
+    /// `process.succeeded`.
+    async fn succession_laws(&self, process: &ProcessId) -> Vec<String> {
+        let mut violations = Vec::new();
+        let successor = self
+            .successor
+            .lock_recover()
+            .clone()
+            .expect("the succession scenario names a successor");
+        let old = lash_core_execution::testing::process_execution_env_fixture_ref().to_string();
+        let new = successor.env.to_string();
+        let pairs = self.world.pairs.lock_recover().clone();
+        for (step, (doc, record_doc, env)) in &pairs {
+            let whole = (doc == &json!(1) && env == &old) || (doc == &json!(2) && env == &new);
+            if doc != record_doc || !whole {
+                violations.push(format!(
+                    "step `{step}` of document {doc} was admitted under a record of document \
+                     {record_doc} and env {env}: a mixed pair"
+                ));
+            }
+        }
+        if pairs.get("after").map(|(doc, ..)| doc) != Some(&json!(2)) {
+            violations.push(format!(
+                "the step after the wait did not run on the successor: {pairs:?}"
+            ));
+        }
+        match self.backend().process_registry().get_process(process).await {
+            Ok(Some(record)) => match &*record.input {
+                ProcessInput::Engine {
+                    payload, launch, ..
+                } if *payload == successor.payload && launch.env == successor.env => {}
+                other => violations.push(format!("S did not end on its successor: {other:?}")),
+            },
+            other => violations.push(format!("S's record: {other:?}")),
+        }
+        let events = self
+            .backend()
+            .process_registry()
+            .recent_events(process, 500)
+            .await
+            .unwrap_or_default();
+        let succeeded = events
+            .iter()
+            .filter(|event| matches!(event.fact, ProcessLifecycleFact::Succeeded(_)))
+            .count();
+        let refused = events
+            .iter()
+            .filter(|event| matches!(event.fact, ProcessLifecycleFact::SuccessorRefused { .. }))
+            .count();
+        if succeeded != 1 || refused != 0 {
+            violations.push(format!(
+                "S recorded {succeeded} successions and {refused} refusals"
+            ));
+        }
+        violations
+    }
+
     /// NR-1 to NR-4 over R's two steps.
     async fn step_laws(
         &self,
@@ -953,5 +1190,27 @@ async fn a_cascade_three_levels_deep_ends_across_a_crash_at_each_batch() {
     assert!(
         !report.cells.is_empty(),
         "the matrix cut no cascade.batch commit"
+    );
+}
+
+/// S is carried onto the pair its host names while it runs, cut at every
+/// `process.advance` commit (the owner's recording of the request and its
+/// apply among them) under every fault: each step runs on one whole pair,
+/// the old one before the apply and the new one after it, and S ends on
+/// the new pair with one `process.succeeded` (FIG-6121).
+#[tokio::test]
+async fn a_successor_pair_cut_at_every_advance_leaves_the_old_pair_or_the_whole_new_one() {
+    let report = Matrix::new()
+        .faults(&FAULTS)
+        .labels(&[CommitLabel::PROCESS_ADVANCE])
+        .across_nodes()
+        .horizon(Duration::from_secs(600))
+        .run_test(|| Proof::new(Shape::Succession))
+        .await;
+    eprintln!("succession: {} cells", report.cells.len());
+    report.assert_held();
+    assert!(
+        !report.cells.is_empty(),
+        "the matrix cut no process.advance commit"
     );
 }

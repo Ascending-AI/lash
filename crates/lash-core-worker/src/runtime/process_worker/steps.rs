@@ -273,6 +273,17 @@ impl ProcessSteps for WorkerSteps {
             .stop_grace()
     }
 
+    fn succession(
+        &self,
+        process: &ProcessRecord,
+    ) -> Option<Arc<dyn lash_core_execution::EngineSuccession>> {
+        self.0
+            .config
+            .runtime_host
+            .process_engines
+            .succession(engine_kind(process)?)
+    }
+
     /// An engine process's composition and the activation's step tools
     /// build here, once per activation, or it parks: a missing component,
     /// an unreadable config or a refused build is the typed park reason,

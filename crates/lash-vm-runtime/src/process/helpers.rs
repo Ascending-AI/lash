@@ -7,16 +7,18 @@
 //! functions, and resumes on exactly them while the build retains the
 //! release. Nothing moves it off them on its own (FIG-6074, D2): before a
 //! build stops retaining the release, each process that still pins one of
-//! its functions ends or is ended by an operator, and the build's node
-//! refuses to start while one is left. [`plan_helper_adoption`] replaces
-//! each pinned function with the build's function of the same name,
-//! rewrites the document, and carries the parked run onto it
-//! (`lash_kernel_migrate::adopt`); a run that stands inside a replaced body
-//! no correspondence carries is refused, typed.
+//! its functions ends, or its host carries it onto a successor pair whose
+//! document names the build's helpers (`Processes::succeed`, FIG-6121), and
+//! the build's node refuses to start while one is left.
 //!
-//! [`survey_helper_processes`] lists the dependents for `lashctl
-//! kernel-migration list`, each with the typed reason its run would not
-//! carry onto the build's helpers.
+//! [`plan_carry`] is that carry's correspondence: it replaces each library
+//! function a document lists with the function the successor names under
+//! the same name, rewrites the document (`lash_kernel_migrate::adopt`), and
+//! carries the parked run onto it; a run that stands inside a replaced body
+//! no correspondence carries is refused, typed. [`plan_helper_adoption`]
+//! plans it onto the build's own helpers, and [`survey_helper_processes`]
+//! lists the dependents for `lashctl kernel-migration list`, each with the
+//! typed reason its run would not carry onto them.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -37,7 +39,8 @@ use super::{KernelDocuments, KernelMigrationSurveyError, advance};
 /// version, when it has one (`lash_vm_library::standard_retired_helpers`).
 pub type RetiredHelpers = BTreeMap<FunctionId, Option<FunctionId>>;
 
-/// Why a run is not adopted onto a build's own helpers.
+/// Why a run is not carried onto other library functions: the build's own
+/// helpers, or the document a successor pair names.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, thiserror::Error)]
 #[serde(rename_all = "snake_case", tag = "refused")]
 #[non_exhaustive]
@@ -69,6 +72,18 @@ pub enum HelperAdoptionRefusal {
     },
     #[error("the process's stored state does not decode: {message}")]
     State { message: String },
+    /// The successor's document is not the process's document with each
+    /// library function it lists replaced by the successor's function of
+    /// the same name: no correspondence carries the run onto it.
+    #[error("no correspondence carries document {document} onto {successor}")]
+    NoCorrespondence {
+        document: DocumentId,
+        successor: DocumentId,
+    },
+    /// The successor's payload starts another entry, or with other
+    /// arguments: it is no successor of this run.
+    #[error("the successor enters `{entry}` with other arguments than the run it would carry")]
+    OtherEntry { entry: lash_kernel_doc::Name },
 }
 
 /// A document adopted onto a build's helpers, and the run parked under it
@@ -122,7 +137,6 @@ pub fn plan_helper_adoption(
     limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<Option<AdoptedRun>, HelperAdoptionRefusal> {
     let state = |message: String| HelperAdoptionRefusal::State { message };
-    let from = document.identity().map_err(|error| state(error.message))?;
     let reached = retired_functions_reached(
         document.manifest.functions.keys().copied(),
         functions,
@@ -143,9 +157,29 @@ pub fn plan_helper_adoption(
         };
         replacements.insert(function, counterpart);
     }
-    let rewritten =
-        lash_kernel_migrate::adopt(document, &replacements, functions, &BTreeMap::new())
-            .map_err(|refusal| state(refusal.to_string()))?;
+    plan_carry(document, parked, functions, &replacements, limits).map(Some)
+}
+
+/// `document`, and `parked`, a run of it with the admission of each wait it
+/// holds, carried onto `replacements`: each library function it names
+/// replaced by its counterpart, and the run pinning the build's helper
+/// release. `functions` holds every function the document reaches and
+/// every replacement.
+///
+/// # Errors
+///
+/// The typed refusal of a document or run that is not carried.
+pub fn plan_carry(
+    document: &Document,
+    parked: Option<(&WholeState, &[AdmittedWait])>,
+    functions: &FunctionRegistry,
+    replacements: &BTreeMap<FunctionId, FunctionId>,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
+) -> Result<AdoptedRun, HelperAdoptionRefusal> {
+    let state = |message: String| HelperAdoptionRefusal::State { message };
+    let from = document.identity().map_err(|error| state(error.message))?;
+    let rewritten = lash_kernel_migrate::adopt(document, replacements, functions, &BTreeMap::new())
+        .map_err(|refusal| state(refusal.to_string()))?;
     validate_document(&rewritten.document, functions).map_err(|invalid| {
         HelperAdoptionRefusal::NotAdmitted {
             document: from,
@@ -160,16 +194,16 @@ pub fn plan_helper_adoption(
                 document,
                 from,
                 &rewritten,
-                &replacements,
+                replacements,
                 limits,
             )
         })
         .transpose()?;
-    Ok(Some(AdoptedRun {
+    Ok(AdoptedRun {
         from,
         rewritten,
         parked,
-    }))
+    })
 }
 
 /// `parked`, a run of `base`, carried onto `rewritten` under its own kernel
@@ -230,8 +264,8 @@ pub struct HelperDependentProcess {
     pub process: ProcessId,
     /// The retired functions its document reaches.
     pub functions: BTreeSet<FunctionId>,
-    /// Why its run would not carry onto the build's helpers; `None` when
-    /// it would.
+    /// Why its run would not carry onto the build's helpers, were its host
+    /// to name a successor pair over them; `None` when it would.
     pub refused: Option<HelperAdoptionRefusal>,
 }
 

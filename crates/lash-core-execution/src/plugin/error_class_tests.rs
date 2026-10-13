@@ -83,6 +83,10 @@ plugin_error_samples! {
             effect: "sampled".to_string(),
         },
     },
+    ProcessSuccessorRefused { .. } => PluginError::ProcessSuccessorRefused {
+        process: process(),
+        refusal: Box::new(crate::ProcessSuccessorRefusal::Ended),
+    },
     InvalidToolDiscovery { .. } => PluginError::InvalidToolDiscovery {
         operation: "sampled".to_string(),
     },

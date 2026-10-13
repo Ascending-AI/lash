@@ -861,6 +861,9 @@ pub mod plugins {
         EngineStateRefusal, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, KeyName,
         Material, NamesMaterial, SettledOutput, SettledOutputRefusal, StepName, StepRequest,
     };
+    /// How a host process engine carries a process onto a successor pair its
+    /// host names (FIG-6121, D2).
+    pub use lash_core::{EngineSuccession, SuccessionError, SuccessorCarry};
     /// Executable identity and terminal rendering returned by protocol integrators.
     pub use lash_core::{ExecutableGeneration, RecordedRender};
     pub use lash_core::{
@@ -976,6 +979,12 @@ pub mod process {
         HostArtifactPin, HostArtifactRefusal, HostArtifacts, ProcessDefinitions,
     };
     pub use crate::process_admin::{ProcessAuthority, ProcessEnvView, Processes};
+    /// A host's successor pair for a process (FIG-6121, D2): what
+    /// [`Processes::succeed`] takes and answers, and the request its owner
+    /// records.
+    pub use lash_core::{
+        ProcessSuccession, ProcessSuccessor, ProcessSuccessorRefusal, ProcessSuccessorRequest,
+    };
     /// Compare recorded process authority with a host's current grants.
     pub mod authority {
         pub use crate::process_authority::{
