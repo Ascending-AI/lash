@@ -14,6 +14,8 @@ use std::time::Duration;
 
 #[path = "growturn/measure.rs"]
 mod measure;
+#[path = "growturn/native.rs"]
+mod native;
 
 #[cfg(not(feature = "dhat-heap"))]
 #[global_allocator]
@@ -64,6 +66,12 @@ struct Args {
     /// A dhat worker's finite bootstrap-to-first-reset windows, per PID.
     #[arg(long)]
     worker_profile_dir: Option<PathBuf>,
+    /// Linux/glibc allocator and raw /proc snapshots, before the store scanner.
+    #[arg(long)]
+    native_memory_dir: Option<PathBuf>,
+    /// Experimental host policy: trim glibc after close and core shutdown.
+    #[arg(long, requires = "native_memory_dir")]
+    trim_at_idle: bool,
 }
 
 fn metadata() -> Result<lash::LlmProfileMetadata> {
@@ -343,6 +351,10 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
             );
             meter.closed();
             meter.sample("closed", args.rounds)?;
+            if args.trim_at_idle {
+                native::trim()?;
+                meter.sample("closed-trimmed", args.rounds)?;
+            }
             if args.profile_at_close {
                 meter.finish_profile(true)?;
             }
@@ -360,6 +372,16 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
             Phase::Resume => args.rounds,
         },
     )?;
+    if args.trim_at_idle {
+        native::trim()?;
+        meter.sample(
+            "shutdown-trimmed",
+            match args.phase {
+                Phase::Start => args.rounds * 3 / 4,
+                Phase::Resume => args.rounds,
+            },
+        )?;
+    }
     Ok(())
 }
 

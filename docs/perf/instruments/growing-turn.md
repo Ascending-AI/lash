@@ -135,3 +135,89 @@ window end. A stack outstanding at a diagnostic endpoint is not alone a
 product leak. Compare N curves, same-process park/drop, restarted-process
 baselines, close, and shutdown. Report shared storage, intentional history,
 temporary traffic, allocator slack and unexplained residuals separately.
+
+## Host RSS and native allocator attribution
+
+On Linux/glibc, add `--native-memory-dir PATH` to each process invocation.
+The directory receives PID/phase/round-labelled `malloc_info` XML,
+`smaps_rollup` and full `smaps` snapshots. The JSONL `native_memory` object
+records `mallinfo2` arena, allocated, mmap, free, fastbin and main-arena top
+bytes, arena count, and thread count times arena count. SQLite counters record
+all SQLite allocation bytes and the page-cache bytes obtained from SQLite's
+heap allocator (a subset of the former); configured page-cache pool usage is
+in slots, not bytes. If the host interposes jemalloc, its refreshed allocated,
+active, resident, metadata, mapped and retained counters are also recorded.
+glibc counters then describe only glibc's allocations, not jemalloc's.
+
+These observations precede the store scanner. They are adjacent observations
+in a running multithreaded process, not an atomic memory census. Raw `smaps`
+separates `[heap]`, file mappings, the main stack and anonymous mappings;
+`smaps_rollup` has no separate heap field. glibc free bytes measure virtual
+allocator capacity, including pages already returned to the OS, and must not
+be equated to RSS. Main-arena top bytes exclude free chunks in other arenas.
+Rust requested bytes exclude allocation rounding, allocator bookkeeping,
+native SQLite allocations, thread stacks and file-backed pages. The `/proc`
+snapshots and native counters concern the host; worker RSS remains in the
+existing process rows.
+
+On recent glibc/kernel combinations, pthread stack guards can use
+`MADV_GUARD_INSTALL` instead of separate inaccessible VMAs. Include anonymous
+guarded stack mappings (`VmFlags: gu`, with the stack's `nh` flag here), the
+main `[stack]`, and any alternate stacks; counting only `[stack]` or searching
+only for an inaccessible page before a 2 MiB mapping misses these stacks.
+Adjacent stacks can share a VMA, so its count is not the thread count.
+
+`--trim-at-idle` selects a host experiment, requiring native snapshots. It
+calls `malloc_trim(0)` after durable session close and again after core
+shutdown, adding `closed-trimmed` and `shutdown-trimmed` endpoints beside the
+untrimmed ones. Nothing trims during a turn. Zero from `malloc_trim` means
+no memory was released, not a failure. A host's real idle policy must account
+for its other sessions; one closed session does not establish process idle.
+The library does not select an allocator or trim memory automatically.
+
+For comparisons, use the same executable, N, payload size and pool box. Set
+`MALLOC_ARENA_MAX=2` at host process startup to test a two-arena glibc limit.
+To test the host with jemalloc while retaining Rust allocation counters,
+interpose the installed `libjemalloc.so.2` with `LD_PRELOAD`; the host's
+`StatsAlloc<System>` then counts requests served by jemalloc. This also
+interposes host C allocations. The worker launcher clears its environment
+before exec, so `LD_PRELOAD`, `MALLOC_CONF`, `MALLOC_ARENA_MAX` and
+`GLIBC_TUNABLES` do not reach it. Pass the worker executable directly.
+Record the allocator library version and
+hash. Measure instructions including workers and GNU time peak RSS, alongside
+close and shutdown RSS; an idle trim cannot undo an earlier peak.
+
+Counter definitions: [glibc allocator parameters](https://sourceware.org/glibc/manual/latest/html_node/Malloc-Tunable-Parameters.html),
+[SQLite status counters](https://www.sqlite.org/c3ref/c_status_malloc_count.html),
+and [jemalloc statistics and decay policy](https://jemalloc.net/jemalloc.3.html).
+
+For the growing-turn workload, prefer host-selected jemalloc C allocation
+interposition with `MALLOC_CONF=background_thread:true,narenas:2,dirty_decay_ms:0,muzzy_decay_ms:0`.
+This was measured with jemalloc 5.3.0 on the same optimized executable and
+worker as glibc 2.43, N=1000 and P=65536, on an i9-13900 pool box:
+
+| Host policy | RSS after close MiB | RSS after shutdown MiB | GNU time peak MiB | Instructions, billions |
+|---|---:|---:|---:|---:|
+| glibc default | 499.36 | 491.82 | 513.92 | 722.56 |
+| glibc idle trim | 188.83 | 112.29 | 486.23 | 719.51 |
+| glibc two arenas | 276.21 | 276.14 | 409.10 | 718.32 |
+| glibc two arenas and idle trim | 184.38 | 107.32 | 397.57 | 721.57 |
+| jemalloc with the configuration above | 169.23 | 92.94 | 338.36 | 720.10 |
+
+Trim rows use the endpoints after the selected trim. Peaks cover both host
+processes; instructions sum their performance-core user instruction counts,
+including workers. Every row completed the same turn and both handoffs.
+These are individual observations under varying build load, not timing or
+speedup certificates; instruction differences below 1% do not establish a
+ranking. Retention also varies with thread scheduling and arena placement.
+The recommendation's basis is lower measured peak and idle RSS.
+
+A host keeping glibc can select `MALLOC_ARENA_MAX=2` at startup and call
+`libc::malloc_trim(0)` from its own idle maintenance policy, as the opt-in
+experiment does. Trimming returns unused pages without removing live session
+objects or process-lifetime caches. In this run the final Rust demand stayed
+10.95 MiB and SQLite demand fell to zero at shutdown; the elevated RSS was
+predominantly freed memory retained by allocator arenas. Changing SQLite's
+cache default would not address that cause. The tested jemalloc policy
+interposes both Rust's System allocator calls and C allocations; selecting a
+Rust-only allocator is a separate composition choice to measure.

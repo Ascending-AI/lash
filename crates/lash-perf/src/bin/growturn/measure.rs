@@ -22,9 +22,13 @@ pub(super) struct Meter {
     pub profile_from_round: usize,
     profile_args: lash_perf::perf_support::dhat::ProfileArgs,
     profile: Mutex<Option<lash_perf::perf_support::dhat::ProfileWindow>>,
+    native_memory_dir: Option<PathBuf>,
 }
 impl Meter {
     pub fn new(args: &super::Args) -> Result<Self> {
+        if let Some(dir) = &args.native_memory_dir {
+            std::fs::create_dir_all(dir)?;
+        }
         Ok(Self {
             database: args.database.clone(),
             out: Mutex::new(
@@ -49,6 +53,7 @@ impl Meter {
                 future_top: args.profile.future_top,
             },
             profile: Mutex::new(None),
+            native_memory_dir: args.native_memory_dir.clone(),
         })
     }
     pub fn closed(&self) {
@@ -109,6 +114,11 @@ impl Meter {
 
     pub fn sample(&self, phase: &str, done: usize) -> Result<()> {
         let alloc = lash_perf::GLOBAL_ALLOCATOR.stats();
+        let native = self
+            .native_memory_dir
+            .as_ref()
+            .map(|dir| super::native::snapshot(dir, phase, done))
+            .transpose()?;
         let traffic =
             {
                 let mut previous = self.previous.lock_recover();
@@ -140,6 +150,7 @@ impl Meter {
             "allocated_bytes":alloc.bytes_allocated, "freed_bytes":alloc.bytes_deallocated,
             "allocations":alloc.allocations, "deallocations":alloc.deallocations,
             "profile_heap":lash_perf::perf_support::dhat::profiled_heap_sample(),
+            "native_memory":native,
             "store":store, "processes":processes,
             "close_tombstone_observed":self.closed.load(std::sync::atomic::Ordering::Relaxed),
             "endpoint_scope":"host Rust allocator including harness; proc includes worker native memory",
