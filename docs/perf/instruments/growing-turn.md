@@ -221,3 +221,36 @@ predominantly freed memory retained by allocator arenas. Changing SQLite's
 cache default would not address that cause. The tested jemalloc policy
 interposes both Rust's System allocator calls and C allocations; selecting a
 Rust-only allocator is a separate composition choice to measure.
+
+## Closed sessions in one core
+
+Use `--phase sessions --sessions 20` with a fresh database to grow and
+request durable deletion of sequential sessions in one core, without parks
+or owner handoffs. Each session sends one turn with the same N/P geometry
+and requires its answer and close tombstone before opening the next.
+`opened-K`, `completed-K` and `closed-K` identify the endpoints for K
+sessions; compare `closed-1`, `closed-5` and `closed-20` with `boot` and
+`shutdown` to distinguish accumulation from process-lifetime demand.
+The close flag resets at each open. Held facade/send handles are dropped
+before deletion so the endpoints measure cache ownership rather than a
+host-held read snapshot. Allocator totals include bounded live replay and
+harness data; they are not an exclusive decoded-window byte census.
+
+```sh
+(ulimit -v 8388608; /usr/bin/time -v "$B" --phase sessions --sessions 20 \
+  --rounds 100 --payload-bytes 65536 --checkpoint-every 100 \
+  --database "$PWD/.kiln/closed-sessions/turn.sqlite" --vm-worker "$W" \
+  --out "$PWD/.kiln/closed-sessions/checkpoints.jsonl")
+```
+
+Add `--retain-sessions` to the sequential population to close each facade
+runtime while retaining its durable session. It opens a live handle at the
+completed head and calls `close()`, then samples `retained-K` after the same
+250 ms teardown delay used at shutdown. These samples have no deletion
+tombstone and retain K answered runs in storage. This distinguishes store
+cache lifetime from durable deletion. An engine actor may stay hot for its
+configured idle lifetime, but releases its decoded head at the idle pass.
+A live graph snapshot keeps the newest cached window warm through its
+shared reader lease; the last graph reader evicts it. A reopen then reloads
+its window from stored bytes. This lease is in-memory ownership only and
+is absent from the graph's serialized representation.

@@ -56,6 +56,10 @@ impl Meter {
             native_memory_dir: args.native_memory_dir.clone(),
         })
     }
+    pub fn opened(&self) {
+        self.closed
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
     pub fn closed(&self) {
         self.closed
             .store(true, std::sync::atomic::Ordering::Relaxed);

@@ -33,6 +33,8 @@ const LIMIT: Duration = Duration::from_secs(3600);
 enum Phase {
     Start,
     Resume,
+    /// Grow and durably delete K sessions in one core, without handoffs.
+    Sessions,
 }
 
 #[derive(Parser)]
@@ -42,6 +44,12 @@ struct Args {
     /// Total model/tool rounds in the single turn, including both handoffs.
     #[arg(long, default_value_t = 10)]
     rounds: usize,
+    /// Number of sequential sessions for --phase sessions.
+    #[arg(long, default_value_t = 1)]
+    sessions: usize,
+    /// Close facade handles but retain durable sessions in --phase sessions.
+    #[arg(long)]
+    retain_sessions: bool,
     #[arg(long, default_value_t = 1024)]
     payload_bytes: usize,
     #[arg(long, default_value_t = 10)]
@@ -84,6 +92,7 @@ fn metadata() -> Result<lash::LlmProfileMetadata> {
 fn provider(args: &Args, meter: Arc<measure::Meter>) -> lash_core::provider::ProviderHandle {
     let rounds = args.rounds;
     let every = args.checkpoint_every;
+    let handoffs = !matches!(args.phase, Phase::Sessions);
     lash_core::testing::TestProvider::builder().kind("growturn-deterministic")
         .requires_streaming(true)
         .options(ProviderOptions { reliability: ProviderReliability::disabled(), ..Default::default() })
@@ -106,14 +115,14 @@ fn provider(args: &Args, meter: Arc<measure::Meter>) -> lash_core::provider::Pro
                 meter.start_profile(done).map_err(|e| lash::provider::LlmTransportError::new(e.to_string()))?;
                 if done.is_multiple_of(every) || done == rounds || done == rounds / 2
                     || done == rounds * 3 / 4 || done == meter.profile_from_round {
-                    let phase = if done == rounds / 2 { "resumed-in-process" }
-                        else if done == rounds * 3 / 4 { "resumed-process-restart" }
+                    let phase = if handoffs && done == rounds / 2 { "resumed-in-process" }
+                        else if handoffs && done == rounds * 3 / 4 { "resumed-process-restart" }
                         else { "round" };
                     meter.sample(phase, done).map_err(|e| lash::provider::LlmTransportError::new(e.to_string()))?;
                 }
                 let text = if done == rounds { "growing turn complete".to_owned() } else {
                     let next = done + 1;
-                    let park = next == rounds / 2 || next == rounds * 3 / 4;
+                    let park = handoffs && (next == rounds / 2 || next == rounds * 3 / 4);
                     format!("<typescript>\n/*growturn:{next}*/\nconst payload = await tools.grow_payload({{round:{next}}});\nif (payload.length !== {bytes}) throw new Error(\"wrong payload size\");\nconsole.log(\"grow-done:{next}:\");\nconsole.log(payload);\n{}\n</typescript>",
                         if park { "await tools.grow_wait({});" } else { "" }, bytes = meter.bytes)
                 };
@@ -275,6 +284,69 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
     let mut core = boot(args, Arc::clone(&meter), "growturn-first").await?;
     meter.sample("boot", 0)?;
     match args.phase {
+        Phase::Sessions => {
+            for ordinal in 1..=args.sessions {
+                meter.opened();
+                let id = lash::SessionId::try_from(format!("growturn-session-{ordinal}"))?;
+                let session = core
+                    .session(id.clone())
+                    .create(lash::SessionCreation::root(
+                        lash::SessionSpec::new(
+                            MODEL,
+                            lash::TurnBudget::Unbounded,
+                            lash::MaxToolCalls::new(args.rounds * 2 + 10),
+                        )
+                        .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+                    ))
+                    .await?;
+                meter.sample(&format!("opened-{ordinal}"), 0)?;
+                let handle = session
+                    .send(lash::TurnInput::text("measure closed session retention"))
+                    .await?;
+                let output = tokio::time::timeout(LIMIT, handle.output()).await??;
+                ensure!(
+                    matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+                    "session {ordinal} failed: {:?}",
+                    output.result.outcome
+                );
+                drop(output);
+                meter.sample(&format!("completed-{ordinal}"), args.rounds)?;
+                if args.retain_sessions {
+                    drop(session);
+                    let live = core.session(id.clone()).open().await?;
+                    live.close()
+                        .await
+                        .map_err(|refused| anyhow::anyhow!("{refused}"))?;
+                    // Match the shutdown endpoint's documented teardown delay:
+                    // the engine finishes the idle pass after publishing the answer.
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    meter.sample(&format!("retained-{ordinal}"), args.rounds)?;
+                    if args.trim_at_idle {
+                        native::trim()?;
+                        meter.sample(&format!("retained-{ordinal}-trimmed"), args.rounds)?;
+                    }
+                    continue;
+                }
+                drop(session);
+                let administration = core.session_administration().await;
+                lash::LashCore::delete_session(administration.delete_context(id.as_str())?).await?;
+                drop(administration);
+                ensure!(
+                    tokio::time::timeout(LIMIT, core.await_session_deletion(&id)).await??
+                        == lash::SessionDeleteCompletion::Deleted,
+                    "session {ordinal} close did not publish its tombstone"
+                );
+                meter.closed();
+                meter.sample(&format!("closed-{ordinal}"), args.rounds)?;
+                if args.trim_at_idle {
+                    native::trim()?;
+                    meter.sample(&format!("closed-{ordinal}-trimmed"), args.rounds)?;
+                }
+            }
+            if args.profile_at_close {
+                meter.finish_profile(true)?;
+            }
+        }
         Phase::Start => {
             let session = core
                 .session(session_id()?)
@@ -369,7 +441,7 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
         "shutdown",
         match args.phase {
             Phase::Start => args.rounds * 3 / 4,
-            Phase::Resume => args.rounds,
+            Phase::Resume | Phase::Sessions => args.rounds,
         },
     )?;
     if args.trim_at_idle {
@@ -378,7 +450,7 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
             "shutdown-trimmed",
             match args.phase {
                 Phase::Start => args.rounds * 3 / 4,
-                Phase::Resume => args.rounds,
+                Phase::Resume | Phase::Sessions => args.rounds,
             },
         )?;
     }
@@ -389,8 +461,11 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
 async fn main() -> Result<()> {
     let args = Args::parse();
     ensure!(
-        args.rounds >= 4 && args.payload_bytes >= 32 && args.checkpoint_every > 0,
-        "rounds >= 4, payload >= 32 and checkpoint interval > 0 required"
+        args.rounds >= 4
+            && args.payload_bytes >= 32
+            && args.checkpoint_every > 0
+            && args.sessions > 0,
+        "rounds >= 4, payload >= 32, checkpoint interval > 0 and sessions > 0 required"
     );
     ensure!(
         args.database.exists() == matches!(args.phase, Phase::Resume),

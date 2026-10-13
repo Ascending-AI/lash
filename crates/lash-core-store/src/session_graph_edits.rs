@@ -83,7 +83,7 @@ impl SessionGraph {
         } else {
             self.invalidate_cache();
         }
-        let data = Arc::make_mut(&mut self.inner);
+        let data = &mut Arc::make_mut(&mut self.inner).data;
         replace_node_records(&mut data.nodes, edits);
         if let Some(leaf) = leaf {
             data.leaf_node_id = Some(leaf);
@@ -111,7 +111,7 @@ impl SessionGraph {
                 .or_insert_with(|| self.nodes[index].as_ref().clone())
                 .timestamp = realized.timestamp;
         }
-        replace_node_records(&mut Arc::make_mut(&mut self.inner).nodes, edits);
+        replace_node_records(&mut Arc::make_mut(&mut self.inner).data.nodes, edits);
     }
 
     pub(super) fn reserve_append_capacity(
@@ -124,6 +124,7 @@ impl SessionGraph {
         }
         self.detach_initialized_cache_for_append();
         Arc::make_mut(&mut self.inner)
+            .data
             .nodes
             .reserve(additional_nodes);
         if let Some(cache_lock) = Arc::get_mut(&mut self.cache)
@@ -208,7 +209,7 @@ impl SessionGraph {
             cache.replace_conversation_reply(&event);
         }
         replace_node_records(
-            &mut Arc::make_mut(&mut self.inner).nodes,
+            &mut Arc::make_mut(&mut self.inner).data.nodes,
             [(index, record)].into(),
         );
         true

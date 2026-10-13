@@ -187,14 +187,22 @@ pub use crate::session_graph_window::WindowAnchor;
 
 #[derive(Debug)]
 pub struct SessionGraph {
-    inner: Arc<SessionGraphData>,
+    inner: Arc<SessionGraphStorage>,
     cache: Arc<OnceLock<SessionGraphCache>>,
+}
+
+/// Keep reader ownership in the existing graph allocation, so a graph
+/// snapshot remains two pointers in runtime state and async futures.
+#[derive(Clone, Debug, Default)]
+struct SessionGraphStorage {
+    data: SessionGraphData,
+    read_owner: Option<Arc<crate::store_backend_support::window_cache::WindowReaders>>,
 }
 
 impl Default for SessionGraph {
     fn default() -> Self {
         Self {
-            inner: Arc::new(SessionGraphData::default()),
+            inner: Arc::new(SessionGraphStorage::default()),
             cache: Arc::new(OnceLock::new()),
         }
     }
@@ -214,7 +222,7 @@ impl serde::Serialize for SessionGraph {
     where
         S: serde::Serializer,
     {
-        self.inner.serialize(serializer)
+        self.inner.data.serialize(serializer)
     }
 }
 
@@ -233,7 +241,7 @@ impl Deref for SessionGraph {
     type Target = SessionGraphData;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.as_ref()
+        &self.inner.data
     }
 }
 
@@ -923,10 +931,13 @@ impl SessionGraph {
         anchor: Option<WindowAnchor>,
     ) -> Self {
         Self {
-            inner: Arc::new(SessionGraphData {
-                nodes: nodes.into(),
-                leaf_node_id,
-                anchor,
+            inner: Arc::new(SessionGraphStorage {
+                data: SessionGraphData {
+                    nodes: nodes.into(),
+                    leaf_node_id,
+                    anchor,
+                },
+                read_owner: None,
             }),
             cache: Arc::new(OnceLock::new()),
         }
@@ -988,13 +999,26 @@ impl SessionGraph {
         }
     }
 
+    pub(crate) fn read_owner(
+        &self,
+    ) -> &Option<Arc<crate::store_backend_support::window_cache::WindowReaders>> {
+        &self.inner.read_owner
+    }
+
+    pub(crate) fn set_read_owner(
+        &mut self,
+        owner: Option<Arc<crate::store_backend_support::window_cache::WindowReaders>>,
+    ) {
+        Arc::make_mut(&mut self.inner).read_owner = owner;
+    }
+
     fn invalidate_cache(&mut self) {
         self.cache = Arc::new(OnceLock::new());
     }
 
     pub fn data_mut(&mut self) -> &mut SessionGraphData {
         self.invalidate_cache();
-        Arc::make_mut(&mut self.inner)
+        &mut Arc::make_mut(&mut self.inner).data
     }
 
     #[expect(
@@ -1048,7 +1072,7 @@ impl SessionGraph {
         if let Some(cache_lock) = Arc::get_mut(&mut self.cache)
             && let Some(cache) = cache_lock.get_mut()
         {
-            let data = Arc::make_mut(&mut self.inner);
+            let data = &mut Arc::make_mut(&mut self.inner).data;
             for node in nodes {
                 let extends_leaf = node.parent_node_id == data.leaf_node_id;
                 let node_id = node.node_id.clone();

@@ -205,6 +205,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 report,
             ));
         }
+        self.windows.forget(session_id);
         Ok(report)
     }
 

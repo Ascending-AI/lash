@@ -1778,3 +1778,135 @@ async fn receipt_replay_uses_scalar_columns_and_preserves_the_original_answer() 
         );
     }
 }
+
+/// FIG-6168: deleting a session releases the store's decoded graph and all
+/// projections it owns; an outstanding read keeps only its own snapshot alive.
+#[tokio::test]
+async fn closed_sessions_release_cached_graph_bytes_after_the_last_reader() {
+    cache_release_population(true).await;
+}
+
+/// FIG-6168: a retained idle session has no decoded cache owner once its
+/// last reader drops; reopening it must read the durable bytes again.
+#[tokio::test]
+async fn idle_sessions_release_cached_graph_bytes_and_reload_on_reopen() {
+    cache_release_population(false).await;
+}
+
+async fn cache_release_population(delete: bool) {
+    use lash_core_execution::store::{SessionStore, WindowSelector, load_session_window_state};
+    use lash_core_execution::{Message, MessageRole, Part, SessionReadView};
+    let mut retained = Vec::new();
+    for depth in [8, 64] {
+        for count in [1, 5, 20] {
+            let store = crate::test_support::sqlite_memory_store()
+                .await
+                .expect("store");
+            let mut records = Vec::new();
+            for ordinal in 0..count {
+                let session = SessionId::fixture(format!("closed-{depth}-{ordinal}"));
+                let mut state = durable_state(&store, &session).await;
+                state.ensure_agent_frame_initialized();
+                for node in 0..depth {
+                    state.session_graph.append_message(Message {
+                        id: format!("message-{node}"),
+                        role: MessageRole::User,
+                        parts: Arc::new(vec![Part::text(
+                            format!("part-{node}"),
+                            "x".repeat(4096),
+                            None,
+                        )]),
+                        origin: None,
+                        reply_marker: None,
+                    });
+                }
+                store
+                    .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
+                    .await
+                    .expect("grow session");
+                drop(state);
+                let bound = SessionStore::new(store.clone(), session.clone()).expect("binding");
+                let loaded = load_session_window_state(&bound, WindowSelector::Current)
+                    .await
+                    .expect("read")
+                    .expect("window");
+                let view = SessionReadView::from_persisted_state(&loaded.state);
+                let transcript = view.transcript().expect("transcript");
+                let projection = view.shared_chronological_projection();
+                let render_cache = Arc::downgrade(&loaded.state.read_model().prompt_render_cache);
+                let expected = serde_json::to_vec(view.messages()).expect("recorded messages");
+                assert_eq!(view.messages().len(), depth);
+                let weak: Vec<_> = loaded
+                    .state
+                    .session_graph
+                    .nodes
+                    .iter()
+                    .skip(1)
+                    .map(Arc::downgrade)
+                    .collect();
+                assert_eq!(weak.len(), depth);
+                drop(loaded);
+                if delete {
+                    store
+                        .delete_session(&session)
+                        .await
+                        .expect("durable storage close");
+                }
+                assert!(
+                    weak.iter().all(|record| record.strong_count() > 0),
+                    "a reader still owns its graph after close"
+                );
+                assert_eq!(view.messages().len(), depth, "the held read stays usable");
+                drop(transcript);
+                drop(projection);
+                drop(view);
+                assert_eq!(
+                    render_cache.strong_count(),
+                    0,
+                    "the graph's render cache has no owner"
+                );
+                records.extend(weak);
+                if !delete {
+                    let before = store.decoded_graph_node_bodies.load(Ordering::Relaxed);
+                    let reopened = load_session_window_state(&bound, WindowSelector::Current)
+                        .await
+                        .expect("reopen")
+                        .expect("retained window");
+                    assert_eq!(
+                        store.decoded_graph_node_bodies.load(Ordering::Relaxed) - before,
+                        (depth + 1) as u64,
+                        "reopen decodes the complete cold window"
+                    );
+                    let view = SessionReadView::from_persisted_state(&reopened.state);
+                    assert_eq!(
+                        serde_json::to_vec(view.messages()).expect("reopened messages"),
+                        expected,
+                        "cache release changed no stored message"
+                    );
+                    records.extend(
+                        reopened
+                            .state
+                            .session_graph
+                            .nodes
+                            .iter()
+                            .skip(1)
+                            .map(Arc::downgrade),
+                    );
+                    drop(view);
+                    drop(reopened);
+                }
+            }
+            let bytes = records
+                .iter()
+                .filter(|record| record.strong_count() > 0)
+                .count()
+                * 4096;
+            eprintln!("cache payload bytes deleted={delete} K={count} N={depth}: {bytes}");
+            retained.push((count, depth, bytes));
+        }
+    }
+    assert!(
+        retained.iter().all(|(_, _, bytes)| *bytes == 0),
+        "closed sessions retain graph payloads after every reader dropped: {retained:?}"
+    );
+}

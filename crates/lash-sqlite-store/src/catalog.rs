@@ -197,7 +197,10 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
     ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
         lash_core_execution::store::validate_session_id(session_id)
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
-        delete_session_from_catalog(&self.conn, session_id, self.clock.timestamp_ms()).await
+        let report =
+            delete_session_from_catalog(&self.conn, session_id, self.clock.timestamp_ms()).await?;
+        self.windows.forget(session_id);
+        Ok(report)
     }
 }
 

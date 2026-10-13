@@ -934,6 +934,9 @@ impl Activation for SessionActivation {
             match pass {
                 Ok(Pass::Again) => idle_since = None,
                 Ok(Pass::Idle) => {
+                    // Keep the actor hot, but not its decoded head: idle
+                    // sessions with no readers reload on their next mail.
+                    heads.evict();
                     idle_since.get_or_insert_with(|| owned.clock().now());
                     woke = Some(owned.wait_for_mail().await);
                 }

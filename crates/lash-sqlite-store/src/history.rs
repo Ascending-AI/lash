@@ -6,8 +6,8 @@ use lash_core_execution::store::{
     WindowSelector,
 };
 use lash_core_execution::store_backend_support::{
-    HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode, WindowCache, WindowFrame,
-    WindowReuse,
+    HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode, WindowCacheRead,
+    WindowFrame, WindowReuse,
 };
 use std::num::NonZeroU32;
 use std::sync::atomic::Ordering;
@@ -353,7 +353,7 @@ fn window_graph(
     last: &Header,
     fleet: lash_core_execution::FleetFormat,
     decoded: &AtomicU64,
-    windows: &WindowCache,
+    windows: &WindowCacheRead,
 ) -> Result<lash_core_execution::SessionGraph, StoreError> {
     let leaf: lash_core_execution::NodeId = last.id.clone().try_into()?;
     let leaf_generation = nonnegative("SessionGraph", "generation", last.generation)?;
@@ -374,8 +374,7 @@ fn window_graph(
                 window_nodes(conn, session, frame, from, last.generation, fleet, decoded)
                 && let Some(graph) = window.extend_window(nodes, &leaf)
             {
-                windows.remember(session, &graph, leaf_generation, bytes + added);
-                return Ok(graph);
+                return Ok(windows.remember(session, &graph, leaf_generation, bytes + added));
             }
         }
         WindowReuse::Miss => {}
@@ -409,8 +408,7 @@ fn window_graph(
         previous_frame_node_id: previous,
     };
     let graph = lash_core_execution::SessionGraph::from_window(nodes, leaf, anchor)?;
-    windows.remember(session, &graph, leaf_generation, bytes);
-    Ok(graph)
+    Ok(windows.remember(session, &graph, leaf_generation, bytes))
 }
 
 pub(crate) fn window(
@@ -419,7 +417,7 @@ pub(crate) fn window(
     selector: WindowSelector,
     fleet: lash_core_execution::FleetFormat,
     decoded: &AtomicU64,
-    windows: &WindowCache,
+    windows: &WindowCacheRead,
     chunk_size: usize,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
     live(conn, session)?;
@@ -529,12 +527,12 @@ impl SessionHistoryStore for SqliteStore {
         let session = session_id.clone();
         let fleet = self.conn.fleet();
         let decoded = Arc::clone(&self.decoded_graph_node_bodies);
-        let windows = Arc::clone(&self.windows);
+        let read = self.windows.read();
         let chunk_size = self.conn.operational.checkpoint_ref_chunk.get();
         self.read_connection()
             .read(move |conn| {
                 Ok(window(
-                    conn, &session, selector, fleet, &decoded, &windows, chunk_size,
+                    conn, &session, selector, fleet, &decoded, &read, chunk_size,
                 ))
             })
             .await

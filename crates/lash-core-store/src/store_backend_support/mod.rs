@@ -12,7 +12,7 @@ mod session_meta;
 pub mod turn_cancel;
 mod turn_input_batch;
 mod turn_input_lifecycle_sql;
-mod window_cache;
+pub(crate) mod window_cache;
 
 pub use append_identity::decode_append_request_identity;
 pub use fork_target::TargetResolution;
@@ -43,7 +43,9 @@ pub use turn_input_lifecycle_sql::{
     released_turn_input_state_sql, terminal_turn_input_state_predicate_sql,
     undelivered_turn_input_state_predicate_sql,
 };
-pub use window_cache::{WINDOW_CACHE_BUDGET_BYTES, WindowCache, WindowFrame, WindowReuse};
+pub use window_cache::{
+    WINDOW_CACHE_BUDGET_BYTES, WindowCache, WindowCacheRead, WindowFrame, WindowReuse,
+};
 
 /// Durable receipt identity of one turn's final commit.
 ///

@@ -6,8 +6,8 @@ use lash_core_execution::store::{
     WindowSelector,
 };
 use lash_core_execution::store_backend_support::{
-    HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode, WindowCache, WindowFrame,
-    WindowReuse,
+    HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode, WindowCacheRead,
+    WindowFrame, WindowReuse,
 };
 use std::num::NonZeroU32;
 #[cfg(any(test, feature = "testing"))]
@@ -357,7 +357,7 @@ async fn window_graph(
     leaf: lash_core_execution::NodeId,
     first_generation: i64,
     leaf_generation: i64,
-    windows: &WindowCache,
+    windows: &WindowCacheRead,
 ) -> Result<lash_core_execution::SessionGraph, StoreError> {
     let session_id = rows.session_id;
     let external_parent: Option<String> = frame_row.get("parent_node_id");
@@ -379,8 +379,7 @@ async fn window_graph(
             if let Ok((nodes, added)) = rows.read(conn, from, leaf_generation).await
                 && let Some(graph) = window.extend_window(nodes, &leaf)
             {
-                windows.remember(session_id, &graph, leaf_at, bytes + added);
-                return Ok(graph);
+                return Ok(windows.remember(session_id, &graph, leaf_at, bytes + added));
             }
         }
         WindowReuse::Miss => {}
@@ -414,8 +413,7 @@ async fn window_graph(
         previous_frame_node_id,
     };
     let graph = lash_core_execution::SessionGraph::from_window(nodes, leaf, anchor)?;
-    windows.remember(session_id, &graph, leaf_at, bytes);
-    Ok(graph)
+    Ok(windows.remember(session_id, &graph, leaf_at, bytes))
 }
 
 pub(crate) async fn window_conn(
@@ -424,7 +422,7 @@ pub(crate) async fn window_conn(
     selector: WindowSelector,
     fleet: lash_core_execution::FleetFormat,
     chunk_size: usize,
-    windows: &WindowCache,
+    windows: &WindowCacheRead,
     #[cfg(any(test, feature = "testing"))] decoded: Option<&std::sync::atomic::AtomicU64>,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
     check_live(conn, session_id).await?;
@@ -574,6 +572,7 @@ impl SessionHistoryStore for PostgresStore {
         session_id: &SessionId,
         selector: WindowSelector,
     ) -> Result<Option<SessionWindowRead>, StoreError> {
+        let windows = self.windows.read();
         let mut tx = read_tx(self).await?;
         let read = window_conn(
             &mut tx,
@@ -581,7 +580,7 @@ impl SessionHistoryStore for PostgresStore {
             selector,
             self.fence.fleet(),
             self.pools.maintenance.checkpoint_ref_chunk as usize,
-            &self.windows,
+            &windows,
             #[cfg(any(test, feature = "testing"))]
             Some(&self.decoded_graph_node_bodies),
         )
