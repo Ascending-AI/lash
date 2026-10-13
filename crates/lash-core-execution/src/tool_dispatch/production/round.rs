@@ -414,8 +414,10 @@ pub(super) fn member_body(
     let tool = execution.draft().tool().clone();
     let pinned = execution.policy();
     let ordinal = AttemptOrdinal::new(execution.attempt());
-    let may_retry =
-        execution.attempt() < pinned.max_attempts() && policies.permits_repeat(&tool, pinned);
+    let may_retry = pinned
+        .retry()
+        .is_some_and(|retry| execution.attempt() < retry.max_attempts.get())
+        && policies.permits_repeat(&tool, pinned);
     let execution = execution.clone();
     let key = execution
         .draft()

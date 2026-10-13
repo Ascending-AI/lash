@@ -127,6 +127,21 @@ impl PluginSpec {
         self
     }
 
+    /// Declare the provider `key` with the reader its `Read` tools need
+    /// (ADR 0144).
+    pub fn with_tool_provider_registration(
+        mut self,
+        key: super::ToolProviderKey,
+        registration: crate::ToolProviderRegistration,
+    ) -> Self {
+        let result = self
+            .registrations
+            .tools()
+            .record_provider_with_reads(key, move |_, _| Ok(registration.clone()));
+        self.admit(result);
+        self
+    }
+
     /// Declare the one deferred provider under `key`; duplicate addresses are refused.
     pub fn with_deferred_provider(
         mut self,

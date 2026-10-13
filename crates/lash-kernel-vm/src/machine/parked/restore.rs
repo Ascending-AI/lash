@@ -784,6 +784,23 @@ pub(in crate::machine) fn import(
     // The tasks were read in task order; the park hands requests out in the
     // order they were made, which is their wait numbers' (K-TASK-024).
     requests.sort_unstable();
+    // The run's reads are effects its document declares, and none waits:
+    // a read is answered inside its statement (`K-EFF-012`).
+    if run
+        .reads
+        .iter()
+        .any(|effect| !program.document.manifest.effects.contains_key(effect))
+    {
+        return Err(malformed(
+            "the run binds as a read an effect its document does not declare",
+        ));
+    }
+    if waits.values().any(|pending| {
+        matches!(&pending.request, Request::Effect(request) if run.reads.contains(&request.effect))
+    }) {
+        return Err(malformed("a wait stands on an effect the run binds as a read"));
+    }
+    let modes = crate::interface::EffectModes::reading(run.reads);
 
     let mut machine = KernelMachine {
         program,
@@ -801,6 +818,7 @@ pub(in crate::machine) fn import(
         requests,
         withdrawn: run.unreported,
         withdrawn_ever: run.withdrawn,
+        modes,
         session,
         session_cell,
         pins: Default::default(),

@@ -76,6 +76,17 @@ impl Machine for Verified {
         Ok(Self(machine))
     }
 
+    fn start_reading(
+        program: Program,
+        bounds: Bounds,
+        start: Start,
+        modes: lash_kernel_vm::EffectModes,
+    ) -> Result<Self, StartError> {
+        let mut machine = KernelMachine::start_reading(program, bounds, start, modes)?;
+        machine.verify_step_structure();
+        Ok(Self(machine))
+    }
+
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
         let before = self.0.verified_steps();
         let step = self.0.run(host, slice);

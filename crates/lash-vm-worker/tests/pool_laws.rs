@@ -133,11 +133,14 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
         from: StartFrom::Fresh(
             wire::encode(
                 PayloadKind::Start,
-                &StartWire::from(RunStart {
-                    target,
-                    args,
-                    bindings: Bindings::default(),
-                }),
+                &StartWire::of(
+                    RunStart {
+                        target,
+                        args,
+                        bindings: Bindings::default(),
+                    },
+                    &lash_kernel_vm::EffectModes::recorded(),
+                ),
             )
             .expect("start"),
         ),
@@ -480,6 +483,7 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
         bindings: Default::default(),
         functions: Default::default(),
         helpers: lash_vm_library::HELPER_RELEASE,
+        reads: Default::default(),
     };
     let mut worker = checkout(&pool);
     let response = worker
@@ -597,6 +601,7 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
         bindings: Default::default(),
         functions: Default::default(),
         helpers: lash_vm_library::HELPER_RELEASE,
+        reads: Default::default(),
     };
     let mut worker = checkout(&pool);
     let response = worker
@@ -779,6 +784,7 @@ main { }"#,
                     HostReadKind::Clock => wire::encode(PayloadKind::HostAnswer, &now),
                     // The top 53 bits, times 2^-53: one half.
                     HostReadKind::Random => wire::encode(PayloadKind::HostAnswer, &(1_u64 << 63)),
+                    HostReadKind::Effect => panic!("the run binds no read"),
                 }
                 .expect("answer");
                 step = worker.host_answer(id, answer).expect("answered");

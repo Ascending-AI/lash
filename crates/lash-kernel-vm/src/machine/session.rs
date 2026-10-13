@@ -55,6 +55,7 @@ pub(super) fn start(
         requests: Vec::new(),
         withdrawn: Vec::new(),
         withdrawn_ever: BTreeSet::new(),
+        modes: crate::interface::EffectModes::recorded(),
         session: BTreeMap::new(),
         session_cell: matches!(start.target, Target::Main),
         pins: Default::default(),
@@ -458,7 +459,13 @@ mod tests {
                 if *invalid.reason == lash_kernel_doc::InvalidReason::TooDeep { limit: 0 }
         ));
         assert!(matches!(
-            KernelMachine::start_with_data_limits(program.clone(), BOUNDS, main(), limits),
+            KernelMachine::start_with_data_limits(
+                program.clone(),
+                BOUNDS,
+                main(),
+                limits,
+                crate::EffectModes::recorded()
+            ),
             Err(StartError::NotAdmitted(invalid))
                 if *invalid.reason == lash_kernel_doc::InvalidReason::TooDeep { limit: 0 }
         ));

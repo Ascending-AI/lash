@@ -26,6 +26,19 @@ pub enum ExecutionPolicy {
     Once,
     /// Repeated execution is part of the tool's declared contract.
     Repeatable { retry: BoundedRetry },
+    /// A read: the answer is not recorded; after a crash before the next
+    /// save it is fetched again and may differ.
+    ///
+    /// A code cell runs the call inside the statement that performs it,
+    /// through the provider's registered reader, and keeps the answer only
+    /// as part of the cell's saved state. No admission, attempt or outcome
+    /// is recorded for it, and its provider stays owed until the cell ends.
+    /// A call that is recorded anyway (a model round's, or one a cell
+    /// cannot plan) runs again from its start when its attempt was
+    /// interrupted, and is never retried after a reported failure. A read
+    /// changes nothing outside: it defers, isolates, declares intents and
+    /// ends turns never.
+    Read,
 }
 
 #[derive(
@@ -74,10 +87,12 @@ impl ExecutionPolicy {
         }
     }
 
-    pub fn max_attempts(self) -> u32 {
+    /// The bounded retry a `Repeatable` call is admitted with; `None` for a
+    /// policy that never retries a reported failure.
+    pub fn retry(self) -> Option<BoundedRetry> {
         match self {
-            Self::Once => 1,
-            Self::Repeatable { retry } => retry.max_attempts.get(),
+            Self::Repeatable { retry } => Some(retry),
+            Self::Once | Self::Read => None,
         }
     }
 
@@ -86,16 +101,24 @@ impl ExecutionPolicy {
         matches!((self, current), (Self::Repeatable { retry }, Self::Repeatable { .. }) if failed_ordinal < retry.max_attempts.get())
     }
 
-    pub fn delay_ms_for_retry(self, retry_index: u32, suggested_delay_ms: Option<u64>) -> u64 {
-        match self {
-            Self::Once => 0,
-            Self::Repeatable { retry } => {
-                let multiplier = 1_u64.checked_shl(retry_index).unwrap_or(u64::MAX);
-                suggested_delay_ms
-                    .unwrap_or_else(|| retry.backoff.base_delay_ms.saturating_mul(multiplier))
-                    .min(retry.backoff.max_delay_ms)
-            }
-        }
+    /// Whether an admitted attempt that started and never settled runs
+    /// again at its ordinal, rather than settling `Interrupted`: a
+    /// `Repeatable` call, whose contract permits repeats, and a recorded
+    /// `Read`, which changes nothing outside.
+    pub fn reruns_interrupted(self) -> bool {
+        matches!(self, Self::Repeatable { .. } | Self::Read)
+    }
+}
+
+impl BoundedRetry {
+    /// The delay before retry `retry_index` (0 for the first retry): the
+    /// failure's suggested delay, or the doubling backoff from its base,
+    /// capped at its maximum.
+    pub fn delay_ms(self, retry_index: u32, suggested_delay_ms: Option<u64>) -> u64 {
+        let multiplier = 1_u64.checked_shl(retry_index).unwrap_or(u64::MAX);
+        suggested_delay_ms
+            .unwrap_or_else(|| self.backoff.base_delay_ms.saturating_mul(multiplier))
+            .min(self.backoff.max_delay_ms)
     }
 }
 
@@ -191,6 +214,14 @@ pub enum RegistrationRefused {
     /// result. [`ToolDefinition::control`] defines one.
     #[error("tool `{tool}` declares a turn control, but it is defined with an output")]
     ControlDeclaresOutput { tool: String },
+    /// A `Read` tool declares a capability a read never has: deferral,
+    /// intents, isolation or a turn control.
+    #[error("tool `{tool}` is declared a read, and a read cannot {capability}")]
+    ReadDeclares { tool: String, capability: String },
+    /// A `Read` tool's provider registered no reader: a read never falls
+    /// back to the provider's recorded execution.
+    #[error("tool `{tool}` is declared a read, and its provider `{provider}` registers no reader")]
+    ReadWithoutReader { tool: String, provider: String },
 }
 
 fn default_tool_execution_policy() -> ExecutionPolicy {
@@ -575,6 +606,9 @@ impl ToolManifest {
                 tool: tool(),
                 cause,
             })?;
+        if let Some(refused) = read_refusal(&self.name, self.execution_policy, &declaration) {
+            return Err(refused);
+        }
         match (declaration.may_defer, park) {
             (true, None) => {
                 return Err(RegistrationRefused::MissingBound {
@@ -601,6 +635,42 @@ impl ToolManifest {
         self.isolation_engine = isolation_engine;
         Ok(self)
     }
+}
+
+impl ToolManifest {
+    /// Why this manifest is not a valid read: a `Read` policy beside a
+    /// capability a read never has. `None` for a valid read and for every
+    /// other policy. A surface refuses a tool this names.
+    #[must_use]
+    pub fn read_refusal(&self) -> Option<RegistrationRefused> {
+        read_refusal(&self.name, self.execution_policy, &self.declaration)
+    }
+}
+
+/// The refusal of `declaration` under a `Read` `policy`.
+fn read_refusal(
+    tool: &str,
+    policy: ExecutionPolicy,
+    declaration: &ToolDeclaration,
+) -> Option<RegistrationRefused> {
+    if policy != ExecutionPolicy::Read {
+        return None;
+    }
+    let capability = if declaration.may_defer {
+        "defer"
+    } else if !declaration.intents.is_empty() {
+        "declare intents"
+    } else if declaration.isolated {
+        "run isolated"
+    } else if !declaration.controls.is_empty() {
+        "end a turn"
+    } else {
+        return None;
+    };
+    Some(RegistrationRefused::ReadDeclares {
+        tool: tool.to_owned(),
+        capability: capability.to_owned(),
+    })
 }
 
 /// Heavy tool contract resolved only when a prompt or call needs schemas/docs.

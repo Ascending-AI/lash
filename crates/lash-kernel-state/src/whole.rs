@@ -79,6 +79,8 @@ pub struct KernelWhole {
     pub ready: ReadyQueue,
     pub withdrawn: BTreeSet<WaitId>,
     pub unreported: Vec<WaitId>,
+    /// The effects the run performs as reads (`K-EFF-012`).
+    pub reads: BTreeSet<EffectName>,
     pub session: BTreeMap<Name, Value>,
     pub tasks: Vec<WholeTask>,
     pub objects: BTreeMap<ObjectId, Object>,
@@ -233,6 +235,7 @@ impl KernelWhole {
             ready: run.ready.clone(),
             withdrawn: run.withdrawn.clone(),
             unreported: run.unreported.clone(),
+            reads: run.reads.clone(),
             session: parked.session.clone(),
             tasks,
             objects: parked.objects.clone(),
@@ -289,6 +292,7 @@ impl KernelWhole {
                 ready: self.ready,
                 withdrawn: self.withdrawn,
                 unreported: self.unreported,
+                reads: self.reads,
             },
             session: self.session,
             tasks,
@@ -830,7 +834,7 @@ impl TokenCodec for WholeTask {
 
 impl TokenCodec for KernelWhole {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(13);
+        out.seq(14);
         out.unsigned(u64::from(self.kernel));
         self.document.encode(out);
         self.release.encode(out);
@@ -841,13 +845,14 @@ impl TokenCodec for KernelWhole {
         self.ready.encode(out);
         self.withdrawn.encode(out);
         self.unreported.encode(out);
+        self.reads.encode(out);
         self.session.encode(out);
         self.tasks.encode(out);
         self.objects.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(13)?;
+        input.expect_struct(14)?;
         let whole = Self {
             kernel: input.unsigned_u32()?,
             document: DocumentId::decode(input)?,
@@ -859,6 +864,7 @@ impl TokenCodec for KernelWhole {
             ready: ReadyQueue::decode(input)?,
             withdrawn: BTreeSet::decode(input)?,
             unreported: Vec::decode(input)?,
+            reads: BTreeSet::decode(input)?,
             session: BTreeMap::decode(input)?,
             tasks: Vec::decode(input)?,
             objects: BTreeMap::decode(input)?,

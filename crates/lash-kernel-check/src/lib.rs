@@ -35,7 +35,7 @@ mod closure_tests;
 mod tests;
 
 pub use admit::{Admitted, Environment, admit, derive, derive_definition, derive_view};
-pub use closure::{EntryEffectsRefusal, entry_effects};
+pub use closure::{EntryEffectsRefusal, entry_effects, main_effects};
 pub use graph::{
     ActionNode, AtomNode, Binding, BindingId, BindingKind, CalleeNode, CatchNode, Edge, EdgeKind,
     EffectSet, ExecutionSite, ExprNode, Graph, GraphNode, MapEntryNode, MemberNode, NodeId,

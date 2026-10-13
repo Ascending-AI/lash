@@ -650,6 +650,7 @@ fn a_host_value_depth_policy_is_honored_by_a_kernel_run() {
             bindings: crate::Bindings::default(),
         },
         limits,
+        crate::EffectModes::recorded(),
     )
     .unwrap();
     let mut world = World::default();

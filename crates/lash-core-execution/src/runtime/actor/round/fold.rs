@@ -146,10 +146,11 @@ impl RoundMember {
 
     fn recovery(&self, current: &PolicyView) -> Recovery {
         let repeats = current.permits_repeat(self.draft.tool(), self.draft.policy());
+        let reruns = current.reruns_interrupted(self.draft.tool(), self.draft.policy());
         match &self.state {
             MemberState::Final { outcome, .. } => Recovery::Settled(outcome.clone()),
             MemberState::Waiting { source, .. } => Recovery::Waiting(source.clone()),
-            MemberState::Started { start, .. } if repeats => Recovery::RerunAtOrdinal(*start),
+            MemberState::Started { start, .. } if reruns => Recovery::RerunAtOrdinal(*start),
             MemberState::Started { .. } => Recovery::Interrupt,
             MemberState::RetryDue { attempt, due, .. } if repeats => Recovery::RetryDue {
                 at: *due,
@@ -480,17 +481,18 @@ fn fold_run(
                 let MemberState::Started { attempt, .. } = member.state else {
                     return Err(out_of_order(row));
                 };
-                if !retry.output.may_repeat() || attempt >= member.draft.policy().max_attempts() {
+                // Only a bounded retry writes one, within its bound.
+                let Some(bounded) = member.draft.policy().retry() else {
+                    return Err(out_of_order(row));
+                };
+                if !retry.output.may_repeat() || attempt >= bounded.max_attempts.get() {
                     return Err(out_of_order(row));
                 }
                 let suggested_delay = match &retry.output {
                     SettledOutput::Failed(failure) => failure.named().suggested_delay_ms,
                     _ => None,
                 };
-                let delay = member
-                    .draft
-                    .policy()
-                    .delay_ms_for_retry(attempt - 1, suggested_delay);
+                let delay = bounded.delay_ms(attempt - 1, suggested_delay);
                 member
                     .attempts
                     .insert(attempt, (retry.output.clone(), Some(delay)));

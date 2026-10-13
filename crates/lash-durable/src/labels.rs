@@ -114,11 +114,13 @@ impl CommitLabel {
     pub const CELL_SNAPSHOT_ADMIT: Self = Self::new("cell.snapshot+admit");
     /// `model.done+cell.snapshot+admit`: A model response and the first
     /// snapshot of the cell it asked for, with its ledger and admissions,
-    /// fused (FIG-6000).
+    /// fused (FIG-6000). A cell that reads saves its start first, admitting
+    /// nothing (ADR 0144).
     pub const MODEL_DONE_CELL_SNAPSHOT_ADMIT: Self = Self::new("model.done+cell.snapshot+admit");
     /// `cell.inject`: An outcome injected into a cell.
     pub const CELL_INJECT: Self = Self::new("cell.inject");
-    /// `cell.snapshot`: A quiet-point snapshot that admits nothing.
+    /// `cell.snapshot`: A quiet-point snapshot that admits nothing, or the
+    /// start a cell that reads saves before it reads (ADR 0144).
     pub const CELL_SNAPSHOT: Self = Self::new("cell.snapshot");
 
     // Session close (L6b).

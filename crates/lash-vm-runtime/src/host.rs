@@ -2,19 +2,37 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Integer, Site, Timestamp};
 use lash_vm_broker::{DurableSnapshotStore, ParentFault};
 use lash_vm_client::RunHost;
 
 use crate::ProjectionCatalog;
 
+/// Who answers a run's read-bound `perform`s (`K-EFF-012`): a cell's
+/// planned reads, through the providers its plan retained.
+#[async_trait::async_trait]
+pub trait EffectReads: Send + Sync {
+    /// One read of `effect` with `args`, performed at `site`: its result,
+    /// or the error raised at the `perform`. `Err` is the parent's own
+    /// failure, and stops the run.
+    async fn perform(
+        &self,
+        effect: &EffectName,
+        args: &[Datum],
+        site: &Site,
+    ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
+}
+
 /// One run's host on the parent: the store's clock, the embedder's random
-/// source, the backend's projection providers, and where prints go.
+/// source, the backend's projection providers, the run's reads, and where
+/// prints go.
 pub struct ParentHost {
     /// The run's store, whose clock is the run's clock.
     pub store: Arc<DurableSnapshotStore>,
     pub random: Arc<dyn Fn() -> u64 + Send + Sync>,
     pub providers: ProjectionCatalog,
+    /// Answers the run's read-bound `perform`s.
+    pub reads: Arc<dyn EffectReads>,
     /// Takes each printed value, in order.
     pub printed: Arc<dyn Fn(Datum) + Send + Sync>,
 }
@@ -43,6 +61,15 @@ impl RunHost for ParentHost {
         request: &Datum,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         Ok(self.providers.answer(handle, request).await)
+    }
+
+    async fn perform(
+        &self,
+        effect: &EffectName,
+        args: &[Datum],
+        site: &Site,
+    ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
+        self.reads.perform(effect, args, site).await
     }
 
     fn print(&self, value: Datum) -> Result<(), ParentFault> {

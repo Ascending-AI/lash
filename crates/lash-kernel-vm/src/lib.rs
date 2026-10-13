@@ -41,7 +41,8 @@ pub use machine::KernelMachine;
 pub use whole::{TerminalError, WholeExportError, WholeImportError, terminal_end, terminal_whole};
 
 pub use interface::{
-    Bindings, Bound, BoundExceeded, Bounds, DeliverError, Delivered, EffectRequest, End,
-    ExportError, Finished, Host, ImportError, Machine, MachineError, Meters, Outcome, Park,
-    Program, Request, RunError, SleepRequest, Start, StartError, Step, Target, WaitId,
+    Bindings, Bound, BoundExceeded, Bounds, DeliverError, Delivered, EffectMode, EffectModes,
+    EffectRequest, End, ExportError, Finished, Host, HostFault, ImportError, Machine, MachineError,
+    Meters, Outcome, Park, Program, Request, RunError, SleepRequest, Start, StartError, Step,
+    Target, WaitId,
 };

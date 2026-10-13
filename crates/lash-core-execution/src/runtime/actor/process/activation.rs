@@ -648,12 +648,13 @@ impl ProcessActivation {
         // Settle at its existing ordinal; do not turn the drift into a policy
         // veto, restart a body, or write a new x_start. Admitted waits and
         // bodies already running under this owner's match keep their outcomes.
-        // A started Once still interrupts: outside work may already have happened.
+        // A started call whose policy does not rerun an interrupted attempt
+        // (Once) still interrupts: outside work may already have happened.
         let mut settled_links = false;
         for view in fold.rounds() {
             for member in view.members() {
                 if member.outcome().is_some()
-                    || matches!(member.draft().policy(), crate::ExecutionPolicy::Once)
+                    || !member.draft().policy().reruns_interrupted()
                     || matches!(member.state(), round::MemberState::Waiting { .. })
                     || live.lifecycle.holds_execution(&view.id_of(member))
                 {

@@ -43,6 +43,8 @@ pub(crate) enum Halt {
     Fail(Datum),
     /// The machine's own state is inconsistent.
     Fault(String),
+    /// The host failed a read-bound `perform` (`K-EFF-012`).
+    Host(crate::interface::HostFault),
 }
 
 impl Halt {
@@ -304,6 +306,9 @@ pub struct KernelMachine {
     /// The waits withdrawn since the last park, and every one ever.
     withdrawn: Vec<WaitId>,
     withdrawn_ever: BTreeSet<WaitId>,
+    /// The mode each effect is performed in, bound at the start and saved
+    /// with the run (`K-EFF-012`).
+    modes: crate::interface::EffectModes,
     /// The session's bindings, when the run is a session cell.
     session: BTreeMap<Name, Value>,
     session_cell: bool,
@@ -407,14 +412,19 @@ impl Roots {
 }
 
 impl KernelMachine {
-    /// Start under deployment recursive data admission, independent of run spend.
+    /// Start under deployment recursive data admission, independent of run
+    /// spend, performing each effect in the mode `modes` binds: the binding
+    /// is saved with the run, and no resume changes it (`K-EFF-012`).
     pub fn start_with_data_limits(
         program: Program,
         bounds: Bounds,
         start: Start,
         limits: lash_kernel_doc::KernelDataLimits,
+        modes: crate::interface::EffectModes,
     ) -> Result<Self, StartError> {
-        session::start(program, bounds, start, Layout::default(), limits)
+        let mut machine = session::start(program, bounds, start, Layout::default(), limits)?;
+        machine.bind_modes(modes)?;
+        Ok(machine)
     }
     /// Resume under the deployment's current recursive data admission policy.
     pub fn import_with_data_limits(
@@ -485,6 +495,28 @@ impl KernelMachine {
     /// How many statement ends the step-structure check has passed.
     pub fn verified_steps(&self) -> u64 {
         self.steps.verified
+    }
+
+    /// Binds `modes` to a run that has executed nothing: each read names an
+    /// effect the document's manifest declares.
+    fn bind_modes(&mut self, modes: crate::interface::EffectModes) -> Result<(), StartError> {
+        if let Some(effect) = modes
+            .reads()
+            .iter()
+            .find(|effect| !self.program.document.manifest.effects.contains_key(*effect))
+        {
+            return Err(StartError::UndeclaredRead {
+                effect: effect.clone(),
+            });
+        }
+        self.modes = modes;
+        Ok(())
+    }
+
+    /// The mode each effect of the run is performed in.
+    #[must_use]
+    pub fn effect_modes(&self) -> &crate::interface::EffectModes {
+        &self.modes
     }
 
     fn task(&mut self, task: TaskId) -> Result<&mut Task, Halt> {
@@ -805,6 +837,10 @@ impl KernelMachine {
                     self.ended = true;
                     return Err(MachineError::Fault { problem });
                 }
+                Err(Halt::Host(fault)) => {
+                    self.ended = true;
+                    return Err(MachineError::Host(fault));
+                }
                 Err(Halt::Bound(mut exceeded)) => {
                     if exceeded.function.is_none()
                         && let Some(lib) = self
@@ -844,6 +880,17 @@ impl Machine for KernelMachine {
 
     fn start(program: Program, bounds: Bounds, start: Start) -> Result<Self, StartError> {
         Self::start_with_layout(program, bounds, start, Layout::default())
+    }
+
+    fn start_reading(
+        program: Program,
+        bounds: Bounds,
+        start: Start,
+        modes: crate::interface::EffectModes,
+    ) -> Result<Self, StartError> {
+        let mut machine = Self::start_with_layout(program, bounds, start, Layout::default())?;
+        machine.bind_modes(modes)?;
+        Ok(machine)
     }
 
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {

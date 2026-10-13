@@ -707,7 +707,10 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     call,
                     context,
                     attempt.attempt.get(),
-                    execution_policy.max_attempts(),
+                    // A policy with no bounded retry reports one attempt.
+                    execution_policy
+                        .retry()
+                        .map_or(1, |retry| retry.max_attempts.get()),
                 ));
                 let outcome = match &stop {
                     Some(stop) if stop.is_cancelled() => stopped_before_completion(),

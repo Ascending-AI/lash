@@ -73,6 +73,36 @@ pub fn entry_effects(
             entry: entry.clone(),
         });
     }
+    linked_effects(document, graph, catalog, Unit::Function(entry.clone()))
+}
+
+/// The effects a session cell's `main` calls or spawns, as
+/// [`entry_effects`] counts an entry's: its own performs, its closures',
+/// and those of every declared function it calls or spawns. A function the
+/// cell calls through a session binding is not followed: what it performs
+/// is not counted, and a host that plans by this set treats it as it treats
+/// any effect outside it.
+///
+/// # Errors
+///
+/// A function it runs calls through a value while it holds a declared
+/// function it does not run, or a performed effect is undeclared.
+pub fn main_effects(
+    document: &Document,
+    graph: &Graph,
+    catalog: &dyn FunctionCatalog,
+) -> Result<BTreeMap<EffectName, Signature>, EntryEffectsRefusal> {
+    linked_effects(document, graph, catalog, Unit::Main)
+}
+
+/// The effects `root`'s code calls or spawns, to a fixed point over the
+/// declared functions it calls or spawns.
+fn linked_effects(
+    document: &Document,
+    graph: &Graph,
+    catalog: &dyn FunctionCatalog,
+    root: Unit,
+) -> Result<BTreeMap<EffectName, Signature>, EntryEffectsRefusal> {
     let closures = closure_bindings(graph);
     let targets = function_targets(graph);
     let mut runs: BTreeMap<Unit, Runs> = BTreeMap::new();
@@ -171,13 +201,16 @@ pub fn entry_effects(
             _ => {}
         }
     }
-    let mut reached = BTreeSet::from([entry.clone()]);
-    let mut pending = vec![entry.clone()];
+    let mut reached = BTreeSet::new();
+    if let Unit::Function(entry) = &root {
+        reached.insert(entry.clone());
+    }
+    let mut pending = vec![root];
     let mut effects = BTreeSet::new();
     let mut held = BTreeSet::new();
     let mut value_call = None;
-    while let Some(name) = pending.pop() {
-        let Some(unit) = runs.get(&Unit::Function(name)) else {
+    while let Some(next) = pending.pop() {
+        let Some(unit) = runs.get(&next) else {
             continue;
         };
         if value_call.is_none() {
@@ -187,7 +220,7 @@ pub fn entry_effects(
         effects.extend(unit.effects.iter().cloned());
         for callee in &unit.calls {
             if reached.insert(callee.clone()) {
-                pending.push(callee.clone());
+                pending.push(Unit::Function(callee.clone()));
             }
         }
     }

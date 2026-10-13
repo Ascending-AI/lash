@@ -497,11 +497,13 @@ impl<'embedding> Server<'embedding> {
                             start.dialect
                         ))
                     })?;
+                let (from, modes) = from.into_start();
                 let machine = KernelMachine::start_with_data_limits(
                     program,
                     bounds,
-                    from.into(),
+                    from,
                     self.bootstrap.tuning.kernel_data,
+                    modes,
                 )
                 .map_err(|error| {
                     PoolError::refused(RunRefusal::Start {
@@ -958,11 +960,16 @@ mod tests {
             from: StartFrom::Fresh(
                 wire::encode(
                     PayloadKind::Start,
-                    &StartWire::from(lash_kernel_vm::Start {
-                        target: lash_kernel_vm::Target::Entry(lash_kernel_doc::Name::new("work")),
-                        args: Vec::new(),
-                        bindings: Default::default(),
-                    }),
+                    &StartWire::of(
+                        lash_kernel_vm::Start {
+                            target: lash_kernel_vm::Target::Entry(lash_kernel_doc::Name::new(
+                                "work",
+                            )),
+                            args: Vec::new(),
+                            bindings: Default::default(),
+                        },
+                        &lash_kernel_vm::EffectModes::recorded(),
+                    ),
                 )
                 .expect("start"),
             ),

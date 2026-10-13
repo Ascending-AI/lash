@@ -58,6 +58,8 @@ pub use lash_core_store::tool_surface::effect_path_of;
 pub struct ToolRegistry {
     providers: BTreeMap<ProviderKey, Arc<dyn ToolProvider>>,
     deferred: Option<(ProviderKey, Arc<dyn crate::DeferredToolProvider>)>,
+    /// Each provider's reader, when it registered one.
+    reads: BTreeMap<ProviderKey, Arc<dyn crate::ToolReads>>,
 }
 
 impl std::fmt::Debug for ToolRegistry {
@@ -75,19 +77,22 @@ impl ToolRegistry {
         identity: ProviderKey,
         provider: Arc<dyn ToolProvider>,
     ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_registrations(vec![(identity, provider)], None)
+        Self::from_tool_registrations(vec![(identity, provider)], None, Vec::new())
     }
 
     /// A registry of every registered provider, keyed by the identity its
-    /// plugin or component declared it under. A key registered twice is
+    /// plugin or component declared it under, with each provider's reader.
+    /// A key registered twice, or a reader of no registered provider, is
     /// refused.
     pub(crate) fn from_tool_registrations(
         providers: Vec<(ProviderKey, Arc<dyn ToolProvider>)>,
         deferred: Option<(ProviderKey, Arc<dyn crate::DeferredToolProvider>)>,
+        reads: Vec<(ProviderKey, Arc<dyn crate::ToolReads>)>,
     ) -> Result<Self, ReconfigureError> {
         let mut registry = Self {
             providers: BTreeMap::new(),
             deferred,
+            reads: BTreeMap::new(),
         };
         for (key, provider) in providers {
             if registry.providers.contains_key(&key) {
@@ -97,12 +102,26 @@ impl ToolRegistry {
             }
             registry.providers.insert(key, provider);
         }
+        for (key, reads) in reads {
+            if !registry.providers.contains_key(&key) || registry.reads.contains_key(&key) {
+                return Err(ReconfigureError::Validation(format!(
+                    "the reader of tool provider `{key}` is registered without its provider or twice"
+                )));
+            }
+            registry.reads.insert(key, reads);
+        }
         Ok(registry)
     }
 
     /// The provider registered under `key`.
     pub fn provider(&self, key: &ProviderKey) -> Option<&Arc<dyn ToolProvider>> {
         self.providers.get(key)
+    }
+
+    /// The reader the provider registered under `key` registered beside
+    /// itself: what answers a cell's reads of its `Read` tools.
+    pub fn reads(&self, key: &ProviderKey) -> Option<&Arc<dyn crate::ToolReads>> {
+        self.reads.get(key)
     }
 
     /// The deferred provider's key, when one is registered.
@@ -152,6 +171,23 @@ impl ToolRegistry {
                 if !ids.insert(manifest.id.clone()) {
                     return Err(crate::PluginError::ResidentToolDuplicateId {
                         tool_id: manifest.id,
+                    });
+                }
+                // A read is a valid one, and its provider reads it: it never
+                // falls back to the provider's recorded execution.
+                if let Some(refusal) = manifest.read_refusal() {
+                    return Err(crate::PluginError::ToolRegistrationRefused {
+                        source: Box::new(refusal),
+                    });
+                }
+                if manifest.execution_policy == crate::ExecutionPolicy::Read
+                    && !self.reads.contains_key(key)
+                {
+                    return Err(crate::PluginError::ToolRegistrationRefused {
+                        source: Box::new(lash_sansio::RegistrationRefused::ReadWithoutReader {
+                            tool: manifest.name.clone(),
+                            provider: key.to_string(),
+                        }),
                     });
                 }
                 let definition = served_definition(provider.as_ref(), manifest, config)?;
@@ -351,6 +387,49 @@ impl SurfaceTools {
     pub fn drift(&self, tool: &ToolId, config: &OwnerConfigView) -> Option<ToolSurfaceDrift> {
         let entry = self.routes.get(tool)?;
         self.drift_match(&entry.provider, &entry.definition, config)
+    }
+
+    /// Where a read of `tool` goes on this node under `config`: the
+    /// provider its entry retained, with that provider's reader.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeErrorCode::LashVmCellBindingDrift`](crate::RuntimeErrorCode::LashVmCellBindingDrift):
+    /// no entry offers `tool`, its provider serves it otherwise here, or
+    /// registers no reader here. Nothing was read.
+    pub fn read_route(
+        &self,
+        tool: &ToolId,
+        config: &OwnerConfigView,
+    ) -> Result<crate::ReadRoute, crate::RuntimeEffectControllerError> {
+        let refused = |why: String| {
+            crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::LashVmCellBindingDrift,
+                format!("a read of tool `{tool}` {why}; nothing was read"),
+            )
+        };
+        let entry = self
+            .routes
+            .get(tool)
+            .ok_or_else(|| refused("names no tool of the run's surface".to_owned()))?;
+        if let Some(drift) = self.drift_match(&entry.provider, &entry.definition, config) {
+            return Err(refused(format!(
+                "names a tool {} what this node's provider serves since the run's tool surface \
+                 was recorded",
+                drift.kind.describe()
+            )));
+        }
+        let reads = self.registry.reads(&entry.provider).ok_or_else(|| {
+            refused(format!(
+                "goes to provider `{}`, which registers no reader on this node",
+                entry.provider
+            ))
+        })?;
+        Ok(crate::ReadRoute::new(
+            entry.provider.clone(),
+            entry.definition.clone(),
+            Arc::clone(reads),
+        ))
     }
 
     /// Judges a retained match, including a deferred match outside the

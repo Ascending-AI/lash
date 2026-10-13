@@ -6,8 +6,8 @@
 //! the slice returns, and a run cancel is the flag the parent sent with the
 //! slice.
 use crate::worker::{Fences, cpu_nanos};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Timestamp};
-use lash_vm_client::wire::{self, ProjectionAnswer, ProjectionRead};
+use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Site, Timestamp};
+use lash_vm_client::wire::{self, EffectAnswer, EffectRead, ProjectionAnswer, ProjectionRead};
 use lash_vm_client::{
     PoolError,
     ipc::{FrameSource, write_frame},
@@ -197,6 +197,26 @@ impl lash_kernel_vm::Host for WireHost {
             },
         );
         answer
+    }
+
+    /// A read-bound `perform` is one more host read: the parent answers it
+    /// from the effect's reader, under the run's fence, and the slice runs
+    /// on. The parent's own failure never crosses: it stops the run there.
+    fn perform(
+        &mut self,
+        effect: &EffectName,
+        args: &[Datum],
+        site: &Site,
+    ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
+        let answer: EffectAnswer = self.exchange(
+            HostReadKind::Effect,
+            &EffectRead {
+                effect: effect.clone(),
+                args: args.to_vec(),
+                site: site.clone(),
+            },
+        );
+        Ok(answer)
     }
 
     fn print(&mut self, value: &Datum) {

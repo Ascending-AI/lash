@@ -483,6 +483,10 @@ pub mod tools {
         ToolChildProcessStarted, facade_support::ToolInvocation,
         facade_support::ToolInvocationReply,
     };
+    /// What answers an [`ExecutionPolicy::Read`] tool's calls inside a code
+    /// cell: the reader a provider registers beside itself, with the
+    /// recipe's `provider_with_reads` (ADR 0144).
+    pub use lash_core::{ReadCall, ReadError, ReadRoute, ToolProviderRegistration, ToolReads};
     /// The dialect-agnostic tool binding and its one setter. The manifest key
     /// is lash's internal projection — hosts never read or write it, and which
     /// dialect executes a bound tool is decided inside lash.

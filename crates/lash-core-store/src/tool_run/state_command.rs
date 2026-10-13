@@ -76,6 +76,9 @@ pub enum StateAuthority {
 
 callback_slots! {
     ToolProvider => "tool_provider", DecisionOnly;
+    /// A tool provider's reader: what answers its `Read` tools' calls in a
+    /// code cell, owed while a cell's read plan names the provider.
+    ToolReads => "tool_reads", DecisionOnly;
     ToolCatalog => "tool_catalog", DecisionOnly;
     BeforeTurn => "before_turn", Commands;
     /// Argument transforms, chained before provider preparation.

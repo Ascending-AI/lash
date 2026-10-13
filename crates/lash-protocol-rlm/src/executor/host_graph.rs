@@ -652,6 +652,10 @@ pub struct HostState {
     pub cancelled: Option<u64>,
     pub prints: Paged<PrintEvent>,
     pub processes: Paged<ProcessEvent>,
+    /// How many reads the cell made up to this state (ADR 0144): they count
+    /// against `max_tool_calls` beside its calls. A read made after the
+    /// state was saved is made again after a crash, and counted again.
+    pub reads: u64,
 }
 
 /// The host root's body: counts, roots and facts.
@@ -662,6 +666,7 @@ struct HostRootBody {
     cancelled: Option<u64>,
     prints: (u64, Option<NodeId>),
     processes: (u64, Option<NodeId>),
+    reads: u64,
 }
 
 fn encode_tree_ref(tree: (u64, Option<NodeId>), out: &mut TokenWriter) {
@@ -681,7 +686,7 @@ fn usize_token(value: usize) -> u64 {
 
 impl TokenCodec for HostRootBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(6);
+        out.seq(7);
         encode_tree_ref(self.calls, out);
         match &self.tool_call_limit {
             None => out.none(),
@@ -704,10 +709,11 @@ impl TokenCodec for HostRootBody {
         self.cancelled.encode(out);
         encode_tree_ref(self.prints, out);
         encode_tree_ref(self.processes, out);
+        out.unsigned(self.reads);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(6)?;
+        input.expect_struct(7)?;
         let calls = decode_tree_ref(input)?;
         let tool_call_limit = if input.option()? {
             input.expect_struct(4)?;
@@ -737,6 +743,7 @@ impl TokenCodec for HostRootBody {
             cancelled: Option::decode(input)?,
             prints: decode_tree_ref(input)?,
             processes: decode_tree_ref(input)?,
+            reads: input.unsigned()?,
         })
     }
 }
@@ -768,6 +775,7 @@ impl HostState {
             cancelled: self.cancelled,
             prints: (self.prints.len(), self.prints.stage(staging, reads)?),
             processes: (self.processes.len(), self.processes.stage(staging, reads)?),
+            reads: self.reads,
         };
         staging.encode_value(NodeKind::HOST_ROOT, &body)
     }
@@ -816,6 +824,7 @@ impl HostState {
             cancelled: body.cancelled,
             prints: Paged::load(decoder, id, body.prints.1, body.prints.0)?,
             processes: Paged::load(decoder, id, body.processes.1, body.processes.0)?,
+            reads: body.reads,
         })
     }
 

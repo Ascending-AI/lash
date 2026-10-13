@@ -510,13 +510,22 @@ impl PolicyView {
         self.current.get(tool).copied()
     }
 
-    /// Whether a stored `pinned` policy of `tool` may run again: it is
-    /// `Repeatable`, and the current declaration does not veto it with
-    /// `Once`. A stored `Once` is never upgraded.
+    /// Whether a stored `pinned` policy of `tool` may run again after a
+    /// reported failure: it is `Repeatable`, and the current declaration
+    /// does not veto it with `Once`. A stored `Once` is never upgraded.
     #[must_use]
     pub fn permits_repeat(&self, tool: &ToolId, pinned: ExecutionPolicy) -> bool {
         matches!(pinned, ExecutionPolicy::Repeatable { .. })
             && self.policy(tool) != Some(ExecutionPolicy::Once)
+    }
+
+    /// Whether an attempt of a stored `pinned` policy of `tool` that
+    /// started and never settled runs again at its ordinal: the policy
+    /// reruns an interrupted attempt ([`ExecutionPolicy::reruns_interrupted`]),
+    /// and the current declaration does not veto it with `Once`.
+    #[must_use]
+    pub fn reruns_interrupted(&self, tool: &ToolId, pinned: ExecutionPolicy) -> bool {
+        pinned.reruns_interrupted() && self.policy(tool) != Some(ExecutionPolicy::Once)
     }
 }
 

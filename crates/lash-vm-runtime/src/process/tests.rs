@@ -50,6 +50,7 @@ fn sealed_stating(stated: u32) -> SealedRun {
             ready: lash_kernel_state::ReadyQueue::default(),
             withdrawn: BTreeSet::new(),
             unreported: Vec::new(),
+            reads: BTreeSet::new(),
         },
         session: BTreeMap::new(),
         tasks: Vec::new(),

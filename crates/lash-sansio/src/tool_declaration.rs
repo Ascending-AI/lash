@@ -26,6 +26,9 @@
 //! and never retries a reported failure. `Repeatable` may repeat only within
 //! its bounds while both recorded and current policies permit it. A permitted
 //! crash rerun keeps the attempt ordinal; a reported-failure retry advances it.
+//! `Read` declares none of these capabilities: a code cell runs it inside
+//! its statement with nothing recorded, and a recorded `Read` reruns an
+//! interrupted attempt and never retries a reported failure.
 //! Recipients deduplicate external work using the stable
 //! [`ToolCallId`](crate::ToolCallId), preserved across attempts; Lash promises
 //! no exactly-once external effects. Retry and cancel policy are runtime

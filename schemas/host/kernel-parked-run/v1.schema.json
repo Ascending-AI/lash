@@ -1135,6 +1135,14 @@
           "minimum": 0,
           "type": "integer"
         },
+        "reads": {
+          "description": "The effects the run performs as reads, bound when it started\n(`K-EFF-012`); every other effect it performs is recorded.",
+          "items": {
+            "$ref": "#/$defs/QualifiedName"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
         "ready": {
           "$ref": "#/$defs/ReadyQueue",
           "description": "The tasks that are ready, in the order they run (`K-TASK-003`)."

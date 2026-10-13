@@ -84,7 +84,7 @@ pub(super) fn register_rlm_protocol_plugin(
             }))
         })?;
     reg.tool_calls()
-        .transform_args(lash_core::hook_key!("projected-args"), move |_owner, _| {
+        .transform_args(super::PROJECTED_ARGS, move |_owner, _| {
             Ok(Arc::new(|input| {
                 Box::pin(async move { normalize_projected_tool_args(input) })
             }))

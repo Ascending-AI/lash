@@ -108,6 +108,9 @@ pub(crate) struct PluginContributions {
     /// Each plugin's pure state reducers, by name (K10).
     pub(crate) state_reducers: BTreeMap<String, BTreeMap<String, super::StateReducer>>,
     pub(crate) tool_providers: Vec<RegisteredProvider<Arc<dyn ToolProvider>>>,
+    /// The readers of the providers whose `Read` tools a cell reads, each
+    /// under its provider's identity.
+    pub(crate) tool_reads: Vec<RegisteredProvider<Arc<dyn crate::ToolReads>>>,
     /// The one deferred provider, registered among `tool_providers` too.
     pub(crate) deferred_provider: Option<RegisteredProvider<Arc<dyn crate::DeferredToolProvider>>>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
@@ -166,6 +169,31 @@ impl ToolRegistrations<'_> {
         provider: Arc<dyn ToolProvider>,
     ) -> Result<(), PluginError> {
         self.reg.add_tool_provider(key, provider)
+    }
+
+    /// Register `registration`'s provider under `key`, with the reader that
+    /// answers its `Read` tools.
+    ///
+    /// # Errors
+    ///
+    /// A duplicate key, or a registration that supplies no reader.
+    pub fn provider_with_reads(
+        self,
+        key: ToolProviderKey,
+        registration: crate::ToolProviderRegistration,
+    ) -> Result<(), PluginError> {
+        let identity = ToolProviderHandle::new(self.reg.registry, self.reg.owner.clone(), key);
+        let Some(reads) = registration.reads else {
+            return Err(PluginError::Registration(format!(
+                "provider `{identity}` was declared with reads, and its registration supplies no reader"
+            )));
+        };
+        self.reg.add_tool_provider(key, registration.provider)?;
+        self.reg.contributions.tool_reads.push(RegisteredProvider {
+            identity,
+            hook: reads,
+        });
+        Ok(())
     }
 
     /// Register `provider` under `key` as the deferred provider: a tool

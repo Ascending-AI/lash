@@ -361,9 +361,12 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 Arc::clone(deferred) as Arc<dyn crate::ToolProvider>,
             ));
         }
-        let registry =
-            crate::ToolRegistry::from_tool_registrations(providers, self.deferred.clone())
-                .expect("the fixture's providers register");
+        let registry = crate::ToolRegistry::from_tool_registrations(
+            providers,
+            self.deferred.clone(),
+            Vec::new(),
+        )
+        .expect("the fixture's providers register");
         let surface = crate::RecordedSurface::new(
             entries,
             self.deferred.as_ref().map(|(identity, _)| identity.clone()),

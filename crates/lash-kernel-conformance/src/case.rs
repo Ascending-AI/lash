@@ -43,6 +43,9 @@ pub struct Environment {
     pub resume: bool,
     pub entry: Option<Name>,
     pub args: Vec<Datum>,
+    /// The effects the run binds as reads (`K-EFF-012`); every other
+    /// effect is recorded.
+    pub reads: Vec<EffectName>,
 }
 
 impl Default for Environment {
@@ -57,6 +60,7 @@ impl Default for Environment {
             resume: false,
             entry: None,
             args: Vec::new(),
+            reads: Vec::new(),
         }
     }
 }
@@ -132,7 +136,18 @@ pub enum HostAnswer {
     Clock(Timestamp),
     Random(u64),
     Read(ReadAnswer),
+    Perform(PerformAnswer),
     Cancel(bool),
+}
+
+/// The host's answer to one read-bound `perform` (`K-EFF-012`): `None`
+/// when it cannot answer at all (`K-HOST-005`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PerformAnswer {
+    pub effect: EffectName,
+    pub args: Vec<Datum>,
+    pub answer: Option<Result<Datum, ErrorDatum>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -180,6 +195,9 @@ pub enum ExpectedEnd {
         limit: u64,
     },
     Cancelled,
+    /// The host could not answer a read-bound `perform`, and the run
+    /// stopped there (`K-HOST-005`).
+    HostFault,
     /// Structural refusal is an observation too. Runtime faults never match it.
     Refused,
 }

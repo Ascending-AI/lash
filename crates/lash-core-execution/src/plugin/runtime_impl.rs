@@ -815,7 +815,12 @@ pub(crate) fn build_tool_registry(
         .deferred_provider
         .as_ref()
         .map(|registered| (registered.identity.clone(), Arc::clone(&registered.hook)));
-    crate::ToolRegistry::from_tool_registrations(providers, deferred)
+    let reads = contributions
+        .tool_reads
+        .iter()
+        .map(|registered| (registered.identity.clone(), Arc::clone(&registered.hook)))
+        .collect();
+    crate::ToolRegistry::from_tool_registrations(providers, deferred, reads)
         .map(Arc::new)
         .map_err(|err| PluginError::Registration(format!("failed to build tool registry: {err}")))
 }

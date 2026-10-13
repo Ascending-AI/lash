@@ -92,6 +92,10 @@ pub struct Run {
     /// order they were withdrawn.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unreported: Vec<WaitId>,
+    /// The effects the run performs as reads, bound when it started
+    /// (`K-EFF-012`); every other effect it performs is recorded.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub reads: BTreeSet<EffectName>,
 }
 
 /// A task's handle: who the task is, what it waits on or how it ended,

@@ -39,14 +39,14 @@
 //! `a_result_the_heap_has_no_room_for_is_refused_at_its_reservation` in
 //! `lash-ext-regex-ecma`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::PreparedLibrary;
 use lash_kernel_doc::{
     Datum, Document, DocumentId, EffectIdentity, EffectName, ErrorDatum, FunctionId, FunctionName,
-    Handle, Invalid, Name, Object, ObjectId, TaskIdentity, Timestamp, Type, Value,
+    Handle, Invalid, Name, Object, ObjectId, Site, TaskIdentity, Timestamp, Type, Value,
 };
 
 /// What a machine runs: an admitted document and the library functions the
@@ -142,6 +142,75 @@ pub struct Bindings {
     pub objects: BTreeMap<ObjectId, Object>,
 }
 
+/// How a run's `perform` of one effect runs (`K-EFF-012`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectMode {
+    /// The `perform` waits: the embedder admits its request at the next
+    /// park and delivers its committed outcome (`K-EFF-001`).
+    Recorded,
+    /// The `perform` is answered by the host at once, inside its statement,
+    /// through [`Host::perform`]: no wait, no request, no turn given up.
+    Read,
+}
+
+/// The mode each effect of a run is performed in, bound once when the run
+/// starts and saved with its state: no later resume can change it
+/// (`K-EFF-012`). Every effect it does not name as a read is recorded.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EffectModes {
+    reads: BTreeSet<EffectName>,
+}
+
+impl EffectModes {
+    /// Every effect recorded.
+    #[must_use]
+    pub fn recorded() -> Self {
+        Self::default()
+    }
+
+    /// `reads` performed as reads, every other effect recorded.
+    #[must_use]
+    pub fn reading(reads: impl IntoIterator<Item = EffectName>) -> Self {
+        Self {
+            reads: reads.into_iter().collect(),
+        }
+    }
+
+    /// The mode `effect` is performed in.
+    #[must_use]
+    pub fn mode(&self, effect: &EffectName) -> EffectMode {
+        if self.reads.contains(effect) {
+            EffectMode::Read
+        } else {
+            EffectMode::Recorded
+        }
+    }
+
+    /// The effects performed as reads, in name order.
+    #[must_use]
+    pub fn reads(&self) -> &BTreeSet<EffectName> {
+        &self.reads
+    }
+}
+
+/// The host's own failure to answer a read-bound `perform`: nothing about
+/// the guest, which raises nothing. The run stops with
+/// [`MachineError::Host`], and its last save stands.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{problem}")]
+pub struct HostFault {
+    pub problem: String,
+}
+
+impl HostFault {
+    #[must_use]
+    pub fn new(problem: impl Into<String>) -> Self {
+        Self {
+            problem: problem.into(),
+        }
+    }
+}
+
 /// The synchronous interface a machine reads its host through while it
 /// runs. Every call is answered at once: none is a wait, none yields the
 /// running task's turn, and none is saved, so a read in a stretch that was
@@ -154,6 +223,23 @@ pub trait Host {
     /// Reads through a projection handle. The answer is kernel data; an
     /// error is raised in the guest at the read.
     fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum>;
+    /// Performs `effect`, which the run binds as a read, with `args` copied
+    /// out of the run, for the `perform` at `site` (`K-EFF-012`). The
+    /// answer is the effect's result, decoded by the `perform`'s type, or
+    /// the error raised at the `perform`, which the guest may catch.
+    /// `Err` is the host's own fault: the run stops and nothing is raised.
+    /// A host that binds no read is never asked.
+    fn perform(
+        &mut self,
+        effect: &EffectName,
+        args: &[Datum],
+        site: &Site,
+    ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
+        let _ = (args, site);
+        Err(HostFault::new(format!(
+            "this host performs no read, and the run binds `{effect}` as one"
+        )))
+    }
     /// Takes the output of one `print`.
     fn print(&mut self, value: &Datum);
     /// Whether the embedder wants the run cancelled. The machine asks at
@@ -322,6 +408,10 @@ pub enum StartError {
     Arguments { problem: String },
     #[error("the bindings are not a session's: {problem}")]
     Bindings { problem: String },
+    /// The run binds as a read an effect its document's manifest does not
+    /// declare.
+    #[error("the run binds `{effect}` as a read, and the manifest declares no such effect")]
+    UndeclaredRead { effect: EffectName },
 }
 
 /// A call the machine cannot serve in its present state.
@@ -334,6 +424,11 @@ pub enum MachineError {
     /// machine, never in the document. The run is over.
     #[error("the machine is in a state it cannot run from: {problem}")]
     Fault { problem: String },
+    /// The host failed a read-bound `perform` it was asked to answer
+    /// ([`Host::perform`]): nothing about the guest. The run is over; its
+    /// last save stands.
+    #[error("the host failed a read: {0}")]
+    Host(HostFault),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -386,6 +481,15 @@ pub trait Machine: Sized {
     /// Admits and prepares `program`'s document, reusing immutable preparation
     /// when available, and creates a run that has executed nothing.
     fn start(program: Program, bounds: Bounds, start: Start) -> Result<Self, StartError>;
+
+    /// Creates a run as [`start`](Self::start) does, performing each
+    /// effect in the mode `modes` binds (`K-EFF-012`).
+    fn start_reading(
+        program: Program,
+        bounds: Bounds,
+        start: Start,
+        modes: EffectModes,
+    ) -> Result<Self, StartError>;
 
     /// Runs ready tasks, first in first out, until no task is ready, the
     /// run ends, or `slice` charge units are spent in this call

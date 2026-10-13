@@ -12,8 +12,10 @@ use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::bodies::OwnerBinding;
 use lash_core_store::checkpoint_graph::{DecodeLimits, NodeKind};
-use lash_kernel_doc::{Datum, Document, DocumentId, ErrorDatum, Handle, KernelVersion, Timestamp};
-use lash_kernel_vm::{Bounds, End, Outcome, Start, Step, WaitId};
+use lash_kernel_doc::{
+    Datum, Document, DocumentId, EffectName, ErrorDatum, Handle, KernelVersion, Site, Timestamp,
+};
+use lash_kernel_vm::{Bounds, EffectModes, End, Outcome, Start, Step, WaitId};
 use lash_sansio::VersionRange;
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::state::{GraphStateFailure, ReleaseGraph, WholeState};
@@ -24,7 +26,7 @@ use lash_vm_protocol::{
 };
 
 use crate::service::{CallHeld, Service};
-use crate::wire::{self, EndWire, OutcomeWire, ParkWire, ProjectionRead, StartWire};
+use crate::wire::{self, EffectRead, EndWire, OutcomeWire, ParkWire, ProjectionRead, StartWire};
 use crate::{Checkout, ExecutionClass, PoolError, RunStep, WorkerPoolRuntimeOps as _};
 
 /// The kernel versions this build's workers resume a parked run under.
@@ -53,6 +55,17 @@ pub trait RunHost: Send + Sync {
         &self,
         handle: &Handle,
         request: &Datum,
+    ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
+
+    /// A `perform` the run binds as a read (`K-EFF-012`), at `site`: the
+    /// effect's result, or the error raised at the `perform`, which the
+    /// guest may catch. `Err` is the parent's own failure: the run stops
+    /// there, unanswered, and its last save stands.
+    async fn perform(
+        &self,
+        effect: &EffectName,
+        args: &[Datum],
+        site: &Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 
     /// One `print` call's value, in the order the run printed.
@@ -124,14 +137,18 @@ pub struct RemoteMachines {
     dialect: String,
     encoded: Arc<Vec<u8>>,
     start: Start,
+    /// The effects a fresh run performs as reads; a resumed run's state
+    /// holds its own.
+    modes: EffectModes,
     bounds: Bounds,
     releases: std::sync::OnceLock<Result<ReleaseGraph, GraphStateFailure>>,
 }
 
 impl RemoteMachines {
     /// The run of `document`, written in `dialect`, from `start`, held to
-    /// `bounds`. `dialect` is recorded configuration: what the run's session
-    /// or process recorded at creation, never a live read.
+    /// `bounds`, performing each effect in the mode `modes` binds.
+    /// `dialect` is recorded configuration: what the run's session or
+    /// process recorded at creation, never a live read.
     ///
     /// # Errors
     ///
@@ -147,6 +164,7 @@ impl RemoteMachines {
         document: &Document,
         dialect: &str,
         start: Start,
+        modes: EffectModes,
         bounds: Bounds,
     ) -> Result<Self, KernelFailure> {
         let prepared = service
@@ -164,6 +182,7 @@ impl RemoteMachines {
             dialect: dialect.to_owned(),
             encoded: Arc::clone(&prepared.encoded),
             start,
+            modes,
             bounds,
             releases: std::sync::OnceLock::new(),
         })
@@ -262,8 +281,11 @@ impl Machines for RemoteMachines {
     }
 
     async fn start(&self, binding: &OwnerBinding) -> Result<RemoteMachine, KernelFailure> {
-        let start = wire::encode(PayloadKind::Start, &StartWire::from(self.start.clone()))
-            .map_err(worker)?;
+        let start = wire::encode(
+            PayloadKind::Start,
+            &StartWire::of(self.start.clone(), &self.modes),
+        )
+        .map_err(worker)?;
         self.checkout(StartFrom::Fresh(start), binding).await
     }
 
@@ -405,6 +427,13 @@ async fn answer(
             wire::encode(
                 PayloadKind::HostAnswer,
                 &host.read(&read.handle, &read.request).await?,
+            )
+        }
+        HostReadKind::Effect => {
+            let read: EffectRead = wire::decode(PayloadKind::HostRead, request).map_err(worker)?;
+            wire::encode(
+                PayloadKind::HostAnswer,
+                &host.perform(&read.effect, &read.args, &read.site).await?,
             )
         }
     }

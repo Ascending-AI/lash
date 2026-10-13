@@ -13,7 +13,8 @@ use lash_kernel_doc::{
     Datum, EffectIdentity, EffectName, ErrorDatum, Handle, Name, Object, ObjectId, Type, Value,
 };
 use lash_kernel_vm::{
-    Bindings, EffectRequest, Outcome, Park, Request, SleepRequest, Start, Target, WaitId,
+    Bindings, EffectModes, EffectRequest, Outcome, Park, Request, SleepRequest, Start, Target,
+    WaitId,
 };
 use lash_vm_protocol::{EncodedPayload, PayloadKind};
 use serde::de::DeserializeOwned;
@@ -82,7 +83,8 @@ pub fn from_json<T: DeserializeOwned>(kind: PayloadKind, json: &[u8]) -> Result<
     Ok(value)
 }
 
-/// How a new run starts ([`Start`]).
+/// How a new run starts ([`Start`]), and the effects it performs as reads
+/// ([`EffectModes`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StartWire {
@@ -91,10 +93,15 @@ pub struct StartWire {
     pub args: Vec<Datum>,
     pub variables: BTreeMap<Name, Value>,
     pub objects: Vec<(ObjectId, Object)>,
+    /// The effects the run performs as reads (`K-EFF-012`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reads: Vec<EffectName>,
 }
 
-impl From<Start> for StartWire {
-    fn from(start: Start) -> Self {
+impl StartWire {
+    /// `start`, performing its effects in the modes `modes` binds.
+    #[must_use]
+    pub fn of(start: Start, modes: &EffectModes) -> Self {
         Self {
             entry: match start.target {
                 Target::Main => None,
@@ -103,22 +110,41 @@ impl From<Start> for StartWire {
             args: start.args,
             variables: start.bindings.variables,
             objects: start.bindings.objects.into_iter().collect(),
+            reads: modes.reads().iter().cloned().collect(),
         }
+    }
+
+    /// The start and the effect modes this wire carries.
+    #[must_use]
+    pub fn into_start(self) -> (Start, EffectModes) {
+        (
+            Start {
+                target: self.entry.map_or(Target::Main, Target::Entry),
+                args: self.args,
+                bindings: Bindings {
+                    variables: self.variables,
+                    objects: self.objects.into_iter().collect(),
+                },
+            },
+            EffectModes::reading(self.reads),
+        )
     }
 }
 
-impl From<StartWire> for Start {
-    fn from(wire: StartWire) -> Self {
-        Self {
-            target: wire.entry.map_or(Target::Main, Target::Entry),
-            args: wire.args,
-            bindings: Bindings {
-                variables: wire.variables,
-                objects: wire.objects.into_iter().collect(),
-            },
-        }
-    }
+/// One read-bound `perform`, as the worker asks its parent to answer it
+/// (`K-EFF-012`): the effect, its arguments copied out of the run, and the
+/// site of the `perform`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EffectRead {
+    pub effect: EffectName,
+    pub args: Vec<Datum>,
+    pub site: lash_kernel_doc::Site,
 }
+
+/// The parent's answer to an [`EffectRead`]: the effect's result, or the
+/// error the guest raises at the `perform`.
+pub type EffectAnswer = Result<Datum, ErrorDatum>;
 
 /// Canonical nanoseconds within one second, checked at payload admission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

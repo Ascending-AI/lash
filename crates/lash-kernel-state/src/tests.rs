@@ -28,6 +28,7 @@ fn parked() -> ParkedRun {
             ready: vec![TaskId::MAIN].try_into().unwrap(),
             withdrawn: BTreeSet::new(),
             unreported: Vec::new(),
+            reads: BTreeSet::new(),
         },
         session: BTreeMap::from([
             (Name::new("a"), list(4)),

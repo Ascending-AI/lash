@@ -159,6 +159,7 @@ impl KernelMachine {
                 .map_err(fault)?,
             withdrawn: self.withdrawn_ever.clone(),
             unreported: self.withdrawn.clone(),
+            reads: self.modes.reads().clone(),
         };
         Ok((run, self.session.clone(), tasks))
     }

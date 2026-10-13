@@ -8,8 +8,8 @@ use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
 };
 use lash_kernel_vm::{
-    Bindings, Delivered, Host, Machine, PreparedLibrary, Program, Request, Start, StartError, Step,
-    Target,
+    Bindings, Delivered, EffectModes, Host, HostFault, Machine, MachineError, PreparedLibrary,
+    Program, Request, Start, StartError, Step, Target,
 };
 
 use crate::{Case, DocumentRunner, ExpectedEnd, HarnessError, HostAnswer, Observations, Trace};
@@ -95,9 +95,12 @@ pub(crate) fn run_case<M: Machine>(
         args: env.args.clone(),
         bindings: Bindings::default(),
     };
-    let mut machine = match M::start(program.clone(), bounds, start) {
+    let modes = EffectModes::reading(env.reads.iter().cloned());
+    let mut machine = match M::start_reading(program.clone(), bounds, start, modes) {
         Ok(machine) => machine,
-        Err(StartError::NotAdmitted(_)) => return Ok(refused()),
+        Err(StartError::NotAdmitted(_) | StartError::UndeclaredRead { .. }) => {
+            return Ok(refused());
+        }
         Err(error) => return Err(HarnessError(error.to_string())),
     };
     let mut host = ScriptHost {
@@ -113,12 +116,28 @@ pub(crate) fn run_case<M: Machine>(
         return Err(HarnessError("a corpus slice must be positive".into()));
     }
     for _ in 0..env.max_steps {
-        let step = machine
-            .run(&mut host, env.slice)
-            .map_err(|error| HarnessError(error.to_string()))?;
+        let step = machine.run(&mut host, env.slice);
         if let Some(fault) = host.fault.take() {
             return Err(HarnessError(fault));
         }
+        let step = match step {
+            Ok(step) => step,
+            Err(MachineError::Host(_)) => {
+                if batches.next().is_some() || !host.answers.is_empty() {
+                    return Err(HarnessError(
+                        "run stopped before its script was consumed".into(),
+                    ));
+                }
+                return Ok(Observations {
+                    prints: host.prints,
+                    end: ExpectedEnd::HostFault,
+                    trace,
+                    charged: machine.meters().charged,
+                    parks,
+                });
+            }
+            Err(error) => return Err(HarnessError(error.to_string())),
+        };
         match step {
             Step::Slice => {}
             Step::Ended(end) => {
@@ -238,6 +257,27 @@ impl Host for ScriptHost {
                     message: "unscripted read".into(),
                     data: Datum::Null,
                 })
+            }
+        }
+    }
+
+    fn perform(
+        &mut self,
+        effect: &lash_kernel_doc::EffectName,
+        args: &[Datum],
+        _site: &lash_kernel_doc::Site,
+    ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
+        match self.answers.pop_front() {
+            Some(HostAnswer::Perform(perform))
+                if perform.effect == *effect && perform.args == args =>
+            {
+                perform
+                    .answer
+                    .ok_or_else(|| HostFault::new("the scripted host cannot answer the read"))
+            }
+            answer => {
+                self.mismatch("matching read-bound perform", answer);
+                Err(HostFault::new("unscripted read-bound perform"))
             }
         }
     }

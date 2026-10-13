@@ -733,6 +733,11 @@ pub use session_graph::{
     SessionNodePayload, SessionNodeRecord, UndeliveredConfigChange,
 };
 
+/// Declared reads (ADR 0144): what answers a `Read` tool's calls inside a
+/// code cell.
+pub use lash_core_execution::{
+    ReadCall, ReadError, ReadRoute, ToolProviderRegistration, ToolReads,
+};
 pub use session_model::LlmProfileBinding;
 pub use session_model::{
     ChargeSafetyPolicy, MaxToolCalls, NoProgressBudget, SessionPolicy, ToolCallLimitExceeded,

@@ -172,6 +172,11 @@ impl ToolProviderHandle {
             self.key(),
         )
     }
+    /// The callback identity of this provider's reader: what a cell's read
+    /// plan owes while it may still read through the provider.
+    pub fn reads_identity(&self) -> crate::store::plugin_writers::PluginCallbackIdentity {
+        crate::store::plugin_writers::PluginCallbackIdentity::tool_reads(self.owner(), self.key())
+    }
 }
 impl std::fmt::Display for ToolProviderHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

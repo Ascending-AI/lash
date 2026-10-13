@@ -1,0 +1,37 @@
+{
+  "rule": "K-HOST-005",
+  "cases": [
+    {
+      "name": "a read the host cannot answer stops the run at its statement",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { print 1 let x = perform echo(1) as Int print x finish x }\n",
+      "environment": {
+        "reads": [
+          "echo"
+        ],
+        "host": [
+          {
+            "perform": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "answer": null
+            }
+          }
+        ]
+      },
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          }
+        ],
+        "end": "host_fault",
+        "trace": [],
+        "parks": 0
+      }
+    }
+  ]
+}

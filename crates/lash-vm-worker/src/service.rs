@@ -25,6 +25,7 @@ pub(crate) fn perform(
             bindings,
             functions,
             helpers,
+            reads,
         } => match embedding.library_for(helpers) {
             Err(_) => Response::HelperReleaseNotHeld { release: helpers },
             Ok(library) => match embedding.lower(
@@ -41,6 +42,7 @@ pub(crate) fn perform(
             ) {
                 None => Response::UnknownDialect { dialect },
                 Some(Ok(lowered)) => Response::Lowered {
+                    reads: reached(&lowered.document, library, reads),
                     document: encoded(lowered.document.to_json())?,
                     annotations: encoded(lowered.annotations.to_json())?,
                     function_values: embedding
@@ -77,6 +79,29 @@ pub(crate) fn perform(
     rmp_serde::to_vec_named(&response)
         .map(EncodedPayload)
         .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))
+}
+
+/// Those of `reads` the cell `document`'s `main` calls or spawns; none
+/// when its linked effects cannot be certified, so every effect it performs
+/// stays recorded.
+fn reached(
+    document: &Document,
+    library: &dyn lash_kernel_doc::FunctionCatalog,
+    mut reads: std::collections::BTreeSet<lash_kernel_doc::EffectName>,
+) -> std::collections::BTreeSet<lash_kernel_doc::EffectName> {
+    if reads.is_empty() {
+        return reads;
+    }
+    let linked = lash_kernel_check::derive_view(document, library)
+        .ok()
+        .and_then(|graph| lash_kernel_check::main_effects(document, &graph, library).ok());
+    match linked {
+        Some(linked) => {
+            reads.retain(|effect| linked.contains_key(effect));
+            reads
+        }
+        None => std::collections::BTreeSet::new(),
+    }
 }
 
 fn encoded(json: Result<String, impl std::fmt::Display>) -> Result<Vec<u8>, PoolError> {

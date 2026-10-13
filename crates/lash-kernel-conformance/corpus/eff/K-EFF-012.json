@@ -1,0 +1,213 @@
+{
+  "rule": "K-EFF-012",
+  "cases": [
+    {
+      "name": "a read is answered inside its statement and charged as a recorded perform",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = perform echo(1) as Int finish x }\n",
+      "environment": {
+        "reads": [
+          "echo"
+        ],
+        "host": [
+          {
+            "perform": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "answer": {
+                "Ok": {
+                  "int": "2"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "trace": [],
+        "charged": 10,
+        "parks": 0
+      }
+    },
+    {
+      "name": "a read's error is raised at the perform",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\ntry { do perform echo(1) as Int } catch e { finish (e.kind, e.data) }\n}\n",
+      "environment": {
+        "reads": [
+          "echo"
+        ],
+        "host": [
+          {
+            "perform": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "answer": {
+                "Err": {
+                  "kind": "test",
+                  "message": "message",
+                  "data": {
+                    "record": [
+                      [
+                        "n",
+                        {
+                          "int": "4"
+                        }
+                      ]
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "text": "test"
+              },
+              {
+                "record": [
+                  [
+                    "n",
+                    {
+                      "int": "4"
+                    }
+                  ]
+                ]
+              }
+            ]
+          }
+        },
+        "trace": [],
+        "parks": 0
+      }
+    },
+    {
+      "name": "a read's answer is decoded as the perform states",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\ntry { do perform echo(1) as Int } catch e { finish e.kind }\n}\n",
+      "environment": {
+        "reads": [
+          "echo"
+        ],
+        "host": [
+          {
+            "perform": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "answer": {
+                "Ok": {
+                  "float": "1.5"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "text": "effect_result"
+          }
+        },
+        "trace": [],
+        "parks": 0
+      }
+    },
+    {
+      "name": "a recorded effect beside a read still waits",
+      "document": "kernel 1\nnumbers by_spelling\neffect look(key: Int) -> Int\neffect echo(value: Int) -> Int\nmain { let a = perform look(1) as Int let b = perform echo(a) as Int finish b }\n",
+      "environment": {
+        "reads": [
+          "look"
+        ],
+        "host": [
+          {
+            "perform": {
+              "effect": "look",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "answer": {
+                "Ok": {
+                  "int": "5"
+                }
+              }
+            }
+          }
+        ],
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "6"
+                }
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "6"
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "5"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ],
+        "parks": 1
+      }
+    },
+    {
+      "name": "a read binding of an effect the manifest does not list is refused",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = perform echo(1) as Int finish x }\n",
+      "environment": {
+        "reads": [
+          "other"
+        ]
+      },
+      "expected": {
+        "prints": [],
+        "end": "refused",
+        "trace": []
+      }
+    }
+  ]
+}

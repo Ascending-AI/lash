@@ -184,7 +184,7 @@ Rules whose cases need a running machine are pinned by the conformance corpus (`
 
 ## The effect boundary (`K-EFF`)
 
-- **K-EFF-001.** `perform e(args) as T` requests one run of effect `e`, which the manifest must list, and waits. It yields the effect's result decoded as `T`.
+- **K-EFF-001.** `perform e(args) as T` requests one run of effect `e`, which the manifest must list, and waits, unless the run binds `e` as a read (`K-EFF-012`). It yields the effect's result decoded as `T`.
 - **K-EFF-002.** A value that leaves the run is copied out as a tree: an effect's arguments, the value of `print`, `finish` and `fail`, a projection read's request, and the run's result. Null, absent, bools, numbers, texts, bytes, timestamps, errors, function references and handles are copied as themselves; a tuple, list, map, set or record is copied member by member, an object reached twice being copied twice. A cycle raises `cycle`. A closure, a task handle or a ref raises `not_data`. Nesting deeper than 128 levels raises `too_deep` (`K-VAL-034`). All are raised at the statement, before anything is requested; for the run's result that statement is the `return` in `main`.
 - **K-EFF-003.** A result is a fresh graph. Every list, map, set and record in it is a new object, and it shares no identity with the arguments or with any earlier result.
 - **K-EFF-004.** A wait copies nothing inside the run. Two variables that held one object before a wait hold one object after it, and after a park and a resume.
@@ -195,13 +195,15 @@ Rules whose cases need a running machine are pinned by the conformance corpus (`
 - **K-EFF-009.** An effect that fails raises the error the embedder delivers, at the `perform`.
 - **K-EFF-010.** `sleep d` requires a number of milliseconds that is finite and not negative, and raises `type_error` for another kind and `number_range` otherwise. It is always a wait.
 - **K-EFF-011.** An effect whose outcome has committed is never executed again. After a crash a run resumes from its last saved state, and a `perform` that runs again there is answered from the committed outcome.
+- **K-EFF-012.** The embedder binds each effect of a run, at its start, as recorded or as a read; the binding is part of the run's saved state, and no resume changes it. A recorded effect is performed as `K-EFF-001` says. A read-bound `perform` is not a wait: its arguments are copied out (`K-EFF-002`) and answered by the embedder inside the statement (`K-HOST-005`), and the task keeps its turn. Its answer is decoded as the `perform` states (`K-EFF-005`, `K-EFF-007`), an error the embedder answers with is raised at the `perform` (`K-EFF-009`), and it is charged exactly as a recorded `perform` is (`K-CHG-002`). It mints no wait and has no effect identity a park hands over. A binding of an effect the manifest does not list is refused at the start, and a saved state that waits on a read-bound effect is refused at its import.
 
 ## Host reads (`K-HOST`)
 
-- **K-HOST-001.** Clock, random and a projection read are answered by the embedder at once, inside the statement that asks. They are not waits and do not end the running task's turn. Their answers are not saved: after a crash, a read in a stretch that was not saved is drawn again.
+- **K-HOST-001.** Clock, random, a projection read and a read-bound `perform` (`K-EFF-012`) are answered by the embedder at once, inside the statement that asks. They are not waits and do not end the running task's turn. Their answers are not saved: after a crash, a read in a stretch that was not saved is drawn again, and its answer may differ.
 - **K-HOST-002.** `clock` yields a timestamp.
 - **K-HOST-003.** `random` yields a float `x` with `0 <= x < 1`: the top 53 of 64 uniformly random bits the embedder supplies, times `2^-53`.
 - **K-HOST-004.** `read(h, request)` requires a handle and raises `type_error` otherwise. The request is copied out (`K-EFF-002`). The answer is kernel data decoded as `Any` (`K-EFF-005`), a fresh graph. An error the host answers with is raised at the read.
+- **K-HOST-005.** An embedder that cannot answer a read-bound `perform` at all, as opposed to answering it with an error, stops the run there: the statement does not complete, nothing of the stretch since the last save survives, and the run's last saved state stands.
 
 ## Charges (`K-CHG`)
 

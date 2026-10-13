@@ -141,6 +141,7 @@ fn lower() -> EncodedPayload {
         bindings: BTreeSet::new(),
         functions: BTreeMap::new(),
         helpers: lash_vm_library::HELPER_RELEASE,
+        reads: BTreeSet::new(),
     };
     EncodedPayload(rmp_serde::to_vec_named(&request).expect("request"))
 }
@@ -166,11 +167,14 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
         from: StartFrom::Fresh(
             wire::encode(
                 PayloadKind::Start,
-                &StartWire::from(RunStart {
-                    target: Target::Main,
-                    args: Vec::new(),
-                    bindings: Default::default(),
-                }),
+                &StartWire::of(
+                    RunStart {
+                        target: Target::Main,
+                        args: Vec::new(),
+                        bindings: Default::default(),
+                    },
+                    &lash_kernel_vm::EffectModes::recorded(),
+                ),
             )
             .expect("start"),
         ),

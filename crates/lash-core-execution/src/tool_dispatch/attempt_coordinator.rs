@@ -109,7 +109,10 @@ pub async fn coordinate_tool_invocation<'run>(
     child_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     mut local_executor: impl FnMut() -> RuntimeEffectLocalExecutor<'run>,
 ) -> CoordinatedToolInvocation {
-    let max_attempts = execution_policy.max_attempts().max(1);
+    // A policy with no bounded retry runs one attempt.
+    let max_attempts = execution_policy
+        .retry()
+        .map_or(1, |retry| retry.max_attempts.get());
     let mut attempts = Vec::new();
 
     for attempt in 1..=max_attempts {
@@ -180,7 +183,10 @@ pub async fn coordinate_tool_invocation<'run>(
                     .tools
                     .resolve_manifest_by_id(&call.tool_id, &context.config)
                     .map_or(execution_policy, |manifest| manifest.execution_policy);
-                let retry_after = if execution_policy.permits_repeat(current, attempt) {
+                let retry = execution_policy
+                    .retry()
+                    .filter(|_| execution_policy.permits_repeat(current, attempt));
+                let retry_after = if let Some(retry) = retry {
                     match &record.output.outcome {
                         crate::ToolCallOutcome::Failure(failure)
                             if !matches!(
@@ -198,10 +204,7 @@ pub async fn coordinate_tool_invocation<'run>(
                                 )
                             ) =>
                         {
-                            Some(
-                                execution_policy
-                                    .delay_ms_for_retry(attempt - 1, failure.suggested_delay_ms),
-                            )
+                            Some(retry.delay_ms(attempt - 1, failure.suggested_delay_ms))
                         }
                         _ => None,
                     }

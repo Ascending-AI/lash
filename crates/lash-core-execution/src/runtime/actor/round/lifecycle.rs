@@ -1089,7 +1089,8 @@ impl Lifecycle {
             SettledOutput::Failed(failure) => failure.named().suggested_delay_ms,
             _ => None,
         };
-        let delay = pinned.delay_ms_for_retry(execution.attempt() - 1, suggested);
+        let retry = pinned.retry()?;
+        let delay = retry.delay_ms(execution.attempt() - 1, suggested);
         let due = now
             .0
             .saturating_add(i64::try_from(delay).unwrap_or(i64::MAX));

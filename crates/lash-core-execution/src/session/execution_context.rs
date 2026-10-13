@@ -1173,6 +1173,27 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self.dispatch.config
     }
 
+    /// Where a read of `tool` goes on this node (ADR 0144): the provider
+    /// the run's surface retained for it, with that provider's reader.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::RuntimeErrorCode::LashVmCellBindingDrift`]: the tool is not
+    /// on the surface, drifted, or its provider registers no reader here.
+    pub fn read_route(
+        &self,
+        tool: &crate::ToolId,
+    ) -> Result<crate::ReadRoute, crate::RuntimeEffectControllerError> {
+        self.dispatch.routes.read_route(tool, &self.dispatch.config)
+    }
+
+    /// The hooks through which the session's plugins see tool calls'
+    /// arguments or results. A read runs no hook, so where one would see it
+    /// the call stays recorded.
+    pub fn tool_call_hooks(&self) -> Vec<crate::plugin::PluginCallbackIdentity> {
+        self.dispatch.composition.tool_call_hooks()
+    }
+
     /// The deferred provider of the surface this execution's calls are
     /// admitted under, with the key the surface recorded it as (S6).
     ///

@@ -12,6 +12,10 @@
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
     },
+    "QualifiedName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
+    },
     "ReadyQueue": {
       "items": {
         "$ref": "#/$defs/TaskId"
@@ -139,6 +143,14 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "reads": {
+          "description": "The effects the run performs as reads, bound when it started\n(`K-EFF-012`); every other effect it performs is recorded.",
+          "items": {
+            "$ref": "#/$defs/QualifiedName"
+          },
+          "type": "array",
+          "uniqueItems": true
         },
         "ready": {
           "$ref": "#/$defs/ReadyQueue",

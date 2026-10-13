@@ -101,6 +101,11 @@ fn k_eff_007() {
 }
 
 #[test]
+fn k_eff_012() {
+    super::run_rule("K-EFF-012", include_str!("../corpus/eff/K-EFF-012.json"));
+}
+
+#[test]
 fn k_fn_002() {
     super::run_rule("K-FN-002", include_str!("../corpus/fn/K-FN-002.json"));
 }
@@ -123,6 +128,11 @@ fn k_form_001() {
 #[test]
 fn k_form_014() {
     super::run_rule("K-FORM-014", include_str!("../corpus/form/K-FORM-014.json"));
+}
+
+#[test]
+fn k_host_005() {
+    super::run_rule("K-HOST-005", include_str!("../corpus/host/K-HOST-005.json"));
 }
 
 #[test]

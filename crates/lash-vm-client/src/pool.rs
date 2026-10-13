@@ -645,7 +645,8 @@ impl Checkout {
     /// The run's state at this park as checkpoint graph state, sealed by the
     /// worker and checked here: the state the park carried, when `binding`
     /// is the one the run's start named, and otherwise the worker's answer
-    /// to an `ExportGraph`.
+    /// to an `ExportGraph`. A run exported before its first slice is its
+    /// start: the start crosses first, on its own.
     pub fn export_graph(
         &mut self,
         binding: lash_vm_protocol::EncodedPayload,
@@ -676,6 +677,15 @@ impl Checkout {
                 return Err(error);
             }
             return Ok(state);
+        }
+        if let Some(start) = self.unsent_start.take() {
+            match self.exchange(
+                ParentMessage::Start(start),
+                self.pool.config.protocol.no_response_watchdog,
+            )? {
+                WorkerMessage::Started => {}
+                message => return Err(self.unexpected(Exchange::Export, &message)),
+            }
         }
         match self.exchange(
             ParentMessage::ExportGraph { binding },

@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_kernel_doc::{
-    EffectIdentity, ErrorValue, JoinMode, LoopIteration, ObjectId, Site, SpawnIdentity, TaskId,
-    TaskIdentity, Value,
+    Datum, EffectIdentity, EffectName, ErrorValue, JoinMode, LoopIteration, ObjectId, Site,
+    SpawnIdentity, TaskId, TaskIdentity, Type, Value,
 };
 use num_traits::ToPrimitive;
 
@@ -18,7 +18,7 @@ use super::{
 };
 use crate::compile::{Action, ActionKind, Atom, Callee, CodeId, Executable, LibId, Stmt, StmtId};
 use crate::heap::Obj;
-use crate::interface::{Bound, EffectRequest, Request, SleepRequest, WaitId};
+use crate::interface::{Bound, EffectMode, EffectRequest, Host, Request, SleepRequest, WaitId};
 
 /// What a call or a `spawn` runs, once its callee is read.
 enum Target {
@@ -38,6 +38,7 @@ impl KernelMachine {
     pub(super) fn act(
         &mut self,
         task: TaskId,
+        host: &mut dyn Host,
         exe: &Executable,
         stmt: StmtId,
         action: &Action,
@@ -63,6 +64,17 @@ impl KernelMachine {
                 let mut copied = Vec::with_capacity(values.len());
                 for value in &values {
                     copied.push(self.copy_out(value)?);
+                }
+                if self.modes.mode(effect) == EffectMode::Read {
+                    // A read completes here, inside its statement: no wait,
+                    // and the task keeps its turn (`K-EFF-012`).
+                    let value =
+                        self.perform_read(host, exe, effect, &copied, &action.site, result)?;
+                    // Held as a delivered outcome is, until the statement
+                    // binds it.
+                    self.put(out, value);
+                    self.pin(out)?;
+                    return Ok(Flow::Done);
                 }
                 let (wait, identity) = self.request(task, exe, stmt, &action.site)?;
                 self.issue(
@@ -283,6 +295,29 @@ impl KernelMachine {
                     "only a closure or a function reference can be called",
                 ),
             },
+        }
+    }
+
+    /// A read-bound `perform`, answered by the host at once: its result
+    /// decoded by the `perform`'s type, or the error the host answered
+    /// raised here, each charged as a recorded `perform`'s outcome is
+    /// (`K-EFF-005`, `K-EFF-009`, `K-EFF-012`).
+    fn perform_read(
+        &mut self,
+        host: &mut dyn Host,
+        exe: &Executable,
+        effect: &EffectName,
+        args: &[Datum],
+        site: &Site,
+        result: &Type,
+    ) -> Eval<Value> {
+        match host.perform(effect, args, site) {
+            Ok(Ok(answer)) => self.decode(exe, &answer, result),
+            Ok(Err(error)) => {
+                let datum = Datum::Error(Box::new(error));
+                Err(Interrupt::Raise(self.decode(exe, &datum, &Type::Any)?))
+            }
+            Err(fault) => Err(Halt::Host(fault).into()),
         }
     }
 

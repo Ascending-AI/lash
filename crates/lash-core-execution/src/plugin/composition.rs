@@ -123,6 +123,30 @@ impl ExecutionComposition {
             .collect()
     }
 
+    /// Every hook that sees a tool call's arguments or its result: what a
+    /// call that runs no hook, as a read does, would pass by.
+    pub(crate) fn tool_call_hooks(&self) -> Vec<PluginCallbackIdentity> {
+        self.tool_args_transforms
+            .iter()
+            .map(|hook| hook.identity.clone())
+            .chain(
+                self.tool_args_checks
+                    .iter()
+                    .map(|hook| hook.identity.clone()),
+            )
+            .chain(
+                self.tool_result_transforms
+                    .iter()
+                    .map(|hook| hook.identity.clone()),
+            )
+            .chain(
+                self.tool_result_checks
+                    .iter()
+                    .map(|hook| hook.identity.clone()),
+            )
+            .collect()
+    }
+
     /// Chain every argument transform once, in recorded registration order.
     /// A transform's failure ends the chain: there is no valid value to
     /// continue from.
@@ -699,6 +723,24 @@ mod tests {
             ),
             "declared provider addresses are unique"
         );
+        struct NoReads;
+        #[async_trait::async_trait]
+        impl crate::ToolReads for NoReads {
+            async fn read(
+                &self,
+                _: crate::ReadCall<'_>,
+            ) -> Result<serde_json::Value, crate::ReadError> {
+                Ok(serde_json::Value::Null)
+            }
+        }
+        reg.tools()
+            .provider_with_reads(crate::tool_provider_key!("reads"), |_, _| {
+                Ok(crate::ToolProviderRegistration::new(Arc::new(
+                    crate::testing::EmptyToolProvider,
+                ))
+                .with_reads(Arc::new(NoReads)))
+            })
+            .unwrap();
         reg.tool_catalog()
             .contribute(crate::hook_key!("catalog"), |_, _| {
                 Ok(Arc::new(|_| Ok(Default::default())))

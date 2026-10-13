@@ -62,6 +62,13 @@ pub struct CellEnvelope {
     /// The read-only host bindings the cell started with: they are the
     /// host's, and are not the session's when the cell ends.
     pub projected: BTreeSet<String>,
+    /// The cell's read plan (ADR 0144): each effect `main` reaches whose
+    /// tool declares a read, with the provider the run's surface retained
+    /// for it. The cell performs these as reads, answered inside their
+    /// statements and recorded nowhere but the cell's saved state; its
+    /// roots owe each provider's reader while the cell lives.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub reads: BTreeMap<EffectName, lash_core::ProviderKey>,
 }
 
 impl CellEnvelope {
@@ -203,6 +210,7 @@ pub(super) fn load_cell(
     let mut ledgers = CellHostLedgers {
         calls: Vec::with_capacity(state.calls.items().len()),
         tool_call_limit: state.tool_call_limit,
+        reads: state.reads,
     };
     let mut graph = HostGraph {
         envelope: Some(envelope),
@@ -362,7 +370,8 @@ fn graph_invalid(kind: NodeKind, reason: impl std::fmt::Display) -> GraphRefusal
 
 /// Kind 12: the effects a cell was lowered against, each with its tool,
 /// signature and declared controls; the grants its deferred resolutions
-/// recorded, including unavailable notes; and its projected binding names. All sorted.
+/// recorded, including unavailable notes; its projected binding names;
+/// and its read plan. All sorted.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectTable {
     pub effects: BTreeMap<EffectName, RecordedEffect>,
@@ -370,11 +379,13 @@ pub struct EffectTable {
     /// Recorded host explanations for unavailable call paths; no authority.
     pub unavailable_notes: BTreeMap<String, String>,
     pub projected: BTreeSet<String>,
+    /// Each planned read's effect, with its retained provider.
+    pub reads: BTreeMap<EffectName, lash_core::ProviderKey>,
 }
 
 impl TokenCodec for EffectTable {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(4);
+        out.seq(5);
         out.map(self.effects.len() as u64);
         for (name, effect) in &self.effects {
             name.encode(out);
@@ -393,6 +404,7 @@ impl TokenCodec for EffectTable {
         for name in &self.projected {
             out.text(name);
         }
+        encode_tree(&self.reads, out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -401,7 +413,7 @@ impl TokenCodec for EffectTable {
                 lash_core_store::checkpoint_graph::CanonicalFault::UnsortedOrDuplicateKey,
             )
         };
-        input.expect_struct(4)?;
+        input.expect_struct(5)?;
         let mut effects = BTreeMap::new();
         for _ in 0..input.map()? {
             let name = EffectName::decode(input)?;
@@ -440,11 +452,18 @@ impl TokenCodec for EffectTable {
             }
             projected.insert(name);
         }
+        let reads: BTreeMap<EffectName, lash_core::ProviderKey> = decode_tree(input)?;
+        if reads.keys().any(|effect| !effects.contains_key(effect)) {
+            return Err(TokenError::Invalid(
+                "the read plan names an effect the cell was not lowered against".to_owned(),
+            ));
+        }
         Ok(Self {
             effects,
             grants,
             unavailable_notes,
             projected,
+            reads,
         })
     }
 }
@@ -526,6 +545,7 @@ impl CellEnvelope {
                     grants: self.grants.clone(),
                     unavailable_notes: self.unavailable_notes.clone(),
                     projected: self.projected.clone(),
+                    reads: self.reads.clone(),
                 },
             )?,
             release,
@@ -571,6 +591,7 @@ impl CellEnvelope {
             grants: table.grants,
             unavailable_notes: table.unavailable_notes,
             projected: table.projected,
+            reads: table.reads,
         };
         Ok((envelope, body.release))
     }

@@ -121,6 +121,7 @@ pub mod testing;
 pub mod tool_dispatch;
 pub mod tool_intent;
 pub mod tool_provider;
+pub mod tool_reads;
 pub mod tool_registry;
 pub mod tool_result;
 pub mod trace;
@@ -483,6 +484,7 @@ pub use lash_core_store::tool_surface::{
 };
 pub use lash_kernel_doc::EffectName;
 pub use protocol_build::{FleetWriterFormats, ProtocolBuildInput};
+pub use tool_reads::{ReadCall, ReadError, ReadRoute, ToolProviderRegistration, ToolReads};
 pub use tool_registry::{
     SurfaceTools, ToolRegistry, ToolSurfaceDrift, ToolSurfaceDriftKind, effect_path_of,
 };

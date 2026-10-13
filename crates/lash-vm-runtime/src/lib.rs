@@ -27,7 +27,7 @@ pub use formats::{
     KERNEL_SAVED_FUNCTION_VERSION, LASH_KERNEL_VERSION, previous_kernel_version,
     retired_kernel_version,
 };
-pub use host::ParentHost;
+pub use host::{EffectReads, ParentHost};
 /// Why a kernel migration does not carry a document or a parked run.
 pub use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal};
 /// The helper releases lash's shipped worker retains beside its own

@@ -13,6 +13,12 @@ mod registration;
 pub(crate) mod runtime_state;
 pub(crate) mod tool_args;
 
+/// The key of the protocol's own argument transform, which projects a
+/// call's arguments as its tool's manifest asks: a cell's read applies the
+/// same projection itself (ADR 0144).
+pub(crate) const PROJECTED_ARGS: lash_core::plugin::HookKey =
+    lash_core::hook_key!("projected-args");
+
 pub use config::{
     RlmDiscovery, RlmPresentationConfig, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
     RlmRecordedBehaviour, UnsetBound, UnsetChannel,

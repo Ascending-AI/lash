@@ -30,6 +30,10 @@ pub enum Request {
         /// The helper release whose names the source resolves against: the
         /// newest every live node holds (FIG-5799).
         helpers: u32,
+        /// The offered effects the host would perform as reads: the
+        /// response names those the cell's `main` can reach.
+        #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+        reads: BTreeSet<EffectName>,
     },
     /// Print `document` (its JSON encoding) as source in `dialect`.
     Print {
@@ -67,6 +71,11 @@ pub enum Response {
         /// the functions a cell binds for later cells
         /// ([`lash_kernel_dialect::Package::function_values`]).
         function_values: Option<lash_kernel_dialect::FunctionValues>,
+        /// Those of the request's `reads` the document's `main` calls or
+        /// spawns, as the checked document's linked effects count them;
+        /// none when they cannot be certified (`lash_kernel_check::main_effects`).
+        #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+        reads: BTreeSet<EffectName>,
     },
     Printed {
         source: String,

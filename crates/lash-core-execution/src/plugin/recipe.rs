@@ -544,6 +544,56 @@ impl<T: Send + Sync + 'static> ToolRegistrations<'_, T> {
         self.record_provider(key, binder)?;
         Ok(handle)
     }
+    /// Declare the provider `key` with the reader its `Read` tools need:
+    /// the binder's registration must supply both
+    /// ([`crate::ToolProviderRegistration::with_reads`]). The reader is its
+    /// own callback, which a node serves only when it registers it, and
+    /// which a cell's read plan owes.
+    pub fn provider_with_reads(
+        self,
+        key: ToolProviderKey,
+        binder: impl Fn(&T, &PluginStateView) -> Result<crate::ToolProviderRegistration, PluginError>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Result<ToolProviderHandle, PluginError> {
+        let owner = self.reg.owner.clone().ok_or_else(|| {
+            PluginError::Registration("a provider handle requires its declared owner".into())
+        })?;
+        let handle = ToolProviderHandle::new(self.reg.registry, owner, key);
+        self.record_provider_with_reads(key, binder)?;
+        Ok(handle)
+    }
+    pub(crate) fn record_provider_with_reads(
+        self,
+        key: ToolProviderKey,
+        binder: impl Fn(&T, &PluginStateView) -> Result<crate::ToolProviderRegistration, PluginError>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Result<(), PluginError> {
+        self.reg.callback(
+            CallbackSlot::ToolProvider,
+            Some(HookKey::__literal(key.as_str())),
+            None,
+            ContributionDetails::Callback {
+                stream_state_from: None,
+            },
+            Arc::new(move |owner, state, reg| {
+                reg.tools().provider_with_reads(key, binder(owner, state)?)
+            }),
+        )?;
+        // The reader binds with its provider, above: this entry declares it.
+        self.reg.callback(
+            CallbackSlot::ToolReads,
+            Some(HookKey::__literal(key.as_str())),
+            None,
+            ContributionDetails::Callback {
+                stream_state_from: None,
+            },
+            Arc::new(|_, _, _| Ok(())),
+        )
+    }
     pub(crate) fn record_provider(
         self,
         key: ToolProviderKey,

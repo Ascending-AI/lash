@@ -226,12 +226,14 @@ The execution record splits into a start and an outcome.
 The policy layer of spec v3 Parts B, C and E carries over, minus every
 journal-engine window.
 
-- `ExecutionPolicy::{Once, Repeatable { retry: BoundedRetry }}` and
+- `ExecutionPolicy::{Once, Repeatable { retry: BoundedRetry }, Read}` and
   `AttemptOutcome::{Completed, Waiting, Failed, Interrupted, TimedOut,
   Cancelled}` with `LimitCause::{ExecutionSlice, ExecutionTotal,
   WaitDeadline}`. `Once` never starts twice. `Repeatable` counts admitted
   ordinals. A current declaration may veto a repeat and never upgrades `Once`.
   `Interrupted` carries no fabricated partial.
+  `Read` records nothing about a call a code cell plans as a read
+  ([ADR 0144](0144-declared-reads-are-owned-by-the-callers-saved-state.md)).
 - `ExecutionLimit` and `WaitDeadline` are recorded before their work starts,
   never refreshed, and nested limits take `min(own, enclosing remaining)`.
   An expired deadline found on load settles at once.
@@ -280,6 +282,10 @@ all mutable execution state and resumes from it.
   snapshot is already in the heap; a read after it reads again. A provider
   that must answer identically after failover puts a revision or snapshot id
   in its `ResourceRef`.
+- **Declared tool reads follow the same rule.** A code cell's call of a tool
+  that declares `ExecutionPolicy::Read`, planned when the cell is lowered, is
+  answered inside its statement and survives only in the cell's next save
+  ([ADR 0144](0144-declared-reads-are-owned-by-the-callers-saved-state.md)).
 - **`history`** is a lash-provided provider over the session transcript at a
   pinned revision.
 - The live-object export registry (`Projections::export`,

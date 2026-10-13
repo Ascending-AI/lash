@@ -9,6 +9,8 @@
 //!   policy, limit and completion wait its tool declares
 //!   ([`CellHost::admit`]). The cell is answered from the call's committed
 //!   outcome alone ([`CellHost::outcome`]).
+//!   A `perform` the cell's read plan binds is no call: it is answered
+//!   inside its statement by the cell's reads ([`super::reads`]).
 //! - a `print` is an observation, kept in order.
 //! - the clock, the random source and reads through projection handles are
 //!   answered by the run's [`lash_vm_runtime::ParentHost`].
@@ -109,9 +111,22 @@ pub(super) struct CellHostLedgers {
     pub calls: Vec<LedgerCall>,
     /// The `max_tool_calls` refusal the cell met, if it met one.
     pub tool_call_limit: Option<lash_core::ToolCallLimitExceeded>,
+    /// How many reads the cell made (ADR 0144), from its saved count on.
+    pub reads: u64,
 }
 
 impl CellHostLedgers {
+    /// What `max_tool_calls` counts of the cell: its admitted calls and its
+    /// reads. The cell's one control attempt is not counted: a cell at the
+    /// limit can still end its turn.
+    pub(super) fn counted(&self, boundary: &HostBoundary) -> usize {
+        self.calls
+            .iter()
+            .filter(|call| !call.control(boundary))
+            .count()
+            .saturating_add(usize::try_from(self.reads).unwrap_or(usize::MAX))
+    }
+
     /// The records of the tool calls the cell completed, in admission
     /// order.
     pub(super) fn tool_call_records(&self) -> Vec<lash_core::ToolCallRecord> {
@@ -185,9 +200,10 @@ pub(super) struct CellHost<'run> {
     pub members: Arc<CellMembers>,
     pub opener: lash_core::EffectOpener,
     pub prints: Arc<Mutex<Vec<Datum>>>,
-    pub ledgers: Mutex<CellHostLedgers>,
+    /// Shared with the cell's reads, which count against the same limit.
+    pub ledgers: Arc<Mutex<CellHostLedgers>>,
     /// The document the cell's function references name entries of.
-    pub entries: super::processes::CellEntries,
+    pub entries: Arc<super::processes::CellEntries>,
     /// The cell's language observation, when a host asked for it.
     pub trace: Option<super::trace::CellTrace>,
     /// The effect identity each open call was performed at: where its
@@ -216,11 +232,21 @@ pub(super) struct HostGraph {
     pub staged: Option<BTreeSet<NodeId>>,
 }
 
-fn refused(kind: &str, message: impl Into<String>) -> ErrorDatum {
+pub(super) fn refused(kind: &str, message: impl Into<String>) -> ErrorDatum {
     ErrorDatum {
         kind: kind.to_owned(),
         message: message.into(),
         data: Datum::Null,
+    }
+}
+
+/// The error a call's or a read's own failure raises: `tool_failed`,
+/// carrying the typed failure as data.
+pub(super) fn tool_failed(failure: &lash_core::ToolFailure) -> ErrorDatum {
+    ErrorDatum {
+        kind: TOOL_FAILED.to_owned(),
+        message: failure.message.clone(),
+        data: datum_from_json(&failure.to_json_value().to_string()).unwrap_or(Datum::Null),
     }
 }
 
@@ -276,21 +302,9 @@ impl CellHost<'_> {
             entries: &self.entries,
             finish: effect.controls.finish_declaration().is_some(),
         };
-        let args = projection.args(&request.args).map_err(|refusal| {
-            refused(
-                TOOL_ARGUMENTS,
-                match refusal {
-                    ArgsRefusal::NotJson(problem) => format!(
-                        "`{}` takes JSON arguments, and these are not JSON: {problem}",
-                        request.effect
-                    ),
-                    ArgsRefusal::Arity(count) => format!(
-                        "`{}` takes one input record and is performed with {count} arguments",
-                        request.effect
-                    ),
-                },
-            )
-        })?;
+        let args = projection
+            .args(&request.args)
+            .map_err(|refusal| refusal.error(&request.effect))?;
         let invocation = self.invocation(request, call, effect.tool.clone(), args);
         let frozen =
             FrozenRequest::tool(CellCall::of(&invocation), request.args.clone(), &projection)
@@ -322,9 +336,26 @@ impl CellHost<'_> {
 }
 
 /// Why a cell's arguments make no tool call.
-enum ArgsRefusal {
+pub(super) enum ArgsRefusal {
     NotJson(String),
     Arity(usize),
+}
+
+impl ArgsRefusal {
+    /// The error a `perform` of `effect` with these arguments raises.
+    pub(super) fn error(self, effect: &EffectName) -> ErrorDatum {
+        refused(
+            TOOL_ARGUMENTS,
+            match self {
+                Self::NotJson(problem) => {
+                    format!("`{effect}` takes JSON arguments, and these are not JSON: {problem}")
+                }
+                Self::Arity(count) => format!(
+                    "`{effect}` takes one input record and is performed with {count} arguments"
+                ),
+            },
+        )
+    }
 }
 
 /// How a cell's arguments become a tool call's JSON: the guest's one input
@@ -362,7 +393,7 @@ impl<'h> CellArgs<'h> {
         }
     }
 
-    fn args(&self, args: &[Datum]) -> Result<serde_json::Value, ArgsRefusal> {
+    pub(super) fn args(&self, args: &[Datum]) -> Result<serde_json::Value, ArgsRefusal> {
         // A tool takes its input as one record (`HostBoundary::offer_tool`).
         match args {
             [] => Ok(serde_json::Value::Object(serde_json::Map::new())),
@@ -470,13 +501,7 @@ impl KernelEffects for CellHost<'_> {
         }
         {
             let mut ledgers = self.ledgers.lock_recover();
-            // The cell's one control attempt is not a call `max_tool_calls`
-            // counts: a cell at the limit can still end its turn.
-            let counted = ledgers
-                .calls
-                .iter()
-                .filter(|call| !call.control(&self.boundary))
-                .count();
+            let counted = ledgers.counted(&self.boundary);
             if !control && counted.saturating_add(1) > self.ctx.max_tool_calls().get() {
                 let exceeded = lash_core::ToolCallLimitExceeded {
                     scope: lash_core::ToolCallLimitScope::Cell,
@@ -560,11 +585,7 @@ impl KernelEffects for CellHost<'_> {
                     )),
                 }
             }
-            lash_core::ToolCallOutcome::Failure(failure) => Outcome::Failed(ErrorDatum {
-                kind: TOOL_FAILED.to_owned(),
-                message: failure.message.clone(),
-                data: datum_from_json(&failure.to_json_value().to_string()).unwrap_or(Datum::Null),
-            }),
+            lash_core::ToolCallOutcome::Failure(failure) => Outcome::Failed(tool_failed(failure)),
             lash_core::ToolCallOutcome::Cancelled(cancelled) => {
                 Outcome::Failed(refused(EFFECT_CANCELLED, cancelled.message.clone()))
             }
@@ -667,6 +688,7 @@ impl KernelEffects for CellHost<'_> {
             graph.state.settle(&record.call_id, outcome, &record.output);
         }
         graph.state.tool_call_limit = ledgers.tool_call_limit;
+        graph.state.reads = ledgers.reads;
         for value in prints
             .iter()
             .skip(usize::try_from(graph.state.prints.len()).unwrap_or(usize::MAX))
@@ -698,12 +720,19 @@ impl KernelEffects for CellHost<'_> {
         let host = graph.state.stage(staging, reads).map_err(fault)?;
         graph.staged = Some(staged);
         // Every match the cell committed stays owed while it is parked: a
-        // later call may run on it.
+        // later call may run on it. So does the reader of every provider
+        // its read plan reads through: a later statement may read.
         let owed = self
             .envelope
             .grants
             .values()
             .flat_map(lash_core::ToolExecutionGrant::callbacks)
+            .chain(
+                self.envelope
+                    .reads
+                    .values()
+                    .map(lash_core::ProviderKey::reads_identity),
+            )
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
@@ -719,6 +748,10 @@ impl KernelEffects for CellHost<'_> {
         if let Some(staged) = graph.staged.take() {
             graph.installed.extend(staged);
         }
+    }
+
+    fn plans_reads(&self) -> bool {
+        !self.envelope.reads.is_empty()
     }
 
     fn held_response(&self) -> Option<&lash_core::HeldResponse> {

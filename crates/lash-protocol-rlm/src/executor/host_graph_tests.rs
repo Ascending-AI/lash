@@ -276,6 +276,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         grants: std::collections::BTreeMap::new(),
         unavailable_notes: [("web.fetch".into(), "permission was revoked".into())].into(),
         projected: ["x".to_owned()].into_iter().collect(),
+        reads: std::collections::BTreeMap::new(),
     };
     let mut staging = staging();
     let release = staging

@@ -118,6 +118,13 @@ pub trait KernelEffects: Projections + Send + Sync {
     /// The save that staged the host's state committed.
     fn host_committed(&self) {}
 
+    /// Whether a fresh run performs some effect as a read (ADR 0144): it
+    /// then saves its start before any statement runs, so no read is made
+    /// before the run's providers are owed.
+    fn plans_reads(&self) -> bool {
+        false
+    }
+
     /// The model response that asked for this run, while its turn holds it
     /// uncommitted for the run's first save (FIG-6000): that save commits it
     /// in the same transaction. The response commits on its own once the
@@ -141,9 +148,10 @@ pub trait DrivenMachine: Send {
     /// `run` runs anything.
     async fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<(), KernelFailure>;
 
-    /// The run's state as it stands at a park: a KernelWhole bound to the
-    /// execution `binding` names, the one its machine was started or
-    /// resumed with when the park requested something.
+    /// The run's state as it stands at a park, or at its start before its
+    /// first slice: a KernelWhole bound to the execution `binding` names,
+    /// the one its machine was started or resumed with when the park
+    /// requested something.
     async fn export(&mut self, binding: &OwnerBinding) -> Result<WholeState, KernelFailure>;
 
     /// Gives the machine up at a clean stop: the run ended, or it stays
@@ -200,6 +208,8 @@ fn held_releases(
 /// embedder's plain loop, for hosts that choose no isolation and for laws.
 pub struct InProcess<H> {
     read_policy: lash_core_store::checkpoint_graph::GraphReadPolicy,
+    /// The effects a fresh run performs as reads.
+    modes: lash_kernel_vm::EffectModes,
     program: Program,
     /// The dialect the run's document is written in: a new run pins that
     /// dialect's release.
@@ -221,6 +231,13 @@ impl<H> InProcess<H> {
         self
     }
 
+    /// Perform the effects `modes` binds as reads in a fresh run.
+    #[must_use]
+    pub fn with_modes(mut self, modes: lash_kernel_vm::EffectModes) -> Self {
+        self.modes = modes;
+        self
+    }
+
     /// The run of `program`, written in `dialect`, from `start`, held to
     /// `bounds`, reading `host`.
     ///
@@ -236,6 +253,7 @@ impl<H> InProcess<H> {
     ) -> Result<Self, KernelFailure> {
         Ok(Self {
             read_policy: lash_core_store::checkpoint_graph::GraphReadPolicy::standard(),
+            modes: lash_kernel_vm::EffectModes::recorded(),
             document: program.document.identity()?,
             program,
             dialect: dialect.to_owned(),
@@ -272,6 +290,14 @@ impl<H: Host> Host for Cancelling<'_, H> {
         request: &lash_kernel_doc::Datum,
     ) -> Result<lash_kernel_doc::Datum, ErrorDatum> {
         self.host.read(handle, request)
+    }
+    fn perform(
+        &mut self,
+        effect: &lash_kernel_doc::EffectName,
+        args: &[lash_kernel_doc::Datum],
+        site: &lash_kernel_doc::Site,
+    ) -> Result<Result<lash_kernel_doc::Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
+        self.host.perform(effect, args, site)
     }
     fn print(&mut self, value: &lash_kernel_doc::Datum) {
         self.host.print(value);
@@ -351,6 +377,7 @@ where
                 self.bounds,
                 self.start.clone(),
                 self.read_policy.execution().kernel_data,
+                self.modes.clone(),
             )?,
             release,
             host: self.host.clone(),
@@ -540,6 +567,41 @@ impl KernelBroker<'_> {
             None => (machines.start(&binding).await?, EffectLedger::new()),
         };
         let mut machine = Some(machine);
+        // A fresh run that reads saves its start first, before any slice
+        // runs, with the response the turn holds: that save owes the
+        // providers it reads through before any read is made, and a crash
+        // after it runs the cell again from its start.
+        if !saved
+            && self.effects.plans_reads()
+            && let Some(running) = machine.as_mut()
+        {
+            let state = running.export(&binding).await?;
+            let save = ParkSave {
+                document,
+                state: state.clone(),
+                releases: machines.releases()?,
+                ledger,
+                admit: Vec::new(),
+                with: Vec::new(),
+            };
+            let committed = match self.commit_save(save, &mut held).await? {
+                Ok(committed) => committed,
+                Err(response) => {
+                    if let Some(stopped) = machine.take() {
+                        stopped.release().await?;
+                    }
+                    response.stop();
+                    return std::future::pending().await;
+                }
+            };
+            saved = true;
+            ledger = committed.ledger;
+            resting = Some(ParkedState {
+                whole: state,
+                document: document.to_string(),
+                admissions: self.store.admitted_waits(&ledger)?,
+            });
+        }
         loop {
             let running = match &mut machine {
                 Some(running) => running,
@@ -593,26 +655,19 @@ impl KernelBroker<'_> {
                     admit,
                     with: Vec::new(),
                 };
-                let committed = match held.take() {
-                    Some(response) => match self
-                        .store
-                        .commit_first_park(save, self.effects, response)
-                        .await?
-                    {
-                        FirstPark::Saved(saved) => saved,
-                        // The turn's cancel stopped the cell at its first
-                        // save: nothing it admitted starts, and the turn,
-                        // which drops this run, stops where it would have
-                        // before the cell started.
-                        FirstPark::Stopped => {
-                            if let Some(stopped) = machine.take() {
-                                stopped.release().await?;
-                            }
-                            response.stop();
-                            return std::future::pending().await;
+                let committed = match self.commit_save(save, &mut held).await? {
+                    Ok(committed) => committed,
+                    // The turn's cancel stopped the cell at its first save:
+                    // nothing it admitted starts, and the turn, which drops
+                    // this run, stops where it would have before the cell
+                    // started.
+                    Err(response) => {
+                        if let Some(stopped) = machine.take() {
+                            stopped.release().await?;
                         }
-                    },
-                    None => self.store.commit_park(save, self.effects).await?,
+                        response.stop();
+                        return std::future::pending().await;
+                    }
                 };
                 saved = true;
                 ledger = committed.ledger;
@@ -677,6 +732,28 @@ impl KernelBroker<'_> {
                 ledger.consume(&outcome.identity);
             }
         }
+    }
+
+    /// Commits `save`, with the response the turn still holds for the run
+    /// when it holds one. `Err` is that response, when the turn's cancel
+    /// stopped the cell at this, its first save.
+    async fn commit_save<'h>(
+        &self,
+        save: ParkSave<'_>,
+        held: &mut Option<&'h lash_core_execution::HeldResponse>,
+    ) -> Result<Result<super::store::Saved, &'h lash_core_execution::HeldResponse>, KernelFailure>
+    {
+        Ok(match held.take() {
+            Some(response) => match self
+                .store
+                .commit_first_park(save, self.effects, response)
+                .await?
+            {
+                FirstPark::Saved(saved) => Ok(saved),
+                FirstPark::Stopped => Err(response),
+            },
+            None => Ok(self.store.commit_park(save, self.effects).await?),
+        })
     }
 
     /// Commit the response the turn holds for this run on its own, as

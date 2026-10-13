@@ -607,13 +607,13 @@ impl KernelMachine {
                     self.eval(task, host, exe, expr)?;
                     self.complete_stmt(task, host, exe, stmt, out)?;
                 }
-                Rhs::Action(action) => match self.act(task, exe, id, action, out)? {
+                Rhs::Action(action) => match self.act(task, host, exe, id, action, out)? {
                     Flow::Done => self.complete_stmt(task, host, exe, stmt, out)?,
                     Flow::Step => return Ok(Ran::Step),
                 },
             },
             Stmt::Do(action) => {
-                if self.act(task, exe, id, action, out)? == Flow::Step {
+                if self.act(task, host, exe, id, action, out)? == Flow::Step {
                     return Ok(Ran::Step);
                 }
             }

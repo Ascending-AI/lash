@@ -58,6 +58,18 @@ impl PluginCallbackIdentity {
         }
     }
 
+    /// The identity of the reader `owner`'s provider `key` registered: the
+    /// callback a cell's read plan owes for that provider's reads.
+    pub fn tool_reads(owner: impl Into<String>, key: &str) -> Self {
+        Self {
+            owner: owner.into(),
+            key: format!(
+                "{}:{key}",
+                crate::tool_run::CallbackSlot::ToolReads.key_prefix()
+            ),
+        }
+    }
+
     /// The declared key of a tool provider identity, or `None` when this
     /// names another callback or a provider by anything but a declared key.
     #[must_use]

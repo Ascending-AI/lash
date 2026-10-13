@@ -131,6 +131,18 @@ impl RunHost for StepHost {
         Ok(self.providers.answer(handle, request).await)
     }
 
+    /// A process binds no read: its every effect is a recorded step.
+    async fn perform(
+        &self,
+        effect: &lash_kernel_doc::EffectName,
+        _args: &[Datum],
+        _site: &lash_kernel_doc::Site,
+    ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
+        Err(ParentFault(format!(
+            "a kernel process binds no read, and its run performed `{effect}` as one"
+        )))
+    }
+
     fn print(&self, _value: Datum) -> Result<(), ParentFault> {
         Ok(())
     }
@@ -241,6 +253,7 @@ async fn kernel_run(
             args,
             bindings: Default::default(),
         },
+        lash_kernel_vm::EffectModes::recorded(),
         settings.bounds(),
     )
     .map_err(|error| RunFault(error.to_string()))?;
