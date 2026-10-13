@@ -133,6 +133,7 @@ fn actor() -> ActorKey {
 enum Protocol {
     /// The RLM protocol: the operation runs inside a code cell.
     Code,
+    ImageCell(&'static str, bool),
     /// The standard protocol: the operation runs in a tool round.
     Tools,
     /// A tool round whose protocol appends a record of its own while the
@@ -217,7 +218,12 @@ impl Protocol {
     /// answers in prose.
     fn rounds(self) -> usize {
         match self {
-            Self::Code | Self::Tools | Self::Noted | Self::Archived | Self::Large(_) => 1,
+            Self::Code
+            | Self::ImageCell(_, _)
+            | Self::Tools
+            | Self::Noted
+            | Self::Archived
+            | Self::Large(_) => 1,
             Self::NotedTwice | Self::Working(_) => 2,
         }
     }
@@ -228,6 +234,7 @@ impl Protocol {
 #[derive(Debug, Default)]
 struct ExternalWorld {
     writes: Mutex<BTreeMap<ToolCallId, Vec<serde_json::Value>>>,
+    reads: Mutex<usize>,
 }
 
 impl ExternalWorld {
@@ -316,6 +323,7 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
                         };
                         text(&request, &format!("{FINAL}{told}"))
                     }
+                    (false, Protocol::ImageCell(source, _)) => text(&request, source),
                     (false, Protocol::Code) => text(&request, CELL),
                     (false, Protocol::Archived) => text(&request, ARCHIVED_CELL),
                     (false, Protocol::Large(pad)) => text(&request, &pad.cell()),
@@ -381,23 +389,35 @@ fn core(
     seen: &Arc<Mutex<Seen>>,
 ) -> lash::LashCore {
     let builder = match protocol {
-        Protocol::Code | Protocol::Archived | Protocol::Large(_) | Protocol::Working(_) => {
-            lash::LashCore::rlm_builder(
-                backend.clone(),
-                lash::rlm::RlmProtocolPluginFactory::new(
-                    lash::rlm::RlmProtocolPluginConfig::builder()
-                        .channel(lash::rlm::RlmChannel::Cell)
-                        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-                        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-                        .build(),
-                    lash::rlm::CellDialect::typescript(),
-                )
-                .with_worker_service(sim::workers(clock)),
+        Protocol::Code
+        | Protocol::ImageCell(_, _)
+        | Protocol::Archived
+        | Protocol::Large(_)
+        | Protocol::Working(_) => lash::LashCore::rlm_builder(
+            backend.clone(),
+            lash::rlm::RlmProtocolPluginFactory::new(
+                lash::rlm::RlmProtocolPluginConfig::builder()
+                    .channel(lash::rlm::RlmChannel::Cell)
+                    .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                    .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                    .build(),
+                if matches!(protocol, Protocol::ImageCell(_, true)) {
+                    lash::rlm::CellDialect::python()
+                } else {
+                    lash::rlm::CellDialect::typescript()
+                },
             )
-        }
+            .with_worker_service(sim::workers(clock)),
+        ),
         Protocol::Tools => lash::LashCore::standard_builder(backend.clone()),
         Protocol::Noted | Protocol::NotedTwice => lash::LashCore::builder(backend.clone())
             .protocol_plugin(Arc::new(noted::NotedProtocolFactory)),
+    };
+    let builder = if matches!(protocol, Protocol::ImageCell(source, _) if source.contains("ext_read"))
+    {
+        builder.plugin(corpus::reader_plugin(world))
+    } else {
+        builder
     };
     builder
         .serve_sessions(false)
@@ -763,7 +783,11 @@ impl V0 {
         }
         if matches!(
             self.protocol,
-            Protocol::Code | Protocol::Archived | Protocol::Large(_) | Protocol::Working(_)
+            Protocol::Code
+                | Protocol::ImageCell(_, _)
+                | Protocol::Archived
+                | Protocol::Large(_)
+                | Protocol::Working(_)
         ) && programs == 0
         {
             violations.push("the turn's cell never ran".to_owned());
@@ -1060,7 +1084,7 @@ async fn prove(protocol: Protocol, dialect: Dialect, postgres_url: Option<String
 /// The owner commits of the uncut turn, in order.
 fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
     match protocol {
-        Protocol::Code | Protocol::Archived => vec![
+        Protocol::Code | Protocol::ImageCell(_, _) | Protocol::Archived => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
@@ -1715,147 +1739,23 @@ async fn a_fresh_large_text_per_await_is_written_once_per_await() {
     large_values_install_once(Pad::Fresh).await;
 }
 
-/// Re-record the session image (`support/images.rs`): node A runs the turn
-/// until its cell's `Once` operation's outcome commits, and dies; the store
-/// it leaves is the fixture. It holds the turn checkpoint, the cell's
-/// snapshot parked on the operation, the operation's run records and its
-/// outcome's material.
+#[path = "vertical_crash_proof/corpus.rs"]
+mod corpus;
+#[path = "support/kernel_images.rs"]
+mod kernel_images;
+#[path = "vertical_crash_proof/images.rs"]
+mod session_images;
+
 #[tokio::test]
 #[ignore = "regenerates crates/lash-durable-test/tests/fixtures/formats/session"]
 async fn regenerate_session_format_fixture() {
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = images::database_path(dir.path());
-    let mut first = V0::new(Protocol::Code, Dialect::SqliteFile, None);
-    first.record_at = Some(path.clone());
-    let clock = SimClock::new();
-    let database = first.database(Arc::clone(&clock)).await;
-    let script = Script::new();
-    script.cut_on("a", CommitLabel::ROUND_OUTCOME, 1, Fault::CommitThenAbort);
-    let nodes = SimNodes::new(
-        Arc::clone(&database),
-        Arc::clone(&clock),
-        script,
-        first.config(),
-        first.activation(),
-    );
-    first.send().await.expect("the turn is sent");
-    nodes.start("a");
-    nodes.quiesce().await;
-    while nodes.script().cuts().is_empty() {
-        // The cut kills A, which leaves no timer armed: the step that cuts
-        // can be the last.
-        let stepped = nodes.step().await;
-        assert!(
-            stepped.is_some() || !nodes.script().cuts().is_empty(),
-            "the turn stalled before its operation's outcome committed:\n{}",
-            nodes.script().rendered_trace()
-        );
-        assert!(
-            nodes.clock().logical_ms() < 600_000,
-            "the operation's outcome did not commit within ten minutes of virtual time:\n{}",
-            nodes.script().rendered_trace()
-        );
-    }
-    nodes.kill("a");
-    nodes.quiesce().await;
-    assert_eq!(
-        first.world.writes().len(),
-        1,
-        "the operation's body did not run once before the cut"
-    );
-    images::regenerate(&path, images::SESSION.name);
+    let (_dir, path) = session_images::record(Protocol::Code).await;
+    images::regenerate(&path, images::SESSION.name.as_ref());
 }
 
-/// The session image resumes on a fresh node of this build: it reaps the
-/// dead owner, claims the session in the build's session set, restores the
-/// turn from its checkpoint and the cell from its snapshot, injects the
-/// operation's committed outcome and commits the turn, without running the
-/// operation's body or entering the cell's program again.
 #[tokio::test]
 async fn a_session_decodes_and_resumes_from_its_1_0_image() {
-    let mut resumed = V0::new(Protocol::Code, Dialect::SqliteFile, None);
-    resumed.image = Some(&images::SESSION);
-    let clock = SimClock::new();
-    let database = resumed.database(Arc::clone(&clock)).await;
-    let snapshot = database
-        .actor(&actor())
-        .await
-        .expect("the image reads")
-        .expect("the image holds the session");
-    assert_eq!(
-        &snapshot.formats,
-        resumed.backend().formats().session(),
-        "the image is in another build's set"
-    );
-    let nodes = SimNodes::new(
-        Arc::clone(&database),
-        Arc::clone(&clock),
-        Script::new(),
-        resumed.config(),
-        resumed.activation(),
-    );
-    nodes.start("b");
-    let horizon = clock.logical_ms() + 600_000;
-    while !resumed.done(&nodes).await {
-        assert!(
-            clock.logical_ms() < horizon,
-            "the resumed session is not done after 600 s of virtual time:\n{}",
-            nodes.script().rendered_trace()
-        );
-        assert!(
-            nodes.step().await.is_some(),
-            "the resumed session stalled:\n{}",
-            nodes.script().rendered_trace()
-        );
-    }
-    nodes.quiesce().await;
-
-    let mut violations = Vec::new();
-    let labels: Vec<CommitLabel> = nodes
-        .script()
-        .trace()
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    if labels
-        != [
-            CommitLabel::MODEL_START,
-            CommitLabel::TURN_COMMIT,
-            CommitLabel::SESSION_RELEASE,
-        ]
-    {
-        violations.push(format!(
-            "the resumed session committed {labels:?}, not the second model call's start, which consumes the cell, the turn's commit and the release"
-        ));
-    }
-    let writes = resumed.world.writes();
-    if !writes.is_empty() {
-        violations.push(format!(
-            "the operation's body ran again on resume: {writes:?}"
-        ));
-    }
-    let counts = resumed.tripwire.counts();
-    let programs: usize = counts.vm_programs.values().sum();
-    if programs != 0 {
-        violations.push(format!(
-            "the cell's program was entered {programs} times; it resumes from its snapshot"
-        ));
-    }
-    let restores = counts
-        .restores
-        .get(&(session(), run()))
-        .copied()
-        .unwrap_or(0);
-    if restores != 1 {
-        violations.push(format!("the turn was restored {restores} times, not once"));
-    }
-    assert!(
-        violations.is_empty(),
-        "the session image's resume:\n  {}\n{}",
-        violations.join("\n  "),
-        nodes.script().rendered_trace()
-    );
+    session_images::resume(&images::SESSION, Protocol::Code).await;
 }
 
 /// A session activation whose first claim rewrites the unfinished turn's
