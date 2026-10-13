@@ -256,7 +256,7 @@ impl RlmHistoryItem {
                 .map(RlmImageRef::from_attachment)
                 .collect(),
             calls: record.calls.iter().map(HistoryExecutedCall::from).collect(),
-            calls_omitted: record.calls_omitted,
+            calls_omitted: 0,
             outcome: Box::new((&record.result).into()),
         }
     }
@@ -317,7 +317,6 @@ mod rlm_step_serde_tests {
                 outcome: lash_sansio::ExecutedCallOutcome::Ok,
                 call_id: Some(lash_sansio::ToolCallId::fixture("math-add")),
             }],
-            calls_omitted: 2,
             bindings: Default::default(),
             result: finished(serde_json::json!({"answer": 42}).into()),
         }
@@ -473,6 +472,13 @@ mod rlm_step_serde_tests {
                 ..CellRecord::default()
             }),
         ];
+        // Omission is presentation vocabulary, independent of CellRecord's
+        // complete durable call list. Cover the optional rendered-view field.
+        let mut bounded = RlmHistoryItem::from_cell_record(&populated_entry());
+        if let RlmHistoryItem::LashVmStep { calls_omitted, .. } = &mut bounded {
+            *calls_omitted = 2;
+        }
+        items.push(serde_json::to_value(bounded).expect("rendered history encodes"));
         for result in [
             finished(serde_json::json!({"answer": 42}).into()),
             finished(super::OutputValue::Retained(retained("{\"answer\""))),

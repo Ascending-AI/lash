@@ -22,7 +22,6 @@ use crate::runtime::durable::session::TurnError;
 pub(super) struct FinishedTurn {
     outcome: TurnOutcome,
     tool_calls: Vec<crate::ToolCallRecord>,
-    omitted: Option<crate::OmittedToolCalls>,
 }
 
 impl FinishedTurn {
@@ -40,21 +39,17 @@ impl FinishedTurn {
         run: &crate::TurnId,
         outcome: &TurnOutcome,
         unrecorded: Option<crate::runtime::durable::session::CellToolCalls>,
+        decoders: &crate::transcript::TranscriptDecoders,
     ) -> Result<Self, TurnError> {
-        let (mut tool_calls, mut omitted) =
-            RuntimeTurnServices::recorded_tool_calls(cx, session, run)
-                .await
-                .map_err(TurnError::Durable)?;
+        let mut tool_calls = RuntimeTurnServices::recorded_tool_calls(cx, session, run, decoders)
+            .await
+            .map_err(TurnError::Durable)?;
         if let Some(cell) = unrecorded {
-            tool_calls.extend(cell.calls);
-            if let Some(left_out) = cell.omitted {
-                crate::runtime::durable::session::add_omitted(&mut omitted, left_out);
-            }
+            tool_calls.extend(cell.records);
         }
         Ok(Self {
             outcome: outcome.clone(),
             tool_calls,
-            omitted,
         })
     }
 
@@ -64,7 +59,6 @@ impl FinishedTurn {
             execution: Default::default(),
             token_usage: Default::default(),
             tool_calls: Arc::new(self.tool_calls.clone()),
-            omitted: self.omitted.clone(),
             errors: Arc::new(Vec::new()),
         }
     }
@@ -79,7 +73,6 @@ impl FinishedTurn {
             token_usage: Default::default(),
             llm_calls: Vec::new(),
             tool_calls: self.tool_calls,
-            omitted: self.omitted,
             retained_outputs: Vec::new(),
             failure_evidence: Vec::new(),
             errors: Vec::new(),

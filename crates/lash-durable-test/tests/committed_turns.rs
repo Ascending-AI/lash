@@ -640,7 +640,7 @@ fn render(entries: &[TranscriptEntry]) -> Vec<String> {
                     format!("{reply}{:?}: {blocks}", message.role)
                 }
                 TranscriptItem::Cell(cell) => format!(
-                    "{reply}cell {}: {} prints={:?} result={} calls={} omitted={}",
+                    "{reply}cell {}: {} prints={:?} result={} calls={}",
                     cell.language,
                     cell.code,
                     cell.prints
@@ -654,7 +654,6 @@ fn render(entries: &[TranscriptEntry]) -> Vec<String> {
                             format!("controlled:{control:?}"),
                     },
                     cell.calls.len(),
-                    cell.calls_omitted,
                 ),
                 TranscriptItem::Suppressed(_) => unreachable!("suppressed entries are filtered"),
             }
@@ -881,10 +880,6 @@ async fn a_host_renders_standard_and_rlm_history_from_typed_entries_live_and_aft
         .filter(|line| line.starts_with("cell typescript: "))
         .collect::<Vec<_>>();
     assert_eq!(cells.len(), 2, "both cells render: {rlm:#?}");
-    assert!(
-        cells[0].ends_with("prints=[\"called\"] result=completed calls=128 omitted=2"),
-        "the calling cell renders its recorded calls and the omitted count: {rlm:#?}"
-    );
     assert!(
         cells[1].contains("result=controlled:Finish") && cells[1].contains("rlm reply"),
         "the finishing cell renders its typed terminal value: {rlm:#?}"

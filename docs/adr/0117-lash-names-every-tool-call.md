@@ -166,7 +166,7 @@ its `call_id`. A protocol never keeps a parallel record of the call. What a
 protocol knows beyond the record is an extra field on it or an extra record
 that names it by `call_id`.
 
-A code cell's executed calls are such records. Each `ExecutedCall` carries the
+A code cell names those records through `ExecutedCall`, which carries the
 source `operation` the cell ran, its `outcome`, and `call_id:
 Option<ToolCallId>`, the id of the host tool call the dispatch resolved to. It
 is `None` only for a dispatch lash handled itself, with no host tool call. The
@@ -176,10 +176,15 @@ ledger, keyed on `AttemptContext::call_id()`, to the cell that made the call.
 The model's view of a cell's calls (operation and outcome, no arguments and no
 identity) is derived from those entries and is not stored.
 
-A turn bounds the records it reports (`OmittedToolCalls` accounts for the
-rest) and a cell entry keeps the tail of its calls (`calls_omitted` counts the
-earlier ones), so an entry in a cell with more calls than either bound can
-name a record the bounded view left out.
+The call ledger stores each archival body once. A turn references that body,
+and a cell entry keeps every executed call in order (FIG-6171). A host reads
+one body through `DurableSession::read_tool_call`, or a cell's bodies through
+`read_cell_tool_calls`, with typed settled, not-found and not-yet-settled
+results. Execution pins retire independently of the archival body.
+
+Only the model-facing diagnostic tail is bounded by `prompt_max_tool_calls`.
+Its earlier-call count is derived at render time; it never limits durable
+identities or host-visible bodies.
 
 Sources: `crates/lash-sansio/src/session.rs` and
 `crates/lash-core-store/src/transcript/mod.rs`. Law:

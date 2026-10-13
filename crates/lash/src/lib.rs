@@ -231,7 +231,7 @@ pub use crate::session::{
     LashSession, ObservableSession, ParkedSession, SessionBuilder, SessionCreation,
     SessionParkRefused,
 };
-pub use crate::turn::{ReportSource, TurnActivityFanout, TurnOutput, TurnReport};
+pub use crate::turn::{ReportSource, ToolCallRead, TurnActivityFanout, TurnOutput, TurnReport};
 /// Re-exported so implementors of `#[async_trait]` facade traits (for example
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
 /// `async-trait` dependency to keep version-aligned.
@@ -266,7 +266,7 @@ pub use lash_core::{
     EmptyLlmProfiles, FrameKey, InputId, InputItem, LlmCallRecord, LlmProfileConfig, LlmProfileKey,
     LlmProfileLimits, LlmProfileLimitsError, LlmProfileMetadata, LlmProfileMetadataBuilder,
     LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason, LlmProfiles, LlmUsage,
-    MaxToolCalls, NoProgressBudget, NodeId, OmittedToolCalls, OutputTokenLimits, PendingTurnInput,
+    MaxToolCalls, NoProgressBudget, NodeId, OutputTokenLimits, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
     ProcessId, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
@@ -748,11 +748,12 @@ pub mod plugins {
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
-        AfterTurnDecisions, CarriedCell, CheckpointApplication, CheckpointComponentKey,
-        CodeExecutionOutcome, CodeExecutorPlugin, ExecutionGraphCapture, ExecutionGraphPurpose,
-        HydratedExecutionGraph, NamespaceEntry, NamespaceValues, PluginAbort, PluginNamespaceState,
-        PluginSessionMaterializationRequest, PluginSessionRequest, PluginState, PluginStateEffect,
-        PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
+        AfterTurnDecisions, CarriedCell, CellCallReferences, CheckpointApplication,
+        CheckpointComponentKey, CodeExecutionOutcome, CodeExecutorPlugin, ExecutionGraphCapture,
+        ExecutionGraphPurpose, HydratedExecutionGraph, NamespaceEntry, NamespaceValues,
+        PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
+        PluginSessionRequest, PluginState, PluginStateEffect, PluginTransitionBase,
+        PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
         ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
         ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
         RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, StoredCell,

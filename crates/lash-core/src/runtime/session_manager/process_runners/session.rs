@@ -263,7 +263,6 @@ impl RuntimeSessionServices {
             token_usage: Default::default(),
             llm_calls: Vec::new(),
             tool_calls: Vec::new(),
-            omitted: None,
             retained_outputs: Vec::new(),
             failure_evidence: Vec::new(),
             errors: Vec::new(),

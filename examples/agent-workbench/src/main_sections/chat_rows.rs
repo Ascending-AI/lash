@@ -37,7 +37,6 @@ pub(crate) struct ChatContent {
     pub(crate) success: Option<bool>,
     pub(crate) error: Option<String>,
     pub(crate) tools: Vec<ChatTool>,
-    pub(crate) tools_omitted: usize,
 }
 
 /// One committed entry as the browser renders it.
@@ -216,7 +215,6 @@ fn cell_row(cell: &CellRecord) -> ChatContent {
                 .into(),
             })
             .collect(),
-        tools_omitted: cell.calls_omitted,
         ..Default::default()
     }
 }

@@ -93,6 +93,21 @@ fn a_settled_call_is_one_outcome_node_that_rebuilds_its_presentation_after_colle
     let answer_node = expected
         .encode_value(NodeKind::FROZEN_VALUE, &FrozenToolValue(value.clone()))
         .unwrap();
+    let body_node = expected
+        .encode_value(
+            NodeKind::CALL_BODY,
+            &call_body::StoredBody {
+                record: crate::ToolCallRecord {
+                    call_id: outcome.call_id.clone(),
+                    provider_call_id: outcome.provider_call_id.clone(),
+                    tool: outcome.tool_name.clone(),
+                    args: outcome.args.clone(),
+                    output: outcome.output.clone(),
+                },
+                answer: Some(answer_node),
+            },
+        )
+        .unwrap();
     let presentation_node = expected
         .encode_value(NodeKind::PRESENTATION, &outcome.presentation)
         .unwrap();
@@ -100,8 +115,11 @@ fn a_settled_call_is_one_outcome_node_that_rebuilds_its_presentation_after_colle
         .encode_value(
             NodeKind::CALL_OUTCOME,
             &StoredOutcome {
-                outcome: outcome.clone(),
-                answer: Some(answer_node),
+                body: body_node,
+                admission: outcome.admission,
+                attempt: outcome.attempt,
+                replay: outcome.replay.clone(),
+                intent_outcomes: outcome.intent_outcomes.clone(),
                 presentation: presentation_node,
             },
         )
@@ -180,16 +198,7 @@ fn every_round_fact_round_trips_through_its_node() {
     let waiting = parked
         .material(owner(), MaterialRole::AttemptOutput)
         .parked("w".to_owned());
-    let report = ReportView::stage(
-        &mut staging,
-        &[],
-        Some(&crate::OmittedToolCalls {
-            count: 2,
-            failures: 1,
-            attachments: Vec::new(),
-        }),
-    )
-    .unwrap();
+    let report = ReportView::default().stage(&mut staging).unwrap();
     let request = Material::journal_local(owner(), MaterialRole::PreparedRequest, "r".to_owned());
     for fact in [
         RoundFact::Admit {
@@ -243,6 +252,64 @@ fn every_round_fact_round_trips_through_its_node() {
     };
     assert_eq!(
         stray.stage(&mut staging),
+        Err(GraphRefusal::PublicationMismatch)
+    );
+}
+
+/// FIG-6171: the turn and live outcome share one exact archival body, while
+/// pins/presentation can be reclaimed. Typed payloads retain their original
+/// material digest and reject a body that would change its request bytes.
+#[test]
+fn the_archival_call_body_is_shared_and_its_payload_digest_binds_the_request() {
+    let output = ToolCallOutput::success(serde_json::json!({"answer": "a".repeat(70_000)}));
+    let presented = ModelToolReturn::from_output("query".to_owned(), &output);
+    let mut call = completed(output, presented);
+    call.args = serde_json::json!({"query": "q".repeat(70_000)});
+    let mut staged = staging();
+    let admission = staged
+        .encode_value(
+            lash_core_store::checkpoint_graph::NodeKind::ADMISSION,
+            &0_u64,
+        )
+        .unwrap();
+    let outcome = CallOutcome::of(&call, Some(admission), 1)
+        .stage(&mut staged)
+        .unwrap();
+    let mut decoder = GraphDecoder::new(&staged, DecodeLimits::within_total(1 << 22));
+    let body = CallOutcome::body_node(&mut decoder, outcome).unwrap();
+    let report = ReportView {
+        entries: vec![body],
+    }
+    .stage(&mut staged)
+    .unwrap();
+    let kept = collected(&staged, report);
+    assert!(!kept.contains_key(&outcome));
+    assert!(!kept.contains_key(&admission));
+    let mut decoder = GraphDecoder::new(&kept, DecodeLimits::within_total(1 << 22));
+    let archive = CallBody::load(&mut decoder, body).unwrap().record;
+    assert_eq!(archive.args, call.args);
+    assert_eq!(archive.output, call.output);
+    assert_eq!(archive.call_id, call.call_id);
+    let payload = serde_json::to_string(&call).unwrap();
+    let material = stage_payload(&mut staged, &payload).unwrap();
+    assert!(matches!(material, MaterialNode::CallPayload(_)));
+    let named = Material::journal_local(owner(), MaterialRole::AttemptOutput, payload.clone());
+    let fact = SettledFact {
+        outcome: AttemptOutcome::Completed(named.reference().clone()),
+        material: Some(material),
+    };
+    let mut decoder = GraphDecoder::new(&staged, DecodeLimits::within_total(1 << 22));
+    fact.check(&mut decoder).unwrap();
+    assert_eq!(load_payload(&mut decoder, material).unwrap(), payload);
+    call.args = serde_json::json!({"query": "changed"});
+    let forged = stage_payload(&mut staged, &serde_json::to_string(&call).unwrap()).unwrap();
+    let fact = SettledFact {
+        material: Some(forged),
+        ..fact
+    };
+    let mut decoder = GraphDecoder::new(&staged, DecodeLimits::within_total(1 << 22));
+    assert_eq!(
+        fact.check(&mut decoder),
         Err(GraphRefusal::PublicationMismatch)
     );
 }

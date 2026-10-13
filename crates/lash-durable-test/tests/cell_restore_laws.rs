@@ -1240,10 +1240,16 @@ impl CellTurn {
         )
         .map_err(|error| format!("the turn's facts do not fold: {error}"))?;
         let mut calls = Vec::new();
+        let mut decoder =
+            lash_core_store::checkpoint_graph::GraphDecoder::new(&facts, facts.read_limits);
         for report in fold.reports().values() {
-            let report = round::cell_report(&facts, *report)
+            let report = round::graph::ReportView::load(&mut decoder, *report)
                 .map_err(|error| format!("the cell's report: {error}"))?;
-            calls.extend(report.calls.into_iter().map(|record| record.call_id));
+            for body in report.entries {
+                let body = round::graph::CallBody::load(&mut decoder, body)
+                    .map_err(|error| format!("the call's body: {error}"))?;
+                calls.push(body.record.call_id);
+            }
         }
         Ok(calls)
     }

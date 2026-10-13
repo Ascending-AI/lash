@@ -1,5 +1,4 @@
 use crate::dialect::SessionDialect;
-use crate::tool_records::{bounded_exec_tool_call_records, bounded_executed_calls};
 use lash_sansio::TurnId;
 use std::sync::Arc;
 
@@ -435,23 +434,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         .find(|call| &call.call_id == call_id)
                         .and_then(|call| call.output.as_turn_control().cloned());
                 }
-                let (host_records, omitted) = bounded_exec_tool_call_records(
-                    &response.tool_calls,
-                    &self.dialect.presentation(),
-                );
                 actions.extend(
-                    host_records
+                    response
+                        .tool_calls
                         .into_iter()
                         .map(tool_call_event)
                         .map(DriverAction::Emit),
                 );
-                if let Some(summary) = omitted {
-                    actions.push(DriverAction::Emit(SessionStreamEvent::ToolCallsOmitted {
-                        summary,
-                    }));
-                }
-                (record.calls, record.calls_omitted) =
-                    bounded_executed_calls(response.calls, &self.dialect.presentation());
+                record.calls = response.calls;
                 record.bindings = (*response.bindings)
                     .bounded(self.dialect.presentation().max_binding_change_names);
                 record.images = response.printed_images;

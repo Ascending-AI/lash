@@ -27,9 +27,8 @@ function observe(node) {
       output: node.querySelector('.code-output').textContent,
       failed: node.classList.contains('fail'),
       attachments: galleryOf(node),
-      tools: tools.filter(tool => !tool.classList.contains('omitted'))
+      tools: tools
         .map(tool => ({operation: tool.querySelector('strong').textContent, status: JSON.parse(tool.querySelector('pre').textContent).status})),
-      tools_omitted: tools.filter(tool => tool.classList.contains('omitted')).length ? Number(tools.at(-1).textContent.split(' ')[0]) : 0,
     }};
   }
   if (node.classList.contains('event')) {
@@ -75,7 +74,7 @@ export function verifyTranscriptSurface(surface, asset, rows, displayOrder = row
     if (row.kind === 'code_block') {
       expected.push({kind: 'code', value: {label: content.language || 'code', code: content.code || '',
         output: [content.output, content.error].filter(Boolean).join('\n'), failed: Boolean(content.error),
-        attachments: content.attachments.map(attachmentOf), tools: content.tools, tools_omitted: content.tools_omitted}});
+        attachments: content.attachments.map(attachmentOf), tools: content.tools}});
       expectedIds.push(row.row_id);
     } else if (row.kind !== 'reasoning') {
       expected.push({kind: 'message', value: {text: prose(content.text), attachments: content.attachments.map(attachmentOf)}});
@@ -102,6 +101,6 @@ export function allKindRecords() {
       attachments: kind === 'attachment' ? [{id:'sha256:one'}, {id:'sha256:two'}] : [],
       language: kind === 'code_block' ? 'typescript' : null, code: kind === 'code_block' ? 'console.log(1)' : null,
       output: kind === 'code_block' ? '1' : null, success: kind === 'code_block' ? true : null, error: null,
-      tools: kind === 'code_block' ? [{operation:'board.move', status:'ok'}] : [], tools_omitted: kind === 'code_block' ? 3 : 0},
+      tools: kind === 'code_block' ? [{operation:'board.move', status:'ok'}] : []},
   }));
 }

@@ -33,7 +33,6 @@ fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHis
             },
             images: Vec::new(),
             calls: Vec::new(),
-            calls_omitted: 0,
             bindings: Default::default(),
             result: lash_core::CellOutcome::Completed,
         })),
@@ -60,7 +59,6 @@ fn terminal_step_event(
             prints: output.into_iter().map(Into::into).collect(),
             images,
             calls: Vec::new(),
-            calls_omitted: 0,
             bindings: Default::default(),
             result: lash_core::CellOutcome::finished_by(
                 crate::FINISH_TOOL_NAME,
@@ -617,7 +615,6 @@ fn printed_images_render_as_llm_image_blocks() {
                 label: Some("img.png".to_string()),
             }],
             calls: Vec::new(),
-            calls_omitted: 0,
             bindings: Default::default(),
             result: lash_core::CellOutcome::Completed,
         })),

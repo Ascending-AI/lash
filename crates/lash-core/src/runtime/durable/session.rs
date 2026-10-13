@@ -507,38 +507,18 @@ pub enum CellExit {
     Suspended,
 }
 
-/// One code cell's tool calls as its turn records them: the records the
-/// code executor's bound keeps
-/// ([`bound_tool_call_records`](crate::plugin::CodeExecutorPlugin::bound_tool_call_records)),
-/// in call order, and the accounting of the calls it leaves out.
+/// One cell's existing ledger references and its transient materialized
+/// records. Only the references are written with the consuming turn commit.
 #[derive(Clone, Debug, Default)]
 pub struct CellToolCalls {
-    /// The retained records, in the order the cell made the calls.
-    pub calls: Vec<crate::ToolCallRecord>,
-    /// The calls the bound left out.
-    pub omitted: Option<crate::OmittedToolCalls>,
+    pub records: Vec<crate::ToolCallRecord>,
+    pub ledger: lash_core_execution::runtime::actor::round::graph::ReportView,
 }
 
 impl CellToolCalls {
-    /// Whether the cell made no tool call.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.calls.is_empty() && self.omitted.is_none()
-    }
-}
-
-/// Add `more` to the omitted-call accounting `into`.
-pub(crate) fn add_omitted(
-    into: &mut Option<crate::OmittedToolCalls>,
-    more: crate::OmittedToolCalls,
-) {
-    match into {
-        Some(summary) => {
-            summary.count += more.count;
-            summary.failures += more.failures;
-            summary.attachments.extend(more.attachments);
-        }
-        None => *into = Some(more),
+        self.ledger.entries.is_empty()
     }
 }
 

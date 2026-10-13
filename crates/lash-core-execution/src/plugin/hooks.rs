@@ -242,7 +242,6 @@ pub struct TurnHookReport {
     pub execution: crate::runtime::TurnExecutionMetrics,
     pub token_usage: crate::LlmUsage,
     pub tool_calls: Arc<Vec<crate::ToolCallRecord>>,
-    pub omitted: Option<crate::OmittedToolCalls>,
     pub errors: Arc<Vec<crate::runtime::TurnIssue>>,
 }
 
@@ -253,7 +252,6 @@ impl TurnHookReport {
             execution: turn.execution.clone(),
             token_usage: turn.token_usage.clone(),
             tool_calls: Arc::new(turn.tool_calls.clone()),
-            omitted: turn.omitted.clone(),
             errors: Arc::new(turn.errors.clone()),
         }
     }

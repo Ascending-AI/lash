@@ -116,5 +116,3 @@ pub use rlm_support::format_budget_suffix;
 mod prompt_contract_tests;
 
 pub use projection::recorded_extraction_decisions;
-
-mod tool_records;

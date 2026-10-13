@@ -848,11 +848,12 @@ pub(super) async fn durable_report(
                 format!("turn report token usage overflows {}", overflow.counter()),
             ))
         })?;
-    let (tool_calls, omitted) =
+    let tool_calls =
         lash_core::runtime::durable::services::RuntimeTurnServices::recorded_tool_calls(
             &ctx.parts.effect_host,
             &ctx.parts.session_id,
             run,
+            &ctx.parts.transcript_decoders,
         )
         .await
         .map_err(EmbedError::Durable)?;
@@ -875,7 +876,6 @@ pub(super) async fn durable_report(
         llm_calls,
         failure_evidence: Vec::new(),
         tool_calls,
-        omitted,
         execution: Default::default(),
         errors,
         acceptance,

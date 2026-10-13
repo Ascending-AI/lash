@@ -518,14 +518,9 @@ pub(super) async fn release_cell_emissions(
     Ok(())
 }
 
-/// Record the tool calls of the cell `answered` names as the cell's report,
-/// at the cell's effect, in the transaction that checkpoints past the cell
-/// or ends the turn on it (FIG-5330): one CellReport fact over the bounded
-/// view the code executor keeps
-/// ([`bound_tool_call_records`](crate::plugin::CodeExecutorPlugin::bound_tool_call_records)),
-/// with the accounting of the calls it left out. The turn's fold reports it
-/// beside its rounds, in call order. A crash before this commit re-delivers
-/// the cell, which answers with them again from its root.
+/// Retain references to the cell's original ledger with the transaction
+/// consuming its answer (FIG-6171). A crash before it re-delivers the cell;
+/// no body is copied into the turn and no presentation limit applies.
 pub(super) fn report_answered_cell(
     tx: &mut lash_durable::ActorTx,
     row: &TurnRow,
@@ -534,16 +529,15 @@ pub(super) fn report_answered_cell(
     let Some(AnsweredCell { id, calls, .. }) = answered.take() else {
         return Ok(());
     };
-    let CellToolCalls { calls, omitted } = calls;
-    if calls.is_empty() && omitted.is_none() {
+    let CellToolCalls { ledger, .. } = calls;
+    if ledger.entries.is_empty() {
         return Ok(());
     }
     round::report_cell(
         tx,
         &OwnerKey::Turn(row.session.clone(), row.run.clone()),
         RunSeq(id.0),
-        &calls,
-        omitted.as_ref(),
+        &ledger,
     )
     .map_err(exec)
 }

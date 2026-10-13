@@ -51,7 +51,7 @@ const row = (rowId, kind, turnId, at, content = {}, provenance = {}) => ({
   provenance: { turn_id: turnId, input_id: null, plugin_id: null, is_turn_reply: kind === "assistant_reply", ...provenance },
   content: {
     text: "", reasoning: [], attachments: [], language: null, code: null, output: null, success: null,
-    error: null, tools: [], tools_omitted: 0, ...content
+    error: null, tools: [], ...content
   }
 });
 

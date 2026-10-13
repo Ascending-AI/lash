@@ -1,11 +1,4 @@
-#[cfg(test)]
-use crate::tool_records::bounded_tool_call_record;
-use crate::tool_records::{bounded_exec_tool_call_records, bounded_executed_calls};
-#[cfg(test)]
-use lash_core::{OmittedToolCalls, ToolCallOutput, ToolFailure, ToolValue};
 use lash_sansio::TurnId;
-#[cfg(test)]
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::rlm_support::RlmCompletion;
@@ -576,23 +569,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         .find(|call| &call.call_id == call_id)
                         .and_then(|call| call.output.as_turn_control().cloned());
                 }
-                let (host_records, omitted) = bounded_exec_tool_call_records(
-                    &response.tool_calls,
-                    &self.dialect.presentation(),
-                );
                 actions.extend(
-                    host_records
+                    response
+                        .tool_calls
                         .into_iter()
                         .map(tool_call_event)
                         .map(DriverAction::Emit),
                 );
-                if let Some(summary) = omitted {
-                    actions.push(DriverAction::Emit(SessionStreamEvent::ToolCallsOmitted {
-                        summary,
-                    }));
-                }
-                (record.calls, record.calls_omitted) =
-                    bounded_executed_calls(response.calls, &self.dialect.presentation());
+                record.calls = response.calls;
                 record.bindings = (*response.bindings)
                     .bounded(self.dialect.presentation().max_binding_change_names);
                 record.images = response.printed_images;
@@ -1065,23 +1049,6 @@ mod classification_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::{
-        AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType, ToolCancellation,
-        ToolFailureClass,
-    };
-
-    fn image_ref(id: &str) -> AttachmentRef {
-        AttachmentRef::new(
-            AttachmentId::parse(
-                format!("{:02x}", id.bytes().fold(0u8, u8::wrapping_add)).repeat(32),
-            )
-            .expect("valid attachment id"),
-            MediaType::parse("image/png").unwrap(),
-            3,
-            Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
-            Some("tiny".to_string()),
-        )
-    }
 
     #[test]
     fn protocol_message_ids_include_turn_identity() {
@@ -1140,179 +1107,6 @@ mod tests {
                 "typescript_cell_count": 0,
             }),
             "an attempt that ran no program renders its code counters as zero"
-        );
-    }
-
-    fn record(index: usize, output: ToolCallOutput) -> ToolCallRecord {
-        ToolCallRecord {
-            call_id: lash_core::ToolCallId::fixture(&format!("call-{index}")),
-            provider_call_id: None,
-            tool: "test_tool".to_string(),
-            args: serde_json::json!({ "index": index }),
-            output,
-        }
-    }
-
-    #[test]
-    fn bounded_output_replaces_oversized_scalars_without_losing_structure_or_attachments() {
-        let attachment = image_ref("nested-attachment");
-        let oversized =
-            "x".repeat(crate::RlmPresentationConfig::standard().max_inline_scalar_bytes + 17);
-        let output = ToolCallOutput::success_tool_value(ToolValue::Object(BTreeMap::from([
-            (
-                "nested".to_string(),
-                ToolValue::Array(vec![
-                    ToolValue::String("kept".to_string()),
-                    ToolValue::String(oversized.clone()),
-                    ToolValue::Attachment(attachment.clone()),
-                ]),
-            ),
-            ("sibling".to_string(), ToolValue::Bool(true)),
-        ])));
-
-        let bounded = bounded_tool_call_record(
-            &record(0, output),
-            &crate::RlmPresentationConfig::standard(),
-        );
-        assert_eq!(bounded.args, serde_json::json!({ "index": 0 }));
-        let attachment_json = ToolValue::Attachment(attachment.clone()).to_json_value();
-        assert_eq!(
-            bounded.output.value_for_projection(),
-            serde_json::json!({
-                "nested": [
-                    "kept",
-                    { "omitted_bytes": oversized.len() },
-                    attachment_json,
-                ],
-                "sibling": true,
-            })
-        );
-        assert_eq!(bounded.output.attachments(), vec![attachment]);
-    }
-
-    #[test]
-    fn bounded_output_recurses_through_failure_and_cancellation_raw_values() {
-        let failure_attachment = image_ref("failure-attachment");
-        let cancellation_attachment = image_ref("cancellation-attachment");
-        let oversized =
-            "x".repeat(crate::RlmPresentationConfig::standard().max_inline_scalar_bytes + 1);
-        let mut failure = ToolFailure::tool(
-            ToolFailureClass::Execution,
-            "failed",
-            "failure recovered by the cell program",
-        );
-        failure.raw = Some(ToolValue::Array(vec![
-            ToolValue::String(oversized.clone()),
-            ToolValue::Attachment(failure_attachment.clone()),
-        ]));
-        let cancellation = ToolCancellation {
-            origin: None,
-            message: "cancelled".to_string(),
-            source: lash_core::ToolFailureSource::Cancellation,
-            raw: Some(ToolValue::Array(vec![
-                ToolValue::String(oversized.clone()),
-                ToolValue::Attachment(cancellation_attachment.clone()),
-            ])),
-            forced: false,
-        };
-
-        let (bounded, omitted) = bounded_exec_tool_call_records(
-            &[
-                record(0, ToolCallOutput::failure(failure)),
-                record(1, ToolCallOutput::cancelled(cancellation)),
-            ],
-            &crate::RlmPresentationConfig::standard(),
-        );
-
-        assert!(omitted.is_none());
-        assert_eq!(bounded[0].output.attachments(), vec![failure_attachment]);
-        assert_eq!(
-            bounded[1].output.attachments(),
-            vec![cancellation_attachment]
-        );
-        for record in bounded {
-            assert!(
-                record
-                    .output
-                    .value_for_projection()
-                    .to_string()
-                    .contains("omitted_bytes")
-            );
-        }
-    }
-
-    #[test]
-    fn typed_omission_preserves_counts_failures_and_attachments() {
-        let attachment = image_ref("overflow-attachment");
-        let mut calls = (0..crate::RlmPresentationConfig::standard().max_tool_call_records + 3)
-            .map(|index| record(index, ToolCallOutput::success(serde_json::json!(index))))
-            .collect::<Vec<_>>();
-        calls[crate::RlmPresentationConfig::standard().max_tool_call_records + 1] = record(
-            crate::RlmPresentationConfig::standard().max_tool_call_records + 1,
-            ToolCallOutput::failure(ToolFailure::tool(
-                ToolFailureClass::Execution,
-                "recovered_failure",
-                "failure recovered by the cell program",
-            )),
-        );
-        calls[crate::RlmPresentationConfig::standard().max_tool_call_records + 2] = record(
-            crate::RlmPresentationConfig::standard().max_tool_call_records + 2,
-            ToolCallOutput::success_tool_value(ToolValue::Attachment(attachment.clone())),
-        );
-
-        let (bounded, omitted) =
-            bounded_exec_tool_call_records(&calls, &crate::RlmPresentationConfig::standard());
-
-        assert_eq!(
-            bounded.len(),
-            crate::RlmPresentationConfig::standard().max_tool_call_records
-        );
-        assert_eq!(
-            omitted,
-            Some(OmittedToolCalls {
-                count: 3,
-                failures: 1,
-                attachments: vec![attachment],
-            })
-        );
-    }
-
-    #[test]
-    fn executed_calls_keep_the_diagnostic_tail_and_count_the_rest() {
-        let records = (0..crate::RlmPresentationConfig::standard().max_tool_call_records + 3)
-            .map(|index| lash_core::ExecutedCall {
-                operation: format!("module.call_{index}"),
-                outcome: if index
-                    == crate::RlmPresentationConfig::standard().max_tool_call_records + 2
-                {
-                    lash_core::ExecutedCallOutcome::Err
-                } else {
-                    lash_core::ExecutedCallOutcome::Ok
-                },
-                call_id: None,
-            })
-            .collect::<Vec<_>>();
-
-        let (calls, omitted) =
-            bounded_executed_calls(records, &crate::RlmPresentationConfig::standard());
-
-        assert_eq!(
-            calls.len(),
-            crate::RlmPresentationConfig::standard().max_tool_call_records
-        );
-        assert_eq!(omitted, 3);
-        assert_eq!(calls[0].operation, "module.call_3");
-        assert_eq!(
-            calls.last().expect("retained tail").operation,
-            format!(
-                "module.call_{}",
-                crate::RlmPresentationConfig::standard().max_tool_call_records + 2
-            )
-        );
-        assert_eq!(calls[0].outcome, lash_core::ExecutedCallOutcome::Ok);
-        assert_eq!(
-            calls.last().expect("retained tail").outcome,
-            lash_core::ExecutedCallOutcome::Err
         );
     }
 }

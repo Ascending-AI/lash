@@ -4,7 +4,7 @@
 /// it are retained unchanged. This fixture uses [`crate::ReportSource::Durable`],
 /// whose observation fields may be incomplete and whose execution metrics are
 /// defaulted. It supplies no acceptance receipt, call ledgers, failure evidence,
-/// observed errors, omissions or affected-input observations; usage and execution
+/// observed errors or affected-input observations; usage and execution
 /// metrics are zero/default. Empty evidence means no observations were supplied,
 /// not proof that no calls, failures or cancellation effects occurred. Tests that
 /// project those fields must populate them explicitly.
@@ -18,7 +18,6 @@ pub fn settled_turn_report(outcome: crate::TurnOutcome) -> crate::TurnReport {
         llm_calls: Vec::new(),
         failure_evidence: Vec::new(),
         tool_calls: Vec::new(),
-        omitted: None,
         execution: Default::default(),
         errors: Vec::new(),
         acceptance: None,

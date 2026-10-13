@@ -260,6 +260,31 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_ledger() 
         .await?;
     let input = handle.input_id().clone();
     let key = world.parked().await;
+    let (settled, pending) =
+        lash_core::runtime::durable::services::RuntimeTurnServices::unfinished_call_bodies(
+            &world.core.effect_host(),
+            session.session_id(),
+            &world.core.transcript_decoders(),
+        )
+        .await?;
+    assert!(!pending.is_empty(), "the parked approval is a known call");
+    assert_eq!(
+        settled.len(),
+        1,
+        "the saved lookup already has a readable body"
+    );
+    assert_eq!(
+        session.read_tool_call(&settled[0].call_id).await?,
+        crate::ToolCallRead::Settled {
+            record: Box::new(settled[0].clone())
+        }
+    );
+    for id in &pending {
+        assert!(matches!(
+            session.read_tool_call(id).await?,
+            crate::ToolCallRead::NotYetSettled { .. }
+        ));
+    }
     assert!(
         !world
             .rows(&format!("exec_snapshots c/{session_name}/{run}/"))
@@ -292,7 +317,6 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_ledger() 
         durable.tool_calls, live.tool_calls,
         "the ledger reports what the live report did"
     );
-    assert_eq!(durable.omitted, live.omitted);
     drop(session);
     world.core.shutdown().await?;
     Ok(())
@@ -329,6 +353,25 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
         tools(&live)
     );
 
+    let facts = world
+        .core
+        .effect_host()
+        .durable_reads()?
+        .run_facts(&lash_core::durable_port::domain::OwnerKey::Turn(
+            session.session_id().clone(),
+            crate::TurnId::fixture(run),
+        ))
+        .await?;
+    let sizes = lash_core::testing::cell_ledger_bytes(&facts, &live.tool_calls)
+        .expect("the stored ledger sizes read");
+    eprintln!(
+        "FIG-6171 3 calls: report={} held={} previous_copy={}",
+        sizes.0, sizes.1, sizes.2
+    );
+    assert!(
+        sizes.1 < sizes.2,
+        "the full retained call ledger shrinks: {sizes:?}"
+    );
     assert_retired(&world, session_name, run);
     assert_eq!(
         world.resolve(&key, granted).await,
@@ -343,7 +386,14 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
     world.collect().await;
     let durable = session.attach(input).output().await?.result;
     assert_eq!(durable.tool_calls, live.tool_calls);
-    assert_eq!(durable.omitted, live.omitted);
+    for call in &live.tool_calls {
+        assert_eq!(
+            session.read_tool_call(&call.call_id).await?,
+            crate::ToolCallRead::Settled {
+                record: Box::new(call.clone())
+            }
+        );
+    }
     drop(session);
     world.core.shutdown().await?;
     Ok(())
@@ -357,6 +407,7 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
 async fn a_deleted_session_leaves_no_engine_row_and_only_its_own_nodes_go() -> Result<()> {
     let mut world = World::new(true).await?;
     let mut ledgers = Vec::new();
+    let mut call_nodes = Vec::new();
     let mut kept = None;
     for name in ["retire-deleted", "retire-kept"] {
         let run = format!("{name}-run");
@@ -373,6 +424,22 @@ async fn a_deleted_session_leaves_no_engine_row_and_only_its_own_nodes_go() -> R
         let live = handle.output().await?.result;
         assert_eq!(live.status(), crate::TurnStatus::Answered);
         ledgers.push(assert_retired(&world, name, &run));
+        let facts = world
+            .core
+            .effect_host()
+            .durable_reads()?
+            .run_facts(&lash_core::durable_port::domain::OwnerKey::Turn(
+                session.session_id().clone(),
+                crate::TurnId::fixture(&run),
+            ))
+            .await?;
+        call_nodes.push(
+            facts
+                .nodes
+                .keys()
+                .map(|id| id.to_hex())
+                .collect::<std::collections::BTreeSet<_>>(),
+        );
         if name == "retire-kept" {
             kept = Some((session, input, live));
         }
@@ -396,6 +463,16 @@ async fn a_deleted_session_leaves_no_engine_row_and_only_its_own_nodes_go() -> R
     assert!(
         others.iter().all(|node| blobs.contains(node)),
         "another session's ledger nodes survive"
+    );
+    for node in call_nodes[0].difference(&call_nodes[1]) {
+        assert!(
+            !blobs.contains(node),
+            "the deleted call ledger retained node {node}"
+        );
+    }
+    assert!(
+        call_nodes[1].iter().all(|node| blobs.contains(node)),
+        "the other call ledger stays reachable"
     );
     let (session, input, live) = kept.expect("the kept session ran");
     let durable = session.attach(input).output().await?.result;

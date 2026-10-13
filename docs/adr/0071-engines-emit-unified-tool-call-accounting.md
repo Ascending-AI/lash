@@ -9,7 +9,7 @@ turn accounting, while each protocol owns the context it projects to the model.
 ## Decision
 
 Each completed tool record in a successful RLM exec response contributes a
-`SessionStreamEvent::ToolCall`, subject to the accounting bounds below. The
+`SessionStreamEvent::ToolCall` with its full typed body. The
 cell and native drivers emit these events in `handle_exec_result`, after
 inspecting the full response for terminal tool control. Recorded exec responses
 pass through this same handling path on resume. Live trace and activity events
@@ -18,27 +18,27 @@ remain separate observations of execution.
 Three rules apply:
 
 1. Engines use the shared tool-call accounting vocabulary.
-2. Terminal control uses the full payload before accounting truncation.
+2. Terminal control uses the full payload.
 3. Protocol projectors decide which execution information reaches model context.
 
 Tool-call accounting populates assembled turns and host observations. It does
 not itself add conversation nodes or model attempts to the ADR 0032 ledger.
 
-The recorded `RlmPresentationConfig::max_tool_call_records` and
-`max_inline_scalar_bytes` bound accounting; `RlmPresentationConfig::standard()`
-selects 128 records per exec and 64 KiB per inline string scalar. Hosts may
-state other limits at protocol creation. Scalars above the selected limit
-become `omitted_bytes` markers recursively inside success and raw failure
-values. Arrays, objects, and attachment references retain their shape.
-The omitted tail contributes one `ToolCallsOmitted` event with its count,
-failures, and attachment references. The final attachment scan includes both
-retained records and that summary.
+FIG-6171 removes the FIG-5330 bounded record copies. The call ledger is the
+only durable home of bodies. Committed cells keep every `ExecutedCall` in call
+order; turns retain references to the same compact archival body components that live
+outcomes reference. Execution pins and presentation recipes are reclaimed with
+the consumed cell; only the original typed request and output remain.
+`DurableSession::read_tool_call` and its batch reads expose original typed records
+through the protocol's offline transcript decoder, without a live session.
+`RlmPresentationConfig::prompt_max_tool_calls` bounds only the next prompt's
+operation/outcome tail (128 by default). The scalar accounting truncator and
+durable omission summaries are deleted; the prompt contains no tool body.
 
 ## Attachment commit acquires explicit referrers
 
 The final turn transaction acquires a `Session` referrer on each committed
-attachment id. The set includes stored references from tool outputs, the omitted
-tool-call summary, message parts, and retained outputs. A code cell's recorded
+attachment id. The set includes stored references from tool outputs, message parts, and retained outputs. A code cell's recorded
 response supplies retained prints and finish values that the commit cannot read
 from protocol records directly. Acquisition validates the whole set and refuses
 an attachment without upload evidence before installing any edge.

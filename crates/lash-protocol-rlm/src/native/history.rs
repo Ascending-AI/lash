@@ -134,6 +134,7 @@ pub(super) fn render_history_messages(
                         .projected_index_for_chronological(entry.index)
                         .unwrap_or(entry.index),
                     step,
+                    input.dialect.presentation().prompt_max_tool_calls,
                 );
                 if let Some(parts) = exchanges.execution_parts(&step.id) {
                     super::transport::append_pair(&mut messages, parts, &observation);

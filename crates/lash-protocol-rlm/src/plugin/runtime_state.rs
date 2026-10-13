@@ -424,26 +424,16 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
         true
     }
 
-    /// The session's recorded presentation bound: at most
-    /// `max_tool_call_records` records, each output's scalars cut at
-    /// `max_inline_scalar_bytes`.
-    fn bound_tool_call_records(
-        &self,
-        records: Vec<lash_core::ToolCallRecord>,
-    ) -> (
-        Vec<lash_core::ToolCallRecord>,
-        Option<lash_core::OmittedToolCalls>,
-    ) {
-        crate::tool_records::bounded_exec_tool_call_records(
-            &records,
-            &self.state.dialect.presentation(),
-        )
-    }
-
     fn snapshot_tool_calls(
         &self,
         cell: &lash_core::plugin::StoredCell,
-    ) -> Result<Vec<lash_core::ToolCallRecord>, SessionError> {
+    ) -> Result<
+        (
+            Vec<lash_core::ToolCallRecord>,
+            lash_vm_broker::round_graph::ReportView,
+        ),
+        SessionError,
+    > {
         crate::executor::snapshot_tool_calls(cell).map_err(SessionError::Protocol)
     }
 

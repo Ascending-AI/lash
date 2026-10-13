@@ -140,6 +140,7 @@ registry! {
     OWNER_BINDING = 37, "OwnerBinding", Enveloped, Node, Seams;
     PROCESS_STATE = 38, "ProcessState", Enveloped, Node, Seams;
     TURN_CONTENT = 39, "TurnContent", Enveloped, Node, Integrator;
+    CALL_BODY = 40, "CallBody", Enveloped, Node, Host;
 }
 
 impl NodeKind {

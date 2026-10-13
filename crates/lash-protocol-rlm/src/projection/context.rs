@@ -383,7 +383,6 @@ mod tests {
             prints: vec!["terminal output".to_string().into()],
             images: Vec::new(),
             calls: Vec::new(),
-            calls_omitted: 0,
             bindings: Default::default(),
             result: lash_core::CellOutcome::finished_by(
                 crate::FINISH_TOOL_NAME,
@@ -400,7 +399,6 @@ mod tests {
             prints: vec!["next".to_string().into()],
             images: Vec::new(),
             calls: Vec::new(),
-            calls_omitted: 0,
             bindings: Default::default(),
             result: lash_core::CellOutcome::Completed,
         };
@@ -481,7 +479,6 @@ mod tests {
             prints: Vec::new(),
             images: Vec::new(),
             calls: Vec::new(),
-            calls_omitted: 0,
             bindings: Default::default(),
             result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
@@ -497,7 +494,6 @@ mod tests {
             prints: Vec::new(),
             images: Vec::new(),
             calls: Vec::new(),
-            calls_omitted: 0,
             bindings: Default::default(),
             result: lash_core::CellOutcome::finished_by(
                 crate::FINISH_TOOL_NAME,

@@ -781,6 +781,7 @@ pub(super) fn call_outcome(
     lash_vm_broker::round_graph::CallOutcome {
         call_id: record.call_id.clone(),
         admission: Some(admission),
+        args: record.args.clone(),
         attempt: 0,
         tool_name: record.tool.clone(),
         output: record.output.clone(),

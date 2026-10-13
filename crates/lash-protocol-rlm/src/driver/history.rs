@@ -201,6 +201,7 @@ pub(super) fn render_history_messages(
                         .projected_index_for_chronological(entry.index)
                         .unwrap_or(entry.index),
                     step,
+                    input.dialect.presentation().prompt_max_tool_calls,
                 );
                 let mut obs_blocks = vec![text_block(obs_text, false)];
                 append_step_image_blocks(step, &mut obs_blocks);
@@ -457,6 +458,7 @@ pub(crate) fn step_output_text(
     vocabulary: crate::dialect::DialectPromptVocabulary,
     index: usize,
     entry: &lash_core::CellRecord,
+    prompt_max_tool_calls: usize,
 ) -> String {
     let mut out = String::new();
     for (output_index, item) in entry.prints.iter().enumerate() {
@@ -496,19 +498,17 @@ pub(crate) fn step_output_text(
             );
         }
     }
-    if !entry.calls.is_empty() {
+    let omitted = entry.calls.len().saturating_sub(prompt_max_tool_calls);
+    let calls = &entry.calls[omitted..];
+    if !calls.is_empty() {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
         out.push_str("Calls:");
-        if entry.calls_omitted > 0 {
-            let _ = write!(
-                out,
-                "\n- … {} earlier executed calls omitted",
-                entry.calls_omitted
-            );
+        if omitted > 0 {
+            let _ = write!(out, "\n- … {} earlier executed calls omitted", omitted);
         }
-        for call in &entry.calls {
+        for call in calls {
             let _ = write!(out, "\n- {} → {}", call.operation, call.outcome.as_str());
         }
     }

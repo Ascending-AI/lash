@@ -454,19 +454,6 @@ impl RuntimeTurnDriver<'_> {
         Ok(())
     }
 
-    /// `records`, one cell's tool call records in call order, as the code
-    /// executor's bound keeps them: what the turn records of the cell.
-    pub(super) fn bounded_cell_calls(
-        &self,
-        records: Vec<crate::ToolCallRecord>,
-    ) -> crate::runtime::durable::session::CellToolCalls {
-        let (calls, omitted) = match self.session.plugins().code_executor() {
-            Some(code_executor) => code_executor.bound_tool_call_records(records),
-            None => (records, None),
-        };
-        crate::runtime::durable::session::CellToolCalls { calls, omitted }
-    }
-
     pub(super) async fn handle_exec_code_effect(
         &mut self,
         machine: &mut TurnMachine,
@@ -638,7 +625,10 @@ impl RuntimeTurnDriver<'_> {
             .saturating_duration_since(cell_started)
             .as_millis() as u64;
         if let Ok(output) = &result {
-            self.answered_cell_calls = self.bounded_cell_calls(output.tool_calls.clone());
+            self.answered_cell_calls = self.read_cell_calls(machine, id).await?;
+            // Bodies are transient: the original ledger nodes are retained
+            // by the consuming commit, never copied into the turn.
+            self.answered_cell_calls.records = output.tool_calls.clone();
         }
         match &result {
             Ok(output) => {

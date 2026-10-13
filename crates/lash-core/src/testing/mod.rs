@@ -189,3 +189,6 @@ pub use lash_core_store::testing::guarded_surfaces;
 pub use lash_core_execution::runtime::actor::round::graph::{
     AdmitMember, CallOutcome, MaterialNode, PinnedMember, RoundFact, SettledFact,
 };
+
+mod cell_ledger;
+pub use cell_ledger::cell_ledger_bytes;

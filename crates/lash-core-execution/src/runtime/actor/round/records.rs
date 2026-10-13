@@ -22,7 +22,9 @@ use crate::ToolCallId;
 /// version_guard(
 ///     shapes(
 ///         path = "crates/lash-core-execution/src/runtime/actor/round/graph.rs",
-///         cover(RoundFact, AdmitMember, PinnedMember, SettledFact, MaterialNode, Decision),
+///         cover(RoundFact, AdmitMember, PinnedMember, SettledFact, MaterialNode, Decision, StoredOutcome, CallOutcome, ReportView),
+///         path = "crates/lash-core-execution/src/runtime/actor/round/call_body.rs",
+///         cover(StoredBody, CallBody),
 ///     ),
 /// )
 /// version_surface = "drain"

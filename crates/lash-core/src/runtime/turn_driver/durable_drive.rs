@@ -366,6 +366,125 @@ async fn restore_working(
 
 /// `exec`'s root, read whole under one protection: its row and every node
 /// it reaches. `None` when the cell has none.
+/// Capture references before the cell root and its run facts are retired.
+/// Outcomes since the latest snapshot are already committed round material;
+/// preserve those exact nodes rather than encoding another output.
+async fn cell_calls(
+    driver: &RuntimeTurnDriver<'_>,
+    machine: &TurnMachine,
+    cx: &ActorContext,
+    id: crate::EffectId,
+) -> Result<CellToolCalls, TurnError> {
+    use lash_core_execution::runtime::actor::round::graph::{ReportView, RoundFact};
+    use lash_core_execution::runtime::actor::round::{self, PolicyView, SettledOutput};
+    use lash_core_store::checkpoint_graph::GraphDecoder;
+    use lash_durable::domain::{CellId, ExecKey, OwnerKey};
+    let Some(executor) = driver.session.plugins().code_executor() else {
+        return Ok(CellToolCalls::default());
+    };
+    let invocation = driver
+        .turn_effect_invocation(machine, id, RuntimeEffectKind::ExecCode)
+        .map_err(|error| TurnError::Exec(error.to_string()))?;
+    let cell = CellId::new(invocation.effect_replay_key());
+    let session = driver.session_id.clone();
+    let run = driver.turn_id.clone();
+    let exec = ExecKey::Cell(session.clone(), run.clone(), cell.clone());
+    let (mut records, mut ledger) = match stored_cell(cx, exec).await? {
+        Some(stored) => executor.snapshot_tool_calls(&stored).map_err(|error| {
+            TurnError::Exec(format!("the cell call ledger does not read: {error}"))
+        })?,
+        None => (Vec::new(), ReportView::default()),
+    };
+    let reads = cx.durable_reads()?;
+    let facts = reads.run_facts(&OwnerKey::Cell(session, run, cell)).await?;
+    let waits = round::PinnedWaits::read(reads, &facts).await?;
+    let fold = round::fold(&facts, &PolicyView::new([]), &waits)
+        .map_err(|error| TurnError::Exec(format!("the cell call ledger: {error}")))?;
+    let mut decoder = GraphDecoder::new(&facts, facts.read_limits);
+    for (run, member) in fold.rounds().flat_map(|round| {
+        round
+            .members()
+            .iter()
+            .map(move |member| (round.run(), member))
+    }) {
+        if member.draft().tool().as_str().starts_with("cell-host:") {
+            continue;
+        }
+        let Some(completed) = member
+            .outcome()
+            .filter(|outcome| {
+                matches!(
+                    outcome,
+                    SettledOutput::Completed(_) | SettledOutput::Failed(_)
+                )
+            })
+            .and_then(SettledOutput::payload)
+            .and_then(round::decode_completed)
+        else {
+            continue;
+        };
+        if records
+            .iter()
+            .any(|record| record.call_id == completed.call_id)
+        {
+            continue;
+        }
+        // Only the final attempt belongs in the report, even when earlier
+        // failed attempts of this call have not been pruned yet.
+        let round::MemberState::Final { start, .. } = member.state() else {
+            continue;
+        };
+        let mut material = None;
+        for row in facts.rows.iter().rev().filter(|row| row.run == run) {
+            if let RoundFact::Outcome {
+                start: settled,
+                output,
+                ..
+            } = RoundFact::load(&mut decoder, row.record)
+                .map_err(|error| TurnError::Exec(error.to_string()))?
+                && settled == start.0
+            {
+                material = output.material;
+                break;
+            }
+        }
+        let Some(round::graph::MaterialNode::CallPayload(outcome)) = material else {
+            return Err(TurnError::Exec(format!(
+                "call {} has no typed outcome node",
+                completed.call_id
+            )));
+        };
+        let body = round::graph::CallOutcome::body_node(&mut decoder, outcome)
+            .map_err(lash_durable::DurableError::Graph)?;
+        ledger.entries.push(body);
+        records.push(crate::ToolCallRecord {
+            call_id: completed.call_id,
+            provider_call_id: completed.provider_call_id,
+            tool: completed.tool_name,
+            args: completed.args,
+            output: completed.output,
+        });
+    }
+    Ok(CellToolCalls { records, ledger })
+}
+
+impl RuntimeTurnDriver<'_> {
+    pub(super) async fn read_cell_calls(
+        &self,
+        machine: &TurnMachine,
+        id: crate::EffectId,
+    ) -> Result<CellToolCalls, RuntimeError> {
+        cell_calls(self, machine, &self.scoped_effect_controller, id)
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ExecutionStateCaptureFailed,
+                    error.to_string(),
+                )
+            })
+    }
+}
+
 async fn stored_cell(
     cx: &ActorContext,
     exec: lash_durable::domain::ExecKey,
@@ -857,71 +976,7 @@ impl TurnDrive for RuntimeDrive {
         cx: &ActorContext,
         id: crate::EffectId,
     ) -> Result<CellToolCalls, TurnError> {
-        use lash_core_execution::runtime::actor::round::{self, PolicyView, SettledOutput};
-        use lash_durable::domain::{CellId, ExecKey, OwnerKey};
-
-        let Some(code_executor) = self.driver.session.plugins().code_executor() else {
-            return Ok(CellToolCalls::default());
-        };
-        // The cell's snapshot and records are filed under its replay key,
-        // which the restored machine derives again.
-        let invocation = self
-            .driver
-            .turn_effect_invocation(&self.machine, id, RuntimeEffectKind::ExecCode)
-            .map_err(|error| TurnError::Exec(error.to_string()))?;
-        let cell = CellId::new(invocation.effect_replay_key());
-        let session = self.driver.session_id.clone();
-        let run = self.driver.turn_id.clone();
-        let reads = cx.durable_reads()?;
-        let exec = ExecKey::Cell(session.clone(), run.clone(), cell.clone());
-        let mut records = match stored_cell(cx, exec).await? {
-            Some(stored) => code_executor
-                .snapshot_tool_calls(&stored)
-                .map_err(|error| {
-                    TurnError::Exec(format!("the stopped cell's root does not read: {error}"))
-                })?,
-            None => Vec::new(),
-        };
-        // A call that settled after the cell's latest root is in no host
-        // state yet: its outcome is still among the cell's own facts, which
-        // only the next park prunes. A member without a completed answer
-        // never finished, and is not reported.
-        let rows = reads.run_facts(&OwnerKey::Cell(session, run, cell)).await?;
-        let waits = round::PinnedWaits::read(reads, &rows).await?;
-        let fold = round::fold(&rows, &PolicyView::new([]), &waits)
-            .map_err(|error| TurnError::Exec(format!("the stopped cell's records: {error}")))?;
-        for member in fold.rounds().flat_map(|round| round.members()) {
-            if member.draft().tool().as_str().starts_with("cell-host:") {
-                continue;
-            }
-            let Some(completed) = member
-                .outcome()
-                .filter(|outcome| {
-                    matches!(
-                        outcome,
-                        SettledOutput::Completed(_) | SettledOutput::Failed(_)
-                    )
-                })
-                .and_then(SettledOutput::payload)
-                .and_then(round::decode_completed)
-            else {
-                continue;
-            };
-            if records
-                .iter()
-                .any(|record| record.call_id == completed.call_id)
-            {
-                continue;
-            }
-            records.push(crate::ToolCallRecord {
-                call_id: completed.call_id,
-                provider_call_id: completed.provider_call_id,
-                tool: completed.tool_name,
-                args: completed.args,
-                output: completed.output,
-            });
-        }
-        Ok(self.driver.bounded_cell_calls(records))
+        cell_calls(&self.driver, &self.machine, cx, id).await
     }
 
     fn finishing_cell_calls(&mut self, calls: &CellToolCalls) {
@@ -966,6 +1021,7 @@ impl TurnDrive for RuntimeDrive {
                     &driver.turn_id,
                     &outcome,
                     unrecorded,
+                    &plugins.transcript_decoders(),
                 )
                 .await?,
             )

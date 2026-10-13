@@ -73,33 +73,21 @@ impl RuntimeTurnServices {
         }
     }
 
-    /// Rebuild a turn's retained tool-call records from its durable rounds,
-    /// including protocol-refused calls settled before dispatch, in admission
-    /// order. This reads every step under the turn's owner, so
-    /// an owner change or a gap in live activity cannot drop earlier calls.
-    /// A code cell's tool calls are among them: the turn records them as the
-    /// cell's report once the cell answers, or when the turn ends on the cell
-    /// (FIG-5330). That report is bounded by the code executor: the calls its
-    /// bound left out are in the omitted-call summary.
-    /// Cell host operations are not catalog tool calls. Calls that settled
-    /// without material have no retained request/output record and remain
-    /// accounted for in the omitted-call summary.
-    ///
-    /// The turn's run facts are its whole tool-call ledger: the report reads
-    /// no wait (its end compacts them) and no cell's own facts (its
-    /// consumption or its turn's end deletes them).
+    /// Materialize a turn's original call ledger in admission order. Cell
+    /// reports retain references to the existing admission/outcome nodes;
+    /// the offline protocol decoder reconstructs their exact typed arguments.
+    /// Waits and consumed cell rows are unnecessary. A call with no completed
+    /// material has no body and is skipped, never summarized as omitted.
     ///
     /// # Errors
     ///
-    /// [`lash_durable::DurableError`] when the records do not read, fold or decode.
+    /// A durable read, fold or decoding refusal, preserving its typed cause.
     pub async fn recorded_tool_calls(
         cx: &ActorContext,
         session: &SessionId,
         run: &TurnId,
-    ) -> Result<
-        (Vec<crate::ToolCallRecord>, Option<crate::OmittedToolCalls>),
-        lash_durable::DurableError,
-    > {
+        decoders: &crate::transcript::TranscriptDecoders,
+    ) -> Result<Vec<crate::ToolCallRecord>, lash_durable::DurableError> {
         use lash_core_execution::runtime::actor::round::{self, PolicyView};
         use lash_durable::domain::OwnerKey;
 
@@ -117,7 +105,6 @@ impl RuntimeTurnServices {
         let fold = round::fold(&facts, &PolicyView::new([]), &round::PinnedWaits::ledger())
             .map_err(|error| corrupt(format!("the turn's tool records: {error}")))?;
         let mut calls = Vec::new();
-        let mut omitted = None;
         // Rounds and cell reports, in the order of the effects they answer.
         let mut runs: std::collections::BTreeMap<_, Result<_, _>> = fold
             .rounds()
@@ -132,12 +119,9 @@ impl RuntimeTurnServices {
             let round = match entry {
                 Ok(round) => round,
                 Err(report) => {
-                    let report = round::cell_report(&facts, report)
-                        .map_err(|error| corrupt(format!("a cell's report: {error}")))?;
-                    calls.extend(report.calls);
-                    if let Some(left_out) = report.omitted {
-                        super::session::add_omitted(&mut omitted, left_out);
-                    }
+                    let report = round::cell_report(&facts, report, decoders)
+                        .map_err(lash_durable::DurableError::Graph)?;
+                    calls.extend(report);
                     continue;
                 }
             };
@@ -146,13 +130,6 @@ impl RuntimeTurnServices {
                     continue;
                 }
                 let Some(payload) = member.outcome().and_then(round::SettledOutput::payload) else {
-                    let summary = omitted.get_or_insert_with(|| crate::OmittedToolCalls {
-                        count: 0,
-                        failures: 0,
-                        attachments: Vec::new(),
-                    });
-                    summary.count += 1;
-                    summary.failures += 1;
                     continue;
                 };
                 let completed = round::decode_completed(payload).ok_or_else(|| {
@@ -176,7 +153,92 @@ impl RuntimeTurnServices {
                 });
             }
         }
-        Ok((calls, omitted))
+        Ok(calls)
+    }
+
+    /// Read settled call bodies and pending identities of the current turn,
+    /// through its reports, current round outcomes and saved cell ledgers.
+    pub async fn unfinished_call_bodies(
+        cx: &ActorContext,
+        session: &SessionId,
+        decoders: &crate::transcript::TranscriptDecoders,
+    ) -> Result<
+        (
+            Vec<crate::ToolCallRecord>,
+            std::collections::BTreeSet<crate::ToolCallId>,
+        ),
+        lash_durable::DurableError,
+    > {
+        use lash_core_execution::runtime::actor::round;
+        use lash_core_store::checkpoint_graph::GraphDecoder;
+        use lash_durable::domain::{OwnerKey, RootOwner};
+        let corrupt = |error: String| {
+            lash_durable::DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Corrupt,
+                message: error,
+            })
+        };
+        let reads = cx.durable_reads()?;
+        let Some(turn) = reads.turn(session).await? else {
+            return Ok(Default::default());
+        };
+        let mut records = Self::recorded_tool_calls(cx, session, &turn.run, decoders).await?;
+        let roots = reads.cell_roots(session, &turn.run).await?;
+        let mut owners = vec![OwnerKey::Turn(session.clone(), turn.run.clone())];
+        let mut pending = std::collections::BTreeSet::new();
+        for root in roots {
+            owners.push(root.exec.owner());
+            let graph = reads
+                .hydrate(
+                    RootOwner::Exec(root.exec),
+                    Some(root.root),
+                    cx.backend().config().settings().graph_reads.owner(),
+                )
+                .await?;
+            let mut decoder = GraphDecoder::new(
+                &graph,
+                cx.backend().config().settings().graph_reads.execution(),
+            );
+            let (saved, open) = decoders
+                .decode_cell_ledger(&mut decoder, root.root)
+                .map_err(lash_durable::DurableError::Graph)?;
+            records.extend(saved);
+            pending.extend(open);
+        }
+        for owner in owners {
+            let facts = reads.run_facts(&owner).await?;
+            let fold = round::fold(
+                &facts,
+                &round::PolicyView::new([]),
+                &round::PinnedWaits::ledger(),
+            )
+            .map_err(|error| corrupt(error.to_string()))?;
+            for member in fold.rounds().flat_map(|round| round.members()) {
+                if member.draft().tool().as_str().starts_with("cell-host:") {
+                    continue;
+                }
+                match member
+                    .outcome()
+                    .and_then(round::SettledOutput::payload)
+                    .and_then(round::decode_completed)
+                {
+                    Some(call) => records.push(crate::ToolCallRecord {
+                        call_id: call.call_id,
+                        provider_call_id: call.provider_call_id,
+                        tool: call.tool_name,
+                        args: call.args,
+                        output: call.output,
+                    }),
+                    None => {
+                        pending.insert(member.call().clone());
+                    }
+                }
+            }
+        }
+        for record in &records {
+            pending.remove(&record.call_id);
+        }
+        Ok((records, pending))
     }
 
     /// Open `row`'s session and prepare its turn under the turn's own scope

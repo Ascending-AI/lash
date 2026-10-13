@@ -500,6 +500,13 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "name": "TurnContent",
       "owner": "Integrator",
       "shape": "Enveloped"
+    },
+    {
+      "bound": 65536,
+      "kind": 40,
+      "name": "CallBody",
+      "owner": "Host",
+      "shape": "Enveloped"
     }
   ],
   "root_sources": [

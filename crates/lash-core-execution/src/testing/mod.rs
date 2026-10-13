@@ -1575,7 +1575,6 @@ pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTu
         token_usage: LlmUsage::default(),
         llm_calls: Vec::new(),
         tool_calls: Vec::new(),
-        omitted: None,
         retained_outputs: Vec::new(),
         failure_evidence: Vec::new(),
         errors: Vec::new(),

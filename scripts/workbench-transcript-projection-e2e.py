@@ -122,19 +122,16 @@ def assert_three_layers(page, state: dict, store: StoreRows, artifact: Path, *, 
     after = scrape_dom()
     tools = page.locator("#timeline .code-block[data-transcript-row-id]").evaluate_all("""nodes => nodes.map(node => ({
         id: node.dataset.transcriptRowId,
-        retained: [...node.querySelectorAll('.tool:not(.omitted)')].map(tool => ({
+        retained: [...node.querySelectorAll('.tool')].map(tool => ({
             operation: tool.querySelector('strong').textContent,
             status: JSON.parse(tool.querySelector('.payload pre').textContent).status
-        })),
-        omitted: [...node.querySelectorAll('.tool.omitted')].reduce((count, tool) =>
-            count + Number(tool.textContent.split(' ')[0]), 0)
+        }))
     }))""")
     artifact.write_text(json.dumps({"api":state,"sql":nodes,"dom_before":before,"dom_after":after}, indent=2) + "\n")
     assert after == before, "reload changed canonical identity, provenance, content or display order"
     for block in tools:
         content = next(row["content"] for row in visible if row["row_id"] == block["id"])
         assert block["retained"] == content["tools"], "reload changed committed tool outcomes"
-        assert block["omitted"] == content["tools_omitted"], "reload changed the named tool omission"
 
 
 def main() -> None:

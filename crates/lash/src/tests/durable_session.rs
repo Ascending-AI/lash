@@ -1722,7 +1722,6 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
         })
         .collect::<Vec<_>>();
     assert_eq!(cells.len(), 1, "the turn ran one cell");
-    assert_eq!(cells[0].calls_omitted, 0);
     assert_eq!(
         cells[0]
             .calls
@@ -1744,9 +1743,155 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
     Ok(())
 }
 
-/// A turn keeps the tool calls its code cells made (FIG-5330): the cell's
-/// own records of them are pruned as it advances, so the turn records them
-/// with its next commit. The settled turn's tool records, read from the
+/// FIG-6171: presentation limits never discard committed call identities or
+/// bodies. A cold reader can resolve every call beyond the prompt's 128 tail.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<()> {
+    fn core(backend: lash_core::Backend) -> Result<LashCore> {
+        explicit_ephemeral_facets(rlm_core_builder_over(backend))
+            .serve_test_llm_profile(
+                text_provider(
+                    "all-cell-calls",
+                    typescript_block(
+                        "for (let i = 0; i < 129; i++) { await tools.app_lookup({}); }\n\
+                         await control.finish(\"all calls\");",
+                    ),
+                ),
+                mock_llm_profile_spec(),
+            )
+            .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
+            .build(crate::testing::runtime_lease_owner())
+    }
+    let backend = sqlite_memory_store_backend().await;
+    let session_id = id("all-cell-calls");
+    let running = core(backend.clone())?;
+    let session = running
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let events = RecordingEvents::default();
+    let run = turn("all-cell-calls-run");
+    let output = session
+        .send(crate::TurnInput::text("all calls"))
+        .id(run.clone())
+        .output_into(&events)
+        .await?;
+    let facts = running
+        .effect_host()
+        .durable_reads()?
+        .run_facts(&lash_core::durable_port::domain::OwnerKey::Turn(
+            session_id.clone(),
+            run,
+        ))
+        .await?;
+    let sizes = lash_core::testing::cell_ledger_bytes(&facts, &output.tool_calls)
+        .expect("the stored ledger sizes read");
+    eprintln!(
+        "FIG-6171 130 calls: report={} held={} previous_copy={}",
+        sizes.0, sizes.1, sizes.2
+    );
+    assert!(
+        sizes.1 < sizes.2,
+        "the full retained call ledger shrinks: {sizes:?}"
+    );
+
+    let live = events
+        .snapshot()
+        .await
+        .into_iter()
+        .filter_map(|activity| match activity.event {
+            crate::TurnEvent::ToolCallCompleted {
+                call_id,
+                provider_call_id,
+                name,
+                args,
+                output,
+                ..
+            } => Some(lash_core::ToolCallRecord {
+                call_id,
+                provider_call_id,
+                tool: name,
+                args,
+                output,
+            }),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    drop(session);
+    // Stop aborts the node rather than draining it or invoking plugin shutdown,
+    // the same crash cut used by the facade recovery laws.
+    running.node.stop().await;
+    drop(running);
+
+    let reopened = core(backend)?;
+    let durable = reopened.session(session_id).durable().await?;
+    let transcript = durable.transcript().await?;
+    let cell = transcript
+        .visible()
+        .find_map(|entry| match &entry.item {
+            crate::transcript::TranscriptItem::Cell(cell) => Some(cell),
+            _ => None,
+        })
+        .expect("one committed cell");
+    assert_eq!(
+        cell.calls.len(),
+        130,
+        "every committed call stays addressable"
+    );
+    let bodies = durable.read_cell_tool_calls(&cell.calls).await?;
+    assert_eq!(bodies.len(), 130);
+    for (call, body) in cell.calls.iter().zip(bodies) {
+        let crate::ToolCallRead::Settled { record } = body else {
+            panic!("committed call has no body");
+        };
+        assert_eq!(call.call_id.as_ref(), Some(&record.call_id));
+        assert!(record.output.is_success());
+        if call.operation == "tools.app_lookup" {
+            assert_eq!(record.tool, "app_lookup");
+            assert_eq!(record.args, serde_json::json!({}));
+        }
+    }
+    let restored = durable
+        .read_cell_tool_calls(&cell.calls)
+        .await?
+        .into_iter()
+        .map(|body| {
+            let crate::ToolCallRead::Settled { record } = body else {
+                panic!("all calls settled");
+            };
+            *record
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        restored, live,
+        "the reprojected requests and recorded outputs equal the live calls"
+    );
+    let last = cell
+        .calls
+        .last()
+        .expect("the finish call")
+        .call_id
+        .as_ref()
+        .expect("recorded call");
+    assert!(matches!(
+        durable.read_tool_call(last).await?,
+        crate::ToolCallRead::Settled { .. }
+    ));
+    assert!(matches!(
+        durable
+            .read_tool_call(&crate::ToolCallId::fixture("not-in-this-session"))
+            .await?,
+        crate::ToolCallRead::NotFound { .. }
+    ));
+    reopened.shutdown().await?;
+    Ok(())
+}
+
+/// A turn keeps references to the calls its code cells made (FIG-6171),
+/// so their archival bodies survive retirement of the cell's execution rows. The settled turn's tool records, read from the
 /// store after a reopen, are the records the turn streamed, by `call_id`
 /// and in call order.
 #[cfg(feature = "rlm")]
@@ -1819,7 +1964,6 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
             .collect::<Vec<_>>()
     };
     assert_eq!(recorded(&settled.tool_calls), streamed);
-    assert!(settled.omitted.is_none());
     drop(session);
     running.shutdown().await?;
 
@@ -1834,7 +1978,6 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
         .result;
     assert_eq!(report.source, crate::ReportSource::Durable);
     assert_eq!(recorded(&report.tool_calls), streamed);
-    assert!(report.omitted.is_none());
     reopened.shutdown().await?;
     Ok(())
 }
@@ -1998,7 +2141,6 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
             vec![("app_lookup", true); completed],
             "{mode:?}: the calls the cell completed, and no other"
         );
-        assert!(report.omitted.is_none(), "{mode:?}");
         reopened.shutdown().await?;
     }
     Ok(())
@@ -2067,84 +2209,6 @@ async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_th
     );
     drop(session);
     core.shutdown().await?;
-    Ok(())
-}
-
-/// A cell's recorded round is bounded by the session's recorded RLM
-/// presentation (FIG-5330): with `max_tool_call_records` at one, a cell
-/// that makes two tool calls and its `control.finish` records one of them,
-/// and the settled turn's report accounts for the other two as omitted,
-/// after a reopen too.
-#[cfg(feature = "rlm")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_cells_recorded_tool_calls_are_bounded_by_the_recorded_presentation() -> Result<()> {
-    fn core(backend: lash_core::Backend) -> Result<LashCore> {
-        let mut config = crate::rlm::RlmProtocolPluginConfig::builder()
-            .channel(crate::rlm::RlmChannel::Cell)
-            .instruction_limit(crate::rlm::InstructionBound::instructions(1_000_000))
-            .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
-            .build();
-        config.presentation.max_tool_call_records = 1;
-        let factory = crate::rlm::RlmProtocolPluginFactory::new(
-            config,
-            crate::rlm::CellDialect::typescript(),
-        )
-        .with_worker_service(untimed_fixture_workers());
-        explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
-            .serve_test_llm_profile(
-                text_provider(
-                    "bounded-cell-records",
-                    typescript_block(
-                        "const first = await tools.app_lookup({});\n\
-                         const second = await tools.app_lookup({});\n\
-                         await control.finish(\"looked up twice\");",
-                    ),
-                ),
-                mock_llm_profile_spec(),
-            )
-            .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
-            .build(crate::testing::runtime_lease_owner())
-    }
-    let left_out = Some(lash_core::OmittedToolCalls {
-        count: 2,
-        failures: 0,
-        attachments: Vec::new(),
-    });
-    let backend = sqlite_memory_store_backend().await;
-    let session_id = id("bounded-cell-records");
-    let run = turn("bounded-cell-records-run");
-    let running = core(backend.clone())?;
-    let session = running
-        .session(session_id.clone())
-        .created()
-        .await
-        .open()
-        .await?;
-    let settled = session
-        .send(crate::TurnInput::text("look up twice"))
-        .id(run.clone())
-        .output()
-        .await?
-        .result;
-    assert_eq!(settled.tool_calls.len(), 1, "the bound keeps one record");
-    assert_eq!(settled.omitted, left_out);
-    drop(session);
-    running.shutdown().await?;
-
-    let reopened = core(backend)?;
-    let report = reopened
-        .session(session_id)
-        .open()
-        .await?
-        .attach_id(run)
-        .output()
-        .await?
-        .result;
-    assert_eq!(report.source, crate::ReportSource::Durable);
-    assert_eq!(report.tool_calls.len(), 1);
-    assert_eq!(report.tool_calls[0].call_id, settled.tool_calls[0].call_id);
-    assert_eq!(report.omitted, left_out);
-    reopened.shutdown().await?;
     Ok(())
 }
 

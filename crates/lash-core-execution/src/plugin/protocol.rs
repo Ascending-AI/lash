@@ -9,6 +9,10 @@ pub use lash_core_store::execution_state::{
     PluginOptions,
 };
 
+/// A cell's ordered archival-body references, which its turn retains when
+/// consuming the cell's saved root. The references contain no copied body.
+pub use crate::runtime::actor::round::graph::ReportView as CellCallReferences;
+
 use crate::SessionId;
 use std::sync::Arc;
 
@@ -255,19 +259,6 @@ pub trait CodeExecutorPlugin: Send + Sync {
         false
     }
 
-    /// The view of `records`, one cell's tool call records in call order,
-    /// that a turn keeps of the cell: the executor's one bound on how many
-    /// records and how much of each output a cell's round retains, with the
-    /// records it leaves out accounted for. The turn records, streams and
-    /// reports this view and nothing else of the cell's calls (FIG-5330).
-    /// An executor that states no bound keeps every record whole.
-    fn bound_tool_call_records(
-        &self,
-        records: Vec<crate::ToolCallRecord>,
-    ) -> (Vec<crate::ToolCallRecord>, Option<crate::OmittedToolCalls>) {
-        (records, None)
-    }
-
     /// The records of the tool calls a cell completed, in call order, as
     /// `cell`, its stored root, holds them. A turn that stops on the cell
     /// records them from here, since the cell never answers (FIG-5330).
@@ -278,8 +269,8 @@ pub trait CodeExecutorPlugin: Send + Sync {
     fn snapshot_tool_calls(
         &self,
         _cell: &StoredCell,
-    ) -> Result<Vec<crate::ToolCallRecord>, crate::SessionError> {
-        Ok(Vec::new())
+    ) -> Result<(Vec<crate::ToolCallRecord>, CellCallReferences), crate::SessionError> {
+        Ok(Default::default())
     }
 
     /// Check `snapshot`, the stored snapshot a cell resumes from, as this

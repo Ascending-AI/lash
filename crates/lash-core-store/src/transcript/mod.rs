@@ -1,8 +1,7 @@
 //! The typed, decoded history of retained committed nodes (ADR 0129). Live
 //! observations are provisional; only these entries describe committed
 //! history. Lash decodes facts here: roles, content blocks, tool calls and
-//! results, code cells and their results, the sealed reply and omission
-//! counts. It renders nothing: hosts own every presentation decision.
+//! results, code cells and their results, and the sealed reply. It renders nothing: hosts own every presentation decision.
 
 use crate::{
     AttachmentRef, InputId, Message, MessageOrigin, MessageRole, NodeId, Part, ProtocolEvent,
@@ -135,10 +134,32 @@ impl TranscriptEntry {
     }
 }
 
+/// Settled records and admitted identities awaiting an outcome in a saved cell.
+pub type CellCallLedger = (Vec<lash_sansio::ToolCallRecord>, Vec<ToolCallId>);
+
 /// A protocol's decoder of the stored shapes it owns, usable without
 /// restoring a live session. Core owns identities, timestamps and reply
 /// provenance; a decoder supplies only the decoded item.
 pub trait TranscriptDecoderPlugin: Send + Sync {
+    /// Decode a call from the protocol's existing admission/outcome graph.
+    /// This uses no live session or tool registry and renders no presentation.
+    fn decode_cell_call(
+        &self,
+        _decoder: &mut crate::checkpoint_graph::GraphDecoder<'_>,
+        _outcome: crate::checkpoint_graph::NodeId,
+    ) -> Result<Option<lash_sansio::ToolCallRecord>, crate::checkpoint_graph::GraphRefusal> {
+        Ok(None)
+    }
+
+    /// Settled bodies and pending identities in a saved cell's ledger.
+    fn decode_cell_ledger(
+        &self,
+        _decoder: &mut crate::checkpoint_graph::GraphDecoder<'_>,
+        _root: crate::checkpoint_graph::NodeId,
+    ) -> Result<Option<CellCallLedger>, crate::checkpoint_graph::GraphRefusal> {
+        Ok(None)
+    }
+
     fn decode_message(&self, _message: &Message) -> Option<TranscriptItem> {
         None
     }
@@ -163,6 +184,42 @@ impl TranscriptDecoders {
     pub fn with_decoder(mut self, decoder: Arc<dyn TranscriptDecoderPlugin>) -> Self {
         self.decoders.push(decoder);
         self
+    }
+    /// Resolve a cell's call through its protocol's registered offline decoder.
+    pub fn decode_cell_call(
+        &self,
+        decoder: &mut crate::checkpoint_graph::GraphDecoder<'_>,
+        outcome: crate::checkpoint_graph::NodeId,
+    ) -> Result<lash_sansio::ToolCallRecord, crate::checkpoint_graph::GraphRefusal> {
+        for registered in &self.decoders {
+            if let Some(record) = registered.decode_cell_call(decoder, outcome)? {
+                return Ok(record);
+            }
+        }
+        Err(crate::checkpoint_graph::GraphRefusal::InvalidBody {
+            kind: crate::checkpoint_graph::NodeKind::CALL_BODY.0,
+            reason: "no protocol decoder reads this call ledger".to_owned(),
+        })
+    }
+
+    /// Read a protocol's saved call ledger without materializing a session.
+    pub fn decode_cell_ledger(
+        &self,
+        decoder: &mut crate::checkpoint_graph::GraphDecoder<'_>,
+        root: crate::checkpoint_graph::NodeId,
+    ) -> Result<
+        (Vec<lash_sansio::ToolCallRecord>, Vec<ToolCallId>),
+        crate::checkpoint_graph::GraphRefusal,
+    > {
+        for registered in &self.decoders {
+            if let Some(calls) = registered.decode_cell_ledger(decoder, root)? {
+                return Ok(calls);
+            }
+        }
+        Err(crate::checkpoint_graph::GraphRefusal::InvalidBody {
+            kind: crate::checkpoint_graph::NodeKind::EXEC_ROOT.0,
+            reason: "no protocol decoder reads this cell ledger".to_owned(),
+        })
     }
 }
 

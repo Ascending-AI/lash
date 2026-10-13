@@ -477,8 +477,7 @@ async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Re
         .instruction_limit(crate::rlm::InstructionBound::instructions(1_000_000))
         .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
         .build();
-    config.presentation.max_tool_call_records = 0;
-    config.presentation.max_inline_scalar_bytes = 2;
+    config.presentation.prompt_max_tool_calls = 0;
     config.presentation.max_inline_keys = 0;
     config.prompt_features.decomposition = false;
     config.continue_as_soft_warn_tokens = None;
@@ -594,7 +593,7 @@ console.log("abcdefghijklmnopqrstuvwxyz");"#,
         })
         .collect::<Vec<_>>()
         .join(" ");
-    assert!(protocol.contains("\"calls_omitted\":1"), "{protocol}");
+    assert!(protocol.contains("tools.app_lookup"), "{protocol}");
     assert!(
         protocol.contains("within 9;"),
         "the selected print cut rendered the running cell: {protocol}"

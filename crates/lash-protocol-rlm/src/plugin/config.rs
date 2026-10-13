@@ -1,13 +1,13 @@
 use super::{ExecutionBounds, InstructionBound, MemoryBound};
 
-/// Prompt and transcript presentation. These choices are pinned with protocol behaviour.
+/// Prompt presentation. These choices are pinned with protocol behaviour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RlmPresentationConfig {
     pub tools: lash_sansio::ToolPresentationConfig,
     pub max_inline_keys: usize,
-    pub max_tool_call_records: usize,
-    pub max_inline_scalar_bytes: usize,
+    /// The diagnostic call tail in the next prompt; durable history keeps all calls.
+    pub prompt_max_tool_calls: usize,
     /// How many binding names a cell's record keeps of what the cell did to
     /// the session's bindings; it counts the rest.
     pub max_binding_change_names: usize,
@@ -23,7 +23,7 @@ impl Default for RlmPresentationConfig {
 }
 impl RlmPresentationConfig {
     /// Standard preset: standard tool/schema presentation, 12 inline
-    /// catalogue keys, 128 tool-call records, 64 KiB inline scalar bodies,
+    /// catalogue keys, 128 calls in the prompt's diagnostic tail,
     /// 32 binding-change names and a 24 KiB bound-variables listing, which
     /// leaves room under the standard 32 KiB prompt section.
     /// These historical presentation cuts have no universal workload measurement.
@@ -31,8 +31,7 @@ impl RlmPresentationConfig {
         Self {
             tools: lash_sansio::ToolPresentationConfig::standard(),
             max_inline_keys: 12,
-            max_tool_call_records: 128,
-            max_inline_scalar_bytes: 64 * 1024,
+            prompt_max_tool_calls: 128,
             max_binding_change_names: 32,
             max_bound_variable_bytes: 24 * 1024,
         }

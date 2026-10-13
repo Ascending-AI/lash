@@ -103,7 +103,7 @@ pub use schema_contract::{
 pub use session::{
     BindingChanges, CellControl, CellDefect, CellFailure, CellFailureKind, CellOutcome, CellPrint,
     CellRecord, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
-    ExecutedCall, ExecutedCallOutcome, OmittedToolCalls, TextProjectionMetadata,
+    ExecutedCall, ExecutedCallOutcome, TextProjectionMetadata,
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{

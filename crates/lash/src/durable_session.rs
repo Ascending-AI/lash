@@ -118,6 +118,109 @@ impl DurableSession {
         self
     }
 
+    /// Read a call's original typed tool, arguments and output from this
+    /// session's ledger. No runtime, plugin session or prompt is materialized.
+    pub async fn read_tool_call(&self, call_id: &crate::ToolCallId) -> Result<crate::ToolCallRead> {
+        let mut reads = self.read_tool_calls(std::slice::from_ref(call_id)).await?;
+        Ok(reads.remove(0))
+    }
+
+    /// Read a batch of call ids in input order, including duplicates. Reads
+    /// use the retained turns' existing graph references; no body index or
+    /// second body table is maintained.
+    pub async fn read_tool_calls(
+        &self,
+        call_ids: &[crate::ToolCallId],
+    ) -> Result<Vec<crate::ToolCallRead>> {
+        use lash_core::runtime::durable::services::RuntimeTurnServices;
+        use std::collections::BTreeMap;
+        let store = self.store().await?;
+        let mut wanted = call_ids
+            .iter()
+            .cloned()
+            .map(|id| {
+                let read = crate::ToolCallRead::NotFound {
+                    call_id: id.clone(),
+                };
+                (id, read)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut cursor = None;
+        while wanted
+            .values()
+            .any(|read| matches!(read, crate::ToolCallRead::NotFound { .. }))
+        {
+            let page = store
+                .load_committed_turns(
+                    cursor.as_ref(),
+                    std::num::NonZeroU32::MIN.saturating_add(127),
+                )
+                .await?;
+            if page.turns.is_empty() {
+                break;
+            }
+            for turn in page.turns {
+                for record in RuntimeTurnServices::recorded_tool_calls(
+                    &self.effect_host,
+                    &self.session_id,
+                    &turn.turn_id,
+                    &self.transcript_decoders,
+                )
+                .await
+                .map_err(EmbedError::Durable)?
+                {
+                    if let Some(read) = wanted.get_mut(&record.call_id) {
+                        *read = crate::ToolCallRead::Settled {
+                            record: Box::new(record),
+                        };
+                    }
+                }
+            }
+            cursor = Some(page.next);
+        }
+        if wanted
+            .values()
+            .any(|read| matches!(read, crate::ToolCallRead::NotFound { .. }))
+        {
+            let (records, pending) = RuntimeTurnServices::unfinished_call_bodies(
+                &self.effect_host,
+                &self.session_id,
+                &self.transcript_decoders,
+            )
+            .await
+            .map_err(EmbedError::Durable)?;
+            for record in records {
+                if let Some(read) = wanted.get_mut(&record.call_id) {
+                    *read = crate::ToolCallRead::Settled {
+                        record: Box::new(record),
+                    };
+                }
+            }
+            for id in pending {
+                if let Some(read @ crate::ToolCallRead::NotFound { .. }) = wanted.get_mut(&id) {
+                    *read = crate::ToolCallRead::NotYetSettled { call_id: id };
+                }
+            }
+        }
+        Ok(call_ids
+            .iter()
+            .filter_map(|id| wanted.get(id).cloned())
+            .collect())
+    }
+
+    /// Read the bodies a cell's ordered executed calls reference. Dispatches
+    /// with no host call id have no ledger body and are skipped.
+    pub async fn read_cell_tool_calls(
+        &self,
+        calls: &[crate::persistence::ExecutedCall],
+    ) -> Result<Vec<crate::ToolCallRead>> {
+        let ids = calls
+            .iter()
+            .filter_map(|call| call.call_id.clone())
+            .collect::<Vec<_>>();
+        self.read_tool_calls(&ids).await
+    }
+
     /// Decode all retained committed history, paging across frame boundaries.
     /// This read takes no live-session writer and restores no plugins.
     pub async fn transcript(&self) -> Result<crate::transcript::SessionTranscript> {
@@ -220,6 +323,7 @@ impl DurableSession {
     /// send handle bound to this Durable Session reads and writes through.
     pub(crate) async fn send_parts(&self) -> Result<crate::send::SendParts> {
         Ok(crate::send::SendParts {
+            transcript_decoders: self.transcript_decoders.clone(),
             observer_pacing: Arc::clone(&self.observer_pacing),
             session_id: self.session_id.clone(),
             store: self.store().await?.clone(),

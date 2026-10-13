@@ -1,13 +1,13 @@
 //! Round facts and call outcomes as checkpoint graph nodes (FIG-5887 §3,
 //! §4, §10).
 //!
-//! - **CallOutcome** (kind 20): one immutable node per settled tool call,
-//!   installed once at settlement. It holds the call's typed output, its
-//!   answer as a separate FrozenValue (kind 8), its provider and intent
-//!   facts, the Admission (kind 18) its request lives under when it has
-//!   one, and its Presentation (kind 31): the recipe that rebuilds the
-//!   model's view of the call exactly from the typed output. It never holds
-//!   the call's arguments or a second rendered copy of its answer.
+//! - **CallBody** (kind 40): one archival typed request/output component,
+//!   shared by the live call's outcome and its consuming turn. Success values
+//!   are shared FrozenValue children; it retains no execution pins or model
+//!   presentation. Arguments are the exact transport projection recorded at
+//!   settlement, checked against the guest request on snapshot restoration.
+//! - **CallOutcome** (kind 20): the live outcome's archival body reference,
+//!   its admission, attempt, replay/intent data, and presentation recipe.
 //! - **RoundFact** (kind 21): a run record's typed body, Admit, Start,
 //!   Wait, Retry, Decide, Present, Outcome and CellReport (variants 0 to 7,
 //!   [`RunFactKind::round_fact_variant`]). A fact that names material
@@ -45,6 +45,10 @@ use serde::de::DeserializeOwned;
 use super::output::{Material, NamesMaterial};
 use super::tools::CompletedCall;
 use crate::{ToolCallId, ToolCallOutput, ToolValue};
+
+#[path = "call_body.rs"]
+mod call_body;
+pub use call_body::CallBody;
 
 fn unsupported(variant: u32) -> TokenError {
     TokenError::UnsupportedVariant { variant }
@@ -333,13 +337,14 @@ fn decode_attempt(input: &mut TokenReader<'_>) -> Result<AttemptOutcome, TokenEr
 pub enum MaterialNode {
     Outcome(NodeId),
     Value(NodeId),
+    CallPayload(NodeId),
 }
 
 impl MaterialNode {
     #[must_use]
     pub fn node(&self) -> NodeId {
         match self {
-            Self::Outcome(node) | Self::Value(node) => *node,
+            Self::Outcome(node) | Self::Value(node) | Self::CallPayload(node) => *node,
         }
     }
 
@@ -348,6 +353,7 @@ impl MaterialNode {
         match self {
             Self::Outcome(_) => NodeKind::CALL_OUTCOME,
             Self::Value(_) => NodeKind::FROZEN_VALUE,
+            Self::CallPayload(_) => NodeKind::CALL_OUTCOME,
         }
     }
 
@@ -388,6 +394,10 @@ impl TokenCodec for MaterialNode {
                 out.sum(1, 1);
                 node.encode(out);
             }
+            Self::CallPayload(node) => {
+                out.sum(2, 1);
+                node.encode(out);
+            }
         }
     }
 
@@ -397,6 +407,7 @@ impl TokenCodec for MaterialNode {
         match variant {
             0 => NodeId::decode(input).map(Self::Outcome),
             1 => NodeId::decode(input).map(Self::Value),
+            2 => NodeId::decode(input).map(Self::CallPayload),
             other => Err(unsupported(other)),
         }
     }
@@ -431,15 +442,16 @@ impl SettledFact {
         };
         match (named, &self.material) {
             (Some(named), Some(material @ MaterialNode::Outcome(_))) => material.check(&named),
-            (Some(named), Some(material @ MaterialNode::Value(_))) => {
-                material.check(&named).or_else(|_| {
-                    let payload = load_payload(decoder, *material)
-                        .map_err(|_| GraphRefusal::PublicationMismatch)?;
-                    Material::new(named, payload)
-                        .map(|_| ())
-                        .map_err(|_| GraphRefusal::PublicationMismatch)
-                })
-            }
+            (
+                Some(named),
+                Some(material @ (MaterialNode::Value(_) | MaterialNode::CallPayload(_))),
+            ) => material.check(&named).or_else(|_| {
+                let payload = load_payload(decoder, *material)
+                    .map_err(|_| GraphRefusal::PublicationMismatch)?;
+                Material::new(named, payload)
+                    .map(|_| ())
+                    .map_err(|_| GraphRefusal::PublicationMismatch)
+            }),
             (None, None) => Ok(()),
             _ => Err(GraphRefusal::PublicationMismatch),
         }
@@ -464,14 +476,15 @@ impl TokenCodec for SettledFact {
 
 // --- Call outcomes -------------------------------------------------------
 
-/// Kind 20: one settled tool call, installed once. Its output's success
-/// answer is a FrozenValue child; its presentation a Presentation child.
+/// Kind 20: one settled tool call's live metadata and shared archival body.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CallOutcome {
     pub call_id: ToolCallId,
     /// The Admission its request lives under; `None` for a turn round's
     /// member, whose request the turn holds.
     pub admission: Option<NodeId>,
+    /// The archival request projection, materialized only in memory.
+    pub args: serde_json::Value,
     /// The ordinal of the attempt's start.
     pub attempt: u64,
     pub tool_name: String,
@@ -501,75 +514,54 @@ impl AnswerSlot for RefAnswer {
     }
 }
 
-fn encode_outcome_body(
-    outcome: &CallOutcome,
-    answer: &RefAnswer,
+struct StoredOutcome {
+    body: NodeId,
+    admission: Option<NodeId>,
+    attempt: u64,
+    replay: Option<lash_sansio::llm::types::ProviderReplayMeta>,
+    intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
+    presentation: NodeId,
+}
+
+fn encode_live_outcome(
+    body: NodeId,
+    admission: Option<NodeId>,
+    attempt: u64,
+    replay: Option<&lash_sansio::llm::types::ProviderReplayMeta>,
+    intents: &[crate::ToolIntentExecutionOutcome],
     presentation: NodeId,
     out: &mut TokenWriter,
 ) {
-    out.seq(9);
-    out.text(outcome.call_id.as_str());
-    outcome.admission.encode(out);
-    out.unsigned(outcome.attempt);
-    out.text(&outcome.tool_name);
-    encode_output(&outcome.output, answer, out);
-    outcome.provider_call_id.encode(out);
-    encode_opt_tree(outcome.replay.as_ref(), out);
-    encode_tree(&outcome.intent_outcomes, out);
+    out.seq(6);
+    body.encode(out);
+    admission.encode(out);
+    out.unsigned(attempt);
+    encode_opt_tree(replay, out);
+    encode_tree(&intents, out);
     presentation.encode(out);
-}
-
-/// The outcome body as stored: its references not yet followed.
-struct StoredOutcome {
-    outcome: CallOutcome,
-    answer: Option<NodeId>,
-    presentation: NodeId,
 }
 
 impl TokenCodec for StoredOutcome {
     fn encode(&self, out: &mut TokenWriter) {
-        let answer = RefAnswer {
-            node: Cell::new(self.answer),
-        };
-        encode_outcome_body(&self.outcome, &answer, self.presentation, out);
+        encode_live_outcome(
+            self.body,
+            self.admission,
+            self.attempt,
+            self.replay.as_ref(),
+            &self.intent_outcomes,
+            self.presentation,
+            out,
+        );
     }
-
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(9)?;
-        let call_id = decode_call_id(input)?;
-        let admission = Option::decode(input)?;
-        let attempt = input.unsigned()?;
-        let tool_name = input.text()?.to_owned();
-        let answer = RefAnswer {
-            node: Cell::new(None),
-        };
-        let output = decode_output(input, &answer)?;
-        let provider_call_id = Option::decode(input)?;
-        let replay = decode_opt_tree(input)?;
-        let intent_outcomes = decode_tree(input)?;
-        let presentation = NodeId::decode(input)?;
+        input.expect_struct(6)?;
         Ok(Self {
-            outcome: CallOutcome {
-                call_id,
-                admission,
-                attempt,
-                tool_name,
-                output,
-                provider_call_id,
-                replay,
-                intent_outcomes,
-                // Read from its own node by the loader.
-                presentation: PresentationRecipe {
-                    renderer: lash_sansio::tool_output::graph::RendererId([0; 32]),
-                    tool_name: String::new(),
-                    parts: Vec::new(),
-                    notices: Vec::new(),
-                    digest: [0; 32],
-                    bytes: 0,
-                },
-            },
-            answer: answer.node.get(),
-            presentation,
+            body: NodeId::decode(input)?,
+            admission: Option::decode(input)?,
+            attempt: input.unsigned()?,
+            replay: decode_opt_tree(input)?,
+            intent_outcomes: decode_tree(input)?,
+            presentation: NodeId::decode(input)?,
         })
     }
 }
@@ -582,6 +574,7 @@ impl CallOutcome {
         Self {
             call_id: completed.call_id.clone(),
             admission,
+            args: completed.args.clone(),
             attempt,
             tool_name: completed.tool_name.clone(),
             output: completed.output.clone(),
@@ -599,59 +592,64 @@ impl CallOutcome {
     ///
     /// Any refusal of the staging area.
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
-        let answer = match &self.output.outcome {
-            crate::ToolCallOutcome::Success(value) => {
-                let mut body = TokenWriter::new();
-                body.sum(lash_sansio::tool_output::graph::FROZEN_TOOL_VALUE, 1);
-                value.encode(&mut body);
-                Some(staging.encode(
-                    NodeKind::FROZEN_VALUE,
-                    TypedBody::logical(&body.into_bytes()),
-                )?)
-            }
-            crate::ToolCallOutcome::Failure(_) | crate::ToolCallOutcome::Cancelled(_) => None,
-        };
+        let body = CallBody::stage_fields(
+            staging,
+            &self.call_id,
+            &self.provider_call_id,
+            &self.tool_name,
+            &self.args,
+            &self.output,
+        )?;
         let presentation = staging.encode_value(NodeKind::PRESENTATION, &self.presentation)?;
-        let answer = RefAnswer {
-            node: Cell::new(answer),
-        };
-        let mut body = TokenWriter::new();
-        encode_outcome_body(self, &answer, presentation, &mut body);
+        let mut encoded = TokenWriter::new();
+        encode_live_outcome(
+            body,
+            self.admission,
+            self.attempt,
+            self.replay.as_ref(),
+            &self.intent_outcomes,
+            presentation,
+            &mut encoded,
+        );
         staging.encode(
             NodeKind::CALL_OUTCOME,
-            TypedBody::logical(&body.into_bytes()),
+            TypedBody::logical(&encoded.into_bytes()),
         )
     }
 
-    /// Reads outcome `id` back whole: its answer from its FrozenValue, its
-    /// presentation recipe from its Presentation, each child of its stated
-    /// kind.
+    /// Load the live outcome and its shared archival body.
     ///
     /// # Errors
-    ///
-    /// Any refusal of a node read, a child of another kind, or
-    /// [`GraphRefusal::InvalidBody`] for a success without its answer.
+    /// Any node decoding or child-kind refusal.
     pub fn load(decoder: &mut GraphDecoder<'_>, id: NodeId) -> Result<Self, GraphRefusal> {
         let stored: StoredOutcome = decoder.decode(id, NodeKind::CALL_OUTCOME)?;
-        let mut outcome = stored.outcome;
-        if let Some(admission) = outcome.admission {
+        if let Some(admission) = stored.admission {
             decoder.child_kind(id, admission, &[NodeKind::ADMISSION])?;
         }
-        match (&mut outcome.output.outcome, stored.answer) {
-            (crate::ToolCallOutcome::Success(value), Some(answer)) => {
-                let FrozenToolValue(frozen) = decoder.decode(answer, NodeKind::FROZEN_VALUE)?;
-                *value = frozen;
-            }
-            (crate::ToolCallOutcome::Success(_), None) => {
-                return Err(GraphRefusal::InvalidBody {
-                    kind: NodeKind::CALL_OUTCOME.0,
-                    reason: "a successful outcome without its answer".to_owned(),
-                });
-            }
-            _ => {}
-        }
-        outcome.presentation = decoder.decode(stored.presentation, NodeKind::PRESENTATION)?;
-        Ok(outcome)
+        let record = CallBody::load(decoder, stored.body)?.record;
+        Ok(Self {
+            call_id: record.call_id,
+            admission: stored.admission,
+            args: record.args,
+            attempt: stored.attempt,
+            tool_name: record.tool,
+            output: record.output,
+            provider_call_id: record.provider_call_id,
+            replay: stored.replay,
+            intent_outcomes: stored.intent_outcomes,
+            presentation: decoder.decode(stored.presentation, NodeKind::PRESENTATION)?,
+        })
+    }
+
+    /// The existing archival component this outcome names: never re-encoded
+    /// by a consuming turn.
+    ///
+    /// # Errors
+    /// Any node decoding or child-kind refusal.
+    pub fn body_node(decoder: &mut GraphDecoder<'_>, id: NodeId) -> Result<NodeId, GraphRefusal> {
+        let stored: StoredOutcome = decoder.decode(id, NodeKind::CALL_OUTCOME)?;
+        decoder.child_kind(id, stored.body, &[NodeKind::CALL_BODY])?;
+        Ok(stored.body)
     }
 
     /// The model's view of the call, rebuilt exactly from the typed output.
@@ -720,6 +718,15 @@ pub fn stage_payload(
     staging: &mut GraphStaging,
     payload: &str,
 ) -> Result<MaterialNode, GraphRefusal> {
+    if let Some(completed) = super::decode_completed(payload) {
+        // Admit this encoding only when decoding and re-serializing preserves
+        // every byte the material digest names; other payloads remain values.
+        if serde_json::to_string(&completed).ok().as_deref() == Some(payload) {
+            return CallOutcome::of(&completed, None, 0)
+                .stage(staging)
+                .map(MaterialNode::CallPayload);
+        }
+    }
     stage_value(staging, &serde_json::Value::String(payload.to_owned()))
 }
 
@@ -733,6 +740,15 @@ pub fn load_payload(
     decoder: &mut GraphDecoder<'_>,
     material: MaterialNode,
 ) -> Result<String, GraphRefusal> {
+    if let MaterialNode::CallPayload(node) = material {
+        let call = CallOutcome::load(decoder, node)?;
+        return serde_json::to_string(&call.completed(call.args.clone())?).map_err(|error| {
+            GraphRefusal::InvalidBody {
+                kind: NodeKind::CALL_OUTCOME.0,
+                reason: error.to_string(),
+            }
+        });
+    }
     let MaterialNode::Value(node) = material else {
         return Err(GraphRefusal::InvalidBody {
             kind: NodeKind::ROUND_FACT.0,
@@ -1022,7 +1038,7 @@ pub enum RoundFact {
         output: SettledFact,
         state: Vec<lash_core_store::tool_run::StateResolution>,
     },
-    /// 7: a cell's report: a reference to its bounded ReportView over the
+    /// 7: a cell's report: a reference to its ReportView over the
     /// original outcomes, never a re-admission or a re-settlement.
     CellReport { report: NodeId },
 }
@@ -1220,176 +1236,46 @@ impl TokenCodec for RoundFact {
 
 // --- Report views --------------------------------------------------------
 
-/// Kind 32: the bounded view of a cell's calls a turn reads, in admission
-/// order: each reported call's outcome as the executor's bound keeps it,
-/// with its presentation and the arguments it was called with, and the
-/// accounting of the calls the bound left out. The turn reports, streams
-/// and records this view and nothing else of the cell's calls (FIG-5330).
-/// An output the bound keeps whole places the same canonical chunks the
-/// cell's own outcome placed, so it is installed once.
-#[derive(Clone, Debug, PartialEq)]
+/// Kind 32: call-order references to the original archival bodies.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ReportView {
-    pub entries: Vec<ReportEntry>,
-    /// The accounting of the calls the bound left out, as
-    /// [`crate::OmittedToolCalls`] spells it.
-    pub omitted: Option<serde_json::Value>,
+    pub entries: Vec<NodeId>,
 }
-
-/// One reported call: its CallOutcome, its Presentation, and its
-/// arguments.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ReportEntry {
-    pub outcome: NodeId,
-    pub presentation: NodeId,
-    pub args: serde_json::Value,
-}
-
 impl TokenCodec for ReportView {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        out.seq(self.entries.len() as u64);
-        for entry in &self.entries {
-            out.seq(3);
-            entry.outcome.encode(out);
-            entry.presentation.encode(out);
-            entry.args.encode(out);
-        }
-        self.omitted.encode(out);
+        self.entries.encode(out);
     }
-
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        let count = input.seq()?;
-        let mut entries = Vec::new();
-        for _ in 0..count {
-            input.expect_struct(3)?;
-            entries.push(ReportEntry {
-                outcome: NodeId::decode(input)?,
-                presentation: NodeId::decode(input)?,
-                args: serde_json::Value::decode(input)?,
-            });
-        }
         Ok(Self {
-            entries,
-            omitted: Option::<serde_json::Value>::decode(input)?,
+            entries: Vec::decode(input)?,
         })
     }
 }
-
 impl ReportView {
-    /// Stages the view of `records`, a cell's calls as its executor's bound
-    /// keeps them, in call order, with `omitted`, the accounting of those it
-    /// left out, and returns the view's node.
-    ///
-    /// # Errors
-    ///
-    /// [`GraphRefusal::InvalidBody`] for an accounting that does not
-    /// encode, or any refusal of the staging area.
-    pub fn stage(
-        staging: &mut GraphStaging,
-        records: &[crate::ToolCallRecord],
-        omitted: Option<&crate::OmittedToolCalls>,
-    ) -> Result<NodeId, GraphRefusal> {
-        let mut entries = Vec::with_capacity(records.len());
-        for record in records {
-            let model_return =
-                crate::ModelToolReturn::from_output(record.tool.clone(), &record.output);
-            let outcome = CallOutcome {
-                call_id: record.call_id.clone(),
-                admission: None,
-                attempt: 0,
-                tool_name: record.tool.clone(),
-                output: record.output.clone(),
-                provider_call_id: record.provider_call_id.clone(),
-                replay: None,
-                intent_outcomes: Vec::new(),
-                presentation: PresentationRecipe::of(&model_return, &record.output),
-            };
-            let presentation =
-                staging.encode_value(NodeKind::PRESENTATION, &outcome.presentation)?;
-            entries.push(ReportEntry {
-                outcome: outcome.stage(staging)?,
-                presentation,
-                args: record.args.clone(),
-            });
-        }
-        let omitted = omitted
-            .map(serde_json::to_value)
-            .transpose()
-            .map_err(|error| GraphRefusal::InvalidBody {
-                kind: NodeKind::REPORT_VIEW.0,
-                reason: format!("the omitted accounting does not encode: {error}"),
-            })?;
-        staging.encode_value(NodeKind::REPORT_VIEW, &Self { entries, omitted })
+    /// Stage only references to existing archival call bodies.
+    pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
+        staging.encode_value(NodeKind::REPORT_VIEW, self)
     }
-
-    /// Reads view `id` and every reported call's outcome, each child of its
-    /// stated kind and each presentation the one its outcome holds.
-    ///
-    /// # Errors
-    ///
-    /// Any refusal of a node read, [`GraphRefusal::WrongChildKind`], or
-    /// [`GraphRefusal::PresentationMismatch`] for a presentation its
-    /// outcome does not hold.
-    pub fn load(
+    /// Read and validate every archival reference.
+    pub fn load(decoder: &mut GraphDecoder<'_>, id: NodeId) -> Result<Self, GraphRefusal> {
+        let view: Self = decoder.decode(id, NodeKind::REPORT_VIEW)?;
+        for body in &view.entries {
+            decoder.child_kind(id, *body, &[NodeKind::CALL_BODY])?;
+        }
+        Ok(view)
+    }
+    /// Read typed bodies through the registered offline protocol decoder.
+    pub fn records(
         decoder: &mut GraphDecoder<'_>,
         id: NodeId,
-    ) -> Result<(Self, Vec<CallOutcome>), GraphRefusal> {
-        let view: Self = decoder.decode(id, NodeKind::REPORT_VIEW)?;
-        let mut outcomes = Vec::with_capacity(view.entries.len());
-        for entry in &view.entries {
-            decoder.child_kind(id, entry.presentation, &[NodeKind::PRESENTATION])?;
-            let outcome = CallOutcome::load(decoder, entry.outcome)?;
-            let recipe: PresentationRecipe =
-                decoder.decode(entry.presentation, NodeKind::PRESENTATION)?;
-            if recipe != outcome.presentation {
-                return Err(GraphRefusal::PresentationMismatch);
-            }
-            outcomes.push(outcome);
-        }
-        Ok((view, outcomes))
-    }
-
-    /// The cell's calls view `id` reports, in call order, and the
-    /// accounting of those its bound left out.
-    ///
-    /// # Errors
-    ///
-    /// Any refusal of [`Self::load`], or an accounting that does not
-    /// decode.
-    pub fn records(decoder: &mut GraphDecoder<'_>, id: NodeId) -> Result<CellReport, GraphRefusal> {
-        let (view, outcomes) = Self::load(decoder, id)?;
-        let calls = view
+        decoders: &lash_core_store::transcript::TranscriptDecoders,
+    ) -> Result<Vec<crate::ToolCallRecord>, GraphRefusal> {
+        Self::load(decoder, id)?
             .entries
             .into_iter()
-            .zip(outcomes)
-            .map(|(entry, outcome)| crate::ToolCallRecord {
-                call_id: outcome.call_id,
-                provider_call_id: outcome.provider_call_id,
-                tool: outcome.tool_name,
-                args: entry.args,
-                output: outcome.output,
-            })
-            .collect();
-        let omitted = view
-            .omitted
-            .map(serde_json::from_value)
-            .transpose()
-            .map_err(|error| GraphRefusal::InvalidBody {
-                kind: NodeKind::REPORT_VIEW.0,
-                reason: format!("the omitted accounting does not decode: {error}"),
-            })?;
-        Ok(CellReport { calls, omitted })
+            .map(|body| decoders.decode_cell_call(decoder, body))
+            .collect()
     }
-}
-
-/// A cell's calls as its report holds them.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CellReport {
-    /// The calls the executor's bound keeps, in call order.
-    pub calls: Vec<crate::ToolCallRecord>,
-    /// The accounting of those it left out.
-    pub omitted: Option<crate::OmittedToolCalls>,
 }
 
 #[cfg(test)]

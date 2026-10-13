@@ -228,7 +228,7 @@ def row(row_id: str, kind: str, turn_id: str | None, at: datetime, **content) ->
         "provenance": {"turn_id": turn_id, "input_id": content.pop("input_id", None), "plugin_id": None,
                        "is_turn_reply": kind == "assistant_reply"},
         "content": {"text": "", "reasoning": [], "attachments": [], "language": None, "code": None,
-                    "output": None, "success": None, "error": None, "tools": [], "tools_omitted": 0, **content},
+                    "output": None, "success": None, "error": None, "tools": [], **content},
     }
 
 

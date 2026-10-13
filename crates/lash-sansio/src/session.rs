@@ -16,14 +16,6 @@ pub struct ExecutedCall {
     pub call_id: Option<ToolCallId>,
 }
 
-/// Typed accounting for host tool records omitted from a bounded turn view.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct OmittedToolCalls {
-    pub count: usize,
-    pub failures: usize,
-    pub attachments: Vec<AttachmentRef>,
-}
-
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -461,9 +453,6 @@ pub struct CellRecord {
     /// lash handled with no host tool call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<ExecutedCall>,
-    /// Calls the cell made beyond the recorded `calls`.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub calls_omitted: usize,
     /// What the cell's committed transition did to the session's bindings.
     #[serde(default, skip_serializing_if = "BindingChanges::is_empty")]
     pub bindings: BindingChanges,

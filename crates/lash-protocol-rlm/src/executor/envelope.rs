@@ -249,6 +249,12 @@ pub(super) fn load_cell(
                 else {
                     return Err("a summarized call's admission holds no tool call".to_owned());
                 };
+                if call.args != loaded.args {
+                    return Err(
+                        "a cell call body's arguments differ from its recorded request projection"
+                            .to_owned(),
+                    );
+                }
                 graph.outcomes.insert(summary.call_id.clone(), *outcome);
                 graph.installed.insert(*outcome);
                 LedgerCallState::Completed {
@@ -310,10 +316,68 @@ pub(super) async fn resumed_cell(
 /// stored root holds them in its host state.
 pub(crate) fn snapshot_tool_calls(
     cell: &lash_core::plugin::StoredCell,
-) -> Result<Vec<lash_core::ToolCallRecord>, String> {
-    Ok(load_cell(&cell.graph, cell.row.root, cell.read_limits)?
-        .ledgers
-        .tool_call_records())
+) -> Result<
+    (
+        Vec<lash_core::ToolCallRecord>,
+        lash_vm_broker::round_graph::ReportView,
+    ),
+    String,
+> {
+    let loaded = load_cell(&cell.graph, cell.row.root, cell.read_limits)?;
+    let calls = loaded.ledgers.tool_call_records();
+    let mut decoder = GraphDecoder::new(&cell.graph, cell.read_limits);
+    let entries = calls
+        .iter()
+        .map(|call| {
+            let outcome = loaded
+                .graph
+                .outcomes
+                .get(&call.call_id)
+                .copied()
+                .ok_or_else(|| format!("call {} has no recorded outcome", call.call_id))?;
+            lash_vm_broker::round_graph::CallOutcome::body_node(&mut decoder, outcome)
+                .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((calls, lash_vm_broker::round_graph::ReportView { entries }))
+}
+
+/// Read the original archival component. Its arguments are the exact
+/// projection recorded at settlement; no live execution machinery is needed.
+pub(crate) fn recorded_call(
+    decoder: &mut GraphDecoder<'_>,
+    body: NodeId,
+) -> Result<lash_core::ToolCallRecord, GraphRefusal> {
+    lash_vm_broker::round_graph::CallBody::load(decoder, body).map(|body| body.record)
+}
+
+/// Offline call reads while a cell is still saved under its execution root.
+pub(crate) fn recorded_cell_ledger(
+    decoder: &mut GraphDecoder<'_>,
+    root: NodeId,
+) -> Result<(Vec<lash_core::ToolCallRecord>, Vec<lash_core::ToolCallId>), GraphRefusal> {
+    use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
+    let root: ExecRoot = decoder.decode(root, NodeKind::EXEC_ROOT)?;
+    let host = match root.status {
+        ExecStatus::Parked => root.host.ok_or_else(|| GraphRefusal::InvalidBody {
+            kind: NodeKind::EXEC_ROOT.0,
+            reason: "a parked cell has no host ledger".to_owned(),
+        })?,
+        ExecStatus::Ended => CellEnd::load(decoder, root.state)?.host,
+    };
+    let state = HostState::load(decoder, host)?;
+    let mut records = Vec::new();
+    let mut pending = Vec::new();
+    for call in state.calls.items() {
+        match call.status {
+            CallStatus::Pending => pending.push(call.call_id.clone()),
+            CallStatus::Completed { outcome, .. } => {
+                let body = lash_vm_broker::round_graph::CallOutcome::body_node(decoder, outcome)?;
+                records.push(recorded_call(decoder, body)?);
+            }
+        }
+    }
+    Ok((records, pending))
 }
 
 /// Whether this build resumes `cell`, a cell's stored root: its host state,

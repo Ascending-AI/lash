@@ -363,13 +363,16 @@ fn fold_report(
     let Record::CellReport(report) = decode(facts, row)? else {
         return Err(out_of_order(row));
     };
-    super::cell_report(facts, report)
-        .map(|_| report)
-        .map_err(|refusal| FoldRefusal::Undecodable {
-            run: row.run,
-            ordinal: row.ordinal,
-            reason: refusal.to_string(),
-        })
+    super::graph::ReportView::load(
+        &mut lash_core_store::checkpoint_graph::GraphDecoder::new(facts, facts.read_limits),
+        report,
+    )
+    .map(|_| report)
+    .map_err(|refusal| FoldRefusal::Undecodable {
+        run: row.run,
+        ordinal: row.ordinal,
+        reason: refusal.to_string(),
+    })
 }
 
 fn fold_run(

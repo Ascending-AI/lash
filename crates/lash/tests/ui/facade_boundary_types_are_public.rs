@@ -446,6 +446,7 @@ fn backend_object_store_uses_the_exported_dependency() -> lash::s3::S3Attachment
 fn committed_turns_page_supports_serde() {
     fn serde_value<T: serde::Serialize + serde::de::DeserializeOwned>() {}
     serde_value::<lash::transcript::CommittedTurnsPage>();
+    serde_value::<lash::ToolCallRead>();
 }
 
 fn settled_outcome_status_is_public(outcome: &lash::TurnOutcome) -> lash::TurnStatus {
@@ -466,4 +467,10 @@ fn attachment_provider_kinds_are_nameable() {
     let _ = lash::anthropic::ANTHROPIC_PROVIDER_KIND;
     #[cfg(feature = "google")]
     let _ = lash::google::GOOGLE_OAUTH_PROVIDER_KIND;
+}
+
+fn cell_call_references_are_public() -> lash::plugins::CellCallReferences {
+    lash::plugins::CellCallReferences {
+        entries: Vec::new(),
+    }
 }

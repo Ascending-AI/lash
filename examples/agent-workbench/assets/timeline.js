@@ -362,13 +362,6 @@ function createToolView() {
 }
 
 function patchToolView(view, event) {
-  if (event?.kind === "omitted") {
-    view.node.className = "tool omitted";
-    view.node.replaceChildren(
-      `${event.count} earlier tool call${event.count === 1 ? "" : "s"} omitted from durable history`
-    );
-    return;
-  }
   const signature = JSON.stringify(event);
   if (signature === view.signature) return;
   view.signature = signature;
@@ -384,7 +377,7 @@ function patchToolView(view, event) {
     ? "in progress"
     : `${ok ? "ok" : "failed"} in ${event.duration_ms || 0}ms`;
   view.summary.textContent = durable
-    ? `Tool ${ok ? "completed" : "failed"} · arguments, result, duration, and call identity unavailable after reload`
+    ? `Tool ${ok ? "completed" : "failed"} · arguments, result, duration, and call identity are not loaded after reload`
     : running
     ? "Tool running"
     : (ok ? summarizeToolResult(event.name, toolResult(event)) : "Tool failed");
@@ -843,8 +836,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
         const tools = liveTools.length || !committed
           ? liveTools.map(tool => ({ key: `call:${tool.event.call_id}`, event: tool.event }))
           : [
-              ...committed.tools.map((tool, index) => ({ key: `durable:${index}`, event: { kind: "durable_summary", ...tool } })),
-              ...(committed.tools_omitted ? [{ key: "omitted", event: { kind: "omitted", count: committed.tools_omitted } }] : [])
+              ...committed.tools.map((tool, index) => ({ key: `durable:${index}`, event: { kind: "durable_summary", ...tool } }))
             ];
         for (const tool of tools) {
           let toolView = view.toolViews.get(tool.key);
@@ -855,14 +847,10 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
           }
           patchToolView(toolView, tool.event);
         }
-        const omitted = tools.filter(tool => tool.event.kind === "omitted")
-          .reduce((total, tool) => total + (Number(tool.event.count) || 0), 0);
-        const retained = tools.length - tools.filter(tool => tool.event.kind === "omitted").length;
-        const toolCount = tools.length ? retained + omitted : (event.tool_call_ids || []).length;
+        const toolCount = tools.length || (event.tool_call_ids || []).length;
         const toolLabel = toolCount ? ` · ${toolCount} tool${toolCount === 1 ? "" : "s"}` : "";
-        const omittedLabel = omitted ? ` · ${omitted} omitted` : "";
         const durationLabel = event.duration_ms === undefined || event.duration_ms === null ? "" : ` in ${event.duration_ms || 0}ms`;
-        view.label.textContent = `${event.language || "code"} ${codeBlockStateLabel(event)}${durationLabel}${toolLabel}${omittedLabel}`;
+        view.label.textContent = `${event.language || "code"} ${codeBlockStateLabel(event)}${durationLabel}${toolLabel}`;
         if (event.graph_key && event.graph_key !== view.graphKey) {
           view.graphKey = event.graph_key;
           const graphButton = el("button", "work-diagram-button");

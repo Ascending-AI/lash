@@ -647,41 +647,28 @@ impl RunFold {
     }
 }
 
-/// The cell's calls ReportView `report` in `facts` holds, as
-/// [`RunFold::reports`] names it.
-///
-/// # Errors
-///
-/// Any refusal of [`graph::ReportView::records`].
+/// Materialize a cell's original call ledger using its offline protocol decoder.
 pub fn cell_report(
     facts: &lash_durable::domain::RunFacts,
     report: lash_core_store::checkpoint_graph::NodeId,
-) -> Result<graph::CellReport, lash_core_store::checkpoint_graph::GraphRefusal> {
+    decoders: &lash_core_store::transcript::TranscriptDecoders,
+) -> Result<Vec<crate::ToolCallRecord>, lash_core_store::checkpoint_graph::GraphRefusal> {
     let mut decoder =
         lash_core_store::checkpoint_graph::GraphDecoder::new(facts, facts.read_limits);
-    graph::ReportView::records(&mut decoder, report)
+    graph::ReportView::records(&mut decoder, report, decoders)
 }
 
-/// Record `calls`, a cell's calls as its executor's bound keeps them, in
-/// call order, with `omitted`, the accounting of those it left out, as the
-/// report of the cell whose effect is run `run` of `owner`: one CellReport
-/// fact over its ReportView, in the transaction that checkpoints past the
-/// cell or ends the turn on it (FIG-5330). A crash before this commit
-/// re-delivers the cell, which answers with them again from its root.
-///
-/// # Errors
-///
-/// A ReportView refusal: an accounting that does not encode.
+/// Record references to a cell's existing admission/outcome ledger in the
+/// transaction consuming its answer. No body is copied or bounded.
 pub fn report_cell(
     tx: &mut lash_durable::ActorTx,
     owner: &OwnerKey,
     run: RunSeq,
-    calls: &[crate::ToolCallRecord],
-    omitted: Option<&crate::OmittedToolCalls>,
+    calls: &graph::ReportView,
 ) -> Result<(), lash_core_store::checkpoint_graph::GraphRefusal> {
     use lash_core_store::checkpoint_graph::{EncodeBudget, ExplicitLimit, GraphStaging};
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
-    let report = graph::ReportView::stage(&mut staging, calls, omitted)?;
+    let report = calls.stage(&mut staging)?;
     tx.stage_all(staging);
     records::append(
         tx,

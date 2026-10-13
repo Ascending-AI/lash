@@ -61,7 +61,6 @@ fn step_event(code: &str) -> SessionHistoryRecord {
             prints: vec!["ok".to_string().into()],
             images: Vec::new(),
             calls: Vec::new(),
-            calls_omitted: 0,
             bindings: Default::default(),
             result: lash_core::CellOutcome::Completed,
         })),
@@ -119,7 +118,7 @@ fn step_output_text_names_the_session_variables_a_cell_changed() {
     };
 
     assert_eq!(
-        step_output_text(dialect.prompt_vocabulary(), 2, &entry(changes.clone())),
+        step_output_text(dialect.prompt_vocabulary(), 2, &entry(changes.clone()), 128),
         "history[2].output[0]:\ndone\n\nSession variables:\n- added: rows, total\n- changed: count\n- removed: scratch\n- not kept (a function or a task does not outlive its cell): increment"
     );
 
@@ -134,7 +133,7 @@ fn step_output_text_names_the_session_variables_a_cell_changed() {
         }
     );
     assert_eq!(
-        step_output_text(dialect.prompt_vocabulary(), 2, &entry(bounded)),
+        step_output_text(dialect.prompt_vocabulary(), 2, &entry(bounded), 128),
         "history[2].output[0]:\ndone\n\nSession variables:\n- added: rows, total\n- changed: count\n- … 2 more names omitted"
     );
 }
@@ -161,12 +160,11 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
             label: Some("chart".to_string()),
         }],
         calls: Vec::new(),
-        calls_omitted: 0,
         bindings: lash_core::BindingChanges::default(),
         result: lash_core::CellOutcome::Completed,
     };
 
-    let rendered = step_output_text(dialect.prompt_vocabulary(), 7, &entry);
+    let rendered = step_output_text(dialect.prompt_vocabulary(), 7, &entry, 128);
 
     assert_eq!(
         rendered,
@@ -266,7 +264,6 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
                     call_id: None,
                 },
             ],
-            calls_omitted: 0,
             bindings: Default::default(),
             result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
@@ -297,40 +294,6 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
     assert!(observation.contains(".cache/lash/state"));
 }
 
-#[test]
-fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
-    let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
-        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(lash_core::CellRecord {
-            language: "typescript".to_string(),
-            prints_retained: None,
-            id: "lash_vm_step_success".to_string(),
-            protocol_iteration: 0,
-            code: "value = module.ok()".to_string(),
-            prints: Vec::new(),
-            images: Vec::new(),
-            calls: vec![lash_core::ExecutedCall {
-                operation: "module.ok".to_string(),
-                outcome: lash_core::ExecutedCallOutcome::Ok,
-                call_id: None,
-            }],
-            calls_omitted: 3,
-            bindings: Default::default(),
-            result: lash_core::CellOutcome::Completed,
-        })),
-        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-            crate::RLM_PROTOCOL_EVENT_VERSION
-        )),
-    ));
-
-    let messages = render(&[event]);
-    let observation = observation_text(&messages[1]);
-
-    assert_eq!(
-        observation,
-        "Calls:\n- … 3 earlier executed calls omitted\n- module.ok → ok"
-    );
-}
-
 fn failed_step_event(id: &str, code: &str, error: &str) -> SessionHistoryRecord {
     step_failed_with(
         id,
@@ -350,7 +313,6 @@ fn step_failed_with(id: &str, code: &str, failure: lash_core::CellFailure) -> Se
             prints: Vec::new(),
             images: Vec::new(),
             calls: Vec::new(),
-            calls_omitted: 0,
             bindings: Default::default(),
             result: lash_core::CellOutcome::Failed(failure),
         })),
@@ -619,4 +581,35 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
 
     assert!(messages[0].starts_user_segment);
     assert!(!messages[1].starts_user_segment);
+}
+
+/// FIG-6171: the next prompt has the exact pre-change diagnostic tail,
+/// while the durable cell retains every call identity.
+#[test]
+fn the_prompt_call_bound_preserves_the_previous_prompt_bytes() {
+    let calls = (0..130)
+        .map(|index| lash_core::ExecutedCall {
+            operation: format!("tools.call_{index}"),
+            outcome: lash_core::ExecutedCallOutcome::Ok,
+            call_id: Some(lash_core::ToolCallId::fixture(&format!("call-{index}"))),
+        })
+        .collect::<Vec<_>>();
+    let cell = lash_core::CellRecord {
+        calls,
+        ..Default::default()
+    };
+    let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(cell)),
+        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
+    ));
+    let messages = render(&[event]);
+    // These are the bytes main renders for the same 130-call fixture: the
+    // final 128 calls and the count of the earlier two, with no call ids.
+    let mut expected = "Calls:\n- … 2 earlier executed calls omitted".to_owned();
+    for index in 2..130 {
+        expected.push_str(&format!("\n- tools.call_{index} → ok"));
+    }
+    assert_eq!(observation_text(&messages[1]), expected);
 }

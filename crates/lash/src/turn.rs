@@ -12,6 +12,16 @@ pub use lash_core::facade_support::{TurnIssue, TurnIssueSeverity};
 /// fields lives in [`crate::provider`].
 pub use lash_core::{TurnFailureCode, TurnFailureKind};
 
+/// A typed read of one session's recorded call. A body is exposed only
+/// after its outcome commits; an admitted call without an outcome is pending.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ToolCallRead {
+    Settled { record: Box<ToolCallRecord> },
+    NotFound { call_id: crate::ToolCallId },
+    NotYetSettled { call_id: crate::ToolCallId },
+}
+
 pub(crate) fn fresh_turn_id() -> TurnId {
     TurnId::from_uuid(uuid::Uuid::new_v4().as_u128())
 }
@@ -51,9 +61,6 @@ pub struct TurnReport {
     pub failure_evidence: Vec<lash_core::TurnFailureEvidence>,
     /// Tool calls issued by the turn in protocol order.
     pub tool_calls: Vec<ToolCallRecord>,
-    /// Typed accounting for tool calls omitted from the bounded record view.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub omitted: Option<crate::OmittedToolCalls>,
     /// Execution metadata collected for the turn.
     pub execution: TurnExecutionMetrics,
     /// Typed errors this follower observed while settling the turn. An
