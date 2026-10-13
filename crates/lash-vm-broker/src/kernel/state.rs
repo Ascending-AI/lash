@@ -101,11 +101,12 @@ impl ReleaseGraph {
         Ok(())
     }
 
-    /// The release manifest `release` names and every node it reaches, when
-    /// this build holds it: what a park that pins it installs.
+    /// The key the release manifest `release` names is pinned under
+    /// ([`HeldManifests::pin_key`]) and every node it reaches, when this
+    /// build holds it: what a park that pins it installs.
     #[must_use]
     pub fn pinned(&self, release: NodeId) -> Option<(String, BTreeMap<NodeId, EncodedNode>)> {
-        let manifest = self.manifests.get(&release.child_ref())?;
+        let key = self.manifests.pin_key(&release.child_ref())?;
         let mut nodes = BTreeMap::new();
         let mut pending = vec![release];
         while let Some(id) = pending.pop() {
@@ -121,7 +122,7 @@ impl ReleaseGraph {
             );
             nodes.insert(id, node.clone());
         }
-        Some((manifest.release.clone(), nodes))
+        Some((key, nodes))
     }
 }
 

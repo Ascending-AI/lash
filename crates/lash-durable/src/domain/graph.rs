@@ -111,7 +111,8 @@ pub enum RootOwner {
     /// SQLite `artifact_refs`; PostgreSQL `lash_lash_vm_artifacts` with
     /// `storage_kind = 1`.
     ArtifactBridge { namespace: String, artifact: String },
-    /// `graph_release_pins`.
+    /// `graph_release_pins`, keyed by the release's dialect line and name
+    /// (`typescript/1.0`).
     ReleasePin { release: String },
 }
 

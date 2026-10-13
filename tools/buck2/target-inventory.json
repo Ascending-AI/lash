@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
   "cargo_package_count": 70,
-  "cargo_target_count": 222,
+  "cargo_target_count": 223,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_969a08f2__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_d3926888__metadata[check]",
@@ -60919,7 +60919,7 @@
       "//crates/lash:lash__fv_cf19cbae"
     ]
   },
-  "generated_label_count": 305,
+  "generated_label_count": 306,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -60996,6 +60996,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
     "//crates/lash-durable-test:attachment_referrer_laws__test",
+    "//crates/lash-durable-test:cell_dialect_releases__test",
     "//crates/lash-durable-test:cell_process_handles__test",
     "//crates/lash-durable-test:cell_read_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
@@ -61561,6 +61562,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
     "//crates/lash-durable-test:attachment_referrer_laws__test",
+    "//crates/lash-durable-test:cell_dialect_releases__test",
     "//crates/lash-durable-test:cell_process_handles__test",
     "//crates/lash-durable-test:cell_read_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
@@ -62076,7 +62078,7 @@
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
-  "metadata_target_count": 1236,
+  "metadata_target_count": 1237,
   "packages": [
     {
       "declared_features": [
@@ -62907,6 +62909,15 @@
           "tags": [
             "hermetic-postgres"
           ]
+        },
+        {
+          "build_label": "//crates/lash-durable-test:cell_dialect_releases__test",
+          "cargo": "cell_dialect_releases",
+          "check_label": "//crates/lash-durable-test:cell_dialect_releases__test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-durable-test:cell_dialect_releases__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-durable-test:cell_dialect_releases__test",
+          "tags": []
         },
         {
           "build_label": "//crates/lash-durable-test:cell_process_handles__test",
@@ -67381,6 +67392,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test": 300,
     "//crates/lash-durable-test:attachment_ref_laws__test": 300,
     "//crates/lash-durable-test:attachment_referrer_laws__test": 300,
+    "//crates/lash-durable-test:cell_dialect_releases__test": 300,
     "//crates/lash-durable-test:cell_process_handles__test": 300,
     "//crates/lash-durable-test:cell_read_laws__test": 300,
     "//crates/lash-durable-test:cell_restore_laws__test": 300,
@@ -67945,6 +67957,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
     "//crates/lash-durable-test:attachment_referrer_laws__test",
+    "//crates/lash-durable-test:cell_dialect_releases__test",
     "//crates/lash-durable-test:cell_process_handles__test",
     "//crates/lash-durable-test:cell_read_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
@@ -68265,6 +68278,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:attachment_ref_laws__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:attachment_referrer_laws__test__rust_test__metadata[check]",
+    "//crates/lash-durable-test:cell_dialect_releases__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:cell_process_handles__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:cell_read_laws__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:cell_restore_laws__test__rust_test__metadata[check]",
@@ -68602,6 +68616,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:attachment_ref_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:attachment_referrer_laws__test__clippy[clippy.txt]",
+    "//crates/lash-durable-test:cell_dialect_releases__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:cell_process_handles__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:cell_read_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:cell_restore_laws__test__clippy[clippy.txt]",
@@ -68906,6 +68921,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
     "//crates/lash-durable-test:attachment_referrer_laws__test",
+    "//crates/lash-durable-test:cell_dialect_releases__test",
     "//crates/lash-durable-test:cell_process_handles__test",
     "//crates/lash-durable-test:cell_read_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
@@ -69211,6 +69227,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
     "//crates/lash-durable-test:attachment_referrer_laws__test",
+    "//crates/lash-durable-test:cell_dialect_releases__test",
     "//crates/lash-durable-test:cell_process_handles__test",
     "//crates/lash-durable-test:cell_read_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
@@ -69496,6 +69513,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
     "//crates/lash-durable-test:attachment_referrer_laws__test",
+    "//crates/lash-durable-test:cell_dialect_releases__test",
     "//crates/lash-durable-test:cell_process_handles__test",
     "//crates/lash-durable-test:cell_read_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
@@ -69673,6 +69691,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
     "//crates/lash-durable-test:attachment_referrer_laws__test",
+    "//crates/lash-durable-test:cell_dialect_releases__test",
     "//crates/lash-durable-test:cell_process_handles__test",
     "//crates/lash-durable-test:cell_read_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
@@ -69867,6 +69886,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
     "//crates/lash-durable-test:attachment_referrer_laws__test",
+    "//crates/lash-durable-test:cell_dialect_releases__test",
     "//crates/lash-durable-test:cell_process_handles__test",
     "//crates/lash-durable-test:cell_read_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
@@ -70277,6 +70297,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
     "//crates/lash-durable-test:attachment_referrer_laws__test",
+    "//crates/lash-durable-test:cell_dialect_releases__test",
     "//crates/lash-durable-test:cell_process_handles__test",
     "//crates/lash-durable-test:cell_read_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
@@ -70474,6 +70495,7 @@
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
     "//crates/lash-durable-test:attachment_referrer_laws__test",
+    "//crates/lash-durable-test:cell_dialect_releases__test",
     "//crates/lash-durable-test:cell_process_handles__test",
     "//crates/lash-durable-test:cell_read_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",

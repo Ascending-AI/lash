@@ -936,8 +936,9 @@ impl DurableSnapshotStore {
     }
 
     /// Pins the helper release `state` pins: the store installs a release's
-    /// nodes with its pin once, on the first root of the first execution
-    /// that pins it; every later root requires them.
+    /// nodes with its pin once, under its dialect's key
+    /// ([`lash_vm_releases::HeldManifests::pin_key`]), on the first root of
+    /// the first execution that pins it; every later root requires them.
     async fn pin_release(
         &self,
         tx: &mut lash_durable::ActorTx,
@@ -960,12 +961,10 @@ impl DurableSnapshotStore {
             tx.require(release);
             return Ok(());
         }
-        let name = releases
+        let key = releases
             .manifests
-            .get(&release.child_ref())
-            .ok_or_else(|| refused("the state pins a release this build does not hold"))?
-            .release
-            .clone();
+            .pin_key(&release.child_ref())
+            .ok_or_else(|| refused("the state pins a release this build does not hold"))?;
         // A release this store already pins is stored whole: the commit
         // rechecks the requirement under its protection. A pin this read
         // cannot confirm is installed again, and the commit compares it.
@@ -975,7 +974,7 @@ impl DurableSnapshotStore {
             .map_err(refused)?
             .hydrate(
                 RootOwner::ReleasePin {
-                    release: name.clone(),
+                    release: key.clone(),
                 },
                 Some(release),
                 self.read_limits(),
@@ -986,12 +985,12 @@ impl DurableSnapshotStore {
             tx.require(release);
             return Ok(());
         }
-        let (name, nodes) = releases
+        let (_, nodes) = releases
             .pinned(release)
             .ok_or_else(|| refused("the state pins a release this build does not hold"))?;
         tx.stage(nodes.into_values());
         tx.write(DomainWrite::ReleasePin(ReleasePinWrite::Install {
-            release: name,
+            release: key,
             root: release,
         }));
         Ok(())

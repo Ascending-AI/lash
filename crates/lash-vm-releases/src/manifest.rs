@@ -241,6 +241,17 @@ impl HeldManifests {
         self.dialects.get(reference).map(String::as_str)
     }
 
+    /// The key a store pins the manifest `reference` names under: its
+    /// dialect's release line and the release's name. Each dialect's
+    /// release line names its releases alike (`1.0`) over other functions,
+    /// so a name alone would make one dialect's pin refuse the other's.
+    #[must_use]
+    pub fn pin_key(&self, reference: &ChildRef) -> Option<String> {
+        let manifest = self.by_reference.get(reference)?;
+        let dialect = self.dialect_of(reference)?;
+        Some(format!("{dialect}/{}", manifest.release))
+    }
+
     /// The manifests the build holds for `dialect`, each with its
     /// reference, in no order.
     pub fn of_dialect<'a>(
