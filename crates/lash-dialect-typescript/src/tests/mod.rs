@@ -20,6 +20,7 @@ mod hot_helpers;
 mod json;
 mod language;
 mod machine;
+mod numeric_helpers;
 mod package;
 mod printer;
 mod printer_corpus;

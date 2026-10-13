@@ -535,6 +535,15 @@ body {
     if same(left_kind, "float") { return num.add(left, right) }
     if same(left_kind, "text") { return text.concat(left, right) }
   }
+  # Keep the float-pair exit above these mixed host-number guards.
+  # Convert integers just as ToNumber does, including its range errors.
+  if same(left_kind, "float") {
+    if same(kind(right), "integer") { return num.add(left, num.to_float(right)) }
+  } else {
+    if same(left_kind, "integer") {
+      if same(kind(right), "float") { return num.add(num.to_float(left), right) }
+    }
+  }
   let a = invoke ts.to_primitive(left, "default")
   let b = invoke ts.to_primitive(right, "default")
   let textual = same(kind(a), "text")
@@ -556,6 +565,10 @@ kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
 body {
+  # Float pairs already have ECMA Number semantics, including NaN and zero.
+  if same(kind(left), "float") {
+    if same(kind(right), "float") { return num.sub(left, right) }
+  }
   let a = invoke ts.to_number(left)
   let b = invoke ts.to_number(right)
   return num.sub(a, b)
@@ -888,6 +901,10 @@ kernel 1
 errors "type_error"
 charge sum(20, deep(left), deep(right))
 body {
+  # Float pairs already have ECMA Number semantics, including NaN and zero.
+  if same(kind(left), "float") {
+    if same(kind(right), "float") { return num.lt(left, right) }
+  }
   let operands = invoke ts.relational(left, right)
   if operands[0] {
     return num.lt(text.utf16_compare(operands[1], operands[2]), 0)
