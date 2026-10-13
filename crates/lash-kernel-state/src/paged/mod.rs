@@ -15,15 +15,20 @@
 //! - [`family`] (S8): frozen values, lazy identity families and cell carry.
 
 pub mod census;
+pub mod census_impl;
 pub mod family;
 pub mod heap;
 pub mod root;
 pub mod source;
 
+#[cfg(test)]
+#[path = "laws/census.rs"]
+mod census_laws;
+
 pub use census::{
     AccountingCertificate, AccountingMetric, AllocationCensus, CensusFault, CensusGraph,
     EntityCost, LogicalPermit, MIN_ENTITY_COST, PendingReservation, RefinedDecision,
-    ReservationDecision, TransientRoots,
+    ReservationDecision, SweepSet, TransientRoots,
 };
 pub use family::{
     CarryClassification, CarryRoots, DataOnlyCertificate, FamilyBase, FamilyRecord, FrozenRef,

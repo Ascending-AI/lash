@@ -3,6 +3,7 @@
 //! [`embedder`].
 
 mod bounds;
+mod census;
 mod embedder;
 mod fast;
 mod forms;

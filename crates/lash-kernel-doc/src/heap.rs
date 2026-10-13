@@ -287,6 +287,8 @@ pub enum HeapFault {
 /// The host resources a heap draws on beside guest memory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum HostResource {
+    /// Quiescent census bitmap, work-list and root scratch budget.
+    TraceBudget,
     CleanResidency,
     DirtyResidency,
     PinnedPages,
