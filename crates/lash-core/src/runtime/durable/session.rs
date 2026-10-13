@@ -61,6 +61,7 @@ use super::turn_scope::{TurnChildrenStopError, await_turn_children, continue_sco
 
 mod park;
 
+pub use super::model_call::ModelAnswer;
 use park::park;
 pub(super) use park::undecodable_state;
 pub use park::{ParkedTurnState, SessionParkReason, SessionPassFailure};
@@ -212,6 +213,27 @@ pub trait TurnDrive: Send {
     ///
     /// [`TurnError`] when the effect cannot be answered.
     async fn local(&mut self, cx: &ActorContext, effect: Effect) -> Result<(), TurnError>;
+
+    /// The completion the last model call answered whose response its
+    /// assistant-response hooks still owe (FIG-6128), which `model.answer`
+    /// commits when [`derive_answer`](Self::derive_answer) aborts. `None`
+    /// once the call answered the machine.
+    fn owed_answer(&self) -> Option<&ModelAnswer> {
+        None
+    }
+
+    /// Run the hooks over [`owed_answer`](Self::owed_answer), live or
+    /// restored, and answer the machine's model call `id` with the result.
+    /// An abort leaves the answer owed.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the derivation aborts the turn.
+    async fn derive_answer(&mut self, _cx: &ActorContext, id: EffectId) -> Result<(), TurnError> {
+        Err(TurnError::Exec(format!(
+            "model call {id:?} owes no derivation"
+        )))
+    }
 
     /// Run `attempt.ordinal` of the pinned model call `id`, bounded by
     /// `attempt.limit` (its deadline is the pinned one, never refreshed), and answer
@@ -1091,6 +1113,9 @@ pub struct PhaseCheckpoint {
     /// which a resume and a cancel restore serve instead of resolving again
     /// (FIG-6021). `None` for a drive that resolves no configuration.
     pub config: Option<super::run_config::RecordedRunConfig>,
+    /// The pinned call's completion its hooks still owe
+    /// ([`TurnDrive::owed_answer`]); `None` outside `model.answer`.
+    pub answered: Option<ModelAnswer>,
 }
 
 impl PhaseCheckpoint {
@@ -1155,6 +1180,8 @@ pub struct RestoredTurn {
     pub delivered: Vec<crate::AdmittedTurnInputs>,
     /// The effect the checkpoint re-delivers, if it is waiting on one.
     pub pending: Option<Effect>,
+    /// The pinned call's completion its hooks still owe, if any.
+    pub answered: Option<ModelAnswer>,
     /// The turn's row.
     pub row: TurnRow,
 }
@@ -1444,7 +1471,10 @@ impl<'a> TurnRestore<'a> {
         self.phase().await?;
         let Some((
             PhaseCheckpoint {
-                saved, delivered, ..
+                saved,
+                delivered,
+                answered,
+                ..
             },
             stored,
         )) = self.phase.take()
@@ -1478,6 +1508,7 @@ impl<'a> TurnRestore<'a> {
             namespaces,
             delivered,
             pending,
+            answered,
             row: row.clone(),
         })
     }

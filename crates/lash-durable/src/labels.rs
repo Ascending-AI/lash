@@ -32,6 +32,10 @@ impl CommitLabel {
     pub const MODEL_START: Self = Self::new("model.start");
     /// `model.done`: A model response, the next checkpoint and the round's admission, fused (C4).
     pub const MODEL_DONE: Self = Self::new("model.done");
+    /// `model.answer`: A model call's completed response, recorded in its
+    /// phase checkpoint when its assistant-response hooks' derivation
+    /// aborted the attempt, so the retry derives from it (FIG-6128).
+    pub const MODEL_ANSWER: Self = Self::new("model.answer");
     /// `round.present+model.start`: A round's presentation and the next model start, fused (C6).
     pub const ROUND_PRESENT_MODEL_START: Self = Self::new("round.present+model.start");
     /// `round.outcome+present+model.start`: plain final outcomes, their
@@ -167,7 +171,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 49] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -179,6 +183,7 @@ impl CommitLabel {
         Self::TURN_PREPARE,
         Self::MODEL_START,
         Self::MODEL_DONE,
+        Self::MODEL_ANSWER,
         Self::ROUND_PRESENT_MODEL_START,
         Self::ROUND_OUTCOME_PRESENT_MODEL_START,
         Self::COMPLETION_START,

@@ -1,7 +1,7 @@
 //! An assistant-response hook's fault on the durable turn path (FIG-3726):
-//! a live fault is its attempt's, so the phase runs again and nothing of
-//! the faulted attempt is recorded; a
-//! deterministic failure is the turn's own outcome, met once.
+//! a live fault is its attempt's, so the hooks run again from the recorded
+//! completion and nothing of the faulted attempt's derivation is recorded;
+//! a deterministic failure is the turn's own outcome, met once.
 
 use super::*;
 use crate::TurnInput;
@@ -79,7 +79,11 @@ async fn transcript(core: &LashCore, id: &str) -> Result<Vec<(String, String)>> 
 /// A hook whose first run meets a live fault (an invocation failure, which
 /// the runtime marks a retryable response derivation) and whose next run
 /// answers: the turn answers the hooked response once, the hook ran again,
-/// and the committed transcript holds the hooked answer alone.
+/// and the committed transcript holds the hooked answer alone. The fault
+/// aborts the activation after `model.answer` committed the completion and
+/// before the hook settled, so the next one restores from the rows as a
+/// successor after a crash there would: it derives from the recorded
+/// completion and the model is paid once (FIG-6128).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_assistant_hook_session_fault_retries_the_step_without_recording_it() -> Result<()> {
     const ID: &str = "hook-live-fault";
@@ -118,6 +122,11 @@ async fn an_assistant_hook_session_fault_retries_the_step_without_recording_it()
         hook_calls.load(Ordering::SeqCst),
         2,
         "the faulted step ran again"
+    );
+    assert_eq!(
+        model_calls.load(Ordering::SeqCst),
+        1,
+        "the hook's retry derives from the recorded completion: it is paid for once"
     );
     let transcript = transcript(&core, ID).await?;
     assert_eq!(

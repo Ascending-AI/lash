@@ -41,26 +41,32 @@ pub(super) struct StreamChunkOutcome {
 impl RuntimeTurnDriver<'_> {
     /// Runs the staged two-phase LLM-call effect boundary (FIG-1276).
     ///
-    /// Phase 1 journals the **raw** provider completion: the paid external fact
-    /// becomes durable before any fallible host code runs. Phase 2 is a second,
-    /// distinct journal entry holding what host assistant-response hooks derived
-    /// from that completion: the transformed response together with the plugin
-    /// events those hooks emitted.
+    /// Phase 1 yields the **raw** provider completion. Phase 2 derives from
+    /// that completion what host assistant-response hooks make of it: the
+    /// transformed response together with the plugin events those hooks
+    /// emitted. A derivation that aborts the attempt leaves the completion to
+    /// the phase runner, which commits it under `model.answer` in the call's
+    /// phase checkpoint before the fault propagates (FIG-6128).
     ///
-    /// Only a *complete* derivation is journaled. A hook failure seals nothing
+    /// Only a *complete* derivation answers the turn. A hook failure seals nothing
     /// and surfaces as a retryable
     /// [`RuntimeErrorCode::RuntimeEffectAssistantResponseHook`](crate::RuntimeErrorCode::RuntimeEffectAssistantResponseHook),
     /// because a sealed error would replay as a permanent result over a
     /// completion that is merely underived.
     ///
-    /// A crash or hook failure after phase 1 therefore redrives phase 2 only:
-    /// replay serves the recorded completion and the provider is never
-    /// re-invoked. Hooks are consequently **at-least-once**; see
+    /// A hook failure, or a crash after `model.answer`, therefore redrives
+    /// phase 2 only: the restore serves the recorded completion and the
+    /// provider is never re-invoked. Hooks are consequently **at-least-once**; see
     /// [`crate::plugin::AssistantResponseHook`].
     ///
-    /// Honest scope: the window this does *not* cover is journal finalization
-    /// itself — a process that dies after the provider returns but before phase
-    /// 1 becomes durable still has no record to replay. Closing that needs
+    /// Honest scope: the window this does *not* cover is whole-node death
+    /// before `model.answer` or the next phase commits — a process that dies
+    /// after the provider returns, while the hooks run, has no record to
+    /// replay and re-sends the call once, paying for it again, as ADR 0142
+    /// §2 bounds for a cell. No commit happens between the provider's answer
+    /// and the hooks to carry the completion, so closing this window would
+    /// cost an owner commit per hooked call, and RLM's cell mask hooks every
+    /// call. Closing that needs
     /// provider-side idempotency or resume (FIG-1275), not more staging here.
     pub(super) async fn invoke_turn_llm_effect(
         &mut self,

@@ -84,6 +84,7 @@ fn encode_phase(
         before_turn: drive.before_turn(),
         trace: drive.trace_scope(),
         config: drive.run_config(),
+        answered: drive.owed_answer().cloned(),
     };
     StagedPhase::of(&checkpoint, &delta.held).map_err(TurnError::Exec)
 }
@@ -133,6 +134,39 @@ pub(super) fn bind_delivered(
             batches: Vec::new(),
         })
     })
+}
+
+/// `model.answer`: the completion `drive` owes its hooks, committed in the
+/// pinned call's phase checkpoint once their derivation aborted the
+/// attempt, so the next attempt, or a successor after a crash, derives
+/// again from it and never pays for the call twice (FIG-6128).
+async fn record_answer(
+    cx: &ActorContext,
+    drive: &mut dyn TurnDrive,
+    session: &SessionId,
+    run: &TurnId,
+    pin: &lash_durable::domain::ModelPin,
+) -> Result<(), TurnError> {
+    let mut tx = cx.begin().await?;
+    if let Some(bind) = bind_delivered(drive, session, run) {
+        tx.write(bind);
+    }
+    let written = write_run_changes(drive, &mut tx, session, run);
+    let (checkpoint, stored) = encode_checkpoint(drive)?.staged_in(&mut tx);
+    tx.write(DomainWrite::Turn(TurnWrite::Advance {
+        session: session.clone(),
+        run: run.clone(),
+        phase: UnfinishedPhase::Model {
+            pin: pin.clone(),
+            checkpoint,
+        },
+        iteration: iteration(drive.machine()),
+    }));
+    cx.commit(tx, CommitLabel::MODEL_ANSWER).await?;
+    stored.committed(drive);
+    drive.run_changes_committed(&written);
+    drive.phase_committed().await;
+    Ok(())
 }
 
 fn iteration(machine: &TurnMachine) -> u32 {
@@ -233,6 +267,18 @@ pub async fn run_phases(
         }
         match effect {
             Effect::LlmCall { id, request } => {
+                // A call restored at `model.answer` was paid for: its hooks
+                // derive from the recorded completion, which is never sent
+                // again (FIG-6128).
+                if drive.owed_answer().is_some() {
+                    if !matches!(model.take(), Some((redelivered, _)) if redelivered == id) {
+                        return Err(TurnError::Exec(format!(
+                            "the recorded completion does not answer model call {id:?}"
+                        )));
+                    }
+                    drive.derive_answer(cx, id).await?;
+                    continue;
+                }
                 // `model.start`'s open is the call's one read: the turn's
                 // accepted cancel, a requested close and the store's clock
                 // come with it.
@@ -451,6 +497,21 @@ pub async fn run_phases(
                     let request = cx.begin().await?.turn_cancel().cloned();
                     let stopped = stopped(drive, &mut carry, &mut answered_cell);
                     return stop(cx, services, &row, request, stopped, heads).await;
+                }
+                if let model_call::ModelStart::Send { pin, .. } = &start
+                    && drive.owed_answer().is_some()
+                    && let Err(error) = drive.derive_answer(cx, id).await
+                {
+                    // A hook's fault aborts the attempt: the completion
+                    // commits on its own as `model.answer` first, so the
+                    // retry derives from it and never pays for the call
+                    // again (FIG-6128, as ADR 0142 §2 does for a cell). A
+                    // refused commit leaves the attempt's own failure to
+                    // answer.
+                    if drive.owed_answer().is_some() {
+                        drop(record_answer(cx, drive.as_mut(), &session, &run, pin).await);
+                    }
+                    return Err(error);
                 }
             }
 

@@ -12,8 +12,8 @@ use super::*;
 use crate::runtime::durable::commit_publication::{CommitBase, PublicationMark, PublishedHeads};
 use crate::runtime::durable::head::SessionHead;
 use crate::runtime::durable::session::{
-    CellExit, CellToolCalls, CodeCell, ModelCallAttempt, OpenTurn, ParkedTurnState, PreparedCall,
-    RestoredTurn, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
+    CellExit, CellToolCalls, CodeCell, ModelAnswer, ModelCallAttempt, OpenTurn, ParkedTurnState,
+    PreparedCall, RestoredTurn, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
 };
 use crate::runtime::turn_loop::DurableTurn;
 
@@ -63,6 +63,10 @@ pub(in crate::runtime) struct RuntimeDrive {
     /// §6), and the one a phase in flight stages in its place.
     working: Option<lash_core_store::checkpoint_graph::NodeId>,
     staged_working: Option<lash_core_store::checkpoint_graph::NodeId>,
+    /// The completion the turn's hooks still owe, and whether it was
+    /// restored from `model.answer` rather than answered on this activation
+    /// (FIG-6128).
+    owed: Option<(ModelAnswer, bool)>,
 }
 
 #[derive(Default)]
@@ -143,6 +147,7 @@ impl RuntimeDrive {
             namespaces,
             delivered,
             pending,
+            answered,
             row,
         } = restore.restore(config).await?;
         // The steering input the turn's checkpoints delivered before its last phase committed are bound to its run;
@@ -196,6 +201,7 @@ impl RuntimeDrive {
             parts,
         );
         drive.working = row.working;
+        drive.owed = answered.map(|answer| (answer, true));
         Ok(OpenTurn {
             drive: Box::new(drive),
             pending,
@@ -235,6 +241,7 @@ impl RuntimeDrive {
             finishing_cell_calls: None,
             working: None,
             staged_working: None,
+            owed: None,
             driver,
             machine,
             observer,
@@ -539,7 +546,7 @@ impl TurnDrive for RuntimeDrive {
         tokio::pin!(call);
         // A cancelled call settles before the turn's stop, which publishes
         // the sealed call ahead of its terminal.
-        tokio::select! {
+        let owed = tokio::select! {
             biased;
             result = &mut call => result,
             () = cancel.cancelled() => {
@@ -547,7 +554,38 @@ impl TurnDrive for RuntimeDrive {
                 call.await
             }
         }
-        .map_err(runtime)
+        .map_err(runtime)?;
+        self.owed = owed.map(|answer| (answer, false));
+        Ok(())
+    }
+
+    fn owed_answer(&self) -> Option<&ModelAnswer> {
+        self.owed.as_ref().map(|(answer, _)| answer)
+    }
+
+    async fn derive_answer(
+        &mut self,
+        _cx: &ActorContext,
+        id: crate::EffectId,
+    ) -> Result<(), TurnError> {
+        let Some((answer, restored)) = self.owed.clone() else {
+            return Err(TurnError::Exec(format!(
+                "model call {id:?} owes no derivation"
+            )));
+        };
+        Box::pin(self.driver.derive_llm_answer(
+            &mut self.machine,
+            id,
+            answer,
+            restored,
+            &self.observer,
+        ))
+        .await
+        .map_err(runtime)?;
+        // A derivation that aborted still owes the answer, for the phase
+        // runner to record before the abort propagates.
+        self.owed = None;
+        Ok(())
     }
 
     async fn prepare_call(

@@ -44,6 +44,30 @@ use lash_sansio::TurnCheckpoint;
 /// version_guard(items(MODEL_REQUEST_PIN_DOMAIN, request_ref))
 const MODEL_REQUEST_PIN_DOMAIN: &str = "lash-model-request-pin/v1";
 
+/// A completion the provider answered whose response the turn's
+/// assistant-response hooks have not derived yet: the paid fact, committed
+/// in its call's phase checkpoint under `model.answer` when their
+/// derivation aborts the attempt (FIG-6128). A restore that finds it
+/// derives the response from it and never sends the call again. A
+/// derivation that answers commits nothing more than a turn without hooks:
+/// the response commits with the next phase, and a whole-node death while
+/// the hooks run may re-send the call once, as ADR 0142 §2 bounds for a
+/// cell's first slice.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelAnswer {
+    /// The attempt that answered.
+    pub(crate) attempt: u32,
+    /// The raw completion.
+    pub(crate) response: crate::llm::types::LlmResponse,
+    pub(crate) text_streamed: bool,
+    /// The paid call's record, which a restore records again: the
+    /// activation that recorded it first published nothing.
+    pub(crate) call_record: Option<crate::LlmCallRecord>,
+    /// The hooks' plan and the stream state they derive with.
+    pub(crate) stream: crate::runtime::LlmStreamRecord,
+}
+
 /// How a model call starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum ModelStart {

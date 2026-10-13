@@ -114,7 +114,10 @@ impl RuntimeTurnDriver<'_> {
 
     /// Send attempt of the admitted call `id`: `admitted` holds its request
     /// template, which every attempt and resend fills and sends, and the
-    /// response context recorded with it.
+    /// response context recorded with it. A completion its recorded plan
+    /// names response hooks for is returned unanswered, for
+    /// [`Self::derive_llm_answer`]: the phase runner commits it should their
+    /// derivation abort (FIG-6128).
     pub(super) async fn handle_llm_call_effect(
         &mut self,
         machine: &mut TurnMachine,
@@ -123,7 +126,7 @@ impl RuntimeTurnDriver<'_> {
         admitted: &lash_sansio::llm::types::AdmittedSend,
         attempt: u32,
         event_tx: &TurnObserver,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<Option<crate::runtime::durable::session::ModelAnswer>, RuntimeError> {
         self.trace_before_llm_call(machine, &request);
         self.admitted_body = Some(admitted.clone());
         self.model_attempt = attempt;
@@ -144,7 +147,7 @@ impl RuntimeTurnDriver<'_> {
             Ok(result) => result,
             Err(err) => {
                 self.fail_or_abort_runtime_effect_controller(machine, err)?;
-                return Ok(());
+                return Ok(None);
             }
         };
         if let (Err(error), Some(record)) = (&result, call_record.as_ref()) {
@@ -164,37 +167,114 @@ impl RuntimeTurnDriver<'_> {
                 self.failure_evidence.push(evidence);
             }
         }
-        if let Some(call_record) = call_record {
-            self.record_model_call(event_tx, call_record);
-        }
-        // Phase 2 of the staged boundary runs only once the paid attempt is
-        // journaled and on the ledger, so a failing derivation can never take
-        // the record of what we bought down with it. Whether it runs at all is
-        // the plan phase 1 recorded with the completion (ADR 0105 §1), never
-        // the response hooks installed now: a replay after a hook was added or
-        // removed issues the phases its first execution did.
+        // Only a complete derivation answers the machine, and a hook may
+        // fault: the paid completion is returned, to be made durable should
+        // the derivation not finish, never bought again for it.
         let result = match result {
-            Ok(raw) if !response_plan.callbacks.is_empty() => {
-                match self
-                    .invoke_assistant_response_hooks_effect(
-                        machine,
-                        id,
-                        raw,
-                        response_plan,
-                        stream_hook_states,
-                        event_tx,
-                    )
-                    .await
-                {
-                    Ok(response) => Ok(response),
-                    Err(err) => {
-                        self.fail_or_abort_runtime_effect_controller(machine, err)?;
-                        return Ok(());
-                    }
+            Ok(response) if !response_plan.callbacks.is_empty() => {
+                if let Some(call_record) = &call_record {
+                    self.record_model_call(event_tx, call_record.clone());
                 }
+                return Ok(Some(crate::runtime::durable::session::ModelAnswer {
+                    attempt,
+                    response,
+                    text_streamed,
+                    call_record,
+                    stream: crate::runtime::LlmStreamRecord {
+                        reasoning_published,
+                        stream_hook_states,
+                        response_plan,
+                    },
+                }));
             }
             result => result,
         };
+        if let Some(call_record) = call_record {
+            self.record_model_call(event_tx, call_record);
+        }
+        self.answer_llm_call(
+            machine,
+            id,
+            result,
+            text_streamed,
+            reasoning_published,
+            event_tx,
+        )?;
+        Ok(None)
+    }
+
+    /// Derive the response of model call `id` from `answer`, the completion
+    /// `model.answer` recorded, through the hooks of its recorded plan, and
+    /// answer the machine with it. A hook's live fault aborts the attempt,
+    /// and the next derives from the same record. `restored` when the
+    /// activation that recorded the call is gone: its record is recorded
+    /// again.
+    pub(super) async fn derive_llm_answer(
+        &mut self,
+        machine: &mut TurnMachine,
+        id: crate::sansio::EffectId,
+        answer: crate::runtime::durable::session::ModelAnswer,
+        restored: bool,
+        event_tx: &TurnObserver,
+    ) -> Result<(), RuntimeError> {
+        let crate::runtime::durable::session::ModelAnswer {
+            attempt,
+            response,
+            text_streamed,
+            call_record,
+            stream:
+                crate::runtime::LlmStreamRecord {
+                    reasoning_published,
+                    stream_hook_states,
+                    response_plan,
+                },
+        } = answer;
+        self.model_attempt = attempt;
+        if restored && let Some(call_record) = call_record {
+            self.record_model_call(event_tx, call_record);
+        }
+        // Whether the hooks run at all is the plan recorded with the
+        // completion (ADR 0105 §1), never the response hooks installed now:
+        // a restore after a hook was added or removed derives as its first
+        // execution did.
+        let result = match self
+            .invoke_assistant_response_hooks_effect(
+                machine,
+                id,
+                response,
+                response_plan,
+                stream_hook_states,
+                event_tx,
+            )
+            .await
+        {
+            Ok(response) => Ok(response),
+            Err(err) => {
+                self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                return Ok(());
+            }
+        };
+        self.answer_llm_call(
+            machine,
+            id,
+            result,
+            text_streamed,
+            reasoning_published,
+            event_tx,
+        )
+    }
+
+    /// Answer the machine's model call `id` with `result`, the response it
+    /// reads.
+    fn answer_llm_call(
+        &mut self,
+        machine: &mut TurnMachine,
+        id: crate::sansio::EffectId,
+        result: Result<LlmResponse, crate::LlmCallError>,
+        text_streamed: bool,
+        reasoning_published: Vec<crate::llm::types::StreamBlockIdentity>,
+        event_tx: &TurnObserver,
+    ) -> Result<(), RuntimeError> {
         if let Err(error) = &result
             && error.code
                 == Some(crate::FailureCode::lash(
