@@ -237,6 +237,17 @@ pub(super) const TABLE_CHURN: &str = r#"
 main {
   let m = map{1.0: "first", 2: "two", 3: "three", 4: "four"}
   let s = set{1.0, 2, 3, 4}
+  let child = [41]
+  set m[4] = child
+  do perform echo(m) as Any
+  set m[4] = (child, "nested")
+  do perform echo(m) as Any
+  set m[4] = "scalar again"
+  let keyed = map{ident.ref(child): "reachable key"}
+  do perform echo(0) as Any
+  remove keyed[ident.ref(child)]
+  set keyed[2] = "scalar after removal"
+  do perform echo(0) as Any
   let keys = []
   let first = true
   for key in m {

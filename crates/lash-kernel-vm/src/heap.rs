@@ -106,6 +106,30 @@ pub(crate) struct Table {
     index: BTreeMap<Key, usize>,
     entries: Vec<Entry>,
     next: u64,
+    /// Derived from live scalar pairs only (K-BND-003), never saved.
+    /// Insert also rebuilds these counters when a parked table is loaded.
+    scalar_bytes: u64,
+    /// Entries outside the scalar shortcut: even a reference-free tuple
+    /// takes the full accounting and tracing path.
+    non_scalar: usize,
+}
+
+/// Only immutable, non-nesting values whose bytes cannot change and
+/// which cannot name a heap object or task qualify for cached accounting.
+fn scalar_pair_bytes(key: &Value, value: &Value) -> Option<u64> {
+    let scalar = |value: &Value| {
+        matches!(
+            value,
+            Value::Null
+                | Value::Bool(_)
+                | Value::Int(_)
+                | Value::Float(_)
+                | Value::Text(_)
+                | Value::Bytes(_)
+                | Value::Timestamp(_)
+        )
+    };
+    (scalar(key) && scalar(value)).then(|| value_bytes(key).saturating_add(value_bytes(value)))
 }
 
 impl Table {
@@ -128,10 +152,26 @@ impl Table {
         match self.index.entry(key) {
             btree_map::Entry::Occupied(slot) => {
                 if let Some(pair) = &mut self.entries[*slot.get()].pair {
+                    if let Some(bytes) = scalar_pair_bytes(&pair.0, &pair.1) {
+                        self.scalar_bytes -= bytes;
+                    } else {
+                        self.non_scalar -= 1;
+                    }
+                    // The first-written key stays, including its byte price.
+                    if let Some(bytes) = scalar_pair_bytes(&pair.0, &value) {
+                        self.scalar_bytes += bytes;
+                    } else {
+                        self.non_scalar += 1;
+                    }
                     pair.1 = value;
                 }
             }
             btree_map::Entry::Vacant(slot) => {
+                if let Some(bytes) = scalar_pair_bytes(&written, &value) {
+                    self.scalar_bytes += bytes;
+                } else {
+                    self.non_scalar += 1;
+                }
                 slot.insert(self.entries.len());
                 self.entries.push(Entry {
                     sequence: self.next,
@@ -144,7 +184,13 @@ impl Table {
 
     pub(crate) fn remove(&mut self, key: &Key) {
         if let Some(slot) = self.index.remove(key) {
-            self.entries[slot].pair = None;
+            if let Some((key, value)) = self.entries[slot].pair.take() {
+                if let Some(bytes) = scalar_pair_bytes(&key, &value) {
+                    self.scalar_bytes -= bytes;
+                } else {
+                    self.non_scalar -= 1;
+                }
+            }
             if self.entries.len() - self.len() > self.len() {
                 self.compact();
             }
@@ -250,6 +296,7 @@ fn error_bytes(error: &ErrorValue) -> u64 {
 pub(crate) fn object_bytes(object: &Obj) -> u64 {
     let contents: u64 = match object {
         Obj::List(items) => items.iter().map(value_bytes).sum(),
+        Obj::Map(table) | Obj::Set(table) if table.non_scalar == 0 => table.scalar_bytes,
         Obj::Map(table) | Obj::Set(table) => table
             .iter()
             .map(|(key, value)| value_bytes(key).saturating_add(value_bytes(value)))
@@ -326,6 +373,7 @@ impl Chunk {
 fn trace(object: &Obj, seeds: &mut Vec<Identity>) {
     match object {
         Obj::List(items) => items.iter().for_each(|item| refs(item, seeds)),
+        Obj::Map(table) | Obj::Set(table) if table.non_scalar == 0 => {}
         Obj::Map(table) | Obj::Set(table) => {
             for (key, value) in table.iter() {
                 refs(key, seeds);

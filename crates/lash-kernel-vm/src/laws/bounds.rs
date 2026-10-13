@@ -98,6 +98,114 @@ fn the_memory_bound_counts_what_is_live() {
         assert!(heap.get(dropped).is_none());
     }
 
+    // K-BND-003: private table accounting equals a recount through
+    // updates, deletion, reinsertion and scalar/reference transitions.
+    // Mixed entries must still trace references nested in tuples/errors,
+    // task handles and first-written keys, for maps and sets alike.
+    fn recount(table: &Table, set: bool) {
+        use crate::heap::{object_bytes, refs, value_bytes};
+
+        let contents: u64 = table
+            .iter()
+            .map(|(key, value)| value_bytes(key).saturating_add(value_bytes(value)))
+            .sum();
+        let mut reached = Vec::new();
+        for (key, value) in table.iter() {
+            refs(key, &mut reached);
+            refs(value, &mut reached);
+        }
+        let mut heap = Heap::new(ROOMY.memory);
+        let child = heap.insert(Obj::List(vec![]));
+        let object = if set {
+            Obj::Set(table.clone())
+        } else {
+            Obj::Map(table.clone())
+        };
+        assert_eq!(object_bytes(&object), 32 + contents);
+        let root = heap.insert(object);
+        let mut tasks = Vec::new();
+        let live = heap.collect(vec![Identity::Object(root)], &mut |task, _| {
+            tasks.push(task)
+        });
+        let keeps_child = reached.contains(&Identity::Object(child));
+        assert_eq!(live, 32 + contents + if keeps_child { 32 } else { 0 });
+        assert_eq!(heap.get(child).is_some(), keeps_child);
+        let mut expected: Vec<_> = reached
+            .into_iter()
+            .filter_map(|identity| match identity {
+                Identity::Task(task) => Some(task),
+                Identity::Object(_) => None,
+            })
+            .collect();
+        tasks.sort();
+        expected.sort();
+        assert_eq!(tasks, expected);
+    }
+    use lash_kernel_doc::{Bytes, ErrorValue, Float, Integer, Name, ObjectId, TaskId, Timestamp};
+    use std::sync::Arc;
+
+    let child = Value::List(ObjectId(0));
+    let mut values = vec![
+        Value::Null,
+        Value::Absent,
+        Value::Bool(true),
+        Value::Int(Integer::from(0)),
+        Value::Int(Integer::from(65536)),
+        Value::Float(Float::new(-0.0)),
+        Value::Float(Float::new(f64::NAN)),
+        Value::text("payload"),
+        Value::Bytes(Bytes::new(vec![1, 2, 3])),
+        Value::Timestamp(Timestamp {
+            nanoseconds: Integer::from(65536),
+        }),
+        Value::Function(Name::new("f")),
+        child.clone(),
+        Value::Ref(Identity::Object(ObjectId(0))),
+        Value::Task(TaskId(7)),
+        Value::Tuple(Arc::from([child.clone(), Value::Task(TaskId(8))])),
+    ];
+    values.push(Value::Error(Arc::new(ErrorValue {
+        kind: "nested".into(),
+        message: "reference".into(),
+        data: child,
+    })));
+    for set in [false, true] {
+        for written in values.iter().filter(|value| Key::of(value).is_some()) {
+            let key = Key::of(written).unwrap();
+            let mut table = Table::default();
+            // Several surviving entries exercise the mixed path and
+            // removing them all forces slot compaction.
+            for i in 1..5 {
+                let other = Value::text(format!("other:{i}"));
+                table.insert(Key::of(&other).unwrap(), other, Value::Null);
+            }
+            for value in &values {
+                table.insert(
+                    key.clone(),
+                    written.clone(),
+                    if set { Value::Null } else { value.clone() },
+                );
+                recount(&table, set);
+            }
+            table.remove(&key);
+            recount(&table, set);
+            table.insert(key.clone(), written.clone(), Value::Null);
+            recount(&table, set);
+            table.insert(key.clone(), written.clone(), values[14].clone());
+            recount(&table, set);
+            table.insert(key.clone(), written.clone(), Value::text("scalar again"));
+            recount(&table, set);
+            table.remove(&key);
+            recount(&table, set);
+            for i in 1..5 {
+                table.remove(&Key::Text(Arc::from(format!("other:{i}"))));
+                recount(&table, set);
+            }
+            table.insert(key, written.clone(), Value::Null);
+            recount(&table, set);
+        }
+    }
+
     let bounds = Bounds {
         memory: 64 << 10,
         ..ROOMY
