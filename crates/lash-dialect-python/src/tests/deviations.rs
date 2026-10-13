@@ -43,8 +43,21 @@ try:
     print(join('a', 'b'))
 except TypeError:
     print('the annotation was believed')
+annotated_left: str = 1
+annotated_right: str = 2
+try:
+    print(annotated_left + annotated_right)
+except TypeError:
+    print('the local annotations were believed')
 ";
-    assert_eq!(lines(source), ["3", "the annotation was believed"]);
+    assert_eq!(
+        lines(source),
+        [
+            "3",
+            "the annotation was believed",
+            "the local annotations were believed"
+        ]
+    );
 }
 
 /// CPython: `[] generator`; the elements are computed when asked for.

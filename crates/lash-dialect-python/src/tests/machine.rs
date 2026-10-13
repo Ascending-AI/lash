@@ -438,7 +438,10 @@ fn witness_rejects_unused_delivery_batches() {
 /// interpreted operations and numeric native charges account for the run.
 #[test]
 fn integer_arithmetic_runs_directly_and_accounts_for_its_body() {
-    let source = "a = 7\nb = 3\nc = a + b\nd = a - b\na += b\n";
+    // Parameters have no local integer proof; this law exercises the
+    // guarded helpers, independently of constant/local lowering.
+    let source =
+        "def arithmetic(a, b):\n    c = a + b\n    d = a - b\n    a += b\narithmetic(7, 3)\n";
     let (mut machine, _) = start(source, effects(), Bindings::default());
     machine.count_work();
     assert!(matches!(
@@ -704,5 +707,237 @@ fn arithmetic_successors_and_held_previous_definitions_resume_exactly() {
     assert!(
         observations[0].3 < observations[1].3,
         "the new bodies do less work"
+    );
+}
+
+/// FIG-6115: integer-closed loop definitions need no dynamic arithmetic
+/// guards, including when the accumulator promotes beyond signed 64 bits.
+#[test]
+fn integer_facts_remove_loop_guards_and_preserve_bigints() {
+    let source = "s = 9223372036854775807\nfor i in range(3):\n    s += i\nprint(s)\n";
+    assert_eq!(
+        output(source),
+        (vec!["9223372036854775810".into()], "ok".into())
+    );
+    assert!(
+        !kernel_text(source).contains("py.iadd"),
+        "proven integer addition is direct"
+    );
+}
+
+/// FIG-6115: a nested function may change a captured binding after its
+/// integer initialization; the enclosing loop must retain dynamic dispatch.
+#[test]
+fn integer_facts_exclude_captured_and_nonlocal_bindings() {
+    let source = r#"
+def outer():
+    x = 1
+    def change():
+        nonlocal x
+        x = 'a'
+    for i in range(2):
+        if i == 0:
+            change()
+        x += 'b'
+    print(x)
+outer()
+"#;
+    assert_eq!(output(source), (vec!["abb".into()], "ok".into()));
+    assert!(kernel_text(source).contains("py.iadd"));
+    for read_only in [
+        "x = 1\ndef read():\n    return x\nfor i in range(2):\n    x += i\nprint(read())",
+        "x = 1\nread = lambda: x\nfor i in range(2):\n    x += i\nprint(read())",
+    ] {
+        assert_eq!(output(read_only), (vec!["2".into()], "ok".into()));
+        assert!(kernel_text(read_only).contains("py.iadd"));
+    }
+}
+
+/// FIG-6115: any non-integer definition reaching a loop use prevents an
+/// integer fact, including a string/float at a later iteration's backedge.
+#[test]
+fn integer_facts_exclude_string_and_float_reassignments() {
+    for (source, expected) in [
+        (
+            "x = 1\nfor i in range(2):\n    x = 'a'\n    x += 'b'\nprint(x)",
+            "ab",
+        ),
+        (
+            "x = 1\nfor i in range(2):\n    x += 1\n    x = 1.5\nprint(x)",
+            "1.5",
+        ),
+        ("x = 1\nif True:\n    x = 1.5\nx += 1\nprint(x)", "2.5"),
+    ] {
+        assert_eq!(output(source), (vec![expected.into()], "ok".into()));
+        assert!(kernel_text(source).contains("py.iadd"));
+    }
+}
+
+/// FIG-6115: a definition on only one branch cannot bypass the Python
+/// unbound-local check at a merged use, even if every definition is int.
+#[test]
+fn integer_facts_check_unbound_paths() {
+    let source = r#"
+def f(flag):
+    if flag:
+        x = 1
+    try:
+        x += 1
+        print(x)
+    except UnboundLocalError:
+        print('unbound')
+f(False)
+f(True)
+"#;
+    assert_eq!(
+        output(source),
+        (vec!["unbound".into(), "2".into()], "ok".into())
+    );
+    assert!(kernel_text(source).contains("py.iadd"));
+}
+
+/// FIG-6115: Python implicitly deletes an except target; the next read
+/// raises its unbound-local error. Explicit variable del remains refused.
+#[test]
+fn integer_facts_exclude_deleted_bindings() {
+    let source = r#"
+def f():
+    x = 1
+    try:
+        raise ValueError()
+    except ValueError as x:
+        pass
+    try:
+        x += 1
+    except UnboundLocalError:
+        print('deleted')
+    x = 1
+    x += 1
+    print(x)
+f()
+"#;
+    assert_eq!(
+        output(source),
+        (vec!["deleted".into(), "2".into()], "ok".into())
+    );
+    assert!(kernel_text(source).contains("py.iadd"));
+    assert_eq!(
+        lower("x = 1\ndel x")
+            .expect_err("variable del is outside the dialect")
+            .code,
+        crate::diagnostics::Code::DeleteUnsupported.as_str()
+    );
+}
+
+/// FIG-6115: global declarations allow a call to replace an integer with
+/// another type; facts cannot cross the scope/call boundary.
+#[test]
+fn integer_facts_exclude_global_bindings() {
+    let source = r#"
+x = 1
+def change():
+    global x
+    x = 1.5
+change()
+x += 1
+print(x)
+"#;
+    assert_eq!(output(source), (vec!["2.5".into()], "ok".into()));
+    assert!(kernel_text(source).contains("py.iadd"));
+}
+
+/// FIG-6115: supported bool-to-int conversion remains guarded; integer
+/// facts preserve signed floor division/modulo and negative-power results.
+#[test]
+fn integer_facts_preserve_boolean_and_signed_arithmetic() {
+    let source = r#"
+x = -7
+for i in range(2):
+    x += i
+print(x // 4, x % 4)
+x = int(True)
+for i in range(2):
+    x += i
+print(x)
+x = int(False)
+for i in range(2):
+    x += i
+print(x)
+x = 2 ** -1
+x += 1
+print(x)
+x = True
+try:
+    x += 1
+except TypeError:
+    print('bool remains guarded')
+"#;
+    assert_eq!(
+        output(source),
+        (
+            vec![
+                "-2 2".into(),
+                "2".into(),
+                "1".into(),
+                "1.5".into(),
+                "bool remains guarded".into()
+            ],
+            "ok".into()
+        )
+    );
+}
+
+/// FIG-6115, K-MACH-007/008, K-CHG-007: serialization at every safe point
+/// (including an await in the loop) restores the exact facts' values,
+/// requests, result and charge; no compiler fact becomes runtime state.
+#[test]
+fn integer_facts_resume_a_parked_loop_exactly() {
+    let source = r#"
+s = 9223372036854775807
+for i in range(3):
+    s += i
+    if i == 1:
+        await echo(s)
+print(s)
+"#;
+    assert!(!kernel_text(source).contains("py.iadd"));
+    let lowered = lower(source).expect("the integer loop lowers");
+    let program = Program {
+        document: Arc::new(lowered.document),
+        library: installed().prepared.clone(),
+    };
+    let straight = arithmetic_observation(program.clone(), BOUNDS, false);
+    assert!(matches!(straight.0, End::Finished(_)));
+    assert_eq!(straight.1, ["9223372036854775810"]);
+    assert_eq!(straight.2, ["echo:9223372036854775808"]);
+    assert_eq!(
+        arithmetic_observation(
+            program,
+            Bounds {
+                charge: straight.3,
+                ..BOUNDS
+            },
+            true
+        ),
+        straight
+    );
+}
+
+/// FIG-6115: a shadowed range is an arbitrary callable, and a restored
+/// binding is an unknown reaching definition, even in an integer recurrence.
+#[test]
+fn integer_facts_exclude_shadowed_ranges_and_restored_values() {
+    let source = r#"
+def f(range):
+    for x in range(2):
+        x += 1
+        print(x)
+f(lambda n: [1.5])
+"#;
+    assert_eq!(output(source), (vec!["2.5".into()], "ok".into()));
+    assert!(kernel_text(source).contains("py.iadd"));
+    assert_eq!(
+        session(&["x = 1.5", "for i in range(2):\n    x += 1\nprint(x)"]),
+        ["3.5"]
     );
 }

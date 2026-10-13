@@ -1075,9 +1075,14 @@ impl Lowerer<'_> {
             .filter(|rename| !hidden.contains(rename))
             .cloned()
             .collect();
+        let mut excluded = self.rebound.clone();
+        excluded.extend(params.iter().cloned());
+        let range_builtin = self.variable("range").is_none();
+        let integer_locals = scope::integer_locals(suite, &bindings, &excluded, range_builtin);
         self.scopes.push(Scope {
             kind: ScopeKind::Function { is_async },
             bindings,
+            integer_locals,
             bound: vec![params.iter().cloned().collect::<BTreeSet<String>>()],
             handlers: active.iter().cloned().map(Active::Passed).collect(),
             loops: Vec::new(),

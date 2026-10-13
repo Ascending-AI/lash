@@ -453,3 +453,174 @@ pub(crate) fn breaks(body: &[Stmt]) -> bool {
         _ => false,
     })
 }
+
+/// A deliberately scope-wide proof: every definition of a candidate local
+/// must produce an integer on successful execution. Remove candidates until
+/// their dependencies are closed. This admits loop-carried integer recurrences
+/// without speculating about the first iteration or about control-flow merges.
+/// A non-integer assignment or deletion anywhere rejects the name everywhere.
+/// The lowerer additionally requires a definitely bound name at each use.
+pub(crate) fn integer_locals(
+    body: &[Stmt],
+    bindings: &Bindings,
+    excluded: &BTreeSet<String>,
+    range_builtin: bool,
+) -> BTreeSet<String> {
+    let mut candidates: BTreeSet<String> = bindings.locals.difference(excluded).cloned().collect();
+    let range_builtin = range_builtin && !bindings.locals.contains("range");
+    loop {
+        let mut proof = IntegerProof {
+            candidates: &candidates,
+            rejected: BTreeSet::new(),
+            range_builtin,
+        };
+        proof.visit_body(body);
+        let rejected = proof.rejected;
+        let before = candidates.len();
+        candidates.retain(|name| !rejected.contains(name));
+        if candidates.len() == before {
+            return candidates;
+        }
+    }
+}
+
+struct IntegerProof<'s> {
+    candidates: &'s BTreeSet<String>,
+    rejected: BTreeSet<String>,
+    range_builtin: bool,
+}
+
+impl IntegerProof<'_> {
+    fn target(&mut self, target: &Expr, integer: bool) {
+        match target {
+            Expr::Name(name) if !integer => {
+                self.rejected.insert(name.id.as_str().to_string());
+            }
+            Expr::Tuple(tuple) => tuple.elts.iter().for_each(|elt| self.target(elt, false)),
+            Expr::List(list) => list.elts.iter().for_each(|elt| self.target(elt, false)),
+            Expr::Starred(starred) => self.target(&starred.value, false),
+            _ => {}
+        }
+    }
+
+    fn integer(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::NumberLiteral(number) => matches!(number.value, ast::Number::Int(_)),
+            Expr::Name(name) => self.candidates.contains(name.id.as_str()),
+            Expr::BinOp(op) => {
+                integer_closed(op.op) && self.integer(&op.left) && self.integer(&op.right)
+            }
+            Expr::UnaryOp(op) => {
+                matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                    && self.integer(&op.operand)
+            }
+            Expr::If(branch) => self.integer(&branch.body) && self.integer(&branch.orelse),
+            // Booleans participate in Python integer arithmetic, but a bool
+            // value is not a kernel integer. Keep its Python coercion helper.
+            // Powers may produce floats (negative exponents); calls and
+            // subscripts do not establish a local integer definition.
+            _ => false,
+        }
+    }
+
+    fn captured(&mut self, node: &Expr) {
+        let mut names = MentionedNames(&mut self.rejected);
+        names.visit_expr(node);
+    }
+}
+
+fn integer_closed(op: ast::Operator) -> bool {
+    matches!(
+        op,
+        ast::Operator::Add
+            | ast::Operator::Sub
+            | ast::Operator::Mult
+            | ast::Operator::FloorDiv
+            | ast::Operator::Mod
+    )
+}
+
+/// Over-approximate captures by every name mentioned in a nested body,
+/// including names shadowed there. Missing an optimization is preferable to
+/// letting closure writes invalidate a proof between two reads.
+struct MentionedNames<'s>(&'s mut BTreeSet<String>);
+
+impl<'a> Visitor<'a> for MentionedNames<'_> {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        if let Expr::Name(name) = expr {
+            self.0.insert(name.id.as_str().to_string());
+        }
+        visitor::walk_expr(self, expr);
+    }
+}
+
+impl<'a> Visitor<'a> for IntegerProof<'_> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::Assign(assign) => {
+                let integer = self.integer(&assign.value);
+                for target in &assign.targets {
+                    self.target(target, integer);
+                }
+            }
+            Stmt::AnnAssign(assign) => {
+                if let Some(value) = &assign.value {
+                    self.target(&assign.target, self.integer(value));
+                }
+            }
+            Stmt::AugAssign(assign) => self.target(
+                &assign.target,
+                integer_closed(assign.op)
+                    && self.integer(&assign.target)
+                    && self.integer(&assign.value),
+            ),
+            Stmt::For(for_loop) => {
+                let integer = self.range_builtin
+                    && matches!(for_loop.iter.as_ref(), Expr::Call(call)
+                    if matches!(call.func.as_ref(), Expr::Name(name) if name.id.as_str() == "range"));
+                self.target(&for_loop.target, integer);
+            }
+            Stmt::Delete(delete) => {
+                for target in &delete.targets {
+                    self.target(target, false);
+                }
+            }
+            Stmt::FunctionDef(def) => {
+                self.rejected.insert(def.name.id.as_str().to_string());
+                let mut names = MentionedNames(&mut self.rejected);
+                names.visit_stmt(stmt);
+                return;
+            }
+            Stmt::ClassDef(class) => {
+                self.rejected.insert(class.name.id.as_str().to_string());
+                let mut names = MentionedNames(&mut self.rejected);
+                names.visit_stmt(stmt);
+                return;
+            }
+            Stmt::Try(attempt) => {
+                for ast::ExceptHandler::ExceptHandler(handler) in &attempt.handlers {
+                    if let Some(name) = &handler.name {
+                        self.rejected.insert(name.id.as_str().to_string());
+                    }
+                }
+            }
+            Stmt::With(with) => {
+                for item in &with.items {
+                    if let Some(target) = &item.optional_vars {
+                        self.target(target, false);
+                    }
+                }
+            }
+            _ => {}
+        }
+        visitor::walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        if matches!(expr, Expr::Lambda(_)) {
+            self.captured(expr);
+        } else {
+            visitor::walk_expr(self, expr);
+        }
+    }
+}

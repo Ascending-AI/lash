@@ -113,6 +113,9 @@ enum ScopeKind {
 struct Scope {
     kind: ScopeKind,
     bindings: Bindings,
+    /// Locals whose every definition is integer-producing. Boundness is
+    /// checked separately at each read; these facts are never serialized.
+    integer_locals: BTreeSet<String>,
     /// Names that hold a value at this point, one frame per kernel block
     /// open in this scope. A read of a name in none of them is checked.
     bound: Vec<BTreeSet<String>>,
@@ -274,6 +277,14 @@ pub(crate) fn lower(
             .iter()
             .map(|name| name.as_str().to_string()),
     );
+    let mut excluded = rebound.clone();
+    excluded.extend(environment.bindings.iter().map(ToString::to_string));
+    // A saved function may write module bindings from an earlier cell.
+    // Its body is outside this local analysis.
+    if !environment.functions.is_empty() {
+        excluded.extend(bindings.locals.iter().cloned());
+    }
+    let integer_locals = scope::integer_locals(&module.body, &bindings, &excluded, true);
     let mut lowerer = Lowerer {
         source,
         library: environment.library,
@@ -286,6 +297,7 @@ pub(crate) fn lower(
         scopes: vec![Scope {
             kind: ScopeKind::Module,
             bindings,
+            integer_locals,
             bound: vec![BTreeSet::new()],
             handlers: Vec::new(),
             loops: Vec::new(),
@@ -509,12 +521,26 @@ impl Lowerer<'_> {
         }
     }
 
-    /// The annotated type of a variable, which the front end trusts.
+    /// An integer fact applies only to a bound local of the current
+    /// scope. An enclosing scope may run differently when a closure is
+    /// called, and a branch-local definition may not reach this read.
     fn type_of(&self, found: &Found, id: &str) -> Ty {
-        found
+        let annotated = found
             .scope
             .and_then(|scope| self.scopes[scope].bindings.types.get(id).copied())
-            .unwrap_or(Ty::Unknown)
+            .unwrap_or(Ty::Unknown);
+        // Explicit annotations retain the dialect's existing trust rule.
+        if annotated != Ty::Unknown {
+            return annotated;
+        }
+        if let Some(scope) = found.scope
+            && scope == self.scopes.len() - 1
+            && self.scopes[scope].integer_locals.contains(id)
+            && self.is_bound(scope, id)
+        {
+            return Ty::Int;
+        }
+        Ty::Unknown
     }
 
     /// The function `id` names, when a `def` is all that binds it.
