@@ -250,12 +250,16 @@ impl SurfaceMethod {
     }
 }
 
+/// An attachment id no case ever writes. The attachment-referrer drivers use
+/// it so the inventory covers those methods without mutating an attachment the
+/// surrounding case depends on: an unknown entity is itself a refusal driver,
+/// and whatever a backend answers, the no-residue law still applies.
 #[expect(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
 fn unknown_attachment_id() -> AttachmentId {
-    AttachmentId::parse(UNKNOWN_ATTACHMENT_ID).expect("the unknown-attachment id must parse")
+    AttachmentId::parse("c3".repeat(32)).expect("the unknown-attachment id must parse")
 }
 
 #[expect(
@@ -299,11 +303,6 @@ fn surface_run_spec_hash() -> Option<lash_core::RunSpecHash> {
 const UNCOMMITTED_TURN_ID: &str = "fig-2841-uncommitted-turn";
 /// The turn id the surface sweep's seed commit stamps.
 const SURFACE_COMMITTED_TURN_ID: &str = "fig-2841-surface-committed-turn";
-/// An attachment id no case ever writes. The attachment-referrer drivers use
-/// it so the inventory covers those methods without mutating an attachment the
-/// surrounding case depends on: an unknown entity is itself a refusal driver,
-/// and whatever a backend answers, the no-residue law still applies.
-const UNKNOWN_ATTACHMENT_ID: &str = "fig-2841-unknown-attachment";
 const UNKNOWN_INPUT_ID: &str = "fig-2841-unknown-input";
 /// The run the sweep binds its next-turn input to, and the other run a
 /// second binding names.

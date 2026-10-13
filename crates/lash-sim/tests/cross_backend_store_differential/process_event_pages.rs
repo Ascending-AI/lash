@@ -410,6 +410,10 @@ pub(super) async fn compare_bounded_process_event_pages(
     // Ten occurrences of one node: the writer records the first
     // `PROCESS_EFFECT_OCCURRENCE_CAP` one by one and counts the rest, by
     // class, in one omission record.
+    // Occurrences and omissions name the same structural site (ADR 0100 R4).
+    let effect_node_id = lash_sansio::effect_identity_fixture("repeated-node", 1)
+        .site
+        .to_string();
     let mut omitted = lash_core::ProcessEffectOmittedCounts::default();
     let mut recorded = Vec::new();
     for occurrence in 1..=10 {
@@ -438,7 +442,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         );
     }
     let omissions = lash_core::ProcessEffectOmissions::new(
-        std::collections::BTreeMap::from([("repeated-node".to_string(), omitted)]),
+        std::collections::BTreeMap::from([(effect_node_id.clone(), omitted)]),
         lash_core::FleetFormat::current(),
     );
     // The run commits its summary at its boundaries (FIG-3571): a bare
@@ -539,7 +543,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         summaries.push(summary);
     }
     assert_eq!(summaries[0], summaries[1], "effect projections diverged");
-    let node = summaries[0].node("repeated-node").expect("effect node");
+    let node = summaries[0].node(&effect_node_id).expect("effect node");
     assert_eq!(node.occurrences.len(), 8);
     assert_eq!(
         node.omitted.failure, 1,
