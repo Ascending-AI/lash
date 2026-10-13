@@ -148,13 +148,34 @@ open that two lanes would otherwise settle differently.
   another validator, or a foreign image, enters the trusted population only
   after the full validation pass (`lash-kernel-migrate`'s carry path). It
   never inherits an incompatible attestation.
-- **D-WAITS.** `WaitsSummary` is the count of the handed-out waits and the
-  XOR of each wait's domain-separated SHA-256 over (wait number, canonical
-  effect identity). It is maintained with the waits table's page edits. The
-  parent maintains the same summary incrementally from its admission rows
-  and the park's admission delta, and refuses a mismatch as a protocol
-  breach. The check guards consistency for a trusted producer; it is not an
-  authenticator.
+- **D-WAITS (amended): table root digest; no XOR summary.** The waits table
+  is canonical; its root digest is its identity. There is no separate summary.
+- **S1/S4 (amended): heap-header page; CheckpointRoot references it.** A
+  KEYED_LEAF-tagged heap-header page encodes HeapRoot. The checkpoint names
+  that page instead of embedding a second copy. Unchanged heaps reuse it.
+- **S7 (amended).** CensusGraph exposes persistent root cost, nested value
+  edges and value cost, plus ascending ended-task enumeration. SweepSet names
+  both unreachable entities and ended-task results; installation is bounded
+  and a failure ends the activation. The census traces in memory only.
+- **S1 (amended): census injection.** Machine::start takes an additional
+  `census: Box<dyn AllocationCensus>`. Composition constructs the concrete
+  census; the VM never chooses or duplicates accounting policy.
+- **S1/S8 (amended): authoritative membership and lazy heads.** The heap
+  checks its persisted membership runs before any override or frozen-base
+  read and installs sweep tombstones. FamilyBase has no member method;
+  `base_object(entity, frozen, pages)` returns `Option<ObjectHead>`. A live
+  member with no frozen body is corrupt-family state. ObjectHead exposes
+  bounded collection roots with authenticated lengths and its family.
+- **S1/S8 (amended): TupleRef/link family context.** Paged tuples and tree
+  links carry optional family context. Relative occurrences have tag 19,
+  distinct from absolute references. Missing or mismatched context is
+  corruption; a context may not interpret an absolute reference to its own
+  family. Copied leaves encode absolute identities and clear their context.
+- **Ownership amendment (2026-10-14).** hp-heap deletes the kernel-state
+  whole-format modules and the VM's old session/parked paths needed for the
+  Value cutover. hp-life owns the new outcome-delivery/instantiate call
+  sites as well as lifecycle implementation. It starts on hp-heap's paged
+  heap milestone and merges subsequent hp-heap commits.
 - **D-FRAME.** Persisted frames hold semantic coordinates only: the pending
   statement's `Site`, bindings by declaring site, loops (a map or set
   position is a `TableCursor`), `finally` departures and held values. This
@@ -427,7 +448,7 @@ Invariants:
 - A wait persists its identity and kind, never its arguments: the parent
   supplies admissions at open.
 - A committed outcome is a `FrozenRef`, delivered as a fresh family (S8).
-- `waits_summary` changes with the waits table (D-WAITS).
+- The waits table root is its digest (D-WAITS amended).
 - `release` and `owner` are the existing ReleaseManifest and OwnerBinding
   nodes. The parent reads them from this header and never decodes the heap
   to find a release.
@@ -722,7 +743,7 @@ by that lane. Seam declaration files (§3) are read-only for every lane.
 | hp-paging | `lash-vm-worker/src/{host,worker,entry,service}.rs`; new `lash-vm-worker/src/page_laws.rs`; `lash-vm-protocol/src/{message,codec,bounds,outcome}.rs` (variants, bounds, refusals); `lash-vm-client/src/{machine,pool,wire,ipc,config}.rs`; new `lash-vm-broker/src/kernel/pages/**` (page service, capability MAC, spool, `spool_laws.rs`); `lash-core-store/src/checkpoint_graph/node.rs` (a public framing function for direct semantic kinds) | S3, S5 `StageSpool` | S6 (`acquire_root_lease`, `read_pages`) |
 | hp-publish | `lash-durable/src/domain/{graph,graph_commit,mod}.rs`; `lash-durable/src/{tx,port}.rs` (only if `commit_candidate` needs `ActorTx` accessors); new `lash-durable/src/laws/pages.rs`; `lash-core-store/src/checkpoint_graph/{registry,roots,bodies,refusal,commit}.rs`; `lash-sqlite-store/src/durable/**`, `lash-sqlite-store/src/schema.rs`, `lash-sqlite-store/src/graph_store_tests.rs`; `lash-postgres-store/src/postgres/durable/**`, its schema, `migrate.rs`, `schema_shape.rs`, `schema-shape.txt`, `graph_store_tests.rs`; `lash-sim/tests/cross_backend_store_differential/**`; `lash-vm-broker/src/kernel/store.rs` (lease acquisition, `commit_candidate`, `pin_release` from the root header) | S6, D-RET, D-ADM | S5 (`CandidateManifest`) |
 | hp-life | new `lash-kernel-state/src/paged/family_impl/**`; `lash-kernel-vm/src/machine/session.rs`; new `lash-kernel-vm/src/laws/lifecycle.rs`; `lash-protocol-rlm/src/executor/session.rs`, `session/graph.rs`; `lash-kernel-dialect/src/saved.rs`, `saved/graph.rs`, new `saved/laws.rs` | S8 | S1 |
-| hp-integrate | `lash-vm-broker/src/kernel/{state,run,graph,ledger,value}.rs`; `lash-vm-runtime/src/process/**`, `formats.rs`; `lash-core-execution/src/runtime/actor/process/state_graph.rs`; `lash-kernel-migrate/**`; `lash-kernel-conformance/src/{migration,smith}/**`; `lash-vm-protocol/src/graph_state*.rs`; `lash-durable/src/domain/mod.rs` (`DurableReads::hydrate`) and every implementation; `lash-durable-test/**` fixtures and crash laws; `lash-perf/**`; `examples/**`; `lash-kernel-state/src/{schema,fragments,whole,terminal,codec_variants,tests}.rs` and `bin/parked_schema_generator.rs`; `lash-kernel-vm/src/whole.rs`, `machine/parked*`; `docs/kernel/**`, `docs/adr/**`; facade and schema exports | end-to-end wiring of activation (lease → page service → seal → candidate → commit) | all |
+| hp-integrate | `lash-vm-broker/src/kernel/{state,run,graph,ledger,value}.rs`; `lash-vm-runtime/src/process/**`, `formats.rs`; `lash-core-execution/src/runtime/actor/process/state_graph.rs`; `lash-kernel-migrate/**`; `lash-kernel-conformance/src/{migration,smith}/**`; `lash-vm-protocol/src/graph_state*.rs`; `lash-durable/src/domain/mod.rs` (`DurableReads::hydrate`) and every implementation; `lash-durable-test/**` fixtures and crash laws; `lash-perf/**`; `examples/**`;  `docs/kernel/**`, `docs/adr/**`; facade and schema exports | end-to-end wiring of activation (lease → page service → seal → candidate → commit) | all |
 
 **Shared touch points** and who resolves each:
 
@@ -776,10 +797,10 @@ symbol together with every caller in its own files.
 | `lash-vm-broker/src/kernel/store.rs::pin_release` (942): decoding a `KernelWhole` to find the release | hp-publish |
 | `lash-vm-broker/src/kernel/store.rs`: `hydrate` calls (975, 1024) on normal activation | I |
 | `lash-durable/src/domain/mod.rs:503`: `DurableReads::hydrate` and `HydratedGraph`; SQLite `durable/graph.rs::hydrate_in` (561); PostgreSQL `durable/graph.rs::{hydrate_in, hydrate_owner}` (661, 1053) | I |
-| `lash-kernel-state/src/schema.rs`: `ParkedRun` and the whole JSON schema; `fragments.rs`: `Baseline`, `Saved`, `save`, `load`; `bin/parked_schema_generator.rs` | I |
-| `lash-kernel-state/src/whole.rs`: `KernelWhole` (66), `WholeTask`, `WholeWait`, `capture` (196), `restore` (253); `terminal.rs`: `TerminalWhole` (21) | I |
-| `lash-kernel-vm/src/whole.rs`: `export_whole` (69), `import_whole*` (112, 129), `terminal_whole` (181), `terminal_end` (273) | I |
-| `lash-kernel-vm/src/machine/parked.rs` and `parked/{capture,restore}.rs`: `export` (419), `save` (440), `import` (458); `machine/mod.rs`: `type Parked` (879), `save` (481), `import_with_*` (430, 460), `Machine::{export,import}` (946, 950) | I |
+| `lash-kernel-state/src/schema.rs`: `ParkedRun` and the whole JSON schema; `fragments.rs`: `Baseline`, `Saved`, `save`, `load`; `bin/parked_schema_generator.rs` | hp-heap |
+| `lash-kernel-state/src/whole.rs`: `KernelWhole` (66), `WholeTask`, `WholeWait`, `capture` (196), `restore` (253); `terminal.rs`: `TerminalWhole` (21) | hp-heap |
+| `lash-kernel-vm/src/whole.rs`: `export_whole` (69), `import_whole*` (112, 129), `terminal_whole` (181), `terminal_end` (273) | hp-heap |
+| `lash-kernel-vm/src/machine/parked.rs` and `parked/{capture,restore}.rs`: `export` (419), `save` (440), `import` (458); `machine/mod.rs`: `type Parked` (879), `save` (481), `import_with_*` (430, 460), `Machine::{export,import}` (946, 950) | hp-heap |
 | `lash-vm-broker/src/kernel/state.rs`: `WholeState` (177), `export_parked` (287), `export_whole_state` (303), `OpenedRun` (333), `open_whole` (349), `capture_whole` (408), `import_parked` (487), `import_whole_state` (519), `export_end*` (640, 655), `read_end*` (688, 698) | I |
 | `lash-vm-protocol/src/graph_state.rs`: `SealedGraphState`, `GraphNodeBytes`, `GraphRoot`; `message.rs`: `StartFrom::ParkedGraph`, `ParkedGraph`, `ParentMessage::ExportGraph`, `WorkerMessage::ExportedGraph`, `Parked.state` | I |
 | `lash-vm-client/src/machine.rs`: `export` returning `WholeState` (482), `resume_sealed` (320); `pool.rs::export_graph` (650) | I |

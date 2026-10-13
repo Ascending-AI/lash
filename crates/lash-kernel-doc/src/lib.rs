@@ -83,3 +83,5 @@ pub use value::{
     ObjectId, TaskId, Timestamp, Value, ValueKind,
 };
 pub use version::KernelVersion;
+
+pub use graph_codec::heap_values;

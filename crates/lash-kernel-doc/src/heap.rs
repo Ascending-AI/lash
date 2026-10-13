@@ -176,6 +176,8 @@ pub struct TupleSummary {
 /// An immutable tuple.
 #[derive(Clone, Debug)]
 pub struct TupleRef {
+    /// Namespace for untouched frozen tuple pages.
+    pub family: Option<FamilyId>,
     pub summary: TupleSummary,
     pub body: Payload<[Value]>,
 }
@@ -287,6 +289,8 @@ pub enum HeapFault {
 /// The host resources a heap draws on beside guest memory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum HostResource {
+    /// Quiescent census bitmap, work-list and root scratch budget.
+    TraceBudget,
     CleanResidency,
     DirtyResidency,
     PinnedPages,

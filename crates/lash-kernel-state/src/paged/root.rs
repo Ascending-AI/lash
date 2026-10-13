@@ -90,18 +90,6 @@ pub struct SavedMeters {
     pub live_tasks: u32,
 }
 
-/// A canonical summary of the waits the run holds handed out, maintained
-/// with the same page edits as the waits table. The parent compares it with
-/// its own admission membership and the park's admission delta instead of
-/// rescanning task pages: count and the XOR of each admitted wait's
-/// domain-separated SHA-256 over (wait number, canonical effect identity).
-/// A consistency check of a trusted producer, not an authenticator.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WaitsSummary {
-    pub count: u64,
-    pub digest: [u8; 32],
-}
-
 /// Kind 1000: one execution's complete root.
 #[derive(Clone, Debug)]
 pub struct CheckpointRoot {
@@ -113,7 +101,7 @@ pub struct CheckpointRoot {
     /// The OwnerBinding node of the execution.
     pub owner: PageId,
     pub status: RootStatus,
-    pub heap: HeapRoot,
+    pub heap: PageRef,
     /// [`TaskRecord`]s by task number; `main` is task 0.
     pub tasks: KeyedRoot,
     /// Task numbers in the order they run (`K-TASK-003`).
@@ -121,7 +109,6 @@ pub struct CheckpointRoot {
     /// [`WaitRecord`]s by wait number: every wait handed out and not yet
     /// run with.
     pub waits: KeyedRoot,
-    pub waits_summary: WaitsSummary,
     /// [`ListJoinRecord`]s by join number.
     pub joins: KeyedRoot,
     /// Wait numbers withdrawn after being handed out (`K-MACH-004`).

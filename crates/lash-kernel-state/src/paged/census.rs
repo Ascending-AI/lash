@@ -112,10 +112,31 @@ pub struct TransientRoots<'a> {
     pub reserved: LogicalBytes,
 }
 
+/// The proved-unreachable portion of a quiescent census. Result payloads
+/// are retired together with entity membership; task obligation metadata
+/// remains owned by the execution records.
+#[derive(Clone, Debug, Default)]
+pub struct SweepSet {
+    pub entities: Vec<EntityId>,
+    pub ended_task_results: Vec<TaskId>,
+}
+
 /// The graph the census traces, as the paged heap exposes it.
 ///
 /// Implemented by the paged heap (layer hp-heap, FIG-6188).
 pub trait CensusGraph {
+    /// Persistent root/control holding costs, excluding entity referents
+    /// and ended-task results. Validated page summaries supply this total.
+    fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault>;
+    /// The local holding cost of a transient value under LocalCostV1.
+    fn value_cost(&mut self, value: &Value) -> Result<LogicalBytes, HeapFault>;
+    /// Identity edges at any immutable nesting depth, including paged
+    /// tuples, read from summaries without assembling scalar payloads.
+    fn value_edges(
+        &mut self,
+        value: &Value,
+        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault>;
     /// Visits every persistent root: session bindings, every task's frames
     /// and held values, task states, waits' committed outcomes, and the
     /// handles that keep ended tasks' results.
@@ -130,24 +151,30 @@ pub trait CensusGraph {
     fn entity_edges(
         &mut self,
         entity: EntityId,
-        out: &mut dyn FnMut(Identity),
+        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault>;
     /// What an ended task's result names and costs, when a handle reaches
     /// the task.
     fn task_result(
         &mut self,
         task: TaskId,
-        out: &mut dyn FnMut(Identity),
+        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<LogicalBytes, HeapFault>;
     /// Removes `entities` from the census, updating directory paths, family
     /// membership and cost aggregates. Never called with a reached entity.
-    fn sweep(&mut self, entities: &[EntityId]) -> Result<(), HeapFault>;
+    fn sweep(&mut self, unreachable: &SweepSet) -> Result<(), HeapFault>;
     /// Every entity the census holds, ascending, after `after`.
     fn census_after(
         &mut self,
         after: Option<EntityId>,
         limit: usize,
     ) -> Result<Vec<EntityId>, HeapFault>;
+    /// Retained ended-task result payloads, unique and ascending.
+    fn ended_tasks_after(
+        &mut self,
+        after: Option<TaskId>,
+        limit: usize,
+    ) -> Result<Vec<TaskId>, HeapFault>;
 }
 
 /// The census and its policy.
@@ -164,8 +191,9 @@ pub trait AllocationCensus {
     where
         Self: Sized;
     fn certificate(&self) -> AccountingCertificate;
-    /// Records an entity's addition with its local cost.
-    fn added(&mut self, cost: LogicalBytes) -> Result<(), CensusFault>;
+    /// Records newly allocated census entities in one checked operation.
+    /// Lazy families pass their validated whole cost and occurrence count.
+    fn added(&mut self, cost: LogicalBytes, entities: u64) -> Result<(), CensusFault>;
     /// Records a local cost change of a census entity or a persistent root
     /// (a field replaced, an element removed). Dropping a reference never
     /// subtracts its referent.
