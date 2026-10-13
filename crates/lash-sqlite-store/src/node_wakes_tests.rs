@@ -24,8 +24,8 @@ use lash_durable::{
     LeaseSettings, MailKind, MailTx, NodeId, NodeLease, NodeWakeEvent, NodeWakeFeed, NodeWakes,
     Owner, Reaped, WakeBatch,
 };
-use tokio::io::AsyncBufReadExt as _;
-use tokio::sync::mpsc;
+use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
+use tokio::sync::{mpsc, watch};
 
 use super::*;
 use crate::SqliteStoreSet;
@@ -158,7 +158,11 @@ impl Child {
             tokio::process::Command::new(std::env::current_exe().expect("the test binary's path"))
                 .args(["--exact", test, "--nocapture", "--test-threads", "1"])
                 .env(CHILD, format!("{role}\n{}", database.display()))
-                .stdin(Stdio::null())
+                .stdin(if test == CONTENTION {
+                    Stdio::piped()
+                } else {
+                    Stdio::null()
+                })
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true)
@@ -212,6 +216,17 @@ impl Child {
         }
     }
 
+    /// Release this contention node's held claims after mail is queued.
+    async fn release_tallies(&mut self) {
+        self.process
+            .stdin
+            .as_mut()
+            .expect("a contention node's piped stdin")
+            .write_all(b"tally\n")
+            .await
+            .expect("release the contention node's tallies");
+    }
+
     /// Kill the child with SIGKILL and wait for it to be gone.
     async fn kill(&mut self) {
         self.process
@@ -250,12 +265,22 @@ impl Activation for Report {
 }
 
 /// Acknowledges each mail it reads, reports it, and releases its actor idle,
-/// so the next mail readies it for whichever node claims first.
-struct Tally;
+/// so the next mail readies it for whichever node claims first. Holds the
+/// initial claims until the parent has observed both nodes owning actors and
+/// queued mail for them; later activations pass through the released gate.
+struct Tally {
+    released: watch::Receiver<bool>,
+}
 
 #[async_trait::async_trait]
 impl Activation for Tally {
     async fn activate(&self, owned: Owned) -> Exit {
+        report(&format!("owns {}", owned.actor()));
+        self.released
+            .clone()
+            .wait_for(|released| *released)
+            .await
+            .expect("the parent releases the tally gate");
         let Ok(mut tx) = owned.begin().await else {
             return Exit::Released;
         };
@@ -450,14 +475,25 @@ async fn run_child(role: &str, database: &Path) {
                 ..DurableSettings::default()
             },
         ),
-        _ => (
-            Arc::new(Tally),
-            DurableSettings {
-                max_active: 4,
-                claim_batch: 4,
-                ..DurableSettings::default()
-            },
-        ),
+        _ => {
+            let (release, released) = watch::channel(false);
+            tokio::task::spawn_blocking(move || {
+                let mut line = String::new();
+                std::io::stdin()
+                    .read_line(&mut line)
+                    .expect("read the parent's tally gate");
+                assert_eq!(line, "tally\n", "the parent releases the held claims");
+                release.send(true).expect("the tally gate stays open");
+            });
+            (
+                Arc::new(Tally { released }),
+                DurableSettings {
+                    max_active: CONTENTION_ACTIVE,
+                    claim_batch: CONTENTION_ACTIVE,
+                    ..DurableSettings::default()
+                },
+            )
+        }
     };
     let config = settings.validate().expect("the child's settings validate");
     let mut runner = Runner::new(
@@ -622,12 +658,14 @@ async fn a_wake_crosses_processes_and_a_killed_process_is_reaped_by_its_lock() {
 
 const CONTENTION: &str =
     "durable::node_wakes::tests::processes_writing_one_file_at_once_lose_and_double_no_work";
+const CONTENTION_ACTIVE: usize = 4;
 
 /// Three processes write one database file at once: this one appends mail
 /// to many actors while two child nodes claim them, acknowledge each one's
 /// mail and release it, all under SQLite's one writer and its busy timeout.
 /// Every mail is acknowledged exactly once, by one node, and both nodes did
-/// part of the work.
+/// part of the work: each holds a full claim batch behind its stdin gate
+/// until both own actors and the parent has queued the first mail round.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn processes_writing_one_file_at_once_lose_and_double_no_work() {
     if let Some((role, database)) = child_role() {
@@ -653,11 +691,24 @@ async fn processes_writing_one_file_at_once_lose_and_double_no_work() {
         Child::start(CONTENTION, "left", &database),
         Child::start(CONTENTION, "right", &database),
     ];
+    let mut held = BTreeSet::new();
     for node in &mut nodes {
         assert_eq!(node.next(Duration::from_secs(30)).await, "serving");
+        for _ in 0..CONTENTION_ACTIVE {
+            let line = node.next(Duration::from_secs(30)).await;
+            let claimed = line.strip_prefix("owns ").expect("a held claim report");
+            assert!(
+                actors.iter().any(|actor| actor.to_string() == claimed),
+                "a node claimed an actor outside the workload: {claimed}"
+            );
+            assert!(
+                held.insert(claimed.to_owned()),
+                "both nodes claimed {claimed}"
+            );
+        }
     }
     let mut appended = BTreeSet::new();
-    for _ in 0..ROUNDS {
+    for round in 0..ROUNDS {
         for actor in &actors {
             let mut tx = MailTx::new();
             tx.append(actor.clone(), MailKind::new("law.note"), "note");
@@ -667,6 +718,13 @@ async fn processes_writing_one_file_at_once_lose_and_double_no_work() {
                 .expect("append under contention");
             for (actor, seq) in commit.appended {
                 appended.insert((actor.to_string(), seq.0));
+            }
+        }
+        if round == 0 {
+            // Each node owns actors with mail before either can acknowledge
+            // and release them. The remaining rounds race ordinary claims.
+            for node in &mut nodes {
+                node.release_tallies().await;
             }
         }
     }
