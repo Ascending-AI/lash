@@ -4,7 +4,7 @@ use lash_sansio::TurnId;
 #[derive(Clone, Copy)]
 struct PhaseStart {
     started_at: Instant,
-    alloc_before: Stats,
+    alloc_before: Option<Stats>,
     memory_before: ProcessMemorySample,
 }
 
@@ -15,9 +15,18 @@ struct RuntimePerfPhaseProbeState {
     first_started_at: Option<Instant>,
 }
 
-#[derive(Default)]
 pub(crate) struct RuntimePerfPhaseProbe {
+    clock_only: bool,
     state: Mutex<RuntimePerfPhaseProbeState>,
+}
+
+impl Default for RuntimePerfPhaseProbe {
+    fn default() -> Self {
+        Self {
+            clock_only: std::env::var_os("LASH_PERF_PHASE_CLOCK_ONLY").is_some(),
+            state: Mutex::new(RuntimePerfPhaseProbeState::default()),
+        }
+    }
 }
 
 impl RuntimePerfPhaseProbe {
@@ -79,8 +88,12 @@ impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
         state.first_started_at.get_or_insert_with(Instant::now);
         let start = PhaseStart {
             started_at: Instant::now(),
-            alloc_before: allocator_stats(),
-            memory_before: process_memory_sample(),
+            alloc_before: (!self.clock_only).then(allocator_stats),
+            memory_before: if self.clock_only {
+                ProcessMemorySample::default()
+            } else {
+                process_memory_sample()
+            },
         };
         state.open.entry(phase.to_string()).or_default().push(start);
     }
@@ -105,12 +118,21 @@ fn record_completed_phase(
     name: String,
     start: PhaseStart,
 ) {
-    let alloc_after = allocator_stats();
-    let memory_after = process_memory_sample();
+    let duration_ms = elapsed_ms(start.started_at);
+    let allocations = start
+        .alloc_before
+        .map_or_else(zero_allocation_delta, |before| {
+            alloc_delta(before, allocator_stats())
+        });
+    let memory_after = if start.alloc_before.is_some() {
+        process_memory_sample()
+    } else {
+        ProcessMemorySample::default()
+    };
     let metrics = RuntimePerfPhaseRunResult {
         samples: 1,
-        duration_ms: elapsed_ms(start.started_at),
-        allocations: alloc_delta(start.alloc_before, alloc_after),
+        duration_ms,
+        allocations,
         rss_growth_kb: diff_opt_i64(start.memory_before.rss_kb, memory_after.rss_kb),
     };
     let entry = completed
@@ -119,7 +141,7 @@ fn record_completed_phase(
             samples: 0,
             duration_ms: 0.0,
             allocations: zero_allocation_delta(),
-            rss_growth_kb: Some(0),
+            rss_growth_kb: None,
         });
     entry.samples += metrics.samples;
     entry.duration_ms = round3(entry.duration_ms + metrics.duration_ms);
@@ -573,7 +595,10 @@ async fn run_once_inner(
         let runtime_ref = &runtime;
         let counters_ref = &extra_counters;
         let deep_session_ref = &deep_session;
-        executed
+        let turn_work_before = work_collector
+            .as_ref()
+            .map(|collector| collector.snapshot());
+        let turn = executed
             .turn_then(
                 turn_index,
                 async move {
@@ -680,26 +705,6 @@ async fn run_once_inner(
                             turn_index + 1
                         )
                     })?;
-                    if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
-                        if !matches!(
-                            turn.outcome,
-                            TurnOutcome::Stopped(
-                                lash_core::facade_support::TurnStop::Cancelled { .. }
-                            )
-                        ) {
-                            anyhow::bail!(
-                                "cancel round-trip turn did not finish cancelled: {:?}",
-                                turn.outcome
-                            );
-                        }
-                    } else {
-                        validate_runtime_perf_turn(
-                            scenario,
-                            turn_index,
-                            &turn,
-                            &runtime.export_state().await?,
-                        )?;
-                    }
                     if let Some(variant) = catalog_variant {
                         let observation = runtime.finish_tool_catalog_observation();
                         extra_counters.lock_recover().insert(
@@ -716,11 +721,11 @@ async fn run_once_inner(
                         );
                     }
                     Ok(TurnRun {
-                        value: (),
                         tail: TurnTail {
                             phase_profile: std::mem::take(&mut extra_phase_profile),
-                            turn_usage: turn.usage,
+                            turn_usage: turn.usage.clone(),
                         },
+                        value: turn,
                     })
                 },
                 async {
@@ -749,6 +754,71 @@ async fn run_once_inner(
                 },
             )
             .await?;
+        // These are process-wide store/graph counters in the send and
+        // settlement window; construction, seeding and validation are outside.
+        if let (Some(before), Some(collector)) = (turn_work_before, &work_collector) {
+            let after = collector.snapshot();
+            for (name, value) in [
+                (
+                    "turn_work.sql_statements",
+                    after.sql_statements.saturating_sub(before.sql_statements),
+                ),
+                (
+                    "turn_work.sql_rows_read",
+                    after.sql_rows_read.saturating_sub(before.sql_rows_read),
+                ),
+                (
+                    "turn_work.sql_rows_written",
+                    after
+                        .sql_rows_written
+                        .saturating_sub(before.sql_rows_written),
+                ),
+                (
+                    "turn_work.wal_frames",
+                    after
+                        .store_pages_written
+                        .saturating_sub(before.store_pages_written),
+                ),
+                (
+                    "turn_work.graph_encoded_bytes",
+                    after
+                        .graph_encoded_bytes
+                        .saturating_sub(before.graph_encoded_bytes),
+                ),
+                (
+                    "turn_work.hash_passes",
+                    after.hash_passes.saturating_sub(before.hash_passes),
+                ),
+                (
+                    "turn_work.hashed_bytes",
+                    after.hashed_bytes.saturating_sub(before.hashed_bytes),
+                ),
+            ] {
+                *extra_counters
+                    .lock_recover()
+                    .entry(name.to_string())
+                    .or_default() += value;
+            }
+        }
+        // The run_turn meter is closed before this validation reads the head.
+        if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
+            if !matches!(
+                turn.outcome,
+                TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
+            ) {
+                anyhow::bail!(
+                    "cancel round-trip turn did not finish cancelled: {:?}",
+                    turn.outcome
+                );
+            }
+        } else {
+            validate_runtime_perf_turn(
+                scenario,
+                turn_index,
+                &turn,
+                &runtime.export_state().await?,
+            )?;
+        }
     }
 
     let state = executed
@@ -928,4 +998,23 @@ mod postgres_tests {
             );
         }
     }
+}
+
+/// CLOCK-ONLY: skipped RSS samples are unknown, rather than an observation
+/// that the phase's resident memory did not change.
+#[cfg(test)]
+#[test]
+fn clock_only_phase_keeps_skipped_rss_unknown() {
+    let probe = RuntimePerfPhaseProbe {
+        clock_only: true,
+        state: Mutex::new(RuntimePerfPhaseProbeState::default()),
+    };
+    probe.begin_named("phase");
+    probe.end_named("phase");
+    let completed = probe.take_completed();
+    let measured = &completed["phase"];
+    assert_eq!(measured.rss_growth_kb, None);
+    assert_eq!(measured.allocations.bytes_allocated, 0);
+    let run_profile = sum_phase_profiles([&completed]);
+    assert_eq!(run_profile["phase"].rss_growth_kb, None);
 }

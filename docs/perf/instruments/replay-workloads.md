@@ -146,7 +146,10 @@ counts make that orchestration difference explicit.
 
 The resume leg SIGKILLs its owner and workers synchronously after k=floor(N/2)
 lookup outcomes have committed under `round.outcome`, before delivery returns
-to the cell. For N=1, k=0: it cuts just before the first `cell.snapshot+admit` commit.
+to the cell. For N=1, k=0: it cuts just before the first cell admission,
+including `model.done+cell.snapshot+admit`. The model response is not yet
+committed at that fused boundary, so the resumed owner regenerates it with
+one Repeatable model call. Positive prefixes make no additional model calls.
 That admission writes `x_start` as well, so cutting after it would interrupt
 a `Once` call whose body had not yet run. A new process opens the same database and attaches to the
 original send id; the engine reaps the dead node and resumes the stored turn.
@@ -288,3 +291,32 @@ must still run, with e-mail-, key- and long-digit-shaped tokens replaced by
 `x` and its `tools.<name>(` calls pointed at `fixture_lookup`. A recorded
 cell that reads fields of a real tool's result needs a hand edit before it
 replays. Read the script before committing it.
+
+The control receipt also retains `staged_commits` (canonical node counts and
+bytes by kind and commit label), `commit_sql` (successful owner SQL windows,
+including newly installed canonical bytes and bounded statement shapes),
+`durable_calls.<method>`, host allocator deltas, and directional IPC message
+and byte counts. SQL bound bytes are expanded SQL spelling, not disk bytes;
+WAL and installed canonical bytes retain their separate units. Allocation
+deltas are process-wide and include the observer and other host threads.
+
+For runtime-perf, `LASH_PERF_PHASE_CLOCK_ONLY=1` keeps the phase callbacks and
+clocks while omitting phase allocator and RSS samples. Phase allocation fields
+are zero and RSS growth is unknown (`null`); outer stage allocation and memory
+samples remain live. The report records `phase_observation_mode`; clock-only
+observation refuses allocation-budget enforcement because phase allocations
+were not sampled. `run_turn` closes before the validation state export.
+Separate profiling runs can set `LASH_PERF_CONTROL` and `LASH_PERF_ACK` to
+perf-stat's control and acknowledgement FIFOs (`--delay=-1 --control=fifo:...`).
+The runtime turn future or control send/outcome window enables and disables
+counters with acknowledgements; setup, final validation and reporting are
+outside those instruction windows. Do not use these profiling runs as the
+unprofiled latency population. `LASH_PERF_COMMIT_TRACE=sqlite` emits optional
+stderr commit markers and runtime-perf owner SQL receipts for syscall
+attribution; `postgres` selects PostgreSQL receipt units.
+
+Durable runtime-perf turns also report `turn_work.*` SQL, WAL, graph-encoding
+and hashing totals across their send/settlement windows. These counters exclude
+construction, seeding and validation; they include all store connections and
+concurrent maintenance in the window. The existing `runtime_work.*` counters
+retain their broader whole-scenario scope.

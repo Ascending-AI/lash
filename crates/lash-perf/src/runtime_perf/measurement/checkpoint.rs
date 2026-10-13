@@ -1114,7 +1114,7 @@ pub(crate) fn sum_phase_profiles<'a>(
                     samples: 0,
                     duration_ms: 0.0,
                     allocations: zero_allocation_delta(),
-                    rss_growth_kb: Some(0),
+                    rss_growth_kb: None,
                 });
             entry.samples += metrics.samples;
             entry.duration_ms = round3(entry.duration_ms + metrics.duration_ms);

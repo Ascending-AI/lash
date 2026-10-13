@@ -247,7 +247,7 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("open session: {e}"))?;
     if args.phase != Phase::Resume {
         cleanup.settle().await?;
-        observation.start();
+        observation.start()?;
     }
     let handle = if args.phase == Phase::Resume {
         session.attach_id(lash::TurnId::from("control-input"))
@@ -263,6 +263,7 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         .await
         .context("control turn timed out")?
         .map_err(|e| anyhow::anyhow!("outcome: {e}"))?;
+    observation.stop_instructions()?;
     ensure!(
         outcome.output().is_some_and(|output| output.is_success()),
         "turn failed: {outcome:?}"
@@ -273,8 +274,10 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         "script deviation: {:?}",
         calls.last_past_script
     );
-    // A resumed cell needs no second model call: its executable is stored.
-    let expected = if args.phase == Phase::Resume {
+    // A positive prefix saved the executable and model response. The zero
+    // prefix cuts before their shared first save, so the Repeatable model
+    // call must run again on its recorded request.
+    let expected = if args.phase == Phase::Resume && args.n / 2 > 0 {
         0
     } else {
         turn.replies.len()
@@ -411,13 +414,13 @@ pub fn run(args: &Args) -> Result<()> {
         durability: serde_json::json!({
             "settings": format!("{:?}", lash_durable::DurableSettings::standard()),
             "sqlite_options": format!("{:?}", lash_sqlite_store::StoreOptions::standard(lash::sqlite::SqliteSynchronous::Full)),
-            "execution_policy": "Once", "owner_crash": "SIGKILL after committed round.outcome; k=floor(N/2); k=0 before first cell.snapshot+admit (admission writes x_start)",
+            "execution_policy": "Once", "owner_crash": "SIGKILL after committed round.outcome; k=floor(N/2); k=0 before first cell admission, including model.done+cell.snapshot+admit (admission writes x_start; unsaved model response is regenerated)",
         }),
         repeat_count: args.repeats,
         n: args.n.clone(),
         physical_syncs: None,
         physical_syncs_note: "No fsync/fdatasync counter in existing observers; WAL frames/bytes are reported instead, never inferred sync counts.",
-        measurement: "fresh: send through outcome, setup excluded; resume: prefix window + fresh-owner entry through outcome, crash/reexec gap excluded; CPU=host process clock + pool charged worker CPU; bytes_read=durable SQL returned scalar payload; staged_bytes=graph node bytes prepared for owner commit attempts, including restaged/uncommitted nodes; p90=nearest-rank; no warmups",
+        measurement: "fresh: send through outcome, setup excluded; resume: prefix window + fresh-owner entry through outcome, crash/reexec gap excluded; CPU=host process clock + pool charged worker CPU; bytes_read=durable SQL returned scalar payload; staged_bytes=graph node bytes prepared for owner commit attempts, including restaged/uncommitted nodes; commit_sql.installed_graph_bytes=canonical bytes actually inserted by successful owner writes; commit_sql.bound_bytes=expanded SQL spelling, not disk bytes; host allocation deltas include observation work and other host threads; IPC counters include framing in both directions; p90=nearest-rank; no warmups",
         legs: Vec::new(),
     };
     for &n in &args.n {

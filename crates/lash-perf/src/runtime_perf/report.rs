@@ -41,6 +41,7 @@ pub(crate) struct RuntimePerfReport {
     scenarios: Vec<String>,
     scenario_harnesses: Vec<String>,
     allocation_mode: &'static str,
+    phase_observation_mode: &'static str,
     dhat_out: Option<PathBuf>,
     results: Vec<RuntimePerfRunResult>,
     summary: Vec<RuntimePerfScenarioSummary>,
@@ -125,6 +126,11 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
         duration_profile,
         version,
     } = run;
+    let clock_only_phases = std::env::var_os("LASH_PERF_PHASE_CLOCK_ONLY").is_some();
+    anyhow::ensure!(
+        !clock_only_phases || enforcement != BudgetEnforcement::All,
+        "clock-only phase observation cannot enforce allocation budgets; unset LASH_PERF_PHASE_CLOCK_ONLY"
+    );
     if dhat_out.is_some() && !enable_dhat {
         anyhow::bail!("--runtime-perf-dhat-out requires --runtime-perf-dhat");
     }
@@ -249,6 +255,11 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
             .collect(),
         scenario_harnesses: selected_scenario_harnesses(&scenarios),
         allocation_mode: crate::ALLOCATION_MODE,
+        phase_observation_mode: if clock_only_phases {
+            "clock_only"
+        } else {
+            "clock_alloc_rss"
+        },
         dhat_out: dhat_out_path.clone(),
         summary,
         scenario_harness_summary,
@@ -897,6 +908,7 @@ mod tests {
                 .collect(),
             scenario_harnesses: selected_scenario_harnesses(&scenarios),
             allocation_mode: crate::ALLOCATION_MODE,
+            phase_observation_mode: "clock_alloc_rss",
             dhat_out: None,
             results,
             summary,

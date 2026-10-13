@@ -337,7 +337,22 @@ where
     F: Future<Output = anyhow::Result<T>>,
 {
     let timeout = runtime_perf_turn_timeout();
-    match crate::runtime_perf::smoke::with_budget(timeout, future).await {
+    let count_turn = phase == "run_turn";
+    let trace = count_turn && std::env::var_os("LASH_PERF_COMMIT_TRACE").is_some();
+    if trace {
+        eprintln!("MEASURE_TURN_BEGIN");
+    }
+    if count_turn {
+        crate::perf_support::time::instruction_control("enable")?;
+    }
+    let result = crate::runtime_perf::smoke::with_budget(timeout, future).await;
+    if count_turn {
+        crate::perf_support::time::instruction_control("disable")?;
+    }
+    if trace {
+        eprintln!("MEASURE_TURN_END");
+    }
+    match result {
         Ok(result) => result,
         Err(_) => {
             if let Some(cancel) = cancel {

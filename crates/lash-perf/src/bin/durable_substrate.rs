@@ -11,8 +11,6 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, bail};
 use clap::Parser;
 use lash_core_execution::DurableSettings;
-use stats_alloc::{INSTRUMENTED_SYSTEM, StatsAlloc};
-use std::alloc::System;
 
 #[path = "durable_substrate/cells.rs"]
 mod cells;
@@ -41,7 +39,12 @@ use turn::Script;
 
 // Match the runtime performance harness's default allocator instrumentation.
 #[global_allocator]
-static GLOBAL_ALLOCATOR: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;
+#[cfg(not(feature = "dhat-heap"))]
+static GLOBAL_ALLOCATOR: &stats_alloc::StatsAlloc<std::alloc::System> = lash_perf::GLOBAL_ALLOCATOR;
+
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: &lash_perf::DhatStatsAllocator = &lash_perf::GLOBAL_ALLOCATOR;
 
 #[derive(Parser)]
 #[command(about = "Measure the durable substrate against the L12a baseline")]

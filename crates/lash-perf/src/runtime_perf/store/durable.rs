@@ -68,7 +68,34 @@ impl DurableStore for RuntimePerfDurableStore {
         }
         let observation = head_commit.then(|| self.metrics.observe_call("commit_runtime_state"));
         let started = Instant::now();
-        let answer = self.inner.commit(tx, label).await;
+        let answer = if std::env::var_os("LASH_PERF_COMMIT_TRACE").is_some() {
+            let bytes: u64 = tx.graph().values().map(|node| node.len()).sum();
+            let alloc_before = crate::GLOBAL_ALLOCATOR.stats();
+            eprintln!("MEASURE_COMMIT_BEGIN {}", label.as_str());
+            let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+                label.as_str(),
+                if std::env::var("LASH_PERF_COMMIT_TRACE").as_deref() == Ok("postgres") {
+                    "postgres"
+                } else {
+                    "sqlite"
+                },
+                self.inner.commit(tx, label),
+            )
+            .await;
+            let alloc = crate::GLOBAL_ALLOCATOR.stats() - alloc_before;
+            eprintln!(
+                "MEASURE_OWNER {}",
+                serde_json::json!({
+                    "label": label.as_str(), "staged_bytes": bytes,
+                    "host_allocations": alloc.allocations, "host_allocated_bytes": alloc.bytes_allocated,
+                    "sql": receipt, "success": answer.is_ok(),
+                })
+            );
+            eprintln!("MEASURE_COMMIT_END {}", label.as_str());
+            answer
+        } else {
+            self.inner.commit(tx, label).await
+        };
         self.metrics
             .record_timing("store_transaction", started.elapsed());
         drop(observation);

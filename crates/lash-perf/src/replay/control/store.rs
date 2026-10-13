@@ -13,50 +13,75 @@ pub(crate) struct ObservedStore {
 #[async_trait::async_trait]
 impl DurableStore for ObservedStore {
     async fn now(&self) -> Result<DurableInstant, DurableError> {
-        self.observe(self.inner.now()).await
+        self.observe("now", self.inner.now()).await
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
-        self.observe(self.inner.register_node(spec)).await
+        self.observe("register_node", self.inner.register_node(spec))
+            .await
     }
 
     async fn heartbeat(&self, node: &NodeLease) -> Result<HeartbeatOutcome, DurableError> {
-        self.observe(self.inner.heartbeat(node)).await
+        self.observe("heartbeat", self.inner.heartbeat(node)).await
     }
 
     async fn reap(&self, reaper: &NodeLease) -> Result<Vec<Reaped>, DurableError> {
-        self.observe(self.inner.reap(reaper)).await
+        self.observe("reap", self.inner.reap(reaper)).await
     }
 
     async fn release_node(&self, node: &NodeLease) -> Result<Vec<ActorKey>, DurableError> {
-        self.observe(self.inner.release_node(node)).await
+        self.observe("release_node", self.inner.release_node(node))
+            .await
     }
 
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
-        self.observe(self.inner.claim(node, limit)).await
+        self.observe("claim", self.inner.claim(node, limit)).await
     }
 
     async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
-        self.observe(self.inner.mark_draining(node)).await
+        self.observe("mark_draining", self.inner.mark_draining(node))
+            .await
     }
 
     async fn live_decodes(&self) -> Result<Vec<Vec<FormatSet>>, DurableError> {
-        self.observe(self.inner.live_decodes()).await
+        self.observe("live_decodes", self.inner.live_decodes())
+            .await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
-        self.observe(self.inner.owned(node)).await
+        self.observe("owned", self.inner.owned(node)).await
     }
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
-        self.observe(self.inner.begin(actor, epoch)).await
+        self.observe("begin", self.inner.begin(actor, epoch)).await
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
-        self.observation
-            .staged(tx.graph().values().map(|node| node.len()).sum());
+        let mut by_kind = std::collections::BTreeMap::new();
+        for node in tx.graph().values() {
+            let kind = node.envelope().ok().map(|envelope| envelope.kind);
+            let name = kind
+                .and_then(|kind| kind.spec())
+                .map_or("invalid", |spec| spec.name);
+            let share = by_kind
+                .entry(name.to_owned())
+                .or_insert_with(super::observation::KindBytes::default);
+            share.nodes += 1;
+            share.bytes += node.len();
+        }
+        self.observation.staged(super::observation::StagedCommit {
+            label: label.as_str().to_owned(),
+            by_kind,
+            domain_writes: tx.domain().len(),
+        });
         self.observation.before_commit(label);
-        self.observe(self.inner.commit(tx, label)).await
+        let before = crate::GLOBAL_ALLOCATOR.stats();
+        let started = std::time::Instant::now();
+        let answer = self.observe("commit", self.inner.commit(tx, label)).await;
+        if answer.is_ok() {
+            self.observation.delegated(label, before, started);
+        }
+        answer
     }
 
     async fn commit_mail(
@@ -64,11 +89,12 @@ impl DurableStore for ObservedStore {
         tx: MailTx,
         label: CommitLabel,
     ) -> Result<MailCommit, DurableError> {
-        self.observe(self.inner.commit_mail(tx, label)).await
+        self.observe("commit_mail", self.inner.commit_mail(tx, label))
+            .await
     }
 
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
-        self.observe(self.inner.actor(actor)).await
+        self.observe("actor", self.inner.actor(actor)).await
     }
 
     async fn actors_in(
@@ -77,7 +103,7 @@ impl DurableStore for ObservedStore {
         after: Option<&ActorKey>,
         limit: usize,
     ) -> Result<Vec<ActorKey>, DurableError> {
-        self.observe(self.inner.actors_in(formats, after, limit))
+        self.observe("actors_in", self.inner.actors_in(formats, after, limit))
             .await
     }
 }
@@ -85,7 +111,7 @@ impl DurableStore for ObservedStore {
 #[async_trait::async_trait]
 impl DurableReads for ObservedStore {
     async fn turn(&self, session: &SessionId) -> Result<Option<TurnRow>, DurableError> {
-        self.observe(self.inner.turn(session)).await
+        self.observe("turn", self.inner.turn(session)).await
     }
 
     async fn turn_namespaces(
@@ -93,7 +119,8 @@ impl DurableReads for ObservedStore {
         session: &SessionId,
         run: &TurnId,
     ) -> Result<Vec<TurnNamespace>, DurableError> {
-        self.observe(self.inner.turn_namespaces(session, run)).await
+        self.observe("turn_namespaces", self.inner.turn_namespaces(session, run))
+            .await
     }
 
     async fn turn_end(
@@ -101,11 +128,12 @@ impl DurableReads for ObservedStore {
         session: &SessionId,
         run: &TurnId,
     ) -> Result<Option<TurnEnd>, DurableError> {
-        self.observe(self.inner.turn_end(session, run)).await
+        self.observe("turn_end", self.inner.turn_end(session, run))
+            .await
     }
 
     async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
-        self.observe(self.inner.run_facts(owner)).await
+        self.observe("run_facts", self.inner.run_facts(owner)).await
     }
 
     async fn run_facts_of(
@@ -113,11 +141,12 @@ impl DurableReads for ObservedStore {
         owner: &OwnerKey,
         run: lash_durable::domain::RunSeq,
     ) -> Result<RunFacts, DurableError> {
-        self.observe(self.inner.run_facts_of(owner, run)).await
+        self.observe("run_facts_of", self.inner.run_facts_of(owner, run))
+            .await
     }
 
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
-        self.observe(self.inner.exec_root(exec)).await
+        self.observe("exec_root", self.inner.exec_root(exec)).await
     }
 
     async fn cell_roots(
@@ -125,7 +154,8 @@ impl DurableReads for ObservedStore {
         session: &lash_sansio::SessionId,
         run: &lash_sansio::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
-        self.observe(self.inner.cell_roots(session, run)).await
+        self.observe("cell_roots", self.inner.cell_roots(session, run))
+            .await
     }
 
     async fn hydrate(
@@ -135,7 +165,7 @@ impl DurableReads for ObservedStore {
         limits: lash_durable::domain::checkpoint_graph::DecodeLimits,
     ) -> Result<HydratedGraph, DurableError> {
         let answer = self
-            .observe(self.inner.hydrate(owner, expected, limits))
+            .observe("hydrate", self.inner.hydrate(owner, expected, limits))
             .await;
         if let Ok(graph) = &answer {
             self.observation.hydrated(
@@ -151,15 +181,16 @@ impl DurableReads for ObservedStore {
     }
 
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {
-        self.observe(self.inner.pending_waits(owner)).await
+        self.observe("pending_waits", self.inner.pending_waits(owner))
+            .await
     }
 
     async fn wait(&self, id: &WaitId) -> Result<Option<WaitRow>, DurableError> {
-        self.observe(self.inner.wait(id)).await
+        self.observe("wait", self.inner.wait(id)).await
     }
 
     async fn process(&self, process: &ProcessId) -> Result<Option<ProcessActorRow>, DurableError> {
-        self.observe(self.inner.process(process)).await
+        self.observe("process", self.inner.process(process)).await
     }
 
     async fn live_until_descendants(
@@ -167,8 +198,11 @@ impl DurableReads for ObservedStore {
         scope: &ScopeKey,
         limit: usize,
     ) -> Result<Vec<ProcessId>, DurableError> {
-        self.observe(self.inner.live_until_descendants(scope, limit))
-            .await
+        self.observe(
+            "live_until_descendants",
+            self.inner.live_until_descendants(scope, limit),
+        )
+        .await
     }
 
     async fn until_children(
@@ -177,43 +211,52 @@ impl DurableReads for ObservedStore {
         after: Option<&ProcessId>,
         limit: usize,
     ) -> Result<Vec<ProcessId>, DurableError> {
-        self.observe(self.inner.until_children(scope, after, limit))
-            .await
+        self.observe(
+            "until_children",
+            self.inner.until_children(scope, after, limit),
+        )
+        .await
     }
 
     async fn session_close(
         &self,
         session: &SessionId,
     ) -> Result<Option<SessionCloseRow>, DurableError> {
-        self.observe(self.inner.session_close(session)).await
+        self.observe("session_close", self.inner.session_close(session))
+            .await
     }
 
     async fn ending_scopes(&self, session: &SessionId) -> Result<Vec<ScopeKey>, DurableError> {
-        self.observe(self.inner.ending_scopes(session)).await
+        self.observe("ending_scopes", self.inner.ending_scopes(session))
+            .await
     }
 
     async fn session_mailbox(&self, session: &SessionId) -> Result<SessionMailbox, DurableError> {
-        self.observe(self.inner.session_mailbox(session)).await
+        self.observe("session_mailbox", self.inner.session_mailbox(session))
+            .await
     }
 
     async fn prompt_snapshot(
         &self,
         call: &PromptCallKey,
     ) -> Result<Option<PromptSnapshotRow>, DurableError> {
-        self.observe(self.inner.prompt_snapshot(call)).await
+        self.observe("prompt_snapshot", self.inner.prompt_snapshot(call))
+            .await
     }
 
     async fn prompt_texts(&self, hashes: &[String]) -> Result<Vec<PromptText>, DurableError> {
-        self.observe(self.inner.prompt_texts(hashes)).await
+        self.observe("prompt_texts", self.inner.prompt_texts(hashes))
+            .await
     }
 }
 
 impl ObservedStore {
     async fn observe<T>(
         &self,
+        operation: &'static str,
         future: impl std::future::Future<Output = Result<T, DurableError>>,
     ) -> Result<T, DurableError> {
-        let (answer, receipt) = sql::collect("code-mode-control", "sqlite", future).await;
+        let (answer, receipt) = sql::collect(operation, "sqlite", future).await;
         self.observation.read(&receipt);
         answer
     }
