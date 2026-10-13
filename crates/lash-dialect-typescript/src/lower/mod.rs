@@ -304,6 +304,7 @@ pub(crate) struct Lowerer<'a> {
     /// What tests have shown of names, innermost last, for the code being
     /// lowered now.
     narrowed: Vec<(String, Ty)>,
+    paths: Vec<expressions::LoopPaths>,
     /// The functions the document declares: its processes.
     declared: BTreeMap<Name, lash_kernel_doc::Function>,
     /// The declared functions a host may start, with their signatures.
@@ -430,6 +431,7 @@ fn lower_program(
         ),
         assigned: &program.assigned,
         narrowed: Vec::new(),
+        paths: Vec::new(),
         declared: BTreeMap::new(),
         entries: BTreeMap::new(),
         lifting: None,

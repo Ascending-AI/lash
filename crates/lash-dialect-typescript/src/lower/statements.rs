@@ -146,6 +146,16 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn lower_statement(&mut self, statement: &ast::Stmt) -> Lowering<()> {
+        if matches!(
+            statement,
+            ast::Stmt::While { .. } | ast::Stmt::DoWhile { .. } | ast::Stmt::For { .. }
+        ) {
+            return self.with_loop_paths(|this| this.lower_statement_inner(statement));
+        }
+        self.lower_statement_inner(statement)
+    }
+
+    fn lower_statement_inner(&mut self, statement: &ast::Stmt) -> Lowering<()> {
         match statement {
             ast::Stmt::Spanned(span, inner) => {
                 let outer = self.span.replace(*span);

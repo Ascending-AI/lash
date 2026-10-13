@@ -390,6 +390,11 @@ fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (Datum, u64, 
             let bytes = serde_json::to_vec(&machine.export().expect("export")).expect("serialize");
             let parked = serde_json::from_slice(&bytes).expect("deserialize");
             machine = KernelMachine::import(program.clone(), BOUNDS, parked).expect("import");
+            assert_eq!(
+                bytes,
+                serde_json::to_vec(&machine.export().expect("re-export")).expect("serialize"),
+                "K-MACH-008: import preserves the exact safe point"
+            );
             imports += 1;
         }
         match step {
@@ -635,4 +640,39 @@ fn numeric_entry_saved_functions_accept_later_unknown_calls() {
             .expect("finish"),
         Step::Ended(End::Finished(_))
     ));
+}
+
+/// TS-STABLE-PATH: a closed ancestor traversal is paid once per loop,
+/// independently of the number of leaf writes; sliced imports pay exactly
+/// the same charge and return the same graph as uninterrupted execution.
+#[test]
+fn stable_ancestor_paths_traverse_once_and_resume_exactly() {
+    fn source(depth: usize, iterations: usize) -> String {
+        let mut source = "const tip = { leaf: 0 };\n".to_string();
+        let mut parent = "tip".to_string();
+        for level in 0..depth {
+            let name = format!("r{level}");
+            source.push_str(&format!("const {name} = {{ next: {parent} }};\n"));
+            parent = name;
+        }
+        let half = ".next".repeat(depth / 2);
+        let rest = ".next".repeat(depth - depth / 2);
+        source.push_str(&format!(
+            "for (let i = 0; i < {iterations}; i++) {{ const middle = {parent}{half}; middle{rest}.leaf = i; }} await finish({parent});"
+        ));
+        source
+    }
+    let shallow_once = plain_record_resume(&source(4, 1), u64::MAX, false);
+    let shallow_many = plain_record_resume(&source(4, 4), u64::MAX, false);
+    let deep_once = plain_record_resume(&source(24, 1), u64::MAX, false);
+    let deep_source = source(24, 4);
+    let deep_many = plain_record_resume(&deep_source, u64::MAX, false);
+    assert_eq!(
+        deep_many.1 - deep_once.1,
+        shallow_many.1 - shallow_once.1,
+        "additional iterations must not repay the ancestors"
+    );
+    let sliced = plain_record_resume(&deep_source, 1, true);
+    assert_eq!((&deep_many.0, deep_many.1), (&sliced.0, sliced.1));
+    assert!(sliced.2 > 24);
 }

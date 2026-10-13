@@ -691,3 +691,122 @@ fn numeric_entry_unproven_and_wrong_arity_calls_keep_the_generic_result() {
         "[\"21\",true,3]",
     );
 }
+
+fn stable_path_matches_guarded(source: &str) {
+    let guarded = source
+        .replace("const r =", "var r =")
+        .replace("let r =", "var r =");
+    assert_eq!(
+        super::machine::end(source),
+        super::machine::end(&guarded),
+        "{source}"
+    );
+}
+
+/// TS-STABLE-PATH-ROOT: roots replaced by other plain records and locals
+/// freshly constructed on each iteration must never retain an old pointer.
+#[test]
+fn stable_paths_reject_rebound_and_iteration_local_roots() {
+    stable_path_matches_guarded(
+        "let r = { a: { b: { leaf: 0 } } }; let sum = 0; for (let i = 0; i < 3; i++) { sum += r.a.b.leaf; r = { a: { b: { leaf: i + 10 } } }; } await finish(sum);",
+    );
+    stable_path_matches_guarded(
+        "let sum = 0; for (let i = 0; i < 3; i++) { const r = { a: { b: { leaf: i } } }; sum += r.a.b.leaf; } await finish(sum);",
+    );
+    stable_path_matches_guarded(
+        "const r = { a: { b: { leaf: 9 } } }; let sum = 0; for (let i = 0; i < 2; i++) { const r = { a: { b: { leaf: i } } }; sum += r.a.b.leaf; } await finish(sum);",
+    );
+}
+
+/// TS-STABLE-PATH-ALIAS: replacement, deletion and computed writes through
+/// aliases invalidate every path containing that link, at every hop.
+#[test]
+fn stable_paths_reject_alias_replacement_deletion_and_computed_writes() {
+    for mutation in [
+        "alias.b = { leaf: i + 10 };",
+        "delete alias.b;",
+        "let key = 'b'; alias[key] = { leaf: i + 10 };",
+        "alias.b = null;",
+    ] {
+        stable_path_matches_guarded(&format!(
+            "const r = {{ a: {{ b: {{ leaf: 0 }} }} }}; const alias = r.a; let result = ''; for (let i = 0; i < 2; i++) {{ try {{ result += String(r.a.b.leaf); {mutation} }} catch (e) {{ result += 'caught'; }} }} await finish(result);"
+        ));
+    }
+}
+
+/// TS-STABLE-PATH-ESCAPE: callbacks, opaque mutators, thrown aliases and
+/// implicit coercion can all replace an ancestor without a direct write.
+#[test]
+fn stable_paths_reject_captures_calls_throws_and_coercions() {
+    for setup in [
+        "const change = () => { r.a.b = { leaf: 7 }; };",
+        "function change() { Object.assign(r.a, { b: { leaf: 7 } }); }",
+        "function change() { try { throw r.a; } catch (x) { Object.assign(x, { b: { leaf: 7 } }); } }",
+        "const key = { toString() { Object.assign(r.a, { b: { leaf: 7 } }); return 'key'; } }; function change() { const value = { [key]: 0 }; }",
+    ] {
+        stable_path_matches_guarded(&format!(
+            "const r = {{ a: {{ b: {{ leaf: 0 }} }} }}; {setup} let sum = 0; for (let i = 0; i < 2; i++) {{ sum += r.a.b.leaf; change(); }} await finish(sum);"
+        ));
+    }
+    stable_path_matches_guarded(
+        "const r = { a: { b: { leaf: 0 } } }; function change(x) { Object.assign(x, { b: { leaf: 7 } }); } let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; change(r.a); } await finish(sum);",
+    );
+}
+
+/// TS-STABLE-PATH-ORDER: absent/null/nonrecord hops keep their failure
+/// order, and paths in zero-trip loops or untaken branches are never read.
+#[test]
+fn stable_paths_keep_hop_failures_and_lazy_evaluation() {
+    for initial in [
+        "{ a: null }",
+        "{}",
+        "{ a: { b: null } }",
+        "{ a: { b: new Date(7) } }",
+    ] {
+        stable_path_matches_guarded(&format!(
+            "const r = {initial}; let result = ''; for (let i = 0; i < 2; i++) {{ try {{ result += String(r.a.b.leaf); }} catch (e) {{ result += 'caught'; }} }} await finish(result);"
+        ));
+    }
+    stable_path_matches_guarded(
+        "const r = { a: { b: { leaf: 7 } } }; let sum = 0; for (let i = 0; i < 0; i++) { sum += r.a.b.leaf; } for (let i = 0; i < 3; i++) { if (i === 2) { sum += r.a.b.leaf; } } await finish(sum);",
+    );
+    stable_path_matches_guarded(
+        "const r = { a: { b: { leaf: 7 } } }; let sum = 0; for (let i = 0; i < 3; i++) { for (let j = 0; j < 2; j++) { sum += r.a.b.leaf; } } await finish(sum);",
+    );
+}
+
+/// TS-STABLE-PATH-BOUNDARY: restored roots and effect results are unknown;
+/// a mid-loop park cannot share source facts with a later guest mutation.
+#[test]
+fn stable_paths_keep_restored_roots_and_nonterminal_effects_guarded() {
+    use lash_kernel_doc::{Datum, Name};
+    let source = "let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; r.a.b = { leaf: 7 }; } await finish(sum);";
+    use lash_kernel_doc::{Float, Object, ObjectId, Value};
+    let bindings = lash_kernel_vm::Bindings {
+        variables: BTreeMap::from([(Name::new("r"), Value::Record(ObjectId(0)))]),
+        objects: BTreeMap::from([
+            (
+                ObjectId(0),
+                Object::Record(vec![("a".into(), Value::Record(ObjectId(1)))]),
+            ),
+            (
+                ObjectId(1),
+                Object::Record(vec![("b".into(), Value::Record(ObjectId(2)))]),
+            ),
+            (
+                ObjectId(2),
+                Object::Record(vec![("leaf".into(), Value::Float(Float::new(1.0)))]),
+            ),
+        ]),
+    };
+    assert_eq!(
+        super::machine::end_with_bindings(source, bindings),
+        super::machine::Ended::Finished(Datum::Float(lash_kernel_doc::Float::new(8.0)))
+    );
+    let effect_source = "const r = { a: { b: { leaf: 0 } } }; let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; r.a.b = await echo({ leaf: 7 }); } await finish(sum);";
+    assert_eq!(
+        super::machine::run(effect_source, &[]),
+        super::machine::run(&effect_source.replace("const r =", "var r ="), &[])
+    );
+    assert_eq!(super::lower("const r = { a: { b: {} } }; for (let i = 0; i < 2; i++) { middle.b; const middle = r.a; }").unwrap_err().code, crate::DiagnosticCode::TemporalDeadZone);
+}

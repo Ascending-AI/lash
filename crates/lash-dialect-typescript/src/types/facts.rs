@@ -166,6 +166,12 @@ impl Facts {
             .is_some_and(|name| self.numeric_functions.contains(name))
     }
 
+    pub(crate) fn path_definition(&self, name: &str) -> Option<&Expr> {
+        self.narrowable(name)
+            .then(|| self.plain.definition(name))
+            .flatten()
+    }
+
     pub(crate) fn plain(&self, expr: &Expr) -> Option<super::PlainRecord> {
         self.plain.of(expr)
     }

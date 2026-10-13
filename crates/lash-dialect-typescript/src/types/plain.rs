@@ -50,9 +50,14 @@ pub(super) struct Facts {
     names: HashMap<String, PlainRecord>,
     mutated: BTreeSet<String>,
     dynamic: bool,
+    definitions: HashMap<String, Expr>,
 }
 
 impl Facts {
+    pub(super) fn definition(&self, name: &str) -> Option<&Expr> {
+        self.definitions.get(name)
+    }
+
     pub(super) fn of(&self, expr: &Expr) -> Option<PlainRecord> {
         if !self.enabled {
             return None;
@@ -225,6 +230,20 @@ impl<'a> Collector<'a> {
             names: HashMap::new(),
             mutated: self.mutated,
             dynamic: self.dynamic,
+            definitions: self
+                .definitions
+                .iter()
+                .filter_map(|(name, values)| {
+                    if let [Some(value)] = values.as_slice()
+                        && matches!(value, Expr::Ident(..) | Expr::Member { .. })
+                        && !self.excluded.contains(*name)
+                    {
+                        Some(((*name).to_string(), (*value).clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
         };
         // Like the integer-local proof, every definition must agree at the
         // fixed point. Starting empty prevents circular aliases proving

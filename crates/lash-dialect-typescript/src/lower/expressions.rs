@@ -1,7 +1,7 @@
 //! Expressions: every one lowers to an operand, after the statements that
 //! compute it.
 
-use lash_kernel_doc::{Expr, Literal, Member, Place, RecordEntry};
+use lash_kernel_doc::{Expr, Literal, Member, Name, Place, RecordEntry, Rhs, Stmt};
 
 use super::calls::Key;
 use super::patterns::Mode;
@@ -38,11 +38,177 @@ fn binary_helper(op: BinaryOp) -> &'static str {
     }
 }
 
+/// Each cache belongs to one dynamic loop entry, never to a function or
+/// source spelling. Only already-live, singly-defined roots can enter it.
+#[derive(Debug, Default)]
+pub(super) struct LoopPaths {
+    roots: std::collections::HashMap<String, Name>,
+    cached: std::collections::HashMap<(Name, Vec<String>), (Name, Name, Ty)>,
+    declarations: Buf,
+    filling: bool,
+    function: usize,
+}
+
+fn member_path(expr: &ast::Expr, fields: &mut Vec<String>) -> Option<String> {
+    match expr {
+        ast::Expr::Ident(name, _) => Some(name.clone()),
+        ast::Expr::Member {
+            object, property, ..
+        } => {
+            let root = member_path(object, fields)?;
+            let field = match property {
+                ast::MemberProperty::Field(field) => field,
+                ast::MemberProperty::Index(key) => match key.as_ref() {
+                    ast::Expr::String(field) => field,
+                    _ => return None,
+                },
+            };
+            fields.push(field.clone());
+            Some(root)
+        }
+        _ => None,
+    }
+}
+
 impl Lowerer<'_> {
     pub(crate) fn lower_expr(&mut self, expr: &ast::Expr) -> Lowering<Operand> {
-        let mut value = self.lower_expr_inner(expr)?;
+        let mut value = match self.cached_path(expr)? {
+            Some(value) => value,
+            None => self.lower_expr_inner(expr)?,
+        };
         value.plain = self.facts.plain(expr);
         Ok(value)
+    }
+
+    /// Keep the first read at its source position: zero-trip loops and
+    /// untaken branches must not evaluate a path. Cache state is ordinary
+    /// kernel locals, so every charge slice/export can resume it exactly.
+    pub(super) fn with_loop_paths<T>(
+        &mut self,
+        lower: impl FnOnce(&mut Self) -> Lowering<T>,
+    ) -> Lowering<T> {
+        let start = self.buf.stmts.len();
+        let mut paths = LoopPaths {
+            function: self.functions.len(),
+            ..LoopPaths::default()
+        };
+        for scope in &self.scopes {
+            for (name, binding) in &scope.bindings {
+                paths.roots.remove(name);
+                if binding.live
+                    && binding.function + 1 == self.functions.len()
+                    && self.facts.narrowable(name)
+                {
+                    paths.roots.insert(name.clone(), binding.kernel.clone());
+                }
+            }
+        }
+        self.paths.push(paths);
+        let result = lower(self);
+        let Some(paths) = self.paths.pop() else {
+            unreachable!("the loop's path context remains on the stack while it lowers");
+        };
+        self.buf
+            .stmts
+            .splice(start..start, paths.declarations.stmts);
+        self.buf
+            .notes
+            .splice(start..start, paths.declarations.notes);
+        result
+    }
+
+    fn cached_path(&mut self, expr: &ast::Expr) -> Lowering<Option<Operand>> {
+        let Some(index) = self.paths.len().checked_sub(1) else {
+            return Ok(None);
+        };
+        let paths = &self.paths[index];
+        if paths.filling
+            || paths.function != self.functions.len()
+            || self.facts.plain(expr).is_none()
+        {
+            return Ok(None);
+        }
+        let mut fields = Vec::new();
+        let Some(mut root) = member_path(expr, &mut fields) else {
+            return Ok(None);
+        };
+        // Do not bypass resolution/TDZ of an alias whose declaration has
+        // not run, even when its definition leads to a stable entry root.
+        if self
+            .binding_mut(&root)
+            .is_none_or(|(_, binding)| !binding.live)
+        {
+            return Ok(None);
+        }
+        let paths = &self.paths[index];
+        // One-hop paths seldom repay a branch and two cache bindings.
+        if fields.len() < 2 {
+            return Ok(None);
+        }
+        // An immutable local such as `const middle = tree.next.next`
+        // may be declared inside the loop. Resolve its sole definition back
+        // to a live entry root, without caching that local's own binding.
+        for _ in 0..32 {
+            if paths.roots.contains_key(&root) {
+                break;
+            }
+            let Some(definition) = self.facts.path_definition(&root) else {
+                return Ok(None);
+            };
+            let mut prefix = Vec::new();
+            let Some(parent) = member_path(definition, &mut prefix) else {
+                return Ok(None);
+            };
+            prefix.extend(fields);
+            fields = prefix;
+            root = parent;
+        }
+        let Some(kernel) = paths.roots.get(&root).cloned() else {
+            return Ok(None);
+        };
+        if self
+            .binding_mut(&root)
+            .is_none_or(|(_, binding)| binding.kernel != kernel)
+        {
+            return Ok(None);
+        }
+        let key = (kernel, fields);
+        let cached = self.paths[index].cached.get(&key).cloned();
+        let (value, ready, ty) = match cached {
+            Some(cached) => cached,
+            None => {
+                let value = self.temp();
+                let ready = self.temp();
+                let paths = &mut self.paths[index];
+                for (name, literal) in [
+                    (value.clone(), Literal::Absent),
+                    (ready.clone(), Literal::Bool(false)),
+                ] {
+                    paths.declarations.stmts.push(Stmt::Let {
+                        name,
+                        value: Rhs::Expr(Expr::Literal(literal)),
+                    });
+                    paths.declarations.notes.push(super::Note::default());
+                }
+                (value, ready, Ty::Unknown)
+            }
+        };
+        self.paths[index].filling = true;
+        let mut result_ty = ty;
+        let fill = self.block(|this| {
+            let result = this.lower_expr(expr)?;
+            result_ty = result.ty.clone();
+            this.store(Place::Variable(value.clone()), result);
+            this.store(Place::Variable(ready.clone()), Operand::bool(true));
+            Ok(())
+        });
+        let paths = &mut self.paths[index];
+        paths.filling = false;
+        paths
+            .cached
+            .insert(key, (value.clone(), ready.clone(), result_ty.clone()));
+        self.emit_if(Expr::Variable(ready), Buf::default(), fill?);
+        Ok(Some(Operand::variable(value, result_ty)))
     }
 
     fn lower_expr_inner(&mut self, expr: &ast::Expr) -> Lowering<Operand> {
