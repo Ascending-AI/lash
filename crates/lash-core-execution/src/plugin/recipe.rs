@@ -189,9 +189,17 @@ impl<T: Send + Sync + 'static> PluginRegistrar<T> {
         {
             // Every operation kind shares one name space: a query and a task
             // of one name are the same declared address.
-            return Err(PluginError::Registration(match &details {
-                ContributionDetails::Operation(def) => {
+            return Err(PluginError::Registration(match (&details, &key) {
+                (ContributionDetails::Operation(def), _) => {
                     format!("duplicate plugin operation name `{}`", def.name)
+                }
+                (ContributionDetails::Callback { .. }, ContributionKey::Callback(identity)) => {
+                    match &self.owner {
+                        Some(owner) => {
+                            format!("duplicate hook key `{}` for plugin `{owner}`", identity.key)
+                        }
+                        None => format!("duplicate hook key `{}`", identity.key),
+                    }
                 }
                 _ => format!("duplicate registration {key:?}"),
             }));

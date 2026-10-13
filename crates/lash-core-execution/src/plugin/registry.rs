@@ -991,7 +991,12 @@ pub struct StaticPluginFactory {
     spec: PluginSpec,
 }
 impl StaticPluginFactory {
-    pub fn new(declaration: PluginDeclaration, spec: PluginSpec) -> Self {
+    pub fn new(declaration: PluginDeclaration, mut spec: PluginSpec) -> Self {
+        for error in &mut spec.errors {
+            if let PluginError::Registration(message) = error {
+                *message = format!("{message} for plugin `{}`", declaration.id);
+            }
+        }
         Self { declaration, spec }
     }
     /// The scoped address of a provider in this factory's declared entries.

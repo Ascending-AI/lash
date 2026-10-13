@@ -425,10 +425,9 @@ fn keyed_registrations_refuse_duplicates_and_unpaired_stream_state() {
         ))
         .err()
         .expect("a duplicate key is refused");
-    assert!(
-        error
-            .to_string()
-            .contains("duplicate hook key `tool_args_check:same`")
+    assert_eq!(
+        error.to_string(),
+        "plugin registration error: duplicate hook key `tool_args_check:same` for plugin `policy`"
     );
 
     let unpaired = plugin(
@@ -453,10 +452,9 @@ fn keyed_registrations_refuse_duplicates_and_unpaired_stream_state() {
         ))
         .err()
         .expect("an unpaired stream state is refused");
-    assert!(
-        error
-            .to_string()
-            .contains("assistant_stream_finished:missing")
+    assert_eq!(
+        error.to_string(),
+        "plugin registration error: response callback `assistant_response:splice` of plugin `mask` reads stream state from `assistant_stream_finished:missing`, which the plugin does not register"
     );
 }
 
