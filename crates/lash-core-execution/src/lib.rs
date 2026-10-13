@@ -766,8 +766,9 @@ pub use session::{
     RuntimeExecutionContext, SessionError, ToolDispatchSurface, tool_dispatch_surface,
 };
 pub use session_graph::{
-    PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
-    SessionNodePayload, SessionNodeRecord, UndeliveredConfigChange,
+    PersistedSessionConfig, PersistedTurnState, RetiredConfigDelivery,
+    SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph, SessionNodePayload, SessionNodeRecord,
+    UndeliveredConfigChange,
 };
 pub use session_model::LlmProfileBinding;
 pub(crate) use session_model::RuntimeSessionPolicy;

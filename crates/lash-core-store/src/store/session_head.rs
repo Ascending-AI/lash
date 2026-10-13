@@ -165,6 +165,7 @@ impl SessionHeadMeta {
     ) -> Self {
         config.config_revision = 0;
         config.undelivered_change = None;
+        config.retired_config_deliveries = Vec::new();
         Self {
             schema_version: fleet_format
                 .writer_version(crate::surface_format!(SESSION_HEAD_META_SCHEMA_VERSION)),

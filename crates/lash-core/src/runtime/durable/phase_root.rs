@@ -13,6 +13,7 @@
 //! run's recorded configuration rides beside it as TurnContent nodes the
 //! root names, staged by the first phase that holds them (FIG-6021).
 
+use lash_core_store::checkpoint_graph::bodies::PhaseRoot as PhaseRootBody;
 use lash_core_store::checkpoint_graph::{
     EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
     NodeSource, TokenCodec, TokenError, TokenReader, TokenWriter,
@@ -54,67 +55,6 @@ struct PhaseRead {
     answered: Option<super::session::ModelAnswer>,
 }
 
-/// Kind 33's body: the checkpoint text, each content blob the checkpoint
-/// names by its digest, ascending, and the nodes of the run's recorded
-/// configuration: its resolved shape and its installed tool surface.
-struct PhaseRootBody {
-    checkpoint: String,
-    content: Vec<(String, NodeId)>,
-    run: Option<NodeId>,
-    surface: Option<NodeId>,
-}
-
-fn encode_node(node: Option<&NodeId>, out: &mut TokenWriter) {
-    match node {
-        None => out.none(),
-        Some(node) => {
-            out.some();
-            node.encode(out);
-        }
-    }
-}
-
-fn decode_node(input: &mut TokenReader<'_>) -> Result<Option<NodeId>, TokenError> {
-    if input.option()? {
-        Ok(Some(NodeId::decode(input)?))
-    } else {
-        Ok(None)
-    }
-}
-
-impl TokenCodec for PhaseRootBody {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(4);
-        out.text(&self.checkpoint);
-        out.seq(self.content.len() as u64);
-        for (digest, node) in &self.content {
-            out.seq(2);
-            out.text(digest);
-            node.encode(out);
-        }
-        encode_node(self.run.as_ref(), out);
-        encode_node(self.surface.as_ref(), out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(4)?;
-        let checkpoint = input.text()?.to_owned();
-        let count = input.seq()?;
-        let mut content = Vec::new();
-        for _ in 0..count {
-            input.expect_struct(2)?;
-            let digest = input.text()?.to_owned();
-            content.push((digest, NodeId::decode(input)?));
-        }
-        Ok(Self {
-            checkpoint,
-            content,
-            run: decode_node(input)?,
-            surface: decode_node(input)?,
-        })
-    }
-}
-
 /// Kind 39's body: one content blob's canonical JSON text.
 struct ContentText(String);
 
@@ -135,6 +75,8 @@ pub(super) struct StagedPhase {
     staging: GraphStaging,
     held: Vec<NodeId>,
     stored: PhaseStored,
+    /// What the root owes, stated with its commit (S7).
+    owed: Vec<crate::plugin::PluginCallbackIdentity>,
 }
 
 /// The blobs a staged phase added, each by the node it is stored as: what
@@ -186,6 +128,11 @@ impl StagedPhase {
                 })
             })
             .transpose()?;
+        let owed = checkpoint
+            .answered
+            .as_ref()
+            .map(super::session::ModelAnswer::owed_callbacks)
+            .unwrap_or_default();
         let text = serde_json::to_string(&PhaseText {
             checkpoint: &checkpoint.saved.checkpoint,
             delivered: &checkpoint.delivered,
@@ -217,6 +164,7 @@ impl StagedPhase {
                     content,
                     run: config.as_ref().map(|config| config.run),
                     surface: config.as_ref().and_then(|config| config.surface),
+                    owed: owed.clone(),
                 },
             )
             .map_err(refused)?;
@@ -232,6 +180,7 @@ impl StagedPhase {
         Ok(Self {
             root,
             staging,
+            owed,
             held: held_nodes,
             stored: PhaseStored {
                 content: stored,
@@ -247,6 +196,7 @@ impl StagedPhase {
             tx.require(node);
         }
         tx.stage_all(self.staging);
+        tx.owe(self.root, self.owed);
         (self.root, self.stored)
     }
 }
@@ -284,6 +234,7 @@ pub(super) fn restaged_text(
         tx.require(*node);
     }
     tx.stage_all(staging);
+    tx.owe(root, body.owed);
     Ok(root)
 }
 

@@ -398,20 +398,19 @@ impl ActorContext {
     ) -> Result<ActorCommit, DurableError> {
         let drain = self.claimed_drain()?;
         let durable = self.durable()?;
-        self.with_obligations(tx, label, None, |tx| {
+        self.with_obligations(tx, None, |tx| {
             drain.release_with(durable.as_ref(), tx, label, release)
         })
         .await
     }
 
-    /// Commit `tx` under `label` through `commit`; a claimed session's
+    /// Commit `tx` through `commit`; a claimed session's
     /// commit carries the claim requirements its records leave it owing
     /// (S7), and its commits are serialized. `owing` states what a root
     /// `tx` publishes owes, as its writer staged it.
     async fn with_obligations<F, Fut>(
         &self,
         tx: ActorTx,
-        label: CommitLabel,
         owing: Option<&super::claim_obligations::ExecutionDebts>,
         commit: F,
     ) -> Result<ActorCommit, DurableError>
@@ -422,19 +421,35 @@ impl ActorContext {
         let Some(obligations) = self.inner.obligations.as_ref() else {
             return commit(tx).await;
         };
-        let limits = self.backend().config().settings().graph_reads.execution();
+        let graph_reads = self.backend().config().settings().graph_reads;
+        let limits = graph_reads.execution();
+        let phase_limits = graph_reads.owner();
         let reads = self.durable_reads()?;
+        let heads = self.backend().session_store_factory();
         let staged = super::claim_obligations::Staged {
-            label,
             epoch: self.inner.epoch,
             owing,
             limits,
+            phase_limits,
         };
         // Boxed: the ledger's read and commit would otherwise inline into
         // every caller's future.
         Box::pin(obligations.commit(
-            |session| async move {
-                super::claim_obligations::RecordedWork::read_session(reads, &session, limits).await
+            |session, scope| async move {
+                use super::claim_obligations::{ReadScope, RecordedWork};
+                match scope {
+                    ReadScope::Session => {
+                        RecordedWork::read_session(
+                            reads,
+                            heads.as_ref(),
+                            &session,
+                            limits,
+                            phase_limits,
+                        )
+                        .await
+                    }
+                    ReadScope::Head => RecordedWork::read_head(heads.as_ref(), &session).await,
+                }
             },
             staged,
             tx,
@@ -502,7 +517,7 @@ impl ActorContext {
         label: CommitLabel,
     ) -> Result<ActorCommit, DurableError> {
         let durable = self.durable()?;
-        self.with_obligations(tx, label, None, |tx| durable.commit(tx, label))
+        self.with_obligations(tx, None, |tx| durable.commit(tx, label))
             .await
     }
 
@@ -522,7 +537,7 @@ impl ActorContext {
         owing: &super::claim_obligations::ExecutionDebts,
     ) -> Result<ActorCommit, DurableError> {
         let durable = self.durable()?;
-        self.with_obligations(tx, label, Some(owing), |tx| durable.commit(tx, label))
+        self.with_obligations(tx, Some(owing), |tx| durable.commit(tx, label))
             .await
     }
 

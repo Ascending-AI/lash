@@ -61,13 +61,26 @@ pub struct PersistedSessionConfig {
     /// session's state, a run's recorded config among them, holds it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub undelivered_change: Option<Box<UndeliveredConfigChange>>,
+    /// The deliveries of applied changes a deployment retired as
+    /// undeliverable, in the order they were retired: each the share of a
+    /// change owed to an observer the deployment uninstalled for good and
+    /// declared retired. Like [`Self::undelivered_change`], only the head
+    /// carries them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retired_config_deliveries: Vec<RetiredConfigDelivery>,
 }
 
 /// A committed change of a session's policy its config-change observers
 /// have not been delivered (FIG-5397). It is delivered at least once: a
 /// delivery the session's head did not retire before its node was lost is
 /// delivered again, under the same [`revision`](Self::revision).
+///
+/// It is owed to the observers it records (FIG-6164): the session's claim
+/// requires each one's callback until the head retires the change, so only
+/// a node that resolves every one of them, or a deployment that retired
+/// one for good, runs the session meanwhile.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct UndeliveredConfigChange {
     /// The config revision the change reached: its stable identity.
     pub revision: u64,
@@ -75,6 +88,24 @@ pub struct UndeliveredConfigChange {
     pub previous: crate::SessionPolicy,
     /// The session's policy the change committed.
     pub current: crate::SessionPolicy,
+    /// The observers the change is owed to, in delivery order: every
+    /// session config-change observer installed when it committed, then
+    /// every one the change it superseded was still owed.
+    pub observers: Vec<crate::store::plugin_writers::PluginCallbackIdentity>,
+}
+
+/// The share of an applied change owed to an observer a deployment
+/// uninstalled for good, retired as undeliverable by a node of the
+/// deployment that declared the observer retired (FIG-6164).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RetiredConfigDelivery {
+    /// The revision of the change whose share was retired.
+    pub revision: u64,
+    /// The observer the share was owed to.
+    pub observer: crate::store::plugin_writers::PluginCallbackIdentity,
+    /// The lease owner of the node that retired it.
+    pub retired_by: String,
 }
 
 impl PersistedSessionConfig {
@@ -131,6 +162,7 @@ impl PersistedSessionConfig {
             plugin_config: crate::PluginConfig::default(),
             config_revision: 0,
             undelivered_change: None,
+            retired_config_deliveries: Vec::new(),
         }
     }
 
@@ -153,6 +185,7 @@ impl PersistedSessionConfig {
             // (`persisted_session_config_from_state`).
             config_revision: 0,
             undelivered_change: None,
+            retired_config_deliveries: Vec::new(),
         }
     }
 }

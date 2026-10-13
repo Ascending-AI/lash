@@ -282,6 +282,9 @@ pub struct RuntimeControlConfig {
     pub commit_admission: super::CommitAdmissionPolicy,
     /// Work batches and fault retry pacing used by this runtime.
     pub pacing: super::RuntimePacingPolicy,
+    /// The config-change observers the deployment uninstalled for good
+    /// (FIG-6164), which every plugin host built for this runtime retires.
+    pub retired_config_observers: Arc<crate::plugin::RetiredConfigObservers>,
 }
 
 impl RuntimeControlConfig {
@@ -363,6 +366,7 @@ impl RuntimeHostConfig {
                 relay: super::obligations::relay::RelayPolicy::standard(),
                 commit_admission: super::CommitAdmissionPolicy::standard(),
                 pacing: super::RuntimePacingPolicy::standard(),
+                retired_config_observers: Arc::default(),
             },
             tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock)),
             turn_phase_probes: super::RuntimeTurnPhaseProbeSlot::default(),

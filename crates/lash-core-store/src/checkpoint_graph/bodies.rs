@@ -1,12 +1,14 @@
 //! The typed bodies of the generic kinds the seam owns (FIG-5887 §3):
-//! OpaqueLeaf, ExecRoot, OwnerBinding and ProcessState.
+//! OpaqueLeaf, PhaseRoot, ExecRoot, OwnerBinding and ProcessState.
 //!
 //! Field order is the registry's. Structs are sequences of exactly their
 //! fields; enums are sums with explicit variant numbers. Every reference is
 //! a child of a stated kind, checked by [`ExecRoot::check_children`] and
 //! [`ProcessState::check_children`].
 
-use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_kernel_doc::graph_tokens::{
+    CanonicalFault, TokenCodec, TokenError, TokenReader, TokenWriter,
+};
 
 use super::decode::GraphDecoder;
 use super::node::NodeId;
@@ -167,6 +169,104 @@ discriminator! {
 discriminator! {
     /// Whether an execution root is parked or ended.
     ExecStatus { Parked = 0, Ended = 1 }
+}
+
+/// Kind 33: a turn phase's checkpoint root. Its checkpoint text is the
+/// phase's JSON without its content, which it names by digest, each a
+/// TurnContent node, ascending; its run's recorded configuration is the
+/// TurnContent nodes of its resolved shape and its installed tool surface.
+/// The integrator owns the text; the seam reads the root's debts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PhaseRoot {
+    pub checkpoint: String,
+    pub content: Vec<(String, NodeId)>,
+    pub run: Option<NodeId>,
+    pub surface: Option<NodeId>,
+    /// The callbacks the phase owes while it stands (S7): the response
+    /// callbacks of a paid model answer whose derivation is still owed, in
+    /// their recorded order. Empty once the answer is consumed.
+    ///
+    /// A root that owes nothing is the four-field struct every root was
+    /// before FIG-6164, byte for byte; only a root with debts carries the
+    /// fifth field, never empty.
+    pub owed: Vec<PluginCallbackIdentity>,
+}
+
+fn encode_node_ref(node: Option<&NodeId>, out: &mut TokenWriter) {
+    match node {
+        None => out.none(),
+        Some(node) => {
+            out.some();
+            node.encode(out);
+        }
+    }
+}
+
+fn decode_node_ref(input: &mut TokenReader<'_>) -> Result<Option<NodeId>, TokenError> {
+    if input.option()? {
+        Ok(Some(NodeId::decode(input)?))
+    } else {
+        Ok(None)
+    }
+}
+
+impl TokenCodec for PhaseRoot {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(if self.owed.is_empty() { 4 } else { 5 });
+        out.text(&self.checkpoint);
+        out.seq(self.content.len() as u64);
+        for (digest, node) in &self.content {
+            out.seq(2);
+            out.text(digest);
+            node.encode(out);
+        }
+        encode_node_ref(self.run.as_ref(), out);
+        encode_node_ref(self.surface.as_ref(), out);
+        if !self.owed.is_empty() {
+            self.owed.encode(out);
+        }
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let fields = input.seq()?;
+        if !matches!(fields, 4 | 5) {
+            return Err(CanonicalFault::FieldCount {
+                expected: 5,
+                found: fields,
+            }
+            .into());
+        }
+        let checkpoint = input.text()?.to_owned();
+        let count = input.seq()?;
+        let mut content = Vec::new();
+        for _ in 0..count {
+            input.expect_struct(2)?;
+            let digest = input.text()?.to_owned();
+            content.push((digest, NodeId::decode(input)?));
+        }
+        let run = decode_node_ref(input)?;
+        let surface = decode_node_ref(input)?;
+        let owed = if fields == 5 {
+            let owed = Vec::decode(input)?;
+            if owed.is_empty() {
+                return Err(CanonicalFault::FieldCount {
+                    expected: 4,
+                    found: 5,
+                }
+                .into());
+            }
+            owed
+        } else {
+            Vec::new()
+        };
+        Ok(Self {
+            checkpoint,
+            content,
+            run,
+            surface,
+            owed,
+        })
+    }
 }
 
 /// Kind 36: one execution's complete root descriptor, at most

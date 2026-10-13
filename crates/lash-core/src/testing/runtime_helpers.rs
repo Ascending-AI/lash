@@ -739,6 +739,12 @@ impl TestRuntime {
     }
 
     pub async fn build(self) -> LashRuntime {
+        // Boxed: the assembly holds a whole session state across its awaits,
+        // and every test that builds a runtime awaits this future.
+        Box::pin(self.assemble()).await
+    }
+
+    async fn assemble(self) -> LashRuntime {
         // `lash-core`'s own `cfg(test)` binary used to get the in-tree protocol
         // fake injected by `builtin_plugin_factories`. The relocated runtime
         // suites link the library without `cfg(test)`, so reproduce that

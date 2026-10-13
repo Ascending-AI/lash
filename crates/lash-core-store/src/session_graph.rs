@@ -494,7 +494,9 @@ pub enum SessionNodePayload {
     },
 }
 
-pub use crate::persisted_session_config::{PersistedSessionConfig, UndeliveredConfigChange};
+pub use crate::persisted_session_config::{
+    PersistedSessionConfig, RetiredConfigDelivery, UndeliveredConfigChange,
+};
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct PersistedTurnState {

@@ -94,6 +94,10 @@ pub enum RecordLocator {
         session: crate::SessionId,
         run: crate::TurnId,
     },
+    /// The session's head: the config change it has not delivered.
+    SessionHead {
+        session: crate::SessionId,
+    },
     Prompt(PromptCallKey),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]

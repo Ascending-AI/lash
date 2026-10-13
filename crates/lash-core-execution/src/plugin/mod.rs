@@ -25,6 +25,7 @@ pub use lash_sansio::{
 
 mod actions;
 mod composition;
+mod config_observers;
 mod execution_state;
 mod process_components;
 pub use process_components::{
@@ -123,6 +124,7 @@ pub use protocol::{
 };
 mod recipe;
 mod service_bindings;
+pub use config_observers::{ConfigChangeDelivery, RetiredConfigObservers, is_lifecycle_observer};
 pub use recipe::{
     CallbackSlot, ContextRegistrations, ContributionDescriptor, ContributionDetails,
     ContributionKey, ContributionKind, ContributionReadiness, ExecutionRegistrations,

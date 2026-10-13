@@ -205,6 +205,29 @@ pub enum EmbedError {
     /// whole status, and every facade result carries this enum.
     #[error("send: {0}")]
     Send(Box<SendError>),
+    /// A config-change observer the builder was told to retire
+    /// ([`LashCoreBuilder::retire_config_observer`](crate::LashCoreBuilder::retire_config_observer))
+    /// cannot be: nothing is built (FIG-6164).
+    #[error("config-change observer {observer:?} cannot be retired: {refusal}")]
+    RetiredConfigObserver {
+        /// The observer named.
+        observer: lash_core::plugin::PluginCallbackIdentity,
+        /// Why it cannot be retired.
+        refusal: RetiredConfigObserverRefusal,
+    },
+}
+
+/// Why a config-change observer cannot be retired (FIG-6164).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum RetiredConfigObserverRefusal {
+    /// The identity names no session lifecycle observer: a retirement
+    /// resolves config-change deliveries and nothing else.
+    #[error("it names no session lifecycle observer")]
+    NotAnObserver,
+    /// An installed plugin still registers it: a node cannot both serve and
+    /// retire one observer.
+    #[error("an installed plugin still registers it")]
+    Installed,
 }
 
 /// Blank text a host offers as an identity is the store's refusal of it.
@@ -458,6 +481,7 @@ impl EmbedError {
                 _ => false,
             },
             Self::MissingProtocolPlugin
+            | Self::RetiredConfigObserver { .. }
             | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
@@ -521,6 +545,7 @@ impl EmbedError {
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => true,
             Self::MissingProtocolPlugin
+            | Self::RetiredConfigObserver { .. }
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
             | Self::MissingLlmProfile

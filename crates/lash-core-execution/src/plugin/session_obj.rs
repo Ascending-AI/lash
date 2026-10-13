@@ -381,6 +381,67 @@ impl PluginDispatchContext<'_> {
             Err(PluginError::HookFailures { causes })
         }
     }
+
+    /// Deliver `change`, a committed session config change owed to
+    /// `observers`, to exactly those, in their recorded order (FIG-6164).
+    /// Every one is resolved before any runs: one this session installs is
+    /// invoked, and one its host declares retired is retired as
+    /// undeliverable. Their failures aggregate as typed causes, as
+    /// [`Self::emit_runtime_event`]'s.
+    ///
+    /// # Errors
+    ///
+    /// [`RecordedCallbackUnavailable`](super::RecordedCallbackUnavailable)
+    /// for the first observer neither installed nor retired: nothing is
+    /// delivered.
+    pub async fn deliver_config_change(
+        &self,
+        observers: &[PluginCallbackIdentity],
+        change: SessionConfigChangedContext,
+    ) -> Result<super::ConfigChangeDelivery, PluginError> {
+        let capabilities = self.session.capabilities();
+        let retired = self.session.host.retired_config_observers();
+        let recorded = capabilities.composition.recorded();
+        let mut delivery = super::ConfigChangeDelivery {
+            retired_by: retired.retired_by().to_owned(),
+            ..super::ConfigChangeDelivery::default()
+        };
+        let mut owed = Vec::new();
+        for observer in observers {
+            match recorded.resolve(observer, &capabilities.contributions.runtime_event_hooks) {
+                Ok(registered) => owed.push(registered),
+                Err(_) if retired.contains(observer) => delivery.retired.push(observer.clone()),
+                Err(unavailable) => return Err(unavailable),
+            }
+        }
+        let event = PluginLifecycleEvent::SessionConfigChanged(Box::new(change));
+        let hook_kind = lifecycle_event_hook_kind(&event);
+        let mut causes = Vec::new();
+        for registered in owed {
+            let phase_name = plugin_hook_phase_name(hook_kind, registered.identity.owner.as_str());
+            if let Some(probe) = self.phase_probe {
+                probe.begin_named(&phase_name);
+            }
+            let result = (registered.hook)(event.clone()).await;
+            if let Some(probe) = self.phase_probe {
+                probe.end_named(&phase_name);
+            }
+            if let Err(error) = result {
+                let identity = registered.identity.clone();
+                let origin = PluginFailureOrigin {
+                    plugin_id: identity.owner,
+                    operation: identity.key,
+                };
+                let mut failure = PluginOperationFailure::from(error);
+                failure.origin.get_or_insert_with(|| origin.clone());
+                causes.push(PluginHookFailure { origin, failure });
+            }
+        }
+        if !causes.is_empty() {
+            delivery.failures = Some(PluginError::HookFailures { causes });
+        }
+        Ok(delivery)
+    }
 }
 
 impl PluginSession {

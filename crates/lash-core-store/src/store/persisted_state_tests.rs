@@ -24,6 +24,7 @@ fn persisted_state_hydrates_the_recorded_llm_profile_without_live_rebinding() {
             prompt_plan: crate::prompt_sections::PromptPlan::default(),
             config_revision: 0,
             undelivered_change: None,
+            retired_config_deliveries: Vec::new(),
             plugin_config: crate::PluginConfig::default(),
         },
         None,

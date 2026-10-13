@@ -27,6 +27,9 @@ pub struct PluginHost {
     /// host's sessions run in: an isolated tool enters a session's catalog
     /// only where its engine is among them.
     isolation_engines: Arc<StdMutex<BTreeSet<String>>>,
+    /// The config-change observers the deployment uninstalled for good
+    /// (FIG-6164).
+    pub(super) retired_config_observers: Arc<super::RetiredConfigObservers>,
 }
 
 /// Inputs shared by new-session creation and reconstruction from durable
@@ -176,6 +179,7 @@ impl PluginHost {
             trace_runtime,
             execution_budgets,
             isolation_engines: Arc::default(),
+            retired_config_observers: Arc::default(),
         }
     }
 
@@ -242,6 +246,7 @@ impl PluginHost {
             trace_runtime: self.trace_runtime.clone(),
             execution_budgets: self.execution_budgets.clone(),
             isolation_engines: Arc::clone(&self.isolation_engines),
+            retired_config_observers: Arc::clone(&self.retired_config_observers),
         }
     }
 

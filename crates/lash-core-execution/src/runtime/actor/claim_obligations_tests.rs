@@ -12,12 +12,10 @@ use lash_core_store::tool_run::{
     MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
 };
 use lash_durable::domain::{OwnerKey, RunSeq};
-use lash_durable::{
-    ActorKey, ActorTx, CommitLabel, DurableInstant, Epoch, MailSeq, OpenedActor, StateRevision,
-};
+use lash_durable::{ActorKey, ActorTx, DurableInstant, Epoch, MailSeq, OpenedActor, StateRevision};
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
 
-use super::{RecordedWork, SessionObligations, Staged};
+use super::{ReadScope, RecordedWork, SessionObligations, Staged};
 use crate::runtime::actor::round::{self, AdmittedExecution, ExecutionDraft, SettledOutput};
 use crate::tool_run::{AdmittedBinding, PresentationBinding};
 use crate::{ToolCallId, ToolId};
@@ -103,18 +101,18 @@ fn token(owner: &str) -> String {
         .to_string()
 }
 
-/// A commit under `label` at the claim's epoch that states no root's debts.
-fn staged(label: CommitLabel) -> Staged<'static> {
+/// A commit at the claim's epoch that states no root's debts.
+fn staged() -> Staged<'static> {
     Staged {
-        label,
         epoch: Epoch(1),
         owing: None,
         limits: limits(),
+        phase_limits: limits(),
     }
 }
 
 /// A seeded ledger reads nothing.
-async fn unread(_: SessionId) -> Result<RecordedWork, lash_durable::DurableError> {
+async fn unread(_: SessionId, _: ReadScope) -> Result<RecordedWork, lash_durable::DurableError> {
     panic!("the ledger knows the session's work")
 }
 
@@ -124,13 +122,13 @@ async fn unread(_: SessionId) -> Result<RecordedWork, lash_durable::DurableError
 fn a_token_stays_required_until_its_last_use_settles() {
     let mut work = RecordedWork::session();
     let (tx, members) = admitting(1, vec![draft("a", "k"), draft("b", "k")]);
-    work.apply(&tx, Epoch(1), None, limits()).unwrap();
+    work.apply(&tx, Epoch(1), None, limits(), limits()).unwrap();
     assert_eq!(work.requires(), [token("k")]);
     assert_eq!(work.outstanding_obligations().len(), 2);
-    work.apply(&settling(&members[0]), Epoch(1), None, limits())
+    work.apply(&settling(&members[0]), Epoch(1), None, limits(), limits())
         .unwrap();
     assert_eq!(work.requires(), [token("k")]);
-    work.apply(&settling(&members[1]), Epoch(1), None, limits())
+    work.apply(&settling(&members[1]), Epoch(1), None, limits(), limits())
         .unwrap();
     assert!(work.requires().is_empty());
 }
@@ -143,7 +141,7 @@ fn a_token_stays_required_until_its_last_use_settles() {
 async fn the_last_commit_to_land_writes_requirements_from_every_record_before_it() {
     let mut work = RecordedWork::session();
     let (tx, members) = admitting(1, vec![draft("x", "k")]);
-    work.apply(&tx, Epoch(1), None, limits()).unwrap();
+    work.apply(&tx, Epoch(1), None, limits(), limits()).unwrap();
     let ledger = Arc::new(SessionObligations::seeded(
         session(),
         work,
@@ -156,16 +154,11 @@ async fn the_last_commit_to_land_writes_requirements_from_every_record_before_it
         let tx = settling(&members[0]);
         crate::task::spawn(async move {
             ledger
-                .commit(
-                    unread,
-                    staged(CommitLabel::ROUND_OUTCOME),
-                    tx,
-                    |tx| async move {
-                        let _ = entered.send(());
-                        let _ = released.await;
-                        Ok(tx.requires().map(<[String]>::to_vec))
-                    },
-                )
+                .commit(unread, staged(), tx, |tx| async move {
+                    let _ = entered.send(());
+                    let _ = released.await;
+                    Ok(tx.requires().map(<[String]>::to_vec))
+                })
                 .await
                 .unwrap()
         })
@@ -176,12 +169,9 @@ async fn the_last_commit_to_land_writes_requirements_from_every_record_before_it
         let (tx, _) = admitting(2, vec![draft("y", "j")]);
         crate::task::spawn(async move {
             ledger
-                .commit(
-                    unread,
-                    staged(CommitLabel::ROUND_START),
-                    tx,
-                    |tx| async move { Ok(tx.requires().map(<[String]>::to_vec)) },
-                )
+                .commit(unread, staged(), tx, |tx| async move {
+                    Ok(tx.requires().map(<[String]>::to_vec))
+                })
                 .await
                 .unwrap()
         })

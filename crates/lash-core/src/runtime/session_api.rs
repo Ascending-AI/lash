@@ -533,51 +533,76 @@ impl LashRuntime {
         self.state.effective_policy().clone()
     }
 
-    pub(super) async fn notify_session_config_changed(
-        &self,
-        change: crate::UndeliveredConfigChange,
-    ) {
+    /// Deliver the config change the session's head still owes its
+    /// observers (FIG-5397) to exactly the observers it records, and take
+    /// it from resident state, so the session's next head commit retires it
+    /// (FIG-6164). An observer the deployment declared retired has its
+    /// share retired as undeliverable, recorded in the head beside the
+    /// change's revision. A runtime whose plugins are not built, or that
+    /// cannot resolve every observer the change is owed to, delivers
+    /// nothing and leaves the change owed: it is never retired against an
+    /// empty or partial roster.
+    pub(super) async fn deliver_undelivered_config_change(&mut self) {
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        let Ok(services) = self.runtime_session_services() else {
+        let Some(change) = self.state.undelivered_config_change.as_deref() else {
             return;
         };
-        let crate::UndeliveredConfigChange {
-            revision,
-            previous,
-            current,
-        } = change;
-        if let Err(error) = session
+        let services = match self.runtime_session_services() {
+            Ok(services) => services,
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %self.state.session_id,
+                    %error,
+                    "a config change was not delivered: the session's services are unavailable"
+                );
+                return;
+            }
+        };
+        let revision = change.revision;
+        let delivered = session
             .plugins()
             .dispatch(None)
-            .emit_runtime_event(crate::PluginLifecycleEvent::SessionConfigChanged(Box::new(
+            .deliver_config_change(
+                &change.observers,
                 SessionConfigChangedContext {
                     session_id: self.state.session_id.clone(),
                     revision,
-                    previous,
-                    current,
+                    previous: change.previous.clone(),
+                    current: change.current.clone(),
                     sessions: services.read_service(),
                 },
-            )))
-            .await
-        {
+            )
+            .await;
+        let delivery = match delivered {
+            Ok(delivery) => delivery,
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %self.state.session_id,
+                    revision,
+                    %error,
+                    "a config change was not delivered: an observer it is owed to is not installed"
+                );
+                return;
+            }
+        };
+        if let Some(error) = delivery.failures {
             tracing::warn!(?error, "session config observer failed");
         }
-    }
-
-    /// Deliver the config change the session's head still owes its
-    /// observers (FIG-5397) to the plugins this runtime has built, and take
-    /// it from resident state, so the session's next head commit retires
-    /// it. A runtime whose plugins are not built delivers nothing.
-    pub(super) async fn deliver_undelivered_config_change(&mut self) {
-        if self.session.is_none() {
-            return;
-        }
-        let Some(change) = self.state.undelivered_config_change.take() else {
-            return;
-        };
-        self.notify_session_config_changed(*change).await;
+        self.state
+            .retired_config_deliveries
+            .extend(
+                delivery
+                    .retired
+                    .into_iter()
+                    .map(|observer| crate::RetiredConfigDelivery {
+                        revision,
+                        observer,
+                        retired_by: delivery.retired_by.clone(),
+                    }),
+            );
+        self.state.undelivered_config_change = None;
     }
 }
 

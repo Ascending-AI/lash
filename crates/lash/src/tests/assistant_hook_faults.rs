@@ -192,3 +192,143 @@ async fn a_deterministic_assistant_hook_failure_is_the_steps_recorded_outcome() 
     core.shutdown().await?;
     Ok(())
 }
+
+/// F1 (FIG-6164): a paid answer whose response hook K faulted is retained
+/// with the turn's phase, and the session owes K until the answer is
+/// derived. While the retry's derivation runs, the session's stored claim
+/// requirements name K's token: a node that decodes the session but does
+/// not install K claims it only to cancel it, never to run the retained
+/// answer, and this core, which installs K, claims it to run. Once the
+/// answer is derived and the turn commits, nothing is owed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_retained_model_answer_requires_its_response_hook_until_it_is_derived() -> Result<()> {
+    use lash_core::durable_port::{
+        ActorKey, BootId, ClaimPurpose, DurableInstant, NodeId, NodeLease, Owner,
+    };
+    const ID: &str = "hook-retained-answer";
+    let (entered, release) = (
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+    );
+    let hook_calls = Arc::new(AtomicUsize::new(0));
+    let hook = {
+        let (entered, release, hook_calls) = (
+            Arc::clone(&entered),
+            Arc::clone(&release),
+            Arc::clone(&hook_calls),
+        );
+        StaticPluginFactory::new(
+            lash_core::plugin::PluginDeclaration::initial("hook-faults"),
+            lash_core::facade_support::PluginSpec::new().with_assistant_response(
+                crate::hook_key!("suffix"),
+                None,
+                Arc::new(move |ctx| {
+                    let call = hook_calls.fetch_add(1, Ordering::SeqCst) + 1;
+                    let response = text_response(&format!("{} [hooked]", ctx.response.full_text()));
+                    let (entered, release) = (Arc::clone(&entered), Arc::clone(&release));
+                    Box::pin(async move {
+                        if call == 1 {
+                            return Err(lash_core::PluginError::Invoke(
+                                "fig6164: the hook faults once".into(),
+                            ));
+                        }
+                        entered.notify_one();
+                        release.notified().await;
+                        Ok(lash_core::facade_support::AssistantResponseTransform {
+                            response,
+                            events: Vec::new(),
+                        })
+                    })
+                }),
+            ),
+        )
+    };
+    let provider = crate::testing::TestProvider::builder()
+        .kind("hook-faults")
+        .complete(|_| async move { Ok(text_response("the paid completion")) })
+        .build()
+        .into_handle();
+    let backend = sqlite_memory_store_backend().await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .plugin(Arc::new(hook))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await?;
+    let handle = session.send(TurnInput::text("hello")).await?;
+    tokio::time::timeout(ANSWERS_WITHIN, entered.notified())
+        .await
+        .expect("the retry derives from the retained answer");
+
+    let hook_token = crate::plugins::ObligationToken::for_callback(
+        crate::plugins::RegistryKind::Session,
+        &lash_core::plugin::PluginCallbackIdentity {
+            owner: "hook-faults".to_owned(),
+            key: "assistant_response:suffix".to_owned(),
+        },
+    )
+    .into_string();
+    let actor = ActorKey::session(ID).expect("a session actor key");
+    let row = backend
+        .durable()
+        .claim_facts(None, &actor)
+        .await?
+        .actor
+        .expect("the session's actor");
+    assert!(
+        row.requires.contains(&hook_token),
+        "the retained answer owes its hook: {:?}",
+        row.requires
+    );
+    let serves = crate::testing::node_serves(&core);
+    let node = |serves: Vec<String>| NodeLease {
+        owner: Owner {
+            node: NodeId::new("fig6164"),
+            boot: BootId::new("boot"),
+        },
+        decodes: backend.formats().session_decodes(),
+        serves,
+        ttl_millis: 1,
+        expires_at: DurableInstant(0),
+    };
+    let without_hook = serves
+        .iter()
+        .filter(|token| **token != hook_token)
+        .cloned()
+        .collect();
+    assert_eq!(
+        ClaimPurpose::of(&node(without_hook), row.formats.as_str(), &row.requires),
+        ClaimPurpose::CancelOnly,
+        "a decoded node without the hook never claims the retained answer to run it"
+    );
+    assert_eq!(
+        ClaimPurpose::of(&node(serves), row.formats.as_str(), &row.requires),
+        ClaimPurpose::Run,
+        "a node that installs the hook claims it to run"
+    );
+
+    release.notify_one();
+    let output = tokio::time::timeout(ANSWERS_WITHIN, handle.output())
+        .await
+        .expect("the turn answers")?;
+    assert_eq!(
+        output.assistant_message(),
+        Some("the paid completion [hooked]")
+    );
+    let row = backend
+        .durable()
+        .claim_facts(None, &actor)
+        .await?
+        .actor
+        .expect("the session's actor");
+    assert!(
+        !row.requires.contains(&hook_token),
+        "the derived answer owes nothing: {:?}",
+        row.requires
+    );
+    drop(session);
+    core.shutdown().await?;
+    Ok(())
+}

@@ -175,18 +175,10 @@ impl PluginDiagnostics {
             });
         };
         let turn = reads.turn(session).await?;
-        let Some(turn) = turn else {
-            return Ok(ObligationEvidencePage {
-                evidence: Evidence::Unavailable {
-                    reason: EvidenceAbsence::NotRetainedOrNeverRecorded,
-                },
-                next: None,
-                mismatch: None,
-                observed_revision: Some(row.revision),
-            });
-        };
+        let heads = self.core.backend.session_store_factory();
         let work = match RecordedWork::read_session_within(
             reads.as_ref(),
+            heads.as_ref(),
             session,
             lash_core_store::checkpoint_graph::DecodeLimits::within_total(16 * 1024 * 1024),
             4096,
@@ -226,9 +218,15 @@ impl PluginDiagnostics {
         let end = after.saturating_add(limit.get().min(256)).min(uses.len());
         let page = uses.get(after..end).unwrap_or_default().to_vec();
         let mismatch = work.mismatch(&row.requires);
-        let source = RecordLocator::TurnPhase {
-            session: session.clone(),
-            run: turn.run,
+        // A session with no turn owes only what its head records.
+        let source = match turn {
+            Some(turn) => RecordLocator::TurnPhase {
+                session: session.clone(),
+                run: turn.run,
+            },
+            None => RecordLocator::SessionHead {
+                session: session.clone(),
+            },
         };
         let evidence = if mismatch.is_some() {
             Evidence::Partial {

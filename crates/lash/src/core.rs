@@ -13,6 +13,7 @@ use lash_sansio::SessionId;
 mod drain;
 mod node;
 mod recovery;
+mod retired_observers;
 mod runtime_host_config;
 mod session_deletion;
 pub use session_deletion::SessionDeleteCompletion;
@@ -729,6 +730,9 @@ pub struct LashCoreBuilder {
     /// and the first registration refused, reported at build.
     process_components: lash_core::plugin::ProcessComponentRegistry,
     process_component_refusal: Option<lash_core::PluginError>,
+    /// The session config-change observers the deployment uninstalled for
+    /// good, each by its exact identity (FIG-6164).
+    retired_config_observers: Vec<lash_core::plugin::PluginCallbackIdentity>,
     recovery_lease: Option<lash_core::engine::RecoveryLeaseConfig>,
     recovery_pass: lash_core::engine::RecoveryPassBudget,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
@@ -796,6 +800,7 @@ impl LashCoreBuilder {
             plugin_stack: PluginStack::default(),
             process_components: lash_core::plugin::ProcessComponentRegistry::new(),
             process_component_refusal: None,
+            retired_config_observers: Vec::new(),
             recovery_lease: None,
             recovery_pass: lash_core::engine::RecoveryPassBudget::default(),
             process_tool_visibility_filter: None,
@@ -956,6 +961,25 @@ impl LashCoreBuilder {
 
     pub fn plugin(mut self, plugin: Arc<dyn PluginFactory>) -> Self {
         self.plugin_stack.push(plugin);
+        self
+    }
+
+    /// Retire the session config-change observer `observer`, which this
+    /// deployment uninstalled for good (FIG-6164): exactly that owner and
+    /// key. A session whose head owes a config change to it is claimed by
+    /// this core's node, and its delivery retires the observer's share as
+    /// undeliverable, recorded in the head as a
+    /// [`RetiredConfigDelivery`](crate::persistence::RetiredConfigDelivery)
+    /// naming the change's revision, the observer and this core's lease
+    /// owner. Its other observers are delivered as ever. The retirement
+    /// resolves config-change deliveries only. The build refuses an identity
+    /// that names no lifecycle observer, or one an installed plugin still
+    /// registers.
+    pub fn retire_config_observer(
+        mut self,
+        observer: lash_core::plugin::PluginCallbackIdentity,
+    ) -> Self {
+        self.retired_config_observers.push(observer);
         self
     }
 
@@ -1296,6 +1320,15 @@ impl LashCoreBuilder {
             &backend,
             protocol_factory.iter().chain(plugin_factories.iter()),
         )?;
+        // Every plugin host built for the core retires the observers the
+        // deployment uninstalled for good, once they are checked against
+        // the plugins it installs.
+        let mut core = core;
+        core.control.retired_config_observers = Arc::new(retired_observers::checked(
+            &build_plugin_host(protocol_factory.as_ref(), &plugin_factories, &core)?,
+            &runtime_owner,
+            std::mem::take(&mut self.retired_config_observers),
+        )?);
         let default_plugin_host = Arc::new(build_plugin_host(
             protocol_factory.as_ref(),
             &plugin_factories,
@@ -1307,7 +1340,6 @@ impl LashCoreBuilder {
         let transcript_decoders = default_plugin_host.transcript_decoders()?;
         // Every runtime of this core, its workers' too, composes a process
         // from these components and nothing else (FIG-6034 §5.1).
-        let mut core = core;
         core.process_engines = core.process_engines.clone().with_components(
             std::mem::take(&mut self.process_components).with_host(
                 lash_core::plugin::ProcessComponentHost {
@@ -1333,6 +1365,11 @@ impl LashCoreBuilder {
         // so no node advertises less than it installed.
         let mut serves = core.process_engines.components().served_tokens();
         serves.extend(default_plugin_host.installed_inventory()?.served_tokens());
+        serves.extend(
+            default_plugin_host
+                .retired_config_observers()
+                .served_tokens(),
+        );
         let serves: Arc<[String]> = serves.into_iter().map(String::from).collect();
         let process_registry = Arc::clone(process_work.registry());
         process_lifecycle_feed.bind_registry(Arc::clone(&process_registry));
@@ -1460,7 +1497,8 @@ pub(crate) fn build_plugin_host(
         core.tracing.clone(),
     )
     .with_prompt_render_pool(core.control.prompt_render_pool.clone())
-    .with_data_limits(core.data_limits);
+    .with_data_limits(core.data_limits)
+    .with_retired_config_observers(Arc::clone(&core.control.retired_config_observers));
     if let Some(protocol) = protocol_factory {
         host = host.with_protocol_plugin(Arc::clone(protocol));
     }

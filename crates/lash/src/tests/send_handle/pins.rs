@@ -68,6 +68,7 @@ async fn published_by(core: &LashCore, session: &str) -> Result<Published> {
         config: lash_core::PersistedSessionConfig {
             config_revision: 0,
             undelivered_change: None,
+            retired_config_deliveries: Vec::new(),
             ..head.config
         },
     })

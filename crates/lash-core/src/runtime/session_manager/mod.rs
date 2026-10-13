@@ -407,6 +407,7 @@ impl CurrentOwnerCapability {
             head_revision: state.head_revision,
             config_revision: state.config_revision,
             undelivered_config_change: state.undelivered_config_change.clone(),
+            retired_config_deliveries: state.retired_config_deliveries.clone(),
             persisted_node_ids: state.persisted_node_ids.clone(),
         }
     }

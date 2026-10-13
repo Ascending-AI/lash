@@ -5,9 +5,11 @@
 //! [`RecordedWork`] is the one traversal. It reads an actor's outstanding
 //! records as uses of claim tokens ([`ObligationUse`]): each call admitted
 //! and not settled owes its binding's callbacks, a parked cell owes the
-//! providers and codecs of the deferred matches it committed, and a process
-//! owes its environment's component configs. `requires` is the union of
-//! their tokens. A token stays required while any one of its uses is
+//! providers and codecs of the deferred matches it committed, the turn's
+//! phase owes the response callbacks of a paid model answer it retains, a
+//! session's head owes the observers of the config change it has not
+//! delivered, and a process owes its environment's component configs.
+//! `requires` is the union of their tokens. A token stays required while any one of its uses is
 //! outstanding: settling one of two calls to a provider leaves it required.
 //!
 //! The same traversal is the reducer at every write point. A claimed
@@ -23,14 +25,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
+use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus, PhaseRoot};
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, DecodeLimits, EncodedNode, GraphDecoder, NodeId, NodeKind, NodeSource, StoredNode,
 };
 use lash_core_store::obligations::{ObligationToken, RegistryKind};
 use lash_durable::domain::graph::{ExecRootWrite, RunFactKind, RunFactWrite, RunFacts};
-use lash_durable::domain::{ExecKey, OwnerKey, RootOwner};
-use lash_durable::{ActorTx, CommitLabel, DomainWrite, DurableError, DurableReads, Epoch};
+use lash_durable::domain::{ExecKey, OwnerKey, RootOwner, TurnWrite};
+use lash_durable::{ActorTx, DomainWrite, DurableError, DurableReads, Epoch};
 
 use crate::ToolCallId;
 use crate::plugin::PluginCallbackIdentity;
@@ -45,6 +47,13 @@ pub enum ObligationSite {
     /// A parked execution's root: the deferred matches its cell committed,
     /// whose later calls run on their providers and codecs, until it ends.
     Execution { exec: ExecKey },
+    /// The unfinished turn's phase: the response callbacks of the paid
+    /// model answer its checkpoint retains, until the answer is derived or
+    /// the turn ends.
+    Phase,
+    /// The config change the session's head has not delivered, at its
+    /// revision: each observer it is owed to, until the head retires it.
+    ConfigChange { revision: u64 },
     /// A process's environment: the config of every component it names.
     Environment,
 }
@@ -56,6 +65,10 @@ pub enum ObligationStage {
     Admitted,
     /// A committed deferred match the execution may still call.
     Matched,
+    /// A paid model answer whose response callbacks have not derived it.
+    Answered,
+    /// A committed config change its observer has not been delivered.
+    Undelivered,
     /// A component config the process is written under.
     Configured,
 }
@@ -75,6 +88,8 @@ impl ObligationUse {
         match self.site {
             ObligationSite::Call { .. } => ObligationStage::Admitted,
             ObligationSite::Execution { .. } => ObligationStage::Matched,
+            ObligationSite::Phase => ObligationStage::Answered,
+            ObligationSite::ConfigChange { .. } => ObligationStage::Undelivered,
             ObligationSite::Environment => ObligationStage::Configured,
         }
     }
@@ -129,42 +144,91 @@ impl RecordedWork {
         work
     }
 
-    /// The outstanding work `session`'s committed records hold: its
-    /// unfinished turn's unsettled calls, and the calls and committed
-    /// matches of each of its cells that is parked. Graph reads are bounded
-    /// by `limits`.
+    /// The outstanding work `session`'s committed records hold: the config
+    /// change its head owes, read from `heads`, its unfinished turn's
+    /// unsettled calls and the answer its phase retains, and the calls and
+    /// committed matches of each of its cells that is parked. The phase's
+    /// graph read is bounded by `phase_limits`, every other by `limits`.
     ///
     /// # Errors
     ///
     /// A read's refusal, or a record that does not decode.
     pub async fn read_session(
         reads: &dyn DurableReads,
+        heads: &dyn crate::store::SessionCommitStore,
         session: &crate::SessionId,
         limits: DecodeLimits,
+        phase_limits: DecodeLimits,
     ) -> Result<Self, DurableError> {
-        Self::read_session_using(reads, session, limits, None).await
+        Self::read_session_using(reads, heads, session, limits, phase_limits, None).await
     }
 
     /// The same traversal for diagnostics, with a row and aggregate byte budget.
     pub async fn read_session_within(
         reads: &dyn DurableReads,
+        heads: &dyn crate::store::SessionCommitStore,
         session: &crate::SessionId,
         limits: DecodeLimits,
         max_rows: usize,
     ) -> Result<Self, DurableError> {
-        Self::read_session_using(reads, session, limits, Some(max_rows)).await
+        Self::read_session_using(reads, heads, session, limits, limits, Some(max_rows)).await
+    }
+
+    /// The work `session`'s head alone owes: the config change it has not
+    /// delivered. What a session that holds no turn owes.
+    ///
+    /// # Errors
+    ///
+    /// The head's read refused.
+    pub async fn read_head(
+        heads: &dyn crate::store::SessionCommitStore,
+        session: &crate::SessionId,
+    ) -> Result<Self, DurableError> {
+        let mut work = Self::session();
+        let head = heads
+            .load_session_head_meta(session)
+            .await
+            .map_err(|error| {
+                DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Unavailable,
+                    message: format!("the session's head does not read: {error}"),
+                })
+            })?;
+        work.apply_head(
+            head.and_then(|head| head.config.undelivered_change)
+                .as_deref(),
+        );
+        Ok(work)
     }
 
     async fn read_session_using(
         reads: &dyn DurableReads,
+        heads: &dyn crate::store::SessionCommitStore,
         session: &crate::SessionId,
         mut limits: DecodeLimits,
+        phase_limits: DecodeLimits,
         max_rows: Option<usize>,
     ) -> Result<Self, DurableError> {
-        let mut work = Self::session();
+        let mut work = Self::read_head(heads, session).await?;
         let Some(turn) = reads.turn(session).await? else {
             return Ok(work);
         };
+        if let Some(root) = turn.phase.checkpoint() {
+            let graph = reads
+                .hydrate(
+                    RootOwner::TurnPhase {
+                        session: session.clone(),
+                        run: turn.run.clone(),
+                    },
+                    Some(root),
+                    phase_limits,
+                )
+                .await?;
+            work.apply_phase(&graph, root, phase_limits)?;
+            if max_rows.is_some() {
+                consume_limits(&mut limits, &graph.nodes)?;
+            }
+        }
         let owner = OwnerKey::Turn(session.clone(), turn.run.clone());
         let facts = match max_rows {
             None => reads.run_facts(&owner).await?,
@@ -290,6 +354,7 @@ impl RecordedWork {
         epoch: Epoch,
         owing: Option<&ExecutionDebts>,
         limits: DecodeLimits,
+        phase_limits: DecodeLimits,
     ) -> Result<(), DurableError> {
         let facts = RunFacts::appended(tx.domain(), tx.graph(), epoch);
         self.apply_facts(&facts)?;
@@ -307,7 +372,28 @@ impl RecordedWork {
                 DomainWrite::ExecRoot(
                     ExecRootWrite::Retire { exec, .. } | ExecRootWrite::Clear { exec },
                 ) => self.end(exec),
+                // The writer of a phase's root states what it owes; a root
+                // it does not state is read from the nodes `tx` stages, and
+                // a phase without a root owes nothing.
+                DomainWrite::Turn(TurnWrite::Advance { phase, .. }) => match phase.checkpoint() {
+                    Some(root) => match tx.owed(&root) {
+                        Some(owed) => self.owe_phase(owed),
+                        None => self.apply_phase(&staged, root, phase_limits)?,
+                    },
+                    None => self.put(ObligationSite::Phase, []),
+                },
+                DomainWrite::Turn(TurnWrite::Terminal { .. }) => self.end_turn(),
                 _ => {}
+            }
+        }
+        // The head a commit publishes states the config change it owes,
+        // whatever else the commit ended.
+        for write in tx.domain() {
+            if let DomainWrite::SessionCommit(commit) = write {
+                let change =
+                    crate::store::session_commit_undelivered_change(&commit.commit_json)
+                        .map_err(|error| corrupt("a session head commit", &error.to_string()))?;
+                self.apply_head(change.as_deref());
             }
         }
         Ok(())
@@ -323,8 +409,28 @@ impl RecordedWork {
                     kind: RunFactKind::Admit | RunFactKind::XOutcome,
                     ..
                 }) | DomainWrite::ExecRoot(_)
+                    | DomainWrite::Turn(TurnWrite::Advance { .. } | TurnWrite::Terminal { .. })
+                    | DomainWrite::SessionCommit(_)
             )
         })
+    }
+
+    /// Whether `tx` ends the session's turn: what the turn's records owe
+    /// goes with it.
+    #[must_use]
+    pub fn ends_turn(tx: &ActorTx) -> bool {
+        tx.domain()
+            .iter()
+            .any(|write| matches!(write, DomainWrite::Turn(TurnWrite::Terminal { .. })))
+    }
+
+    /// Whether `tx` publishes the session's head, which states the config
+    /// change it owes.
+    #[must_use]
+    pub fn writes_head(tx: &ActorTx) -> bool {
+        tx.domain()
+            .iter()
+            .any(|write| matches!(write, DomainWrite::SessionCommit(_)))
     }
 
     fn put(&mut self, site: ObligationSite, tokens: impl IntoIterator<Item = ObligationToken>) {
@@ -381,6 +487,63 @@ impl RecordedWork {
         Ok(())
     }
 
+    /// Take what the phase root `root`, read from `source`, owes: the
+    /// response callbacks of the paid answer it retains (S7), its `owed`.
+    /// With [`Self::owe_phase`], the one projection of a phase's debts: a
+    /// cold read, a commit and diagnostics all take it here.
+    fn apply_phase(
+        &mut self,
+        source: &dyn NodeSource,
+        root: NodeId,
+        limits: DecodeLimits,
+    ) -> Result<(), DurableError> {
+        let body: PhaseRoot = GraphDecoder::new(source, limits)
+            .decode(root, NodeKind::PHASE_ROOT)
+            .map_err(|refusal| corrupt("a turn's phase root", &refusal.to_string()))?;
+        self.owe_phase(&body.owed);
+        Ok(())
+    }
+
+    /// The turn's phase owes `owed`, and nothing it owed before.
+    fn owe_phase(&mut self, owed: &[PluginCallbackIdentity]) {
+        let registry = self.registry;
+        self.put(
+            ObligationSite::Phase,
+            owed.iter()
+                .map(|callback| ObligationToken::for_callback(registry, callback)),
+        );
+    }
+
+    /// Take what `change`, the config change a session's head owes, owes:
+    /// each observer it records, and nothing a change it replaced owed.
+    fn apply_head(&mut self, change: Option<&crate::UndeliveredConfigChange>) {
+        self.uses
+            .retain(|site, _| !matches!(site, ObligationSite::ConfigChange { .. }));
+        if let Some(change) = change {
+            let registry = self.registry;
+            self.put(
+                ObligationSite::ConfigChange {
+                    revision: change.revision,
+                },
+                change
+                    .observers
+                    .iter()
+                    .map(|observer| ObligationToken::for_callback(registry, observer)),
+            );
+        }
+    }
+
+    /// The session's turn ended: its calls, its phase and its cells owe
+    /// nothing more; what its head owes stays.
+    fn end_turn(&mut self) {
+        self.uses.retain(|site, _| {
+            matches!(
+                site,
+                ObligationSite::ConfigChange { .. } | ObligationSite::Environment
+            )
+        });
+    }
+
     /// `exec`'s root owes `owed`, and nothing it owed before.
     fn owe(&mut self, exec: &ExecKey, owed: &[PluginCallbackIdentity]) {
         let registry = self.registry;
@@ -397,7 +560,9 @@ impl RecordedWork {
         self.uses.retain(|site, _| match site {
             ObligationSite::Execution { exec: held } => held != exec,
             ObligationSite::Call { owner: held, .. } => *held != owner,
-            ObligationSite::Environment => true,
+            ObligationSite::Phase
+            | ObligationSite::ConfigChange { .. }
+            | ObligationSite::Environment => true,
         });
     }
 }
@@ -500,7 +665,8 @@ impl SessionObligations {
     /// `requires` its records leave the session owing written into it when
     /// they change. A transaction whose writer set its requirements keeps
     /// them. Commits through one ledger are serialized. The session's
-    /// records are read through `read` when the ledger does not know them.
+    /// records are read through `read` when the ledger does not know them:
+    /// only its head's when `tx` ends its turn.
     ///
     /// # Errors
     ///
@@ -514,7 +680,7 @@ impl SessionObligations {
         commit: F,
     ) -> Result<T, DurableError>
     where
-        R: FnOnce(crate::SessionId) -> ReadFut,
+        R: FnOnce(crate::SessionId, ReadScope) -> ReadFut,
         ReadFut: std::future::Future<Output = Result<RecordedWork, DurableError>>,
         F: FnOnce(ActorTx) -> Fut,
         Fut: std::future::Future<Output = Result<T, DurableError>>,
@@ -532,24 +698,29 @@ impl SessionObligations {
             state.written = Some(explicit);
             return Ok(committed);
         }
-        let ends_turn = staged.label == CommitLabel::TURN_COMMIT;
-        if !ends_turn && !RecordedWork::touches(&tx) {
+        if !RecordedWork::touches(&tx) {
             return commit(tx).await;
         }
-        let next = if ends_turn {
-            RecordedWork::session()
-        } else {
-            let mut work = match state.work.take() {
-                Some(work) => work,
-                None => {
-                    let work = read(self.session.clone()).await?;
-                    self.report(&work, state.written.as_deref());
-                    work
-                }
-            };
-            work.apply(&tx, staged.epoch, staged.owing, staged.limits)?;
-            work
+        let ends_turn = RecordedWork::ends_turn(&tx);
+        let mut next = match state.work.take() {
+            Some(work) => work,
+            // A commit that ends the turn and publishes the head states all
+            // the session owes after it.
+            None if ends_turn && RecordedWork::writes_head(&tx) => RecordedWork::session(),
+            None if ends_turn => read(self.session.clone(), ReadScope::Head).await?,
+            None => {
+                let work = read(self.session.clone(), ReadScope::Session).await?;
+                self.report(&work, state.written.as_deref());
+                work
+            }
         };
+        next.apply(
+            &tx,
+            staged.epoch,
+            staged.owing,
+            staged.limits,
+            staged.phase_limits,
+        )?;
         let requires = next.requires();
         if state.written.as_ref() != Some(&requires) {
             tx.set_requires(requires.clone());
@@ -579,14 +750,24 @@ impl SessionObligations {
     }
 }
 
-/// How one commit through a [`SessionObligations`] is staged: its label,
-/// the epoch it lands at, what the root it publishes owes when its writer
-/// states it, and the bounds of a root it decodes.
+/// What of a session's records a [`SessionObligations`] reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ReadScope {
+    /// Every outstanding record ([`RecordedWork::read_session`]).
+    Session,
+    /// Its head's alone ([`RecordedWork::read_head`]): the commit ends the
+    /// turn, whose records owe nothing after it.
+    Head,
+}
+
+/// How one commit through a [`SessionObligations`] is staged: the epoch it
+/// lands at, what the root it publishes owes when its writer states it, and
+/// the bounds of an execution's root and of a phase's root it decodes.
 pub(super) struct Staged<'a> {
-    pub(super) label: CommitLabel,
     pub(super) epoch: Epoch,
     pub(super) owing: Option<&'a ExecutionDebts>,
     pub(super) limits: DecodeLimits,
+    pub(super) phase_limits: DecodeLimits,
 }
 
 #[cfg(test)]

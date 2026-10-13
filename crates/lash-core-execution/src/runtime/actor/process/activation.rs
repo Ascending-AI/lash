@@ -245,7 +245,7 @@ impl Activation for ProcessActivation {
         let Ok(process) = ProcessId::parse(owned.actor().id()) else {
             return Exit::Abandoned;
         };
-        let exit = self.run(&owned, &process).await;
+        let exit = Box::pin(self.run(&owned, &process)).await;
         self.forget_published(&owned, &process).await;
         exit
     }

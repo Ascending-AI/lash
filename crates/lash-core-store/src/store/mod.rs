@@ -173,7 +173,7 @@ pub use runtime_commit::{
     TurnProjectionWatermark, TurnTraceReceipt, decode_runtime_commit_receipt,
     decode_runtime_commit_receipt_for_fleet, decode_session_commit, encode_session_commit,
     ensure_supported_receipt_version, ensure_supported_receipt_version_for_fleet,
-    frames_left_by_commit, validate_turn_commit_outcome_code,
+    frames_left_by_commit, session_commit_undelivered_change, validate_turn_commit_outcome_code,
 };
 pub use runtime_commit_plan::{
     FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,
@@ -473,6 +473,9 @@ impl RuntimeCommit {
         config
             .undelivered_change
             .clone_from(&state.undelivered_config_change);
+        config
+            .retired_config_deliveries
+            .clone_from(&state.retired_config_deliveries);
         Ok(Self {
             commit_budget,
             session_id: state.session_id.clone(),

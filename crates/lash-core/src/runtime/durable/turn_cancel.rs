@@ -436,9 +436,10 @@ async fn end(
     // The turn's scope ends with its cancel (L6b): its waits are revoked and
     // its first batch of `Until` children marked; the next pass marks the rest.
     super::turn_scope::end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;
-    // Nothing the ended turn called is owed any more: the session's claim
-    // requirements go with it (FIG-6072).
-    tx.set_requires(Vec::new());
+    // Nothing the ended turn called is owed any more: the commit's claim
+    // requirements are what the session's head alone still owes, the
+    // observers of a config change it has not delivered (FIG-6072,
+    // FIG-6164).
     // A turn cancelled before its first phase commit still owes its
     // admission's export: it is made before the commit that ends the turn
     // (FIG-5998).

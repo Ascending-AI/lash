@@ -61,32 +61,60 @@ struct Seen {
 
 /// A plugin that records every session config change it observes. While
 /// `failing` is set a session it is part of does not build.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct Observer {
+    id: &'static str,
     seen: Arc<Mutex<Vec<Seen>>>,
     failing: Arc<AtomicBool>,
 }
 
-impl Observer {
-    fn seen(&self) -> Vec<Seen> {
-        self.seen.lock_recover().clone()
+impl Default for Observer {
+    fn default() -> Self {
+        Self::named(PLUGIN)
     }
 }
 
 impl Observer {
-    pub fn declaration() -> lash::plugins::PluginDeclaration {
-        lash::plugins::PluginDeclaration::initial(PLUGIN)
+    /// The observer plugin `id`.
+    fn named(id: &'static str) -> Self {
+        Self {
+            id,
+            seen: Arc::default(),
+            failing: Arc::default(),
+        }
+    }
+
+    fn seen(&self) -> Vec<Seen> {
+        self.seen.lock_recover().clone()
+    }
+
+    /// The identity of its config-change observer.
+    fn identity(&self) -> lash_core::plugin::PluginCallbackIdentity {
+        lash_core::plugin::PluginCallbackIdentity {
+            owner: self.id.to_owned(),
+            key: "runtime_event:observe".to_owned(),
+        }
+    }
+
+    /// The claim token of its config-change observer.
+    fn token(&self) -> String {
+        lash::plugins::ObligationToken::for_callback(
+            lash::plugins::RegistryKind::Session,
+            &self.identity(),
+        )
+        .into_string()
     }
 }
+
 impl lash::plugins::PluginMetadata for Observer {
     fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
-        Self::declaration()
+        lash::plugins::PluginDeclaration::initial(self.id)
     }
 }
 
 impl lash::plugins::PluginFactory for Observer {
     fn id(&self) -> &'static str {
-        PLUGIN
+        self.id
     }
 
     fn recipe(
@@ -107,7 +135,7 @@ impl lash::plugins::PluginFactory for Observer {
 
 impl lash::plugins::SessionPlugin for Observer {
     fn id(&self) -> &'static str {
-        PLUGIN
+        self.id
     }
 
     /// A session's build ends here; inspecting the plugin's registrations,
@@ -402,6 +430,189 @@ async fn cold_config_changes_coalesce_until_the_next_successful_plugin_build_on_
     );
     world.send(&durable, "after the coalesced delivery").await;
     assert_eq!(observer.seen(), latest, "a later build does not redeliver");
+    world.shutdown().await;
+}
+
+/// A core whose plugins are `observers` and that retires `retired`.
+fn observing(
+    observers: &[&Observer],
+    retired: &[&Observer],
+) -> impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder {
+    let observers: Vec<Arc<dyn lash::plugins::PluginFactory>> = observers
+        .iter()
+        .map(|observer| Arc::new((*observer).clone()) as Arc<dyn lash::plugins::PluginFactory>)
+        .collect();
+    let retired: Vec<_> = retired.iter().map(|observer| observer.identity()).collect();
+    move |backend| {
+        let builder = observers.into_iter().fold(
+            lash::LashCore::standard_builder(backend.clone()),
+            lash::LashCoreBuilder::plugin,
+        );
+        retired
+            .into_iter()
+            .fold(builder, lash::LashCoreBuilder::retire_config_observer)
+    }
+}
+
+/// The session's stored claim requirements.
+async fn requires(backend: &lash::Backend, name: &str) -> Vec<String> {
+    backend
+        .durable()
+        .claim_facts(None, &ActorKey::session(name).unwrap())
+        .await
+        .expect("read the session's claim facts")
+        .actor
+        .expect("the session's actor")
+        .requires
+}
+
+/// FIG-6164: a committed change is owed to the observers installed when it
+/// commits, and the session's claim requires each one until the head
+/// retires it. Its observers O and P are installed when it commits, and
+/// its delivery does not happen: the session's plugins do not build, as if
+/// the node were lost after the commit. A node that installs P but neither
+/// installs O nor retires it never claims the session to run it: the
+/// change stays owed and P sees nothing, so it is never retired against a
+/// partial roster. A node that installs P and retires O, which the
+/// deployment uninstalled for good, claims it: P is delivered the change
+/// exactly once, O's share is retired as undeliverable, recorded in the
+/// head with the change's revision and the retiring node, and nothing is
+/// owed after it. A deployment cannot retire an observer it installs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_pending_change_is_owed_to_its_recorded_observers_until_delivered_or_retired_on_sqlite_memory()
+ {
+    let kept = Observer::default();
+    let gone = Observer::named("config-change-gone");
+    let Some(mut world) = World::new(Tier::SqliteMemory, observing(&[&kept, &gone], &[])).await
+    else {
+        return;
+    };
+    let name = "config-change-owed";
+    let durable = world.session(name, served::spec(BEFORE)).await;
+    let session = open(&world, name).await;
+    let base = revision(&session).await;
+    gone.failing.store(true, Ordering::SeqCst);
+    let outcome = set_limit(&session, "raise-owed", base, AFTER).await;
+    assert!(
+        matches!(outcome, ConfigTransactionOutcome::Applied { .. }),
+        "{outcome:?}"
+    );
+    let change = owed(&world.backend, name)
+        .await
+        .expect("the head owes the change");
+    assert_eq!(
+        change.observers,
+        vec![kept.identity(), gone.identity()],
+        "the change is owed to the observers installed when it committed"
+    );
+    let required = requires(&world.backend, name).await;
+    assert!(
+        required.contains(&kept.token()) && required.contains(&gone.token()),
+        "the session's claim requires every observer the change is owed to: {required:?}"
+    );
+    drop(durable);
+    drop(session);
+
+    // A node that lacks O, and does not retire it, never runs the session.
+    world
+        .restart("without-gone", observing(&[&kept], &[]))
+        .await;
+    assert!(
+        !lash::testing::node_serves(&world.core).contains(&gone.token()),
+        "the node does not serve the observer it lacks"
+    );
+    let held = world
+        .core
+        .session(lash::SessionId::try_from(name.to_owned()).unwrap())
+        .durable()
+        .await
+        .expect("the durable session");
+    let waiting = held
+        .send(lash::TurnInput::text("after the change"))
+        .await
+        .expect("the input is accepted");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(kept.seen(), Vec::new(), "a node lacking O delivers nothing");
+    assert_eq!(
+        owed(&world.backend, name).await.map(|owed| owed.revision),
+        Some(base + 1),
+        "the change is not retired against a partial roster"
+    );
+    drop(waiting);
+    drop(held);
+
+    // A node that retires O delivers P once and records O's share retired.
+    world
+        .restart("retiring-gone", observing(&[&kept], &[&gone]))
+        .await;
+    let resumed = world
+        .core
+        .session(lash::SessionId::try_from(name.to_owned()).unwrap())
+        .durable()
+        .await
+        .expect("the durable session");
+    world.send(&resumed, "once the observer is retired").await;
+    assert_eq!(
+        kept.seen(),
+        vec![Seen {
+            session: name.to_owned(),
+            revision: base + 1,
+            previous: BEFORE,
+            current: AFTER,
+            served: AFTER,
+        }],
+        "the observer still installed is delivered the change exactly once"
+    );
+    assert_eq!(gone.seen(), Vec::new());
+    let head = world
+        .backend
+        .stores()
+        .session_store_factory()
+        .load_session_head_meta(&lash::SessionId::try_from(name.to_owned()).unwrap())
+        .await
+        .expect("read the session's head")
+        .expect("the session has a head");
+    assert_eq!(
+        head.config.undelivered_change, None,
+        "the change is retired"
+    );
+    assert_eq!(
+        head.config.retired_config_deliveries,
+        vec![lash::persistence::RetiredConfigDelivery {
+            revision: base + 1,
+            observer: gone.identity(),
+            retired_by: "tool-semantics-deployment".to_owned(),
+        }],
+        "O's share is recorded retired by the node that retired it"
+    );
+    assert_eq!(
+        requires(&world.backend, name).await,
+        Vec::<String>::new(),
+        "nothing is owed once the change is retired"
+    );
+
+    let refused = observing(&[&kept], &[&kept])(&world.backend)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
+        .serve_sessions(false)
+        .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            lash::persistence::LeaseOwnerId::new("refused-deployment"),
+            lash::persistence::LeaseIncarnationId::new("refused-boot"),
+        ));
+    assert!(
+        matches!(
+            refused,
+            Err(lash::EmbedError::RetiredConfigObserver {
+                refusal: lash::RetiredConfigObserverRefusal::Installed,
+                ..
+            })
+        ),
+        "a node cannot both serve and retire one observer"
+    );
     world.shutdown().await;
 }
 

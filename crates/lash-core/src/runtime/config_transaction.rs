@@ -226,12 +226,9 @@ impl LashRuntime {
                 .map_err(RuntimeError::from)?;
             let current = self.session_policy();
             if current != previous {
-                self.notify_session_config_changed(crate::UndeliveredConfigChange {
-                    revision: self.state.config_revision,
-                    previous,
-                    current,
-                })
-                .await;
+                self.state.undelivered_config_change =
+                    self.owed_config_change(previous, current)?;
+                self.deliver_undelivered_config_change().await;
             }
         }
         Ok(outcome)
@@ -310,15 +307,9 @@ impl LashRuntime {
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
             self.publish_resident_authority()?;
             let current = self.session_policy();
-            // A change still owed is superseded: its observers are owed the
-            // policy this one commits, under this one's revision.
             if current != previous {
                 self.state.undelivered_config_change =
-                    Some(Box::new(crate::UndeliveredConfigChange {
-                        revision: self.state.config_revision,
-                        previous,
-                        current,
-                    }));
+                    self.owed_config_change(previous, current)?;
             }
         }
         let committed =
@@ -339,6 +330,42 @@ impl LashRuntime {
             committed,
             super::host_commands::CommandCommit::Withdrawn
         ))
+    }
+
+    /// The change from `previous` to `current` this runtime's config
+    /// revision reached, owed to every session config-change observer its
+    /// deployment installs, read from their registrations, and to every one
+    /// the change still owed was owed to (FIG-6164): a change still owed is
+    /// superseded, and its observers are owed the policy this one commits,
+    /// under this one's revision. `None` when no observer is owed it.
+    fn owed_config_change(
+        &self,
+        previous: crate::SessionPolicy,
+        current: crate::SessionPolicy,
+    ) -> Result<Option<Box<crate::UndeliveredConfigChange>>, RuntimeError> {
+        let mut observers = self
+            .services
+            .plugins
+            .host()
+            .config_change_observers()
+            .map_err(|error| {
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            })?;
+        if let Some(superseded) = self.state.undelivered_config_change.as_deref() {
+            for observer in &superseded.observers {
+                if !observers.contains(observer) {
+                    observers.push(observer.clone());
+                }
+            }
+        }
+        Ok((!observers.is_empty()).then(|| {
+            Box::new(crate::UndeliveredConfigChange {
+                revision: self.state.config_revision,
+                previous,
+                current,
+                observers,
+            })
+        }))
     }
 
     /// Deliver the config change the session's head owes its observers past

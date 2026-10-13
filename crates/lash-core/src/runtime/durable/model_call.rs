@@ -68,6 +68,15 @@ pub struct ModelAnswer {
     pub(crate) stream: crate::runtime::LlmStreamRecord,
 }
 
+impl ModelAnswer {
+    /// The callbacks the answer owes until it is derived: its response
+    /// plan's, in recorded order (S7). Its PhaseRoot records them, so a node
+    /// that cannot resolve one never claims the turn to run it.
+    pub(crate) fn owed_callbacks(&self) -> Vec<crate::plugin::PluginCallbackIdentity> {
+        self.stream.response_plan.callbacks.clone()
+    }
+}
+
 /// How a model call starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum ModelStart {

@@ -96,6 +96,7 @@ pub struct ActorTx {
     graph: BTreeMap<NodeId, EncodedNode>,
     reads: BTreeSet<NodeId>,
     budget: Option<GraphCommitBudget>,
+    owed: BTreeMap<NodeId, Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>>,
 }
 
 /// What a fenced read saw of one owned actor.
@@ -144,6 +145,7 @@ impl ActorTx {
             graph: BTreeMap::new(),
             reads: BTreeSet::new(),
             budget: None,
+            owed: BTreeMap::new(),
         }
     }
 
@@ -242,20 +244,43 @@ impl ActorTx {
 
     /// Carry `held`, a transaction of the same actor that was never
     /// submitted: its domain writes after the ones recorded here, its staged
-    /// nodes and the stored nodes it requires. Its open read, fence and
-    /// mailbox position are this transaction's own.
+    /// nodes, the stored nodes it requires and what its roots owe. Its open
+    /// read, fence and mailbox position are this transaction's own.
     pub fn append(&mut self, held: Self) -> &mut Self {
         self.domain.extend(held.domain);
         for (id, node) in held.graph {
             self.graph.entry(id).or_insert(node);
         }
         self.reads.extend(held.reads);
+        self.owed.extend(held.owed);
         self
     }
 
     /// Stage everything `staging` made.
     pub fn stage_all(&mut self, staging: GraphStaging) -> &mut Self {
         self.stage(staging.into_nodes().into_values())
+    }
+
+    /// Record that `root`, a root this transaction stages, owes `owed`
+    /// (S7): the callbacks its writer staged it owing, which the actor's
+    /// claim obligations take as stated. The root is not decoded again: it
+    /// names nodes the store already holds.
+    pub fn owe(
+        &mut self,
+        root: NodeId,
+        owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
+    ) -> &mut Self {
+        self.owed.insert(root, owed);
+        self
+    }
+
+    /// What `root`'s writer stated it owes, when it stated it ([`Self::owe`]).
+    #[must_use]
+    pub fn owed(
+        &self,
+        root: &NodeId,
+    ) -> Option<&[lash_core_store::store::plugin_writers::PluginCallbackIdentity]> {
+        self.owed.get(root).map(Vec::as_slice)
     }
 
     /// Require `node`, which this commit references without staging: the

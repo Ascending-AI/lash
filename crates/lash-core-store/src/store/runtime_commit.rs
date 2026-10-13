@@ -1101,6 +1101,37 @@ pub fn encode_session_commit(commit: &RuntimeCommit) -> Result<EncodedSessionCom
     })
 }
 
+/// The change the head a commit [`encode_session_commit`] encoded publishes
+/// still owes its observers (FIG-6164), read without decoding the rest of
+/// the commit: what a session's claim obligations take from its head
+/// commits.
+///
+/// # Errors
+///
+/// [`StoreError::Backend`] when `encoded` is not such a commit.
+pub fn session_commit_undelivered_change(
+    encoded: &str,
+) -> Result<Option<Box<crate::UndeliveredConfigChange>>, StoreError> {
+    #[derive(serde::Deserialize)]
+    struct Envelope {
+        commit: Commit,
+    }
+    #[derive(serde::Deserialize)]
+    struct Commit {
+        config: Config,
+    }
+    #[derive(serde::Deserialize)]
+    struct Config {
+        #[serde(default)]
+        undelivered_change: Option<Box<crate::UndeliveredConfigChange>>,
+    }
+    serde_json::from_str::<Envelope>(encoded)
+        .map(|envelope| envelope.commit.config.undelivered_change)
+        .map_err(|error| {
+            StoreError::Backend(format!("the session commit does not decode: {error}"))
+        })
+}
+
 /// Decode a commit [`encode_session_commit`] encoded.
 ///
 /// # Errors

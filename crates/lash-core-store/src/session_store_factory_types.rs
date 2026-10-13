@@ -198,11 +198,13 @@ impl RetainedRevision {
     /// head recorded, at the new session's first config revision. Nothing
     /// of the deployment that forks stands in for any of it (FIG-4594). A
     /// change the source's observers are owed stays the source's: the fork
-    /// owes its own observers nothing (FIG-5397).
+    /// owes its own observers nothing (FIG-5397), and retired none of
+    /// their shares (FIG-6164).
     pub fn fork_config(&self) -> crate::PersistedSessionConfig {
         crate::PersistedSessionConfig {
             config_revision: 0,
             undelivered_change: None,
+            retired_config_deliveries: Vec::new(),
             ..self.config.clone()
         }
     }

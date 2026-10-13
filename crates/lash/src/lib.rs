@@ -220,7 +220,7 @@ pub use crate::core::{
 };
 pub use crate::data_retention::DataRetention;
 pub use crate::durable_session::DurableSession;
-pub use crate::error::{EmbedError, Result, SendError};
+pub use crate::error::{EmbedError, Result, RetiredConfigObserverRefusal, SendError};
 pub use crate::parked_work::{ControlIntentPage, ControlIntentQuery, ParkedWork};
 pub use crate::send::{
     BatchInput, CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RunHandle,
@@ -644,7 +644,8 @@ pub mod plugins {
         ContributionKind, ContributionReadiness, ExecutionComposition, ExecutionState,
         InstalledInventory, InventoryScope, MaterializedInventoryReader, PluginRecipe,
         PluginRecipeFactory, PreflightIssue, ProcessRecipe, Proposal, RequiredPort, Requirements,
-        ServiceKind, ToolProviderKey, ToolProviderKeyError, WeakMaterializedInventoryReader,
+        RetiredConfigObservers, ServiceKind, ToolProviderKey, ToolProviderKeyError,
+        WeakMaterializedInventoryReader,
     };
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{

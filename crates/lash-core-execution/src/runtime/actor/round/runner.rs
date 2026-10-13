@@ -62,13 +62,7 @@ impl DeferredOutcome {
     /// Append the outcomes to a freshly fenced transaction of the same owner.
     /// Its fresh cancellation read decides whether these answers may commit.
     pub fn append_to(&self, tx: &mut lash_durable::ActorTx) {
-        tx.stage(self.tx.graph().values().cloned());
-        for node in self.tx.reads() {
-            tx.require(*node);
-        }
-        for write in self.tx.domain() {
-            tx.write(write.clone());
-        }
+        tx.append(self.tx.clone());
     }
 
     /// Publish the final observations only after the combined commit was
