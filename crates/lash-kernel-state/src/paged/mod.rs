@@ -23,7 +23,7 @@ pub mod source;
 pub use census::{
     AccountingCertificate, AccountingMetric, AllocationCensus, CensusFault, CensusGraph,
     EntityCost, LogicalPermit, MIN_ENTITY_COST, PendingReservation, RefinedDecision,
-    ReservationDecision, TransientRoots,
+    ReservationDecision, SweepSet, TransientRoots,
 };
 pub use family::{
     CarryClassification, CarryRoots, DataOnlyCertificate, FamilyBase, FamilyRecord, FrozenRef,
