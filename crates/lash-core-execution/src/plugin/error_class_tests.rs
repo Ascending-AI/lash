@@ -339,6 +339,33 @@ fn every_plugin_error_has_one_class_on_every_boundary() {
             serde_json::from_slice(&serde_json::to_vec(&error).expect("encode plugin journal"))
                 .expect("replay plugin journal");
         for error in [error, replayed] {
+            if let PluginError::ProcessSuccessorRefused { process, refusal } = &error {
+                for runtime in [
+                    RuntimeEffectControllerError::from(error.clone()).into_runtime_error(),
+                    error.clone().into_turn_failure(RuntimeErrorCode::Plugin),
+                ] {
+                    let recorded: RuntimeError = serde_json::from_slice(
+                        &serde_json::to_vec(&runtime).expect("encode successor cause"),
+                    )
+                    .expect("replay successor cause");
+                    let Some(crate::RuntimeErrorCause::PluginOperation { failure }) =
+                        recorded.cause
+                    else {
+                        panic!("successor refusal lost its typed cause");
+                    };
+                    assert_eq!(*failure, envelope);
+                    let PluginError::ProcessSuccessorRefused {
+                        process: decoded_process,
+                        refusal: decoded_refusal,
+                    } = serde_json::from_value::<PluginError>(failure.payload)
+                        .expect("decode successor refusal")
+                    else {
+                        panic!("successor cause changed its variant");
+                    };
+                    assert_eq!(&decoded_process, process);
+                    assert_eq!(&decoded_refusal, refusal);
+                }
+            }
             if let PluginError::ProviderFailure {
                 kind,
                 code,

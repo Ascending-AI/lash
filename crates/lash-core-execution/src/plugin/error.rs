@@ -1040,6 +1040,36 @@ impl PluginError {
                         source,
                     })
             }
+            error @ Self::ProcessSuccessorRefused { .. } => {
+                // The controller delegates this refusal here. Build its
+                // terminal cause directly rather than converting back to
+                // the controller, and retain the execution-owned fields in
+                // the existing plugin envelope at the store/host boundary.
+                let payload = match serde_json::to_value(&error) {
+                    Ok(payload) => payload,
+                    Err(source) => {
+                        return crate::RuntimeError::new(
+                            crate::RuntimeErrorCode::RecordEncodingFailed,
+                            source.to_string(),
+                        );
+                    }
+                };
+                let message = error.to_string();
+                let failure = super::PluginOperationFailure {
+                    error_type: "lash.plugin".into(),
+                    error_version: std::num::NonZeroU32::MIN,
+                    payload,
+                    class: super::PluginFailureClass::Terminal,
+                    code: crate::FailureCode::from(&refusal),
+                    message: message.clone(),
+                    origin: None,
+                };
+                crate::RuntimeError::new(refusal, message).with_cause(
+                    crate::RuntimeErrorCause::PluginOperation {
+                        failure: Box::new(failure),
+                    },
+                )
+            }
             Self::Runtime(error)
                 if matches!(
                     error.cause,
