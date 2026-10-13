@@ -215,10 +215,9 @@ pub struct AttemptContext<'run> {
     call_id: lash_sansio::ToolCallId,
     attempt_number: u32,
     max_attempts: u32,
-    /// The provenance a child this body declares inherits when the attempt is
-    /// running inside a durable process. `None` where the attempt is not
-    /// running inside one, and the child takes the declaring session's own.
-    process_spawn_provenance: Option<crate::ProcessSpawnProvenance>,
+    /// The enclosing process's full recorded provenance, also supplied to
+    /// child starts. `None` when the attempt runs outside a process.
+    process_spawn_provenance: Option<crate::ProcessProvenance>,
     process_lineage: Option<crate::ProcessLineage>,
     /// The process this attempt runs inside, with its recorded environment
     /// and settings: what a nested start's policy may inherit. `None`
@@ -286,11 +285,17 @@ impl<'run> AttemptContext<'run> {
         &self.definition_engines
     }
 
-    /// The logical run this attempt runs under, read from the admitted
-    /// scope it was recorded in (FIG-3607 item 6): never a live read. `None`
-    /// outside a session turn (a process body, a runtime operation).
+    /// The logical run this attempt runs under: the starting turn in a
+    /// process's recorded provenance, or a session turn's admitted scope
+    /// (FIG-3607 item 6). Neither requires a live read. `None` for a
+    /// host-started process or an operation outside a turn. The full turn
+    /// address of a process's starting run is on
+    /// [`process_spawn_provenance`](Self::process_spawn_provenance).
     pub fn logical_run(&self) -> Option<crate::TurnId> {
-        self.parent_scope.scope().logical_run()
+        match self.process_spawn_provenance.as_ref() {
+            Some(provenance) => provenance.run.as_ref().map(|run| run.turn_id.clone()),
+            None => self.parent_scope.scope().logical_run(),
+        }
     }
 
     /// The start context a child start declared by this attempt draws its
@@ -487,18 +492,16 @@ impl<'run> AttemptContext<'run> {
     pub fn max_attempts(&self) -> u32 {
         self.max_attempts
     }
-    /// The provenance a child declared by this body inherits.
+    /// The enclosing process's full recorded provenance: its originator,
+    /// caused-by invocation and starting turn. A resumed attempt reads the
+    /// same record. A child start uses this record's originator and inherits
+    /// its run through the admitted lineage; Lash stamps the child's own
+    /// caused-by from its declaring invocation. No execution scope or host
+    /// input replaces the recorded starting turn.
     ///
-    /// A process's children belong to the chain that started the process, not
-    /// to the process's own runtime: they carry the chain's
-    /// originator, and the execution scope appears on no
-    /// record. The in-attempt start path has always read this off the runtime
-    /// execution context (`ProcessStartOptions::spawn_provenance`); a leaf
-    /// start declares its child before realization, so it reads the same fact
-    /// here and stamps it on the declaration. `None` means the attempt is not
-    /// running inside a process and the child takes the declaring session's
-    /// own originator.
-    pub fn process_spawn_provenance(&self) -> Option<&crate::ProcessSpawnProvenance> {
+    /// `None` means this attempt runs outside a process, so a child takes
+    /// the declaring session's originator.
+    pub fn process_spawn_provenance(&self) -> Option<&crate::ProcessProvenance> {
         self.process_spawn_provenance.as_ref()
     }
     /// The definition `target` names, read and verified before a start

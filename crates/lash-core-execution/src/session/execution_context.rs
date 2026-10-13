@@ -209,7 +209,7 @@ pub struct RuntimeExecutionContext<'run> {
 #[derive(Clone)]
 pub(crate) struct RuntimeProcessExecution {
     pub process_id: ProcessId,
-    pub originator: crate::ProcessOriginator,
+    pub provenance: crate::ProcessProvenance,
     /// The process's recorded environment and settings, for an engine
     /// process whose runtime loaded them: what its children may inherit and
     /// the capability refs its execution binds.
@@ -276,7 +276,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         match self
             .process_execution
             .as_ref()
-            .map(|execution| &execution.originator)
+            .map(|execution| &execution.provenance.originator)
         {
             Some(crate::ProcessOriginator::Host { .. }) => crate::RuntimeAttribution::none(),
             Some(crate::ProcessOriginator::Session { session_id, .. }) => {
@@ -961,17 +961,15 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.dispatch.process_lineage.clone()
     }
 
-    pub(crate) fn process_spawn_provenance(&self) -> Option<crate::ProcessSpawnProvenance> {
+    pub(crate) fn process_spawn_provenance(&self) -> Option<crate::ProcessProvenance> {
         self.process_execution
             .as_ref()
-            .map(|exec| crate::ProcessSpawnProvenance {
-                originator: exec.originator.clone(),
-            })
+            .map(|exec| exec.provenance.clone())
     }
 
     fn child_process_observers(&self) -> Vec<crate::SessionId> {
         match self.process_execution.as_ref() {
-            Some(exec) => match &exec.originator {
+            Some(exec) => match &exec.provenance.originator {
                 crate::ProcessOriginator::Host { .. } => Vec::new(),
                 crate::ProcessOriginator::Session { session_id, .. } => vec![session_id.clone()],
             },

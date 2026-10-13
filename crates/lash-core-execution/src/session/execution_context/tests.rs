@@ -111,7 +111,9 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
     let mut host_process = test_execution_context();
     host_process.process_execution = Some(RuntimeProcessExecution {
         process_id: crate::process_id_for_test("host-process"),
-        originator: crate::ProcessOriginator::host_scoped("automation"),
+        provenance: crate::ProcessProvenance::new(crate::ProcessOriginator::host_scoped(
+            "automation",
+        )),
         enclosing: None,
         event_context: None,
     });
@@ -124,7 +126,7 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
     let mut session_process = test_execution_context();
     session_process.process_execution = Some(RuntimeProcessExecution {
         process_id: crate::process_id_for_test("session-process"),
-        originator: crate::ProcessOriginator::session(crate::SessionScope::new("origin-session")),
+        provenance: crate::ProcessProvenance::session(crate::SessionScope::new("origin-session")),
         enclosing: None,
         event_context: None,
     });

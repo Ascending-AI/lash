@@ -134,6 +134,13 @@ stores the id and retry information and builds the attempt context.
 Provider correlation belongs to protocol, transcript and display records,
 rather than an accessor on the attempt context.
 
+For a process call, `process_spawn_provenance()` exposes the full recorded
+`ProcessProvenance`: its originator, `caused_by` and starting `TurnAddress`.
+`logical_run()` returns that address's turn id, including after resume and
+for nested processes. A host-started process has no starting turn. Lash
+stamps the address from the admitted start context; host input cannot choose
+it. Each child records its own declaring invocation as `caused_by`.
+
 Source: `crates/lash-core-execution/src/tool_provider.rs`.
 
 ### 6. Derived keys

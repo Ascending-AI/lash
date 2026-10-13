@@ -513,22 +513,14 @@ pub async fn load_process_env(
 pub struct ProcessStartOptions {
     /// Explicit host-selected initial observer session ids.
     pub initial_observers: Vec<SessionId>,
-    /// Runtime-internal spawn provenance override. Set by process execution
-    /// contexts so children started *by a process* inherit the parent's
-    /// originator instead of being stamped with the ephemeral
-    /// execution scope. `None` means the session start path stamps the
-    /// creating session (the in-session meaning of "start"). This rides
-    /// options — not the request — so in-session callers cannot forge
+    /// The enclosing process's full recorded provenance, supplied by its
+    /// runtime execution context. Children inherit its originator; Lash
+    /// stamps their run from the admitted start context and their caused-by
+    /// from the declaring invocation. `None` means a session start stamps
+    /// the creating session. This rides options, not the request: no model
+    /// or host input reaches `run`, and in-session callers cannot forge
     /// provenance through the session surface.
-    pub spawn_provenance: Option<ProcessSpawnProvenance>,
-}
-
-/// Provenance a process-run context hands to its children: the chain's
-/// originator. Observer membership remains an independent,
-/// explicit start option.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessSpawnProvenance {
-    pub originator: ProcessOriginator,
+    pub spawn_provenance: Option<ProcessProvenance>,
 }
 
 impl ProcessStartOptions {
@@ -556,7 +548,7 @@ impl ProcessStartOptions {
 
     /// Sets the spawn provenance carried by a `ProcessStartOptions` for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
-    pub fn with_spawn_provenance(mut self, spawn_provenance: ProcessSpawnProvenance) -> Self {
+    pub fn with_spawn_provenance(mut self, spawn_provenance: ProcessProvenance) -> Self {
         self.spawn_provenance = Some(spawn_provenance);
         self
     }

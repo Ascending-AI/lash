@@ -114,6 +114,36 @@ struct Seen {
     /// The environment and capability refs of each build for a process.
     builds: Mutex<Vec<Build>>,
     entered: tokio::sync::Notify,
+    calls: Mutex<Vec<CallContext>>,
+}
+
+/// The recorded caller facts the host handler sees, before and after restart.
+#[derive(Clone, Debug)]
+struct CallContext {
+    process: lash_core::ProcessId,
+    provenance: lash::process::ProcessProvenance,
+    run: Option<lash_core::TurnId>,
+}
+
+fn assert_provenance(call: &CallContext, record: &lash_core::ProcessRecord) {
+    assert_eq!(call.process, record.id);
+    assert_eq!(
+        call.provenance, record.provenance,
+        "the full recorded provenance"
+    );
+    assert!(
+        call.provenance.caused_by.is_some(),
+        "the declaring invocation"
+    );
+    assert_eq!(
+        call.run,
+        record
+            .provenance
+            .run
+            .as_ref()
+            .map(|run| run.turn_id.clone()),
+        "a process tool call names the starting logical run"
+    );
 }
 
 struct ProbeBody {
@@ -124,6 +154,19 @@ struct ProbeBody {
 #[async_trait::async_trait]
 impl lash::tools::StaticToolExecute for ProbeBody {
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.seen.calls.lock_recover().push(CallContext {
+            process: call
+                .context
+                .enclosing_process()
+                .expect("a process call")
+                .clone(),
+            provenance: call
+                .context
+                .process_spawn_provenance()
+                .expect("recorded provenance")
+                .clone(),
+            run: call.context.logical_run(),
+        });
         if call.name() == WAIT {
             if self.holds {
                 self.seen.entered.notify_one();
@@ -431,6 +474,8 @@ async fn stored_env(
 /// PROCESS-OWN-ENV (D18) and NESTED-ENV (M5). Red claim (D18): this pins
 /// Sam's ruling and is not a found bug; main binds no capability ref to a
 /// process execution, which no public tool seam there can observe.
+/// FIG-6172: host calls expose full recorded process provenance and the
+/// starting run before interruption, on resume and from nested children.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_gone() {
     let stores: Arc<dyn lash_core_execution::StoreSet> = Arc::new(
@@ -462,6 +507,7 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
         Duration::from_secs(60),
         session
             .send(lash::TurnInput::text("start the process"))
+            .id(lash::TurnId::try_from("own-env-start".to_owned()).unwrap())
             .run(run)
             .model(RUN_MODEL)
             .options(
@@ -483,6 +529,12 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
         .expect("the process's first step holds");
     let parent = labelled(&backend, "parent").await;
     let env = stored_env(&backend, &parent).await;
+    assert_eq!(
+        parent.provenance.run,
+        Some(lash::TurnAddress::new(session_id.clone(), "own-env-start")),
+        "Lash stamped the starting turn"
+    );
+    assert_provenance(&seen.calls.lock_recover()[0], &parent);
 
     // The host narrows the session's tool selection, changes its model and
     // deletes it while the process holds.
@@ -548,6 +600,8 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     })
     .await
     .expect("the deletion completes within a minute");
+    // Stop with WAIT's Repeatable attempt still in flight and no outcome:
+    // recovery must read the process record on the new worker.
     first.shutdown().await.expect("the first worker stops");
     drop(first);
 
@@ -654,5 +708,27 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     }
     assert_eq!(read("inherit").model.as_deref(), Some(RUN_MODEL));
     assert_eq!(read("new").model, None, "the new env names no model");
+    let calls = seen.calls.lock_recover().clone();
+    assert!(
+        calls
+            .iter()
+            .filter(|call| call.process == parent.id)
+            .count()
+            >= 3,
+        "the parent called before interruption and after resume"
+    );
+    for record in [&parent, &inherited, &fresh_child] {
+        assert!(calls.iter().any(|call| call.process == record.id));
+        for call in calls.iter().filter(|call| call.process == record.id) {
+            assert_provenance(call, record);
+        }
+    }
+    for child in [&inherited, &fresh_child] {
+        assert_eq!(child.provenance.originator, parent.provenance.originator);
+        assert_ne!(
+            child.provenance.caused_by, parent.provenance.caused_by,
+            "a child records its own declaring invocation"
+        );
+    }
     fresh.shutdown().await.expect("the fresh worker stops");
 }

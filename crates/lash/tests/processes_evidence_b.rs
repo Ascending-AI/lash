@@ -348,12 +348,6 @@ fn processes_area_witnesses_b() {
         let lash::plugins::ProcessRunOutcome::Terminal { output, .. } = value;
         let _ = output;
     });
-    // W0509: lash_core::ProcessSpawnProvenance [struct]
-    type_witness::<lash_core::ProcessSpawnProvenance>();
-    // W0510: lash_core::ProcessSpawnProvenance::originator [field]
-    field_witness(|value: &lash_core::ProcessSpawnProvenance| {
-        let _ = &value.originator;
-    });
     // W0512: lash::persistence::ProcessStartOutcome [enum]
     type_witness::<lash::persistence::ProcessStartOutcome>();
     // W0513: lash::persistence::ProcessStartOutcome::AlreadyApplied [variant]

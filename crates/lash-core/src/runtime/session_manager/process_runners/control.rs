@@ -290,7 +290,9 @@ impl ProcessCapability {
         // run context provides it); in-session starts stamp the creating
         // session. Only the explicit `options.initial_observers` set creates
         // observer edges. The ephemeral execution scope must never appear on
-        // a record.
+        // a record. The full enclosing provenance travels in options; the
+        // child records its own declaring invocation above, and its run is
+        // stamped from the admitted start context below, never host options.
         let originator = match options.spawn_provenance.clone() {
             Some(spawn) => spawn.originator,
             None => crate::ProcessOriginator::session(creator_scope.clone()),

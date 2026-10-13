@@ -994,8 +994,7 @@ pub mod secrets {
 pub mod process {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::{
-        ConsumerHold, FitPolicy, ProcessDefinitionStoredError, ProcessSpawnProvenance,
-        ProcessStartDeclaration,
+        ConsumerHold, FitPolicy, ProcessDefinitionStoredError, ProcessStartDeclaration,
     };
     pub use lash_core_store::effect_opener::EffectOpenerError;
     pub use lash_sansio::HandleTarget;

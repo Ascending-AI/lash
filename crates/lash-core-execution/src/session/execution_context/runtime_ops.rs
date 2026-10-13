@@ -160,7 +160,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         self.dispatch = Arc::new(dispatch);
         self.process_execution = Some(RuntimeProcessExecution {
             process_id: process.id.clone(),
-            originator: process.provenance.originator.clone(),
+            provenance: process.provenance.clone(),
             enclosing: enclosing_process(process, env),
             event_context: event_context.into(),
         });

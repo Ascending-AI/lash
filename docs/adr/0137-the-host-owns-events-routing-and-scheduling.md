@@ -49,6 +49,13 @@ and to the cell on that one key. Caller context provides `owner`,
 `enclosing_process`, `logical_run` and `process_spawn_provenance`; provenance
 is context, not authorization or an instruction to notify a parent.
 
+For a process call, `process_spawn_provenance()` exposes the full recorded
+`ProcessProvenance`: its originator, `caused_by` and starting `TurnAddress`.
+`logical_run()` returns that address's turn id, including after resume and
+for nested processes. A host-started process has no starting turn. Lash
+stamps the address from the admitted start context; host input cannot choose
+it. Each child records its own declaring invocation as `caused_by`.
+
 `Completions::parked(owner)` accepts `CallOwner::Session` or
 `CallOwner::Process` and returns pending `ParkedCall` records with `key`,
 `owner`, `call_id`, `tool_id` and `deadline`. It is a snapshot read of the
