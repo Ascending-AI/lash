@@ -653,6 +653,7 @@ pub mod plugins {
     /// components installed on the deployment, and the environment ports a
     /// start's launch is held through (FIG-6034).
     pub use lash_core::ProcessEnvPorts;
+    pub use lash_core::SurfaceTools;
     /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
     pub use lash_core::TurnDriverConfig;
     /// A turn's prepared request history, as its prelude records it.
@@ -787,7 +788,7 @@ pub mod plugins {
     /// factory that wraps another (the RLM factory, say) forwards it so the
     /// wrapped factory's process engines are still contributed (FIG-4373).
     pub use lash_core::plugin::{PluginExecutionTrace, ProcessEngineContributionContext};
-    pub use lash_core::plugin::{ProcessComponentRegistry, ProcessComposition};
+    pub use lash_core::plugin::{ProcessComponentRegistry, ProcessComposition, StepLink};
     /// Engine registry and narrowed execution contexts used to host custom process engines.
     pub use lash_core::runtime::ProcessEngineRegistry;
     /// Engine-extension contracts for a tool call's admission, attempts,
@@ -997,7 +998,7 @@ pub mod process {
     };
     pub use lash_core::{
         DeclaredDefinitionLaunch, DeclaredLaunch, EnclosingProcess, EngineLaunch, EngineSettings,
-        HoldEnvError, ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId,
+        FitPolicy, HoldEnvError, ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId,
         ProcessComponentIdError, ProcessConfigKey, ProcessEnv, ProcessEnvBuilder, ProcessEnvChoice,
         ProcessEnvCx, ProcessEnvPolicy, ProcessEnvPolicyError, ProcessEnvRefusal, ProcessLimits,
         ProcessModel, ProcessStartChoice, ResolvedStartTarget,

@@ -126,6 +126,19 @@ pub(crate) async fn publish(
         .processes()
         .engine_defaults(LASH_VM_ENGINE_KIND, &serde_json::Value::Null)?;
     let result = async {
+        let offered = artifacts
+            .workflow_environment(&environment)
+            .await?
+            .ok_or_else(|| RunError::Invalid("this core reads no workflow documents".into()))?;
+        let document = draft.document();
+        let graph = lash::workflow::graph::derive(document, offered.functions())
+            .map_err(|refusal| RunError::Invalid(refusal.to_string()))?;
+        let effects =
+            lash::workflow::graph::entry_effects(document, &graph, offered.functions(), entry)
+                .map_err(|refusal| RunError::Invalid(refusal.to_string()))?;
+        // The editor offers all host effects; each published pair links only
+        // the effects its entry calls or spawns, including called functions.
+        let environment = environment.restrict(effects.keys())?;
         match artifacts
             .publish_workflow(&pin, draft, entry, &environment)
             .await?

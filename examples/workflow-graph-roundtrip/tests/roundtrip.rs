@@ -43,7 +43,11 @@ async fn run(client: &reqwest::Client, base: &str) -> Vec<RunEvent> {
         .send()
         .await
         .expect("POST /run");
-    assert!(response.status().is_success(), "the run starts");
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.expect("the start refusal");
+        panic!("the run starts: {status} {body}");
+    }
     let mut pending = String::new();
     let mut events = Vec::new();
     let mut resolved = std::collections::BTreeSet::new();
