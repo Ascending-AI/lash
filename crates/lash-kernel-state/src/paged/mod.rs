@@ -37,6 +37,20 @@ pub use root::{
     BindingRecord, BoundRecord, CheckpointRoot, CommittedOutcomeRecord, EndedRecord, EndedTask,
     EnteredRecord, FinallyRecord, FrameRecord, HeapRoot, HeldRecord, IncomingRecord, JoinerRecord,
     KeyedRoot, ListJoinRecord, LoopRecord, RootStatus, SavedMeters, SequenceRoot, TaskRecord,
-    TaskStateRecord, WaitKindRecord, WaitRecord, WaitStateRecord, WaitsSummary,
+    TaskStateRecord, WaitKindRecord, WaitRecord, WaitStateRecord,
 };
 pub use source::{PageAnswer, PageBody, PageKind, PageSource};
+
+mod codec;
+pub mod tree;
+
+pub mod directory;
+pub mod heap_impl;
+pub mod payload;
+pub use heap_impl::PagedHeap;
+
+#[cfg(test)]
+mod laws {
+    pub mod heap;
+    pub mod root;
+}

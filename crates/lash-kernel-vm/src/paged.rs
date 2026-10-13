@@ -15,7 +15,9 @@
 use lash_kernel_doc::heap::{HeapFault, PageRef};
 use lash_kernel_doc::{Datum, DocumentId, Invalid, Name};
 use lash_kernel_state::AdmittedWait;
-use lash_kernel_state::paged::{CheckpointRoot, PageSource, SealBudget, SessionRoot};
+use lash_kernel_state::paged::{
+    AllocationCensus, CheckpointRoot, PageSource, SealBudget, SessionRoot,
+};
 
 use crate::interface::{
     Bounds, DeliverError, Delivered, EffectModes, Host, Meters, Outcome, Program, StartError, Step,
@@ -118,6 +120,7 @@ pub trait Machine: Sized {
         bounds: Bounds,
         start: CellStart,
         source: Box<dyn PageSource>,
+        census: Box<dyn AllocationCensus>,
     ) -> Result<Self, StartError>;
 
     /// Opens a sealed root against its document's prepared executable,

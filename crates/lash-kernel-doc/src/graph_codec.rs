@@ -796,3 +796,413 @@ mod forms;
 #[cfg(test)]
 #[path = "graph_codec_tests.rs"]
 mod tests;
+
+/// Canonical codecs for semantic heap descriptors. Grants are activation
+/// authority and are deliberately absent from the durable grammar.
+pub mod heap_values {
+    use super::{invalid, nested, variant};
+    use crate::graph_tokens::{ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter};
+    use crate::heap::*;
+    use crate::{Float, Integer, Name, TaskId, Timestamp};
+    use num_bigint::{BigInt, Sign};
+    use num_traits::FromPrimitive;
+    use sha2::{Digest, Sha256};
+    use std::sync::Arc;
+
+    macro_rules! record {
+        ($name:ident { $($field:ident : $ty:ty),+ $(,)? }) => {
+            impl TokenCodec for $name {
+                fn encode(&self, out: &mut TokenWriter) {
+                    out.seq([$(stringify!($field)),+].len() as u64);
+                    $(self.$field.encode(out);)+
+                }
+                fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+                    input.expect_struct([$(stringify!($field)),+].len() as u64)?;
+                    Ok(Self { $($field: <$ty>::decode(input)?),+ })
+                }
+            }
+        };
+    }
+    macro_rules! scalar {
+        ($name:ident) => {
+            impl TokenCodec for $name {
+                fn encode(&self, out: &mut TokenWriter) {
+                    out.unsigned(self.0);
+                }
+                fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+                    input.unsigned().map(Self)
+                }
+            }
+        };
+    }
+    scalar!(FamilyId);
+    scalar!(LogicalBytes);
+    record!(EntityId {
+        family: FamilyId,
+        ordinal: u64
+    });
+    record!(TextSummary {
+        utf8_bytes: u64,
+        chars: u64,
+        utf16_units: u64
+    });
+    record!(IntSummary {
+        bits: u64,
+        negative: bool
+    });
+    record!(TupleSummary {
+        len: u64,
+        cost: LogicalBytes,
+        has_edges: bool,
+        depth: u32
+    });
+    record!(ErrorRef { kind: TextRef, message: TextRef, data: Arc<Value>, cost: LogicalBytes, has_edges: bool });
+
+    impl TokenCodec for PageId {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.child(ChildRef(self.0));
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            input.child().map(|id| Self(id.0))
+        }
+    }
+    impl TokenCodec for PageRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            self.id.encode(out);
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            Ok(Self {
+                id: PageId::decode(input)?,
+                grant: PageGrant::NONE,
+            })
+        }
+    }
+    impl TokenCodec for Identity {
+        fn encode(&self, out: &mut TokenWriter) {
+            match self {
+                Self::Object(id) => {
+                    out.sum(0, 1);
+                    id.encode(out);
+                }
+                Self::Task(id) => {
+                    out.sum(1, 1);
+                    id.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            Ok(match variant(input, |v| (v <= 1).then_some(1))? {
+                0 => Self::Object(EntityId::decode(input)?),
+                _ => Self::Task(TaskId::decode(input)?),
+            })
+        }
+    }
+    impl TokenCodec for TextRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.seq(2);
+            self.summary.encode(out);
+            match &self.body {
+                Payload::Resident(text) => {
+                    out.sum(0, 1);
+                    out.text(text);
+                }
+                Payload::Paged(page) => {
+                    out.sum(1, 1);
+                    page.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            input.expect_struct(2)?;
+            let summary = TextSummary::decode(input)?;
+            let body = match variant(input, |v| (v <= 1).then_some(1))? {
+                0 => {
+                    let text = input.text()?;
+                    if text.len() as u64 > IMMUTABLE_INLINE_MAX || summary != text_summary(text) {
+                        return Err(invalid("invalid inline text descriptor"));
+                    }
+                    Payload::Resident(Arc::from(text))
+                }
+                _ => {
+                    if summary.utf8_bytes <= IMMUTABLE_INLINE_MAX {
+                        return Err(invalid("a short text must be inline"));
+                    }
+                    Payload::Paged(PageRef::decode(input)?)
+                }
+            };
+            Ok(Self { summary, body })
+        }
+    }
+    impl TokenCodec for BytesRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.seq(2);
+            out.unsigned(self.len);
+            match &self.body {
+                Payload::Resident(bytes) => {
+                    out.sum(0, 1);
+                    out.bytes(bytes);
+                }
+                Payload::Paged(page) => {
+                    out.sum(1, 1);
+                    page.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            input.expect_struct(2)?;
+            let len = input.unsigned()?;
+            let body = match variant(input, |v| (v <= 1).then_some(1))? {
+                0 => {
+                    let bytes = input.bytes()?;
+                    if bytes.len() as u64 != len || len > IMMUTABLE_INLINE_MAX {
+                        return Err(invalid("invalid inline bytes descriptor"));
+                    }
+                    Payload::Resident(Arc::from(bytes))
+                }
+                _ => {
+                    if len <= IMMUTABLE_INLINE_MAX {
+                        return Err(invalid("short bytes must be inline"));
+                    }
+                    Payload::Paged(PageRef::decode(input)?)
+                }
+            };
+            Ok(Self { len, body })
+        }
+    }
+    impl TokenCodec for IntRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            match self {
+                Self::Inline(int) => {
+                    out.sum(0, 1);
+                    int.encode(out);
+                }
+                Self::Paged { summary, digits } => {
+                    out.sum(1, 2);
+                    summary.encode(out);
+                    digits.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            Ok(
+                match variant(input, |v| match v {
+                    0 => Some(1),
+                    1 => Some(2),
+                    _ => None,
+                })? {
+                    0 => {
+                        let int = Integer::decode(input)?;
+                        if int.bits().div_ceil(8) > IMMUTABLE_INLINE_MAX {
+                            return Err(invalid("a large integer must be paged"));
+                        }
+                        Self::Inline(int)
+                    }
+                    _ => {
+                        let summary = IntSummary::decode(input)?;
+                        if summary.bits.div_ceil(8) <= IMMUTABLE_INLINE_MAX {
+                            return Err(invalid("a short integer must be inline"));
+                        }
+                        Self::Paged {
+                            summary,
+                            digits: PageRef::decode(input)?,
+                        }
+                    }
+                },
+            )
+        }
+    }
+    impl TokenCodec for TupleRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.seq(3);
+            self.summary.encode(out);
+            self.family.encode(out);
+            match &self.body {
+                Payload::Resident(values) => {
+                    out.sum(0, 1);
+                    values.encode(out);
+                }
+                Payload::Paged(page) => {
+                    out.sum(1, 1);
+                    page.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            decode_tuple(input, None)
+        }
+    }
+    fn decode_tuple(
+        input: &mut TokenReader<'_>,
+        inherited: Option<FamilyId>,
+    ) -> Result<TupleRef, TokenError> {
+        input.expect_struct(3)?;
+        let summary = TupleSummary::decode(input)?;
+        let declared = Option::<FamilyId>::decode(input)?;
+        if inherited.is_some() && declared.is_some() && inherited != declared {
+            return Err(invalid("tuple family context mismatch"));
+        }
+        let family = declared.or(inherited);
+        if summary.depth > 128 {
+            return Err(invalid("tuple depth exceeds K-VAL-034"));
+        }
+        let body = match variant(input, |v| (v <= 1).then_some(1))? {
+            0 => {
+                let count = input.seq()?;
+                if count != summary.len {
+                    return Err(invalid("tuple length mismatch"));
+                }
+                let mut values = Vec::new();
+                for _ in 0..count {
+                    values.push(decode_value_with_family(input, family)?);
+                }
+                Payload::Resident(Arc::from(values))
+            }
+            _ => Payload::Paged(PageRef::decode(input)?),
+        };
+        Ok(TupleRef {
+            summary,
+            family,
+            body,
+        })
+    }
+    impl TokenCodec for Value {
+        fn encode(&self, out: &mut TokenWriter) {
+            macro_rules! one {
+                ($n:expr, $v:expr) => {{
+                    out.sum($n, 1);
+                    $v.encode(out);
+                }};
+            }
+            match self {
+                Self::Null => out.sum(0, 0),
+                Self::Absent => out.sum(1, 0),
+                Self::Bool(v) => one!(2, v),
+                Self::Int(v) => one!(3, v),
+                Self::Float(v) => one!(4, v),
+                Self::Text(v) => one!(5, v),
+                Self::Bytes(v) => one!(6, v),
+                Self::Timestamp(v) => one!(7, v),
+                Self::Tuple(v) => one!(8, v),
+                Self::List(v) => one!(9, v),
+                Self::Map(v) => one!(10, v),
+                Self::Set(v) => one!(11, v),
+                Self::Record(v) => one!(12, v),
+                Self::Closure(v) => one!(13, v),
+                Self::Error(v) => one!(14, v),
+                Self::Task(v) => one!(15, v),
+                Self::Function(v) => one!(16, v),
+                Self::Handle(v) => one!(17, v),
+                Self::Ref(v) => one!(18, v),
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            decode_value_with_family(input, None)
+        }
+    }
+    /// A relative occurrence has a distinct grammar tag. It cannot be decoded
+    /// without a family supplied by the frozen body's authenticated link.
+    pub fn encode_relative(kind: u32, ordinal: u64, out: &mut TokenWriter) {
+        out.sum(19, 2);
+        out.unsigned(u64::from(kind));
+        out.unsigned(ordinal);
+    }
+    fn absolute_entity(
+        input: &mut TokenReader<'_>,
+        family: Option<FamilyId>,
+    ) -> Result<EntityId, TokenError> {
+        let id = EntityId::decode(input)?;
+        if Some(id.family) == family {
+            return Err(invalid("absolute reference under its own family context"));
+        }
+        Ok(id)
+    }
+    pub fn decode_value_with_family(
+        input: &mut TokenReader<'_>,
+        family: Option<FamilyId>,
+    ) -> Result<Value, TokenError> {
+        nested(input.decode_depth(), || {
+            Ok(
+                match variant(input, |v| match v {
+                    0 | 1 => Some(0),
+                    2..=18 => Some(1),
+                    19 => Some(2),
+                    _ => None,
+                })? {
+                    0 => Value::Null,
+                    1 => Value::Absent,
+                    2 => Value::Bool(bool::decode(input)?),
+                    3 => Value::Int(IntRef::decode(input)?),
+                    4 => Value::Float(Float::decode(input)?),
+                    5 => Value::Text(TextRef::decode(input)?),
+                    6 => Value::Bytes(BytesRef::decode(input)?),
+                    7 => Value::Timestamp(Timestamp::decode(input)?),
+                    8 => Value::Tuple(decode_tuple(input, family)?),
+                    9 => Value::List(absolute_entity(input, family)?),
+                    10 => Value::Map(absolute_entity(input, family)?),
+                    11 => Value::Set(absolute_entity(input, family)?),
+                    12 => Value::Record(absolute_entity(input, family)?),
+                    13 => Value::Closure(absolute_entity(input, family)?),
+                    14 => Value::Error(Arc::decode(input)?),
+                    15 => Value::Task(TaskId::decode(input)?),
+                    16 => Value::Function(Name::decode(input)?),
+                    17 => Value::Handle(Arc::decode(input)?),
+                    18 => {
+                        let identity = Identity::decode(input)?;
+                        if matches!(identity, Identity::Object(id) if Some(id.family) == family) {
+                            return Err(invalid("absolute reference under its own family context"));
+                        }
+                        Value::Ref(identity)
+                    }
+                    _ => {
+                        let kind = input.unsigned_u32()?;
+                        let ordinal = input.unsigned()?;
+                        let id = EntityId {
+                            family: family.ok_or_else(|| {
+                                invalid("relative reference without family context")
+                            })?,
+                            ordinal,
+                        };
+                        match kind {
+                            0 => Value::List(id),
+                            1 => Value::Map(id),
+                            2 => Value::Set(id),
+                            3 => Value::Record(id),
+                            4 => Value::Closure(id),
+                            5 => Value::Ref(Identity::Object(id)),
+                            _ => return Err(invalid("unknown relative reference kind")),
+                        }
+                    }
+                },
+            )
+        })
+    }
+
+    pub fn text_summary(text: &str) -> TextSummary {
+        TextSummary {
+            utf8_bytes: text.len() as u64,
+            chars: text.chars().count() as u64,
+            utf16_units: text.encode_utf16().count() as u64,
+        }
+    }
+    /// Canonical long-key digest, distinct from page hashing (D-KEY).
+    pub fn key_digest(tokens: &[u8]) -> [u8; 32] {
+        let mut hash = Sha256::new();
+        hash.update(b"lash.normal-key.v1\0");
+        hash.update(tokens);
+        hash.finalize().into()
+    }
+    pub fn integral_float(float: f64) -> Option<Integer> {
+        (float.is_finite() && float.fract() == 0.0)
+            .then(|| BigInt::from_f64(float).map(Integer::new))
+            .flatten()
+    }
+    pub fn integer_digits(int: &Integer) -> Vec<u8> {
+        int.as_bigint().to_bytes_le().1
+    }
+    pub fn integer_from_digits(negative: bool, digits: &[u8]) -> Integer {
+        Integer::new(BigInt::from_bytes_le(
+            if negative { Sign::Minus } else { Sign::Plus },
+            digits,
+        ))
+    }
+}

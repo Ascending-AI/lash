@@ -20,7 +20,7 @@
 use lash_kernel_doc::Name;
 use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, LogicalBytes, PageRef, Value};
 
-use super::heap::{HeapWriteError, ObjectInit};
+use super::heap::HeapWriteError;
 use super::root::{HeapRoot, KeyedRoot};
 
 /// What a frozen value's root page states, checked when the value entered
@@ -106,11 +106,14 @@ pub struct CarryRoots {
 /// Implemented by the lifecycle layer (hp-life, FIG-6192); the paged heap
 /// (hp-heap) calls it when a directory lookup finds no override row.
 pub trait FamilyBase {
-    /// The initial contents of `entity` from its family's frozen base, or
-    /// `None` when its ordinal is outside the extent or not live.
-    fn base_object(&mut self, entity: EntityId) -> Result<Option<ObjectInit>, HeapFault>;
-    /// Whether the census holds `entity`.
-    fn member(&mut self, entity: EntityId) -> Result<bool, HeapFault>;
+    /// The lazy initial head of a live member. The heap checks its current
+    /// membership before calling this; None is corrupt-family state.
+    fn base_object(
+        &mut self,
+        entity: EntityId,
+        frozen: &FrozenRef,
+        pages: &mut dyn super::PageSource,
+    ) -> Result<Option<super::directory::ObjectHead>, HeapFault>;
 }
 
 /// The paged heap's lifecycle operations.

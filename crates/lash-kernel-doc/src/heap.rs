@@ -176,6 +176,8 @@ pub struct TupleSummary {
 /// An immutable tuple.
 #[derive(Clone, Debug)]
 pub struct TupleRef {
+    /// Namespace for untouched frozen tuple pages.
+    pub family: Option<FamilyId>,
     pub summary: TupleSummary,
     pub body: Payload<[Value]>,
 }
