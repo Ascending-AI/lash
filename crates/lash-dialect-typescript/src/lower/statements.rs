@@ -53,7 +53,10 @@ impl Lowerer<'_> {
                 }
                 ast::Stmt::Function { name, function } => {
                     self.declare(name, BindingKind::Function);
-                    if !self.assigned.contains(name) && super::positional::eligible(function) {
+                    if !self.assigned.contains(name)
+                        && self.facts.has_direct_call(name)
+                        && super::positional::eligible(function)
+                    {
                         let entry = super::Positional {
                             name: self.fresh("positional"),
                             arity: function.params.len(),

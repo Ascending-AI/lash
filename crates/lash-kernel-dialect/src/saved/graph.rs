@@ -13,7 +13,7 @@
 //! This module writes and reads the bundle's logical body. Nodes are staged
 //! by the caller's `stage` function, so this crate depends on no store.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::graph_tokens::{
     ChildRef, CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending,
@@ -141,6 +141,7 @@ impl Bundle {
                 name: name.clone(),
                 document,
                 captures: function.captures.clone(),
+                helper_owners: function.helper_owners.clone(),
                 written: function.written.clone(),
                 token: function.token.clone(),
             });
@@ -170,6 +171,7 @@ impl Bundle {
                 name: member.name.clone(),
                 document: document(member.document)?,
                 captures: member.captures,
+                helper_owners: member.helper_owners,
                 written: member.written,
                 token: member.token,
             };
@@ -206,6 +208,7 @@ pub struct MemberBody {
     pub name: Name,
     pub document: ChildRef,
     pub captures: BTreeMap<Name, Datum>,
+    pub helper_owners: BTreeSet<Name>,
     pub written: Option<Written>,
     pub token: Option<Token>,
 }
@@ -248,20 +251,22 @@ impl TokenCodec for BundleBody {
 
 impl TokenCodec for MemberBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(5);
+        out.seq(6);
         self.name.encode(out);
         self.document.encode(out);
         self.captures.encode(out);
+        self.helper_owners.encode(out);
         self.written.encode(out);
         self.token.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(5)?;
+        input.expect_struct(6)?;
         Ok(Self {
             name: Name::decode(input)?,
             document: ChildRef::decode(input)?,
             captures: BTreeMap::decode(input)?,
+            helper_owners: BTreeSet::decode(input)?,
             written: Option::decode(input)?,
             token: Option::decode(input)?,
         })

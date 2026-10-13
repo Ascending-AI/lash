@@ -34,7 +34,7 @@ fn a_binding_read_before_its_declaration_is_caught() {
     );
     assert!(text.contains("let late_1 = ()"), "{text}");
     assert!(
-        text.contains("let t3 = invoke ts.tdz(late_1, \"late\")"),
+        text.contains("let t5 = invoke ts.tdz(late_1, \"late\")"),
         "{text}"
     );
     let refused = lower("x = 1; let x;").unwrap_err();

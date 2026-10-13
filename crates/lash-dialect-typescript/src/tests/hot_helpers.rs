@@ -649,13 +649,15 @@ fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
     ] {
         let (end, charge, work) = run(fast.clone(), value.clone(), false);
         let work = work.unwrap();
-        // The entry adds 4 form units plus the result's deep size;
-        // admission adds 28 for an integer, 46 for a float.
-        let expected_charge = match &value {
-            Datum::Int(n) => 28 + 4 + 1 + n.bits().div_ceil(64),
-            Datum::Float(_) => 46 + 4 + 1,
+        // Entry call/return: 4 + deep(result). The helper's return,
+        // call expression, three arguments and two tuple writes cost 9;
+        // atomic key.identity costs 1 + deep(result).
+        let deep = match &value {
+            Datum::Int(n) => 1 + n.bits().div_ceil(64),
+            Datum::Float(_) => 1,
             _ => unreachable!(),
         };
+        let expected_charge = 4 + deep + 9 + 1 + deep;
         assert_eq!(charge, expected_charge, "K-CHG-007: {value:?}");
         assert_eq!(
             work.heap_insertions, 0,

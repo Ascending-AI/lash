@@ -225,6 +225,7 @@ fn saved(name: &str, kernel: u32) -> serde_json::Value {
         name: lash_kernel_doc::Name::new(name),
         document,
         captures: Default::default(),
+        helper_owners: Default::default(),
         written: None,
         token: None,
     })

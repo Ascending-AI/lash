@@ -59,17 +59,20 @@ fn a_variable_read_before_a_call_is_held_in_a_temporary() {
     assert_eq!(
         main_text("let x = 1; function f() { x = 5; return 1; } x = x + f();"),
         "\
+let positional1 = absent
 let x = 1.0
-let t1 = fn(this1, args1) {
+set positional1 = fn(this1) {
   set x = 5.0
   return 1.0
 }
-let f = (\"ts.function\", \"\", \"f\", 0.0, t1, {})
-let t3 = x
-let t4 = []
-let t5 = f[4.0]
-let t6 = apply t5(absent, t4)
-set x = invoke ts.add(t3, t6)"
+let t3 = fn(this2, args1) {
+  let t2 = apply positional1(this2)
+  return t2
+}
+let f = (\"ts.function\", \"\", \"f\", 0.0, t3, {})
+let t5 = x
+let t6 = apply positional1(absent)
+set x = invoke ts.add(t5, t6)"
     );
 }
 

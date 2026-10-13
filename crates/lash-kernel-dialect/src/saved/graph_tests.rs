@@ -33,6 +33,7 @@ fn function(name: &str, calls: &[&str]) -> SavedFunction {
         name: Name::new(name),
         document,
         captures: BTreeMap::new(),
+        helper_owners: Default::default(),
         written: None,
         token: None,
     }

@@ -73,6 +73,7 @@ struct Collector<'a> {
     functions: HashMap<&'a str, &'a Function>,
     reads: HashMap<&'a str, usize>,
     calls: HashMap<&'a str, usize>,
+    direct_calls: HashSet<&'a str>,
     contexts: Vec<Option<&'a str>>,
     captured_calls: HashSet<&'a str>,
 }
@@ -85,6 +86,7 @@ pub(crate) struct Facts {
     narrowable: HashSet<String>,
     aliases: BTreeMap<String, Ty>,
     numeric_functions: HashSet<String>,
+    direct_calls: HashSet<String>,
 }
 
 impl Facts {
@@ -99,6 +101,11 @@ impl Facts {
         collector.statements(&program.statements);
         let aliases = resolve_aliases(&collector.aliases, &program.type_parameters);
         let mut facts = Self {
+            direct_calls: collector
+                .direct_calls
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
             numeric_functions: collector
                 .functions
                 .iter()
@@ -164,6 +171,12 @@ impl Facts {
             .name
             .as_ref()
             .is_some_and(|name| self.numeric_functions.contains(name))
+    }
+
+    /// Only plain identifier calls can use a positional entry. A name
+    /// match may include a shadowed binding, which only over-admits a split.
+    pub(crate) fn has_direct_call(&self, name: &str) -> bool {
+        self.direct_calls.contains(name)
     }
 
     pub(crate) fn path_definition(&self, name: &str) -> Option<&Expr> {
@@ -731,6 +744,9 @@ impl<'a> Collector<'a> {
             }
             Expr::Call { callee, args, .. } => {
                 if let Expr::Ident(name, _) = callee.as_ref() {
+                    if args.iter().all(|arg| matches!(arg, CallArg::Value(_))) {
+                        self.direct_calls.insert(name);
+                    }
                     *self.calls.entry(name).or_default() += 1;
                     if self
                         .contexts

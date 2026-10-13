@@ -302,6 +302,7 @@ fn a_function_saved_under_one_version_is_migrated_and_called_under_the_next() {
         )
         .expect("the saved function's document"),
         captures: [(Name::new("fallback"), text("none"))].into(),
+        helper_owners: Default::default(),
         written: None,
         token: None,
     };

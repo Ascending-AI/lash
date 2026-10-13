@@ -46,6 +46,10 @@ pub struct SavedFunction {
     /// function, which is found by that name where this one is used.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub captures: BTreeMap<Name, Datum>,
+    /// Named functions whose private closures are included in this
+    /// function's code. Their exported entries remain members of its
+    /// bundle even when the code calls only their private entry.
+    pub helper_owners: BTreeSet<Name>,
     /// What the function's dialect stated of it, which the kernel reads
     /// none of.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -415,6 +419,58 @@ pub fn save(
             named.entry(id).or_insert_with(|| name.clone());
         }
     }
+    let mut helper_owners: BTreeMap<ObjectId, BTreeSet<Name>> = BTreeMap::new();
+    for (id, owner) in &named {
+        let Some(Object::Closure(object)) = left.closure_objects.get(id) else {
+            continue;
+        };
+        let Ok(closure) = closure_code(&left, object) else {
+            continue;
+        };
+        // A forwarding entry owns the private body it returns. Merely
+        // capturing an anonymous callback does not make its other users
+        // depend on this function (which may itself be unsavable).
+        let [
+            ..,
+            Stmt::Let {
+                name: result,
+                value:
+                    Rhs::Action(Action::Call {
+                        callee: Callee::Value(callee),
+                        ..
+                    }),
+            },
+            Stmt::Return {
+                value: Expr::Variable(returned),
+            },
+        ] = closure.body.as_slice()
+        else {
+            continue;
+        };
+        if result != returned {
+            continue;
+        }
+        let mut reads = Reads::default();
+        reads.block(&closure.body, &mut closure.params.clone());
+        if !reads.effects.is_empty()
+            || !reads.declared.is_empty()
+            || reads.free.len() != 1
+            || !reads.free.contains(callee)
+        {
+            continue;
+        }
+        for free in &reads.free {
+            if let Ok(Some((value, _))) = captured_value(&left, object, free)
+                && let Some(helper) = closure_held(value, tag)
+                && !named.contains_key(&helper)
+            {
+                helper_owners
+                    .entry(helper)
+                    .or_default()
+                    .insert(owner.clone());
+            }
+        }
+    }
     let mut saved: BTreeMap<Name, Kept> = BTreeMap::new();
     let mut refused = BTreeMap::new();
     let mut aliases: BTreeMap<Name, BTreeSet<Name>> = BTreeMap::new();
@@ -436,10 +492,11 @@ pub fn save(
                 .insert(name.clone());
             continue;
         }
-        let kept = save_closure(&left, name, id, &named).and_then(|mut function| {
-            function.token = frozen_token(&left, value, &named)?;
-            Ok(function)
-        });
+        let kept =
+            save_closure(&left, name, id, &named, &helper_owners).and_then(|mut function| {
+                function.token = frozen_token(&left, value, &named)?;
+                Ok(function)
+            });
         match kept {
             Ok(function) => {
                 saved.insert(
@@ -523,6 +580,7 @@ fn save_closure(
     name: &Name,
     id: ObjectId,
     named: &BTreeMap<ObjectId, Name>,
+    helper_owners: &BTreeMap<ObjectId, BTreeSet<Name>>,
 ) -> Result<SavedFunction, NotSaved> {
     let unreadable = |problem: &str| NotSaved::Unreadable {
         problem: problem.to_owned(),
@@ -536,12 +594,15 @@ fn save_closure(
         reads: Reads::default(),
         bound: BTreeMap::new(),
         helpers: Vec::new(),
+        helper_owners,
+        owners: BTreeSet::new(),
     };
     let closure = frozen.absorb(object)?;
     let Frozen {
         reads,
         bound,
         helpers,
+        mut owners,
         ..
     } = frozen;
 
@@ -604,6 +665,7 @@ fn save_closure(
         });
     }
     body.extend(closure.body.iter().cloned());
+    owners.remove(name);
     document.functions.insert(
         name.clone(),
         Function {
@@ -621,6 +683,7 @@ fn save_closure(
                 Held::Helper(_) => None,
             })
             .collect(),
+        helper_owners: owners,
         written: left
             .annotations
             .and_then(|annotations| written(annotations, &object.site)),
@@ -644,6 +707,8 @@ struct Frozen<'a> {
     reads: Reads,
     bound: BTreeMap<Name, Held>,
     helpers: Vec<Helper>,
+    helper_owners: &'a BTreeMap<ObjectId, BTreeSet<Name>>,
+    owners: BTreeSet<Name>,
 }
 
 /// A closure no binding names, made again in the saved function's code.
@@ -666,19 +731,7 @@ impl<'a> Frozen<'a> {
         let unreadable = |problem: &str| NotSaved::Unreadable {
             problem: problem.to_owned(),
         };
-        let body = match &object.site.unit {
-            Unit::Main => &left.document.main,
-            Unit::Function(function) => left
-                .document
-                .functions
-                .get(function)
-                .map(|function| &function.body)
-                .ok_or_else(|| unreadable("its unit is not declared"))?,
-            Unit::Library(_) => return Err(NotSaved::MadeByLibrary),
-        };
-        let closure = closure_at(body, &object.site)
-            .ok_or_else(|| unreadable("its site is not a closure expression"))?;
-        let in_main = object.site.unit == Unit::Main;
+        let closure = closure_code(left, object)?;
 
         let mut reads = Reads::default();
         let mut bound = closure.params.clone();
@@ -687,35 +740,8 @@ impl<'a> Frozen<'a> {
         self.reads.library.extend(reads.library);
 
         for free in &reads.free {
-            let cell = object
-                .captures
-                .iter()
-                .find(|(captured, _)| captured == free)
-                .map(|(_, cell)| *cell);
-            let (value, objects) = match cell {
-                Some(cell) => match left.closure_objects.get(&cell) {
-                    Some(Object::Variable(value)) => (value, left.closure_objects),
-                    _ => return Err(unreadable("a captured variable is missing")),
-                },
-                // A closure made in `main` reads the session's variables
-                // by name; one made in a declared function has nothing
-                // outside its captures.
-                None if in_main => {
-                    if let Some(value) = left.carried.get(free) {
-                        (value, left.carried_objects)
-                    } else if let Some(value) = left.closures.get(free) {
-                        (value, left.closure_objects)
-                    } else if left.not_carried.contains(free) {
-                        return Err(NotSaved::Capture {
-                            name: free.clone(),
-                            why: CaptureRefusal::Task,
-                        });
-                    } else {
-                        // Unbound when the cell ended: unbound when called.
-                        continue;
-                    }
-                }
-                None => continue,
+            let Some((value, objects)) = captured_value(left, object, free)? else {
+                continue;
             };
             let refuse = |why| NotSaved::Capture {
                 name: free.clone(),
@@ -726,6 +752,9 @@ impl<'a> Frozen<'a> {
             if let Some(helper) = closure_held(value, left.values.tag())
                 && !self.named.contains_key(&helper)
             {
+                if let Some(owners) = self.helper_owners.get(&helper) {
+                    self.owners.extend(owners.iter().cloned());
+                }
                 match self.bound.get(free) {
                     Some(Held::Helper(held)) if *held == helper => continue,
                     Some(_) => return Err(refuse(CaptureRefusal::Conflict)),
@@ -775,6 +804,64 @@ impl<'a> Frozen<'a> {
         }
         Ok(closure)
     }
+}
+
+fn closure_code<'a>(
+    left: &Left<'a>,
+    object: &lash_kernel_doc::ClosureObject,
+) -> Result<&'a lash_kernel_doc::Closure, NotSaved> {
+    let unreadable = |problem: &str| NotSaved::Unreadable {
+        problem: problem.to_owned(),
+    };
+    let body = match &object.site.unit {
+        Unit::Main => &left.document.main,
+        Unit::Function(function) => left
+            .document
+            .functions
+            .get(function)
+            .map(|function| &function.body)
+            .ok_or_else(|| unreadable("its unit is not declared"))?,
+        Unit::Library(_) => return Err(NotSaved::MadeByLibrary),
+    };
+    closure_at(body, &object.site).ok_or_else(|| unreadable("its site is not a closure expression"))
+}
+
+type CapturedValue<'a> = (&'a Value, &'a BTreeMap<ObjectId, Object>);
+
+/// A main closure may read a session variable by name. Other closures
+/// read only their captured variable cells. Unbound stays unbound.
+fn captured_value<'a>(
+    left: &Left<'a>,
+    object: &lash_kernel_doc::ClosureObject,
+    free: &Name,
+) -> Result<Option<CapturedValue<'a>>, NotSaved> {
+    if let Some((_, cell)) = object
+        .captures
+        .iter()
+        .find(|(captured, _)| captured == free)
+    {
+        return match left.closure_objects.get(cell) {
+            Some(Object::Variable(value)) => Ok(Some((value, left.closure_objects))),
+            _ => Err(NotSaved::Unreadable {
+                problem: "a captured variable is missing".to_owned(),
+            }),
+        };
+    }
+    if object.site.unit == Unit::Main {
+        if let Some(value) = left.carried.get(free) {
+            return Ok(Some((value, left.carried_objects)));
+        }
+        if let Some(value) = left.closures.get(free) {
+            return Ok(Some((value, left.closure_objects)));
+        }
+        if left.not_carried.contains(free) {
+            return Err(NotSaved::Capture {
+                name: free.clone(),
+                why: CaptureRefusal::Task,
+            });
+        }
+    }
+    Ok(None)
 }
 
 /// The closure expression at `site` of the unit whose body is `body`.
@@ -1158,7 +1245,7 @@ impl SavedFunction {
 
     /// The saved functions this one names: in a capture, or in its code.
     pub fn needs(&self) -> BTreeSet<Name> {
-        let mut needs = BTreeSet::new();
+        let mut needs = self.helper_owners.clone();
         for datum in self.captures.values() {
             functions_named(datum, &mut needs);
         }
