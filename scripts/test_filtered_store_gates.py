@@ -304,7 +304,13 @@ class StoreGateTests(Fixture):
             "runtime_perf::report::phase_tests::affected_postgres_scenarios_leave_base_database_clean",
             "runtime_perf::measurement::phase_probe::postgres_tests::selected_postgres_scenario_requires_a_database_url",
         ],
-        "pg-sim-backend-faults": ["postgres_backend_fault_seed_set_covers_every_fault_and_oracle"],
+        "pg-sim-backend-faults": [
+            "postgres_backend_fault_seed_set_covers_every_fault_and_oracle",
+            "writer_fence_storm_expires_while_virtual_time_is_stopped",
+            "postgres_isolation_requires_a_database_url",
+            "a_postgres_failure_package_replays_on_postgres",
+            "a_turn_seeded_during_a_lock_timeout_storm_is_admitted_once_the_fence_frees",
+        ],
         "pg-facade-laws": ["a_facade_law_on_postgres"],
         "s3-attachment-differential": ["attachment_blob_store_differential_agrees"],
     }
