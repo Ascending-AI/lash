@@ -378,6 +378,9 @@ pub struct PostgresDurableStore {
     /// A connection a test loses at the next commit's `COMMIT`.
     #[cfg(any(test, feature = "testing"))]
     commit_fault: Option<Arc<crate::testing::CommitFault>>,
+    /// Where a test holds a transaction inside its SQL.
+    #[cfg(any(test, feature = "testing"))]
+    storage_gates: Option<crate::testing::StorageGates>,
 }
 
 impl std::fmt::Debug for PostgresDurableStore {
@@ -573,6 +576,8 @@ impl PostgresDurableStore {
             clock: None,
             #[cfg(any(test, feature = "testing"))]
             commit_fault: None,
+            #[cfg(any(test, feature = "testing"))]
+            storage_gates: None,
         }
     }
 
@@ -595,6 +600,21 @@ impl PostgresDurableStore {
     ) -> Self {
         self.commit_fault = Some(fault);
         self
+    }
+
+    /// Hold this store's transactions where `gates` arms a pause.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_storage_gates_for_testing(mut self, gates: crate::testing::StorageGates) -> Self {
+        self.storage_gates = Some(gates);
+        self
+    }
+
+    /// Wait at `point` while a test's storage gate holds it.
+    #[cfg(any(test, feature = "testing"))]
+    async fn storage_point(&self, point: crate::testing::StoragePoint) {
+        if let Some(gates) = &self.storage_gates {
+            gates.pass(point).await;
+        }
     }
 
     fn injected_instant(&self) -> Option<Result<DurableInstant, DurableError>> {
@@ -1233,6 +1253,9 @@ impl DurableStore for PostgresDurableStore {
                         Some(true) => return Ok(Vec::new()),
                         Some(false) => {}
                     }
+                    #[cfg(any(test, feature = "testing"))]
+                    self.storage_point(crate::testing::StoragePoint::ClaimAfterNodeLive)
+                        .await;
                     let rows = crate::observed_sql::query(SQL.postgres.claim.sql())
                         .bind(now.0)
                         .bind(node.owner.node.as_str())
@@ -1557,6 +1580,11 @@ CREATE TRIGGER deadlock_first_cancel_mail BEFORE INSERT ON lash_actor_mail
 #[cfg(test)]
 const OWNER_FENCE_SQL: &str =
     "UPDATE lash_actors SET state_revision = state_revision + 1 WHERE actor_key = $1";
+
+/// The claim-availability law's holder: actor `$1`'s row, locked as a
+/// concurrent transaction holds it (FIG-6131).
+#[cfg(test)]
+const HOLD_ACTOR_SQL: &str = "SELECT actor_key FROM lash_actors WHERE actor_key = $1 FOR UPDATE";
 
 #[cfg(test)]
 #[path = "../durable_concurrency_tests.rs"]

@@ -216,6 +216,187 @@ async fn a_reap_racing_owner_commits_has_one_winner_per_actor() {
     eprintln!("reap race: {won} of {} owner commits won", actors.len());
 }
 
+/// Whether the reap waits on a lock at its delete of expired boots before it
+/// ends.
+async fn until_reap_waits<T>(pool: &sqlx::PgPool, reap: &tokio::task::JoinHandle<T>) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let waiting: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock'
+               AND query = $1)",
+        )
+        .bind(super::SQL.node.delete_expired.sql())
+        .fetch_one(pool)
+        .await
+        .expect("look for the reap's lock wait");
+        if waiting {
+            return true;
+        }
+        if reap.is_finished() {
+            return false;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the reap neither waited on a lock nor finished"
+        );
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+}
+
+/// A claim that found its boot's lease races the reap that deletes that
+/// boot (FIG-6131). The claim locks the node row `FOR SHARE` at `node_live`,
+/// so the reap's delete waits for the claim and then releases what it took:
+/// no actor stays owned by a deleted boot, a successor claims every one and
+/// the deleted boot's epoch is fenced. Were the row not locked, the reap
+/// would delete the boot first and the claim would then hand its actors to
+/// a boot nothing reaps again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_claim_racing_the_reap_of_its_boot_leaves_no_actor_owned_by_it() {
+    use crate::testing::{StorageGates, StoragePoint};
+
+    let Some((_database, storage)) =
+        storage("a_claim_racing_the_reap_of_its_boot_leaves_no_actor_owned_by_it").await
+    else {
+        return;
+    };
+    let clock = Arc::new(TestClock::new(1_000_000));
+    let gates = StorageGates::new();
+    let store = storage
+        .durable_store()
+        .with_clock_for_testing(clock.clone())
+        .with_storage_gates_for_testing(gates.clone());
+    let actors: Vec<ActorKey> = (0..4)
+        .map(|index| actor(&format!("orphan-{index}")))
+        .collect();
+    create(&store, &actors).await;
+    let doomed = node(&store, "doomed").await;
+    clock.advance(u64::try_from(TTL.as_millis()).expect("ttl fits") + 1);
+    let reaper = node(&store, "reaper").await;
+
+    let held = gates.pause_next(StoragePoint::ClaimAfterNodeLive);
+    let claim = tokio::spawn({
+        let (store, doomed, limit) = (store.clone(), doomed.clone(), actors.len());
+        async move { store.claim(&doomed, limit).await }
+    });
+    held.reached().await;
+    let reap = tokio::spawn({
+        let store = store.clone();
+        async move { store.reap(&reaper).await }
+    });
+    let waited = until_reap_waits(storage.pool(), &reap).await;
+    held.release();
+    let claimed = claim
+        .await
+        .expect("the claim task")
+        .expect("the claim commits");
+    let reaped = reap
+        .await
+        .expect("the reap task")
+        .expect("the reap commits");
+
+    let left = store
+        .owned(&doomed)
+        .await
+        .expect("read the deleted boot's actors");
+    assert!(
+        left.is_empty(),
+        "actors stayed owned by the reaped boot: {left:?}; the reap released {reaped:?}"
+    );
+    assert!(
+        waited,
+        "the reap did not wait for the claim's node-row lock"
+    );
+    assert_eq!(claimed.len(), actors.len(), "the claim took {claimed:?}");
+    let mut released: Vec<_> = reaped
+        .iter()
+        .map(|reaped| (reaped.actor.clone(), reaped.epoch))
+        .collect();
+    released.sort();
+    assert_eq!(
+        released,
+        claimed
+            .iter()
+            .map(|claimed| (claimed.actor.clone(), Epoch(claimed.epoch.0 + 1)))
+            .collect::<Vec<_>>(),
+        "the reap did not release every claimed actor with one epoch bump"
+    );
+    let successor = node(&store, "successor").await;
+    let taken = store
+        .claim(&successor, actors.len())
+        .await
+        .expect("the successor's claim commits");
+    assert_eq!(
+        taken.iter().map(|taken| &taken.actor).collect::<Vec<_>>(),
+        actors.iter().collect::<Vec<_>>(),
+        "the successor could not claim every released actor"
+    );
+    for claimed in &claimed {
+        assert!(
+            matches!(
+                store.begin(&claimed.actor, claimed.epoch).await,
+                Err(DurableError::OwnershipLost(_))
+            ),
+            "the reaped boot still opens {} at its claimed epoch",
+            claimed.actor
+        );
+    }
+}
+
+/// A claim skips an eligible actor another transaction holds locked and
+/// takes the next oldest (FIG-6131): with limit one it answers the second
+/// actor while the oldest stays locked, neither nothing nor a wait, and the
+/// oldest is claimable again once its holder ends.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_claim_takes_the_next_actor_past_a_locked_oldest() {
+    let Some((_database, storage)) =
+        storage("a_claim_takes_the_next_actor_past_a_locked_oldest").await
+    else {
+        return;
+    };
+    let clock = Arc::new(TestClock::new(1_000_000));
+    let store = storage
+        .durable_store()
+        .with_clock_for_testing(clock.clone());
+    // Key order opposes age, so only age makes the locked actor the oldest.
+    let (oldest, next) = (actor("z-oldest"), actor("a-next"));
+    create(&store, std::slice::from_ref(&oldest)).await;
+    clock.advance(1);
+    create(&store, std::slice::from_ref(&next)).await;
+    let claimer = node(&store, "claimer").await;
+    let claim_one = || async {
+        tokio::time::timeout(Duration::from_secs(10), store.claim(&claimer, 1))
+            .await
+            .map_err(|_| "the claim waited".to_owned())?
+            .map(|claimed| {
+                claimed
+                    .into_iter()
+                    .map(|claimed| claimed.actor)
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|error| error.to_string())
+    };
+
+    let mut holder = storage.pool().begin().await.expect("open the holder");
+    sqlx::query(super::HOLD_ACTOR_SQL)
+        .bind(oldest.as_str())
+        .fetch_one(&mut *holder)
+        .await
+        .expect("lock the oldest actor");
+    let past = claim_one().await;
+    holder.rollback().await.expect("end the holder");
+    assert_eq!(
+        past,
+        Ok(vec![next]),
+        "a claim did not take the next actor past the locked oldest"
+    );
+    assert_eq!(
+        claim_one().await,
+        Ok(vec![oldest]),
+        "the oldest was not claimable once its holder ended"
+    );
+}
+
 /// The claim latencies and outcomes of a contention run.
 #[derive(Default)]
 struct Contention {

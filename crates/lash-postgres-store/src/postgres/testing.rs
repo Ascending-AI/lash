@@ -461,6 +461,94 @@ impl TurnCommitPause {
     }
 }
 
+/// A point inside a durable transaction's SQL where a [`StorageGates`] seam
+/// can hold it: every statement before the point has run and its locks are
+/// held, so a law can race another transaction into that window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoragePoint {
+    /// A claim's, right after `node_live` found its boot's lease and locked
+    /// the node row `FOR SHARE`, before it selects any actor.
+    ClaimAfterNodeLive,
+}
+
+/// The storage-gate seam: holds a durable transaction at a [`StoragePoint`],
+/// a window inside its SQL that a gate around the store's API cannot reach.
+///
+/// Install it on a durable store with
+/// [`PostgresDurableStore::with_storage_gates_for_testing`](crate::PostgresDurableStore::with_storage_gates_for_testing).
+/// Each [`Self::pause_next`] arms one pause at a point, taken by the next
+/// transaction that reaches that point, in arming order; one that finds
+/// none armed passes.
+#[derive(Clone, Debug, Default)]
+pub struct StorageGates {
+    armed: std::sync::Arc<std::sync::Mutex<Vec<ArmedPoint>>>,
+}
+
+/// A pause armed at a point, and the gate it holds there.
+type ArmedPoint = (
+    StoragePoint,
+    std::sync::Arc<lash_core_execution::testing::Gate>,
+);
+
+/// One armed [`StorageGates`] pause: the transaction that takes it waits at
+/// its point until [`Self::release`], or until this handle is dropped.
+#[derive(Debug)]
+pub struct StoragePause {
+    gate: std::sync::Arc<lash_core_execution::testing::Gate>,
+}
+
+impl StorageGates {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Pause the next transaction that reaches `point`.
+    pub fn pause_next(&self, point: StoragePoint) -> StoragePause {
+        use lash_sansio::sync::MutexExt;
+        let gate = std::sync::Arc::new(lash_core_execution::testing::Gate::new(format!(
+            "postgres storage point {point:?}"
+        )));
+        self.armed
+            .lock_recover()
+            .push((point, std::sync::Arc::clone(&gate)));
+        StoragePause { gate }
+    }
+
+    /// Called by a transaction at `point`: takes the earliest pause armed
+    /// there, if any, and waits for its release.
+    pub(crate) async fn pass(&self, point: StoragePoint) {
+        use lash_sansio::sync::MutexExt;
+        let armed = {
+            let mut armed = self.armed.lock_recover();
+            armed
+                .iter()
+                .position(|(at, _)| *at == point)
+                .map(|index| armed.remove(index).1)
+        };
+        if let Some(gate) = armed {
+            gate.pass().await;
+        }
+    }
+}
+
+impl StoragePause {
+    /// Wait until a transaction has taken this pause.
+    pub async fn reached(&self) {
+        self.gate.reached(1).await;
+    }
+
+    /// Let the paused transaction continue.
+    pub fn release(self) {
+        self.gate.open_all();
+    }
+}
+
+impl Drop for StoragePause {
+    fn drop(&mut self) {
+        self.gate.open_all();
+    }
+}
+
 /// A move of `F`, for tests that stand in for a newer fleet or race the
 /// writer fence (ADR 0115 §2.2): the fleet-format row read `FOR UPDATE` and
 /// moved to `epoch`, held open until [`HeldFinalize::commit`].
