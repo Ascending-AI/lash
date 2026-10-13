@@ -159,6 +159,13 @@ pub(super) async fn one_claim_per_readied_actor() {
         matches!(event, WakeEvidence::Watched(boots) if boots.iter().filter(|boot| boot.held).count() == PEERS + 1)
     })
     .await;
+    // The probe reports what it saw before it returns, and the runner takes
+    // that view as its peers only afterwards. Its next probe starts once the
+    // view is in place, so the first readied actor's commit picks a peer.
+    evidence_until(&mut evidence, |event| {
+        matches!(event, WakeEvidence::Watched(_))
+    })
+    .await;
     for index in 0..READIED {
         let readied = actor(&format!("readied-{index}"));
         let commit = create(&store, &readied).await;
