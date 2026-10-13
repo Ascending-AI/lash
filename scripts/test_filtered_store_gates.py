@@ -156,6 +156,9 @@ class Fixture(unittest.TestCase):
         ])
 
     def gate(self, suite, trusted=True, **cache_env):
+        psql = self.root / "psql"
+        psql.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "${FIXTURE_POSTGRES_SETTINGS:-on|on}"\n')
+        psql.chmod(0o755)
         hermetic = self.root / "hermetic-build"
         hermetic.write_text(HERMETIC)
         hermetic.chmod(0o755)
@@ -163,6 +166,7 @@ class Fixture(unittest.TestCase):
         cargo.write_text(CARGO)
         cargo.chmod(0o755)
         self.env.update(PATH=str(self.root) + os.pathsep + os.environ["PATH"],
+                        LASH_POSTGRES_DATABASE_URL="postgres://fixture/lash",
                         BUCK2_TRUSTED="true" if trusted else "false",
                         HERMETIC_BUILD=str(hermetic), RUNNER_TEMP=str(self.root / "runner-temp"),
                         FIXTURE_ROOT=str(self.root), FIXTURE_MEMBER=str(self.member),
@@ -286,8 +290,20 @@ class FilteredRunnerTests(Fixture):
 
 
 class StoreGateTests(Fixture):
+    def test_pool_wait_refuses_nondurable_postgres_before_test_execution(self):
+        for settings in ("off|on", "on|off", "on|local"):
+            with self.subTest(settings=settings):
+                self.env["FIXTURE_POSTGRES_SETTINGS"] = settings
+                result = self.gate("pg-pool-wait")
+                self.assert_failed(result, "--durable-postgres")
+                self.assertNotIn("running", result.stdout)
+
     SUITES = {
-        "pg-pool-wait": ["postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads"],
+        "pg-pool-wait": [
+            "runtime_perf::report::phase_tests::postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads",
+            "runtime_perf::report::phase_tests::affected_postgres_scenarios_leave_base_database_clean",
+            "runtime_perf::measurement::phase_probe::postgres_tests::selected_postgres_scenario_requires_a_database_url",
+        ],
         "pg-sim-backend-faults": ["postgres_backend_fault_seed_set_covers_every_fault_and_oracle"],
         "pg-facade-laws": ["a_facade_law_on_postgres"],
         "s3-attachment-differential": ["attachment_blob_store_differential_agrees"],

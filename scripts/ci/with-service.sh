@@ -22,6 +22,7 @@
 #   scripts/ci/with-service.sh                       # list services and exit
 #   scripts/ci/with-service.sh --list
 #   scripts/ci/with-service.sh <service> -- <command...>
+#   scripts/ci/with-service.sh --durable-postgres pg -- <command...>
 #   scripts/ci/with-service.sh all -- <command...>   # each store service in turn
 #
 # Example:
@@ -53,6 +54,7 @@ readonly ALL_SERVICES=(pg s3)
 # `lash_slot_<index>`; `tools/buck2/postgres_slot_runner.sh` hands one to each
 # test action so the sharded suites never share tables (FIG-3572).
 readonly POSTGRES_SLOT_COUNT=4
+durable_postgres=false
 
 # Lash 1.0 supports PostgreSQL 17 and 18. 18 is the primary major: every CI
 # lane and the hermetic test server (`native//:postgres`, zonky 18.6.0) run
@@ -120,6 +122,11 @@ service_run_spec() {
         -c shared_preload_libraries=pg_stat_statements
         -c "max_connections=$((100 * POSTGRES_SLOT_COUNT))"
         -c max_locks_per_transaction=256
+      )
+      if [ "$durable_postgres" = true ]; then
+        # Performance entry points measure the promised durable commit.
+        RUN_COMMAND+=(-c fsync=on -c synchronous_commit=on -c full_page_writes=on)
+      else
         # The container is throwaway: lash's crash tests kill lash processes
         # or the engine, never the host OS, so data in the page cache
         # survives anything a suite does and fsync only matters for a host
@@ -127,10 +134,8 @@ service_run_spec() {
         # test, the durable defaults made PostgreSQL the shared host's top
         # CPU consumer.
         # Logic tests only; this does not certify power-loss durability.
-        -c fsync=off
-        -c synchronous_commit=off
-        -c full_page_writes=off
-      )
+        RUN_COMMAND+=(-c fsync=off -c synchronous_commit=off -c full_page_writes=off)
+      fi
       ;;
     s3)
       mapfile -t RUN_ARGS < <(lash_s3_run_args)
@@ -294,7 +299,7 @@ fail() {
 usage() {
   cat <<USAGE
 usage: ${PROGRAM} [--list]
-       ${PROGRAM} <${SERVICES[*]}|all> -- <command...>
+       ${PROGRAM} [--durable-postgres] <${SERVICES[*]}|all> -- <command...>
 USAGE
 }
 
@@ -383,6 +388,9 @@ run_with_service() {
   if wait_ready "$name" "$container" "$port"; then
     if service_setup "$name" "$container" "$port"; then
       service_test_env "$name" "$port"
+      if [[ "$name" = pg || "$name" = pg17 ]]; then
+        TEST_ENV+=("POSTGRES_SERVICE_CONTAINER=$container")
+      fi
       set +e
       env "${TEST_ENV[@]}" "$@"
       rc=$?
@@ -411,6 +419,7 @@ main() {
     case "$1" in
       --) shift; break ;;
       --list) list=1; shift ;;
+      --durable-postgres) durable_postgres=true; shift ;;
       -h | --help) usage; exit 0 ;;
       -*) fail "unknown option: $1" ;;
       *) requested+=("$1"); shift ;;

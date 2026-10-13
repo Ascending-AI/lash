@@ -55,6 +55,21 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}"
 selection_python="${LIBTEST_SELECTION_PYTHON:-python3}"
 
+if [[ "$labels_only" = false && "$suite" = pg-pool-wait ]]; then
+  # This law exercises real performance entry points, including their
+  # durability guard. Inspect the server before compiling or running tests.
+  postgres_probe=(psql "${LASH_POSTGRES_DATABASE_URL:?PostgreSQL URL is required}")
+  if [[ -n "${POSTGRES_SERVICE_CONTAINER:-}" ]]; then
+    postgres_probe=(docker exec "$POSTGRES_SERVICE_CONTAINER" psql -U lash -d lash)
+  fi
+  settings="$("${postgres_probe[@]}" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT current_setting('fsync'), current_setting('synchronous_commit')")"
+  if [[ "$settings" != 'on|on' ]]; then
+    echo "pg-pool-wait requires fsync=on and synchronous_commit=on; got $settings; run with-service.sh --durable-postgres pg -- bash scripts/ci/store-tests.sh pg-pool-wait" >&2
+    exit 1
+  fi
+fi
+
 buck2_test_count=0
 buck2_report_root=""
 # One Buck2 test invocation with this suite's numbered reports, then the proof
@@ -191,13 +206,13 @@ declare -A uniform_store_suites=(
   # also needs a second service unless a skip here names it.
   [pg-facade-laws]="//crates/lash:lash__unit_test,//crates/lash:integration__test,//crates/lash:artifact_referrers_evidence__test,//crates/lash:llm_profiles__test|postgres|lash-runtime|--lib --bins --test integration --test artifact_referrers_evidence --test llm_profiles --features rlm,sqlite,testing,typescript|cargo-test|ignored-only,nocapture"
   [pg-broker-park]="//crates/lash-vm-broker:park_matrix__test||lash-internal-vm-broker|--test park_matrix|cargo-test|ignored-only,nocapture"
-  [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads,affected_postgres_scenarios_leave_base_database_clean,selected_postgres_scenario_requires_a_database_url|lash-perf||nextest|include-ignored"
+  [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|runtime_perf::report::phase_tests::postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads,runtime_perf::report::phase_tests::affected_postgres_scenarios_leave_base_database_clean,runtime_perf::measurement::phase_probe::postgres_tests::selected_postgres_scenario_requires_a_database_url|lash-perf||nextest|include-ignored"
   [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault,writer_fence_storm_expires_while_virtual_time_is_stopped,postgres_isolation_requires_a_database_url,a_postgres_failure_package_replays_on_postgres,a_turn_seeded_during_a_lock_timeout_storm_is_admitted_once_the_fence_frees|lash-sim|--lib|nextest-ci|include-ignored"
   [pg-cross-backend]="//crates/lash-sim:cross_backend_store_differential__test||lash-sim|--test cross_backend_store_differential|nextest-ci|include-ignored,single-threaded,nocapture"
   [pg-standard-retention]="//crates/lash-protocol-standard:lash-protocol-standard__unit_test|postgres|lash-internal-protocol-standard|--lib|cargo-test|ignored-only"
   [pg-operator-laws]="//crates/lashctl:operator_json_contract__test||lashctl|--test operator_json_contract|cargo-test|ignored-only"
   [pg-chaos-laws]="//crates/lash-sim:chaos_soak__test|chaos_soak_on_postgres|lash-sim|--test chaos_soak|cargo-test|ignored-only"
-  [pg-schema-laws]="//crates/lash-postgres-store:schema_constraints__test||lash-internal-postgres-store|--test schema_constraints|cargo-test|ignored-only"
+  [pg-schema-laws]="//crates/lash-postgres-store:schema_constraints__test|postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when_configured,a_process_row_takes_its_lifecycle_columns_from_its_record_alone,postgres_obligation_checks_reject_incomplete_variants,turn_cancellation_shape_is_guarded,isolated_cells_do_not_checkpoint_or_share_state|lash-internal-postgres-store|--test schema_constraints|cargo-test|"
   [s3-attachment-differential]="//crates/lash-sim:cross_backend_store_differential__test|attachment_blob_store_differential_agrees|lash-sim|--test cross_backend_store_differential|cargo-test|include-ignored,nocapture"
 )
 

@@ -204,6 +204,65 @@ class SelectionDefects(Fixture):
 
 
 class TargetCoverage(Fixture):
+    def test_inline_module_keeps_the_executable_law_path(self):
+        self.target(source='''mod postgres_tests {
+#[test]
+#[ignore = "requires PostgreSQL"]
+fn opens_on_postgres() {}
+}
+''')
+        self.write_recipe("//crates/durable:proof__test", "nocapture")
+        path = self.root / checker.STORE_TESTS
+        path.write_text(path.read_text().replace("|postgres|", "|postgres_tests::opens_on_postgres|"))
+        self.assert_clean()
+
+    def test_release_selection_recognizes_ignored_macro_case_names(self):
+        self.target(tags=["hermetic-postgres"], source='''#[test]
+fn opens_once_on_postgres() {}
+macro_rules! sqlite_laws {
+    ($($name:ident => $case:ident;)*) => {
+        $(#[tokio::test] #[ignore = "SQLite file tier"] async fn $name() {})*
+    };
+}
+sqlite_laws! { the_crash_matrix_holds_on_a_sqlite_file => Turn; }
+''')
+        self.write_workflow('''jobs:
+  release:
+    steps:
+      - run: bash scripts/ci/with-service.sh pg -- bash scripts/ci/store-tests.sh pg-release
+''')
+        recipe = self.root / checker.STORE_TESTS
+        recipe.write_text(recipe.read_text() + '''
+release_legs() {
+  echo "proof|shared|the_crash_matrix_holds_on_a_sqlite_file --include-ignored|//crates/durable:proof__test|-p durable"
+}
+''')
+        self.assert_clean()
+
+    def test_ignored_only_suite_must_select_a_law_even_with_a_hermetic_runner(self):
+        self.target(tags=["hermetic-postgres"])
+        self.write_recipe("//crates/durable:proof__test", "nocapture")
+        self.assertTrue(any("selects zero" in v.detail for v in self.violations()))
+
+    def test_each_suite_filter_must_select_a_law(self):
+        self.target(source='''#[test]
+#[ignore = "requires PostgreSQL"]
+fn opens_on_postgres() {}
+''')
+        self.write_recipe("//crates/durable:proof__test", "nocapture")
+        path = self.root / checker.STORE_TESTS
+        path.write_text(path.read_text().replace("|postgres|", "|postgres,renamed_law|"))
+        self.assertTrue(any("renamed_law" in v.detail and "selects zero" in v.detail
+                            for v in self.violations()))
+
+    def test_skipping_every_selected_law_is_an_empty_selection(self):
+        self.target(source='''#[test]
+#[ignore = "requires PostgreSQL"]
+fn opens_on_postgres() {}
+''')
+        self.write_recipe("//crates/durable:proof__test", "skip=opens_on_postgres")
+        self.assertTrue(any("selects zero" in v.detail for v in self.violations()))
+
     def target(self, tags=(), source=None):
         package = self.root / "crates/durable"
         package.mkdir(parents=True, exist_ok=True)

@@ -13,6 +13,8 @@ including shared #[path] helpers. URL reads, PostgreSQL law names and the PG
 tier macro require hermetic-postgres or a named main/certification gate.
 An ignored law additionally needs an ignored-covering selection: merely
 starting a hermetic server does not execute an ignored test.
+Every suite filter must select at least one executable law in each named
+binary, after ignored-only and skip selections have been applied.
 
 It scans the workspace for
 every ignored marker whose reason names PostgreSQL -- on a ``fn``, on a
@@ -95,7 +97,7 @@ class Violation:
 
 @dataclass(frozen=True)
 class Suite:
-    """One ignored-covering selection a Postgres-wrapped suite makes."""
+    """One executable selection a Postgres-wrapped suite makes."""
 
     name: str
     labels: frozenset[str]
@@ -190,7 +192,7 @@ def postgres_argument(text: str, invocation: re.Match) -> str | None:
 
 
 def macro_invocation_fragments(text: str, macro: str) -> tuple[str, ...]:
-    """The postgres-carrying arguments every `macro!` invocation binds.
+    """Case names and postgres-carrying arguments bound by `macro!` invocations.
 
     `#[ignore]` inside a `macro_rules!` body precedes a metavariable `fn`
     (`async fn $postgres()`), so the marked test names come from the
@@ -200,10 +202,9 @@ def macro_invocation_fragments(text: str, macro: str) -> tuple[str, ...]:
     for invocation in INVOCATION.finditer(text):
         if invocation.group(1) != macro:
             continue
-        for ident in re.findall(
-            r"\b[a-z_]\w*\b", invocation_arguments(text, invocation)
-        ):
-            if FILTER_COVERED.search(ident):
+        arguments = invocation_arguments(text, invocation)
+        for ident in re.findall(r"\b[a-z_]\w*\b", arguments):
+            if FILTER_COVERED.search(ident) or re.search(rf"\b{ident}\s*=>", arguments):
                 fragments.append(ident)
     return tuple(fragments)
 
@@ -338,7 +339,7 @@ def postgres_wrapped_suites(workflows: dict[Path, object]) -> set[str]:
                 run = step.get("run") if isinstance(step, dict) else None
                 if not isinstance(run, str):
                     continue
-                if not re.search(r"with-service\.sh\s+\"?pg", run) and not (
+                if not re.search(r"with-service\.sh\s+(?:--durable-postgres\s+)?\"?pg", run) and not (
                     'with-service.sh "${SERVICE}"' in run
                     and services and set(services) <= {"pg", "pg17", "pg18"}
                 ):
@@ -350,7 +351,7 @@ def postgres_wrapped_suites(workflows: dict[Path, object]) -> set[str]:
 
 
 def covering_suites(root: Path) -> tuple[list[Suite], list[Violation]]:
-    """The ignored-covering selections the Postgres service legs make."""
+    """The selections the Postgres service legs make, including ignore mode."""
     violations: list[Violation] = []
     script_path = root / STORE_TESTS
     try:
@@ -388,8 +389,6 @@ def covering_suites(root: Path) -> tuple[list[Suite], list[Violation]]:
             continue
         labels, filter_list, _package, _target, _runner, flags = fields
         selections = flags.split(",") if flags else []
-        if not {"include-ignored", "ignored-only"} & set(selections):
-            continue  # runs only the binaries' non-ignored tests
         suites.append(
             Suite(
                 name=name,
@@ -403,6 +402,7 @@ def covering_suites(root: Path) -> tuple[list[Suite], list[Violation]]:
                     if flag.startswith("skip=")
                 ),
                 ignored_only="ignored-only" in selections,
+                ignored=bool({"include-ignored", "ignored-only"} & set(selections)),
             )
         )
     if "pg-release" in wrapped:
@@ -437,7 +437,6 @@ def rust_modules(source: Path):
         # Restore them so diagnostics retain the source's real line numbers.
         text = "".join("\n" if before == "\n" else after
                        for before, after in zip(raw, without_comments(raw)))
-        yield path, prefix, text
         tokens = list(TOKEN.finditer(text))
 
         def close(at):
@@ -451,6 +450,11 @@ def rust_modules(source: Path):
             raise ValueError(f"unclosed {opening} in {path}")
 
         def block(start, end, base, attribute_base, names):
+            if start == end:
+                return
+            begin = tokens[start].start()
+            finish = tokens[end - 1].end()
+            scoped = list(text[begin:finish])
             attrs = []
             at = start
             while at < end:
@@ -468,6 +472,9 @@ def rust_modules(source: Path):
                     if following == "{":
                         stop = close(at + 2)
                         yield from block(at + 3, stop, base / name, base / name, (*names, name))
+                        left, right = tokens[at].start() - begin, tokens[stop].end() - begin
+                        scoped[left:right] = ["\n" if char == "\n" else " "
+                                              for char in scoped[left:right]]
                         at = stop + 1
                     elif following == ";":
                         override = re.search(r'#\[path\s*=\s*("[^"\n]+")\]', "\n".join(attrs))
@@ -487,6 +494,7 @@ def rust_modules(source: Path):
                     at = close(at) + 1
                 else:
                     at += 1
+            yield path, names, "\n" * text.count("\n", 0, begin) + "".join(scoped)
 
         yield from block(0, len(tokens), directory, path.parent, prefix)
 
@@ -516,9 +524,12 @@ def postgres_targets(root: Path):
             sites = []
             markers = []
             fragments = set()
+            test_laws = set()
+            ignored_laws = set()
             for path, prefix, text in rust_modules(source):
                 relative = path.relative_to(root)
                 for site in scan_file(relative, text):
+                    ignored_laws.update("::".join((*prefix, f)) for f in site.fragments)
                     if not site.reason.startswith("regenerates ") and (POSTGRES.search(site.reason) or any(POSTGRES.search(f) for f in site.fragments)):
                         sites.append(Site(site.path, site.line, site.reason,
                                           tuple("::".join((*prefix, f)) for f in site.fragments)))
@@ -534,6 +545,8 @@ def postgres_targets(root: Path):
                 if marker:
                     markers.append(f"{relative}:{line_of(text, marker.start())}")
                 concrete = "".join(marker_text)
+                test_laws.update("::".join((*prefix, function[1]))
+                                 for function in TEST_FUNCTION.finditer(concrete))
                 for invocation in re.finditer(r'\btiered_laws!\s*\(', concrete):
                     opening = invocation.end() - 1
                     arguments = concrete[opening + 1:matching_close(concrete, opening) - 1]
@@ -556,7 +569,10 @@ def postgres_targets(root: Path):
                 if target["kind"] == "test" and re.search(r'#\[(?:tokio::)?test\b', text) and PG_READ.search(text):
                     markers.append(str(relative))
             if sites or markers:
-                yield dict(target, postgres_laws=sorted(fragments)), sites, markers
+                test_laws.update(fragments)
+                test_laws.update(ignored_laws)
+                yield dict(target, postgres_laws=sorted(fragments),
+                           test_laws=sorted(test_laws), ignored_laws=sorted(ignored_laws)), sites, markers
 
 
 def check_repository(root: Path) -> list[Violation]:
@@ -586,6 +602,18 @@ def check_repository(root: Path) -> list[Violation]:
         label = target["label"]
         candidates = [suite for suite in suites if label in suite.labels]
         hermetic = "hermetic-postgres" in target.get("tags", [])
+        if "test_laws" in target:
+            ignored_laws = target["ignored_laws"]
+            for suite in candidates:
+                for selection in suite.filters or ("",):
+                    def executable(law):
+                        ignored = any(law == name or law.startswith(name + "::")
+                                      for name in ignored_laws)
+                        return (selection in law and not suite.skips_(law)
+                                and (suite.ignored if ignored else not suite.ignored_only))
+                    if not any(executable(law) for law in target["test_laws"]):
+                        violations.append(Violation(str(STORE_TESTS), f"suite `{suite.name}`",
+                                                    f"{label} filter {selection!r} selects zero executable tests"))
         if not hermetic and not candidates:
             violations.append(Violation(label, "PostgreSQL leg", f"{label} has PostgreSQL legs ({', '.join(markers)}) but neither hermetic-postgres nor a named PostgreSQL gate"))
         if not hermetic:
