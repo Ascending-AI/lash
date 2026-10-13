@@ -64,13 +64,12 @@ pub enum Case {
     Effects,
     /// A turn cancelled by the host while its tool runs.
     Cancel,
-    /// A turn's code cell: its snapshot, its `Once` operation and its
-    /// resume from the snapshot.
+    /// A turn's code cell: its snapshot, its `Once` operation raced against
+    /// a sleep, its resume, and its end recorded with a pending sleep.
     Cell,
     /// [`Self::Cell`] with the node killed inside the operation's body, its
-    /// session served with a host plugin's callback: its cell's end is
-    /// recorded on its own, where [`Self::Cell`]'s commits with the commit
-    /// that consumes the cell's answer (FIG-5999). Its cell computes past
+    /// session served with a host plugin's callback and no competing sleep:
+    /// its cell's end commits with `turn.commit` (FIG-6162). It computes past
     /// its first slice before its call, so the model response commits on
     /// its own, where [`Self::Cell`]'s commits with the cell's first save
     /// (FIG-6000).

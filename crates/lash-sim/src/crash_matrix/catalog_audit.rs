@@ -78,7 +78,10 @@ pub const COVERAGE: [(CommitLabel, Coverage); 49] = [
         CommitLabel::PRESSURE_FRAME,
         Coverage::Cases(&[Case::Pressure]),
     ),
-    (CommitLabel::TURN_COMMIT, Coverage::Cases(&[Case::Turn])),
+    (
+        CommitLabel::TURN_COMMIT,
+        Coverage::Cases(&[Case::Turn, Case::CellKilled]),
+    ),
     (CommitLabel::TURN_CANCEL, Coverage::Cases(&[Case::Cancel])),
     (CommitLabel::SESSION_RELEASE, Coverage::Cases(&[Case::Turn])),
     (
@@ -148,10 +151,7 @@ pub const COVERAGE: [(CommitLabel, Coverage); 49] = [
         CommitLabel::CELL_INJECT,
         Coverage::Cases(&[Case::CellKilled]),
     ),
-    (
-        CommitLabel::CELL_SNAPSHOT,
-        Coverage::Cases(&[Case::CellKilled]),
-    ),
+    (CommitLabel::CELL_SNAPSHOT, Coverage::Cases(&[Case::Cell])),
     (
         CommitLabel::SESSION_CLOSE_BEGIN,
         Coverage::Cases(&[Case::Close]),

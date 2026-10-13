@@ -1,11 +1,11 @@
 //! The cell seam: one turn, behind the facade on the production driver,
 //! whose model writes a TypeScript cell that calls the `Once` tool
-//! `ext_write`; the cell snapshots with the model response that asked for it
-//! and the operation's admission (`model.done+cell.snapshot+admit`,
+//! `ext_write`, raced against a sleep longer than the matrix horizon; the
+//! cell snapshots with the model response that asked for it and both
+//! admissions (`model.done+cell.snapshot+admit`,
 //! FIG-6000), the body runs, its outcome
-//! commits (`round.outcome`), the cell finishes from its snapshot, its end
-//! commits with the model call that consumes its answer, and the model
-//! answers with its result.
+//! commits (`round.outcome`), the cell finishes from its snapshot with the
+//! sleep still pending, and its end commits on its own (`cell.snapshot`).
 //!
 //! The killed variant's cell computes past its first slice first, so the
 //! model response commits on its own (`model.done`) and the cell snapshots
@@ -14,7 +14,8 @@
 //! kills the node running it, then restarts it: another owner reaps the
 //! dead one, restores the turn and finds the operation started without an
 //! outcome, so it injects `Interrupted` into the cell (`cell.inject`), never
-//! entering the body again.
+//! entering the body again. It races no sleep, so its end commits with
+//! `turn.commit` even with a host plugin's checkpoint callback (FIG-6162).
 //!
 //! Laws: the turn answered; the cell's program is entered fresh only by an
 //! activation that found no snapshot of it; the killed variant's operation

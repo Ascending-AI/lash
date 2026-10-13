@@ -11,14 +11,14 @@
 //!
 //! A [`TurnScript::Cell`] session's cell reaches its first save within its
 //! first slice, so that save commits the model response that asked for the
-//! cell (`model.done+cell.snapshot+admit`, FIG-6000); and its turn runs no
-//! callback but its protocol's, so its cell's end commits with the commit
-//! that consumes the cell's answer (FIG-5999). A [`TurnScript::CellKilled`]
+//! cell (`model.done+cell.snapshot+admit`, FIG-6000). Its call races a sleep
+//! longer than the matrix horizon: the call wins, leaving the sleep pending,
+//! so its end must commit on its own (`cell.snapshot`). A [`TurnScript::CellKilled`]
 //! session's cell first computes past its slice, so the response commits on
 //! its own (`model.done`) and the cell's first save is
 //! `cell.snapshot+admit`; and it is served with a host plugin's checkpoint
-//! callback ([`Watch`]), which may read what the cell left, so its cell's
-//! end is recorded on its own (`cell.snapshot`) before the cell answers.
+//! callback ([`Watch`]). With no pending work when the cell ends, its end
+//! commits with `turn.commit`, even with that callback installed (FIG-6162).
 
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::{Arc, Weak};
@@ -50,15 +50,27 @@ const KILLED_SLICE: u64 = 20_000;
 
 /// The cell the model writes for `session`: one `Once` tool call naming it,
 /// which a [`TurnScript::CellKilled`] session's cell makes after a stretch
-/// many times [`KILLED_SLICE`] long.
+/// many times [`KILLED_SLICE`] long. The regular cell races its call against
+/// a sleep that cannot elapse within the matrix horizon, so its end still
+/// has pending work and must commit a separate snapshot.
 fn cell(session: &str) -> String {
-    let stretch = if session.starts_with(&format!("{}-", TurnScript::CellKilled.name())) {
+    let killed = session.starts_with(&format!("{}-", TurnScript::CellKilled.name()));
+    let stretch = if killed {
         "let n = 0;\nfor (let i = 0; i < 20000; i++) { n = n + i; }\n"
     } else {
         ""
     };
+    let call = format!("tools.{EXT_WRITE}({{ x: 7, session: \"{session}\" }})");
+    let awaited = if killed {
+        call
+    } else {
+        format!(
+            "Promise.race([{call}, sleep({})])",
+            super::HORIZON.as_millis() * 2
+        )
+    };
     format!(
-        "<typescript>\n{stretch}const written = await tools.{EXT_WRITE}({{ x: 7, session: \"{session}\" }});\nconsole.log(written);\n</typescript>"
+        "<typescript>\n{stretch}const written = await {awaited};\nconsole.log(written);\n</typescript>"
     )
 }
 
@@ -94,8 +106,8 @@ pub fn cell_core_of(world: &Arc<World>, script: TurnScript) -> Result<lash::Lash
 }
 
 /// The host plugin a [`TurnScript::CellKilled`] session is served with: a
-/// checkpoint callback that contributes nothing. It is a callback outside
-/// the session's protocol, so the turn holds no cell end for it.
+/// checkpoint callback that contributes nothing. A callback outside the
+/// session's protocol does not split the cell's end commit (FIG-6162).
 const WATCH: &str = "lash-sim-watch";
 
 #[derive(Clone)]
