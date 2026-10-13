@@ -11,7 +11,7 @@ kiln run //crates/lash-perf:lash-perf__bin -- provider-http \
 ```
 
 `startup` launches concurrent fresh-process waves at widths 1, 2 and 4. Each
-child opens a fresh SQLite file with `Normal` synchronous mode, builds a durable
+child opens a fresh SQLite file with `Full` synchronous mode, builds a durable
 node, observes its registration, creates a session, prewarms one real VM helper,
 and submits its first loopback-provider turn through `send()`. Each process uses
 two configured Tokio workers. The existing `latency worker ready` handshake

@@ -11,7 +11,6 @@ use crate::perf_support::metrics::{
 use crate::perf_support::paths;
 use crate::perf_support::report as report_support;
 use crate::perf_support::stack::{DEFAULT_STACK_BUDGET_BYTES, StackProfile};
-use crate::perf_support::time::round3;
 
 use super::duration_trend;
 use super::measurement::*;
@@ -468,10 +467,13 @@ fn summarize(
                         .filter_map(|result| result.turns.first().cloned())
                         .collect::<Vec<_>>(),
                 ),
+                // Every steady (non-first) turn of every run is one sample:
+                // the tails below are the turn population's, not a tail of
+                // per-run means.
                 steady_state_turn: summarize_optional_turn_group(
                     &matching
                         .iter()
-                        .filter_map(|result| mean_turn_result(&result.turns[1..]))
+                        .flat_map(|result| result.turns[1..].iter().cloned())
                         .collect::<Vec<_>>(),
                 ),
                 last_turn: summarize_turn_group(
@@ -629,60 +631,6 @@ fn summarize_optional_turn_group(
     }
 }
 
-fn mean_turn_result(turns: &[RuntimePerfTurnResult]) -> Option<RuntimePerfTurnResult> {
-    if turns.is_empty() {
-        return None;
-    }
-
-    Some(RuntimePerfTurnResult {
-        turn_index: turns[0].turn_index,
-        stages: mean_turn_stages(turns),
-        memory: RuntimePerfMemoryRunResult {
-            rss_before_kb: None,
-            peak_hwm_before_kb: None,
-            peak_hwm_after_kb: None,
-            rss_growth_kb: mean_option_i64(turns.iter().map(|turn| turn.memory.rss_growth_kb)),
-            hwm_growth_kb: mean_option_i64(turns.iter().map(|turn| turn.memory.hwm_growth_kb)),
-        },
-        phase_profile: mean_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
-        turn_usage: mean_token_usage(turns.iter().map(|turn| &turn.turn_usage)),
-    })
-}
-
-/// The mean of each stage across the turns that ran it. A stage absent from
-/// every turn stays absent; one measured on a subset averages that subset.
-fn mean_turn_stages(
-    turns: &[RuntimePerfTurnResult],
-) -> BTreeMap<String, RuntimePerfStageRunResult> {
-    let mut means = BTreeMap::new();
-    for name in turns.iter().flat_map(|turn| turn.stages.keys()) {
-        if means.contains_key(name) {
-            continue;
-        }
-        let present = turns
-            .iter()
-            .filter_map(|turn| turn.stage(name))
-            .collect::<Vec<_>>();
-        let count = present.len() as f64;
-        means.insert(
-            name.clone(),
-            RuntimePerfStageRunResult {
-                duration_ms: round3(
-                    present.iter().map(|stage| stage.duration_ms).sum::<f64>() / count,
-                ),
-                allocations: mean_allocation_delta(present.iter().map(|stage| &stage.allocations)),
-                rss_after_kb: mean_option_u64(present.iter().map(|stage| stage.rss_after_kb)),
-            },
-        );
-    }
-    means
-}
-
-fn mean_option_u64(values: impl IntoIterator<Item = Option<u64>>) -> Option<u64> {
-    let present = values.into_iter().flatten().collect::<Vec<_>>();
-    (!present.is_empty())
-        .then(|| (present.iter().sum::<u64>() as f64 / present.len() as f64).round() as u64)
-}
 fn summarize_metric(values: Vec<f64>) -> RuntimePerfMetricSummary {
     basic_summary(values)
 }
@@ -1109,6 +1057,48 @@ mod tests {
                 .contains_key("process.cpu_utilization")
         );
         assert_ne!(total.duration_ms.p95, 0.0);
+    }
+
+    #[test]
+    fn steady_state_turn_tails_pool_raw_turns_not_per_run_means() {
+        // Both runs have the same steady-turn mean (505): a tail over run
+        // means reads 505 at every percentile, while the raw turn
+        // population's tail exposes the 1000 ms turn.
+        let scenario = RuntimePerfScenario::Standard;
+        let run = |steady_totals: &[f64]| {
+            let mut run = RunRecorder::start(scenario, 1 + steady_totals.len());
+            run.record_stage(stage::BUILD_RUNTIME, stage_result(1.0, 1));
+            run.record_stage(stage::SEED_STATE, stage_result(1.0, 2));
+            run.record_stage(stage::EXPORT_STATE, stage_result(1.0, 3));
+            run.record_turn(turn_result(5.0, 10));
+            for total_ms in steady_totals {
+                run.record_turn(turn_result(*total_ms, 10));
+            }
+            run.finish(RunTail {
+                session_nodes: 1,
+                active_path_messages: 1,
+                memory: Some(memory_run()),
+                phase_profile: Some(BTreeMap::new()),
+                total_stage: Some(stage_result(5.0, 10)),
+                ..RunTail::default()
+            })
+        };
+        let results = vec![run(&[10.0, 1000.0]), run(&[500.0, 510.0])];
+        let stack_profile = stack_profile(2 * 1024 * 1024);
+        let summary = summarize(&results, &[scenario], 3, &stack_profile)
+            .into_iter()
+            .next()
+            .expect("summary exists");
+        let steady = summary.steady_state_turn.expect("steady turns ran");
+        let total = &steady
+            .stage_summary
+            .get(stage::TOTAL)
+            .expect("turn total stage")
+            .duration_ms;
+        // Sorted raw samples [10, 500, 510, 1000] interpolate p95 to
+        // 510 + 0.85 * (1000 - 510); mean = 505 either way.
+        assert_eq!(total.mean, 505.0);
+        assert_eq!(total.p95, 926.5);
     }
 
     #[test]

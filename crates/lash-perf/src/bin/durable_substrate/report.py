@@ -52,9 +52,17 @@ def where(store, nodes):
 def load(paths):
     rows = []
     for path in paths:
+        # A `run` record heads the rows its invocation wrote; its fields are
+        # the only build/settings identity the ledger carries. Rows a foreign
+        # file left unattributed keep their source path as the cohort.
+        cohort = {"unattributed": str(path)}
         for line in Path(path).read_text().splitlines():
             if line.strip():
-                rows.append(json.loads(line))
+                row = json.loads(line)
+                if row.get("kind") == "run":
+                    cohort = {key: value for key, value in row.items() if key != "cases"}
+                row["cohort"] = cohort
+                rows.append(row)
     return rows
 
 
@@ -63,6 +71,13 @@ def groups(rows, kind, case_prefix):
     for row in rows:
         if row["kind"] == kind and row["case"].startswith(case_prefix):
             grouped[(row["dialect"], row.get("nodes", 1), row["case"])].append(row)
+    for (store, nodes, case), members in grouped.items():
+        cohorts = {json.dumps(member["cohort"], sort_keys=True) for member in members}
+        if len(cohorts) > 1:
+            raise SystemExit(
+                f"refusing to pool {len(cohorts)} run cohorts for {case} on {store} x{nodes}: "
+                + " | ".join(sorted(cohorts))
+            )
     return grouped
 
 

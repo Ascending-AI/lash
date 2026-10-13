@@ -2,14 +2,26 @@
 set -euo pipefail
 
 # Clippy size lints and named type-size assertions are the primary regression
-# gate (FIG-595, after the FIG-594 structural fix); this 2 MiB run is the
-# defense-in-depth backstop for dynamic poll-stack behavior.
-stack_kb="${LASH_STACK_BUDGET_KB:-2048}"
-rust_min_stack="${LASH_RUST_MIN_STACK_BUDGET:-2097152}"
+# gate (FIG-595, after the FIG-594 structural fix); the product-stack probes
+# are the defense-in-depth backstop for dynamic poll-stack behavior.
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$repo"
+# A kiln fork carries its buck2 configuration in env.sh; a plain checkout has
+# none and falls through to the hermetic driver below.
+[[ -f env.sh ]] && source env.sh
 
-# The runtime selection lives behind lash-runtime's `rlm` feature; without it
-# `stack_budget` compiles no test and the run passes vacuously (FIG-4432).
-cargo test -p lash-runtime --features rlm stack_budget --locked --no-run
+# The stack-budget laws live in lash-sim's stack_policy target: each probe
+# replays one fixed agent product contract on a thread of the product's
+# 2 MiB stack budget, so no rlimit wrapper is needed. The former
+# `cargo test -p lash-runtime stack_budget` selection was deleted when its
+# laws moved to the durable substrate; docs/testing/substrate-port-ledger.toml
+# records it covered by this target.
+if command -v kiln >/dev/null 2>&1; then
+  kiln test //crates/lash-sim:stack_policy__test
+else
+  scripts/hermetic-build.sh test //crates/lash-sim:stack_policy__test
+fi
+
 cargo build -p lash-perf --locked
 
 # RLM turns run model code in the shipped worker helper, which the runtime
@@ -21,27 +33,6 @@ cargo build -p lash-internal-vm-worker --bin lash-vm-worker --features testing,d
 target_dir="${CARGO_TARGET_DIR:-target}"
 [[ "$target_dir" = /* ]] || target_dir="$PWD/$target_dir"
 export LASH_VM_WORKER="$target_dir/debug/lash-vm-worker"
-
-log_dir="$(mktemp -d "${TMPDIR:-/tmp}/lash-stack-budget.XXXXXX")"
-
-# A filtered selection whose filter matches nothing exits 0 with
-# "0 passed", so each run must show at least one passing test in its log.
-run_stack_budget() {
-  local name="$1"
-  shift
-  local log="$log_dir/$name.log"
-  "$@" 2>&1 | tee "$log"
-  if ! grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$log"; then
-    echo "stack budget selection executed zero tests: $*" >&2
-    return 1
-  fi
-}
-
-(
-  ulimit -s "$stack_kb"
-  export RUST_MIN_STACK="$rust_min_stack"
-  run_stack_budget runtime cargo test -p lash-runtime --features rlm stack_budget --locked -- --nocapture --test-threads=1
-)
 
 python3 scripts/profile_runtime_stack.py \
   --binary "$target_dir/debug/lash-perf" \

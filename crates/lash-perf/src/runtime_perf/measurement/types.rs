@@ -457,6 +457,8 @@ pub(crate) struct RuntimePerfScenarioSummary {
     pub(crate) hwm_growth_kb: Option<RuntimePerfMetricSummary>,
     pub(crate) phase_summary: BTreeMap<String, RuntimePerfPhaseSummary>,
     pub(crate) first_turn: RuntimePerfTurnSummary,
+    /// Every steady (non-first) turn of every run is one sample: percentiles
+    /// are the turn population's, not a tail of per-run means.
     pub(crate) steady_state_turn: Option<RuntimePerfTurnSummary>,
     pub(crate) last_turn: RuntimePerfTurnSummary,
     pub(crate) sample_session_nodes: usize,

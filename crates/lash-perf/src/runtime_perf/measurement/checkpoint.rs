@@ -1121,32 +1121,6 @@ pub(crate) fn sum_phase_profiles<'a>(
     totals
 }
 
-pub(crate) fn mean_phase_profiles<'a>(
-    profiles: impl IntoIterator<Item = &'a BTreeMap<String, RuntimePerfPhaseRunResult>>,
-) -> BTreeMap<String, RuntimePerfPhaseRunResult> {
-    let profiles = profiles.into_iter().collect::<Vec<_>>();
-    if profiles.is_empty() {
-        return BTreeMap::new();
-    }
-    let count = profiles.len() as f64;
-    let sums = sum_phase_profiles(profiles);
-    sums.into_iter()
-        .map(|(phase, metrics)| {
-            (
-                phase,
-                RuntimePerfPhaseRunResult {
-                    samples: ((metrics.samples as f64) / count).round() as usize,
-                    duration_ms: round3(metrics.duration_ms / count),
-                    allocations: scale_allocation_delta(&metrics.allocations, count),
-                    rss_growth_kb: metrics
-                        .rss_growth_kb
-                        .map(|value| ((value as f64) / count).round() as i64),
-                },
-            )
-        })
-        .collect()
-}
-
 pub(crate) fn sum_allocation_deltas<'a>(
     deltas: impl IntoIterator<Item = &'a RuntimePerfAllocationDelta>,
 ) -> RuntimePerfAllocationDelta {
@@ -1163,32 +1137,6 @@ pub(crate) fn sum_allocation_deltas<'a>(
     total
 }
 
-pub(crate) fn mean_allocation_delta<'a>(
-    deltas: impl IntoIterator<Item = &'a RuntimePerfAllocationDelta>,
-) -> RuntimePerfAllocationDelta {
-    let deltas = deltas.into_iter().collect::<Vec<_>>();
-    if deltas.is_empty() {
-        return zero_allocation_delta();
-    }
-    let count = deltas.len() as f64;
-    scale_allocation_delta(&sum_allocation_deltas(deltas), count)
-}
-
-pub(crate) fn scale_allocation_delta(
-    delta: &RuntimePerfAllocationDelta,
-    divisor: f64,
-) -> RuntimePerfAllocationDelta {
-    RuntimePerfAllocationDelta {
-        allocations: ((delta.allocations as f64) / divisor).round() as usize,
-        deallocations: ((delta.deallocations as f64) / divisor).round() as usize,
-        reallocations: ((delta.reallocations as f64) / divisor).round() as usize,
-        bytes_allocated: ((delta.bytes_allocated as f64) / divisor).round() as usize,
-        bytes_deallocated: ((delta.bytes_deallocated as f64) / divisor).round() as usize,
-        bytes_reallocated: ((delta.bytes_reallocated as f64) / divisor).round() as isize,
-        net_live_bytes: ((delta.net_live_bytes as f64) / divisor).round() as i64,
-    }
-}
-
 pub(crate) fn zero_allocation_delta() -> RuntimePerfAllocationDelta {
     RuntimePerfAllocationDelta {
         allocations: 0,
@@ -1198,42 +1146,6 @@ pub(crate) fn zero_allocation_delta() -> RuntimePerfAllocationDelta {
         bytes_deallocated: 0,
         bytes_reallocated: 0,
         net_live_bytes: 0,
-    }
-}
-
-pub(crate) fn mean_token_usage<'a>(usages: impl IntoIterator<Item = &'a LlmUsage>) -> LlmUsage {
-    let usages = usages.into_iter().collect::<Vec<_>>();
-    if usages.is_empty() {
-        return LlmUsage::default();
-    }
-    let count = usages.len() as i64;
-    LlmUsage {
-        input_tokens: usages.iter().map(|usage| usage.input_tokens).sum::<i64>() / count,
-        output_tokens: usages.iter().map(|usage| usage.output_tokens).sum::<i64>() / count,
-        cache_read_input_tokens: usages
-            .iter()
-            .map(|usage| usage.cache_read_input_tokens)
-            .sum::<i64>()
-            / count,
-        cache_write_input_tokens: usages
-            .iter()
-            .map(|usage| usage.cache_write_input_tokens)
-            .sum::<i64>()
-            / count,
-        reasoning_output_tokens: usages
-            .iter()
-            .map(|usage| usage.reasoning_output_tokens)
-            .sum::<i64>()
-            / count,
-    }
-}
-
-pub(crate) fn mean_option_i64(values: impl IntoIterator<Item = Option<i64>>) -> Option<i64> {
-    let values = values.into_iter().flatten().collect::<Vec<_>>();
-    if values.is_empty() {
-        None
-    } else {
-        Some((values.iter().sum::<i64>() as f64 / values.len() as f64).round() as i64)
     }
 }
 

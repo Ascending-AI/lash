@@ -13,7 +13,6 @@ import perfreport
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_KINDS = {
-    "lash-vm-perf",
     "runtime-perf",
     "runtime-stack",
 }
@@ -56,7 +55,7 @@ class PerfReportDispatchTest(unittest.TestCase):
         self.assertIn("max_live(sum-of-pps)", summary)
 
     def test_dead_report_kinds_are_not_dispatchable(self) -> None:
-        for kind in ("ui-perf", "runtime-guard", "perf-guard"):
+        for kind in ("ui-perf", "runtime-guard", "perf-guard", "lash-vm-perf"):
             with self.subTest(kind=kind):
                 with self.assertRaisesRegex(ValueError, rf"unknown report kind '{kind}'"):
                     perfreport.dispatch_entry({"kind": kind}, Path("report.json"))

@@ -64,9 +64,8 @@ role, PID, window, units and statistics.
 The overhead wrapper reports one ordered on/off wall-duration difference per
 instrument, including parent startup, waited children and profile flush.
 Its `configuration` object labels workload settings and limits separately
-from measured durations; worker receipts identify the heap-smoke population.
-Both builds use the same profiling platform; the off population uses
-stats_alloc for the harness or System for the dedicated worker. Boundary
+from measured durations. Both builds use the same profiling platform; the
+off population uses stats_alloc. Boundary
 commands additionally measure future-size collection alone in the same
 stats_alloc binary. This measures the observed instrumented population cost,
 including bookkeeping and output. Shared-host noise, order and allocator

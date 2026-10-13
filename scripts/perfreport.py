@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize lash runtime/UI/Lash VM perf reports, guard reports, and dhat heap profiles.
+"""Summarize lash runtime/UI perf reports, guard reports, and dhat heap profiles.
 
 Usage:
   perfreport.py REPORT.json                  # human summary
@@ -44,12 +44,6 @@ def fmt_ms(n: float | None) -> str:
     if n is None:
         return "n/a"
     return f"{n:.2f}ms"
-
-
-def fmt_ns(n: float | None) -> str:
-    if n is None:
-        return "n/a"
-    return f"{n:.1f}ns"
 
 
 def fmt_metric_percentiles(metric: dict[str, Any]) -> str:
@@ -301,136 +295,6 @@ def summarize_runtime_stack(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def summarize_lash_vm(report: dict[str, Any]) -> str:
-    params = report.get("parameters", {})
-    lines: list[str] = []
-    lines.append(
-        f"# lash-vm-perf report  ({report.get('created_at', '?')[:19]}, "
-        f"{params.get('iterations', '?')} iterations)"
-    )
-    git = report.get("git", {})
-    dirty = "dirty" if git.get("dirty") else "clean"
-    lines.append(
-        f"build={report.get('build_mode', '?')}  git={git.get('sha', '?')} ({dirty})  "
-        f"scenarios={', '.join(params.get('scenarios', []))}  "
-        f"modes={', '.join(params.get('modes', []))}"
-    )
-    stack_text = fmt_stack_profile(report.get("stack_profile"))
-    if stack_text:
-        lines.append(stack_text.strip())
-    lines.append("")
-
-    budget_results = report.get("budget_results", [])
-    if budget_results:
-        lines.append("## guard maxima")
-        for metric in (
-            "allocated_bytes_per_iter",
-            "allocations_per_iter",
-            "instructions_per_iter",
-        ):
-            matching = [
-                result
-                for result in budget_results
-                if result.get("metric") == metric
-                and isinstance(result.get("actual"), int | float)
-            ]
-            if not matching:
-                continue
-            worst = max(matching, key=lambda result: float(result["actual"]))
-            status = "pass" if all(result.get("passed") for result in matching) else "FAIL"
-            lines.append(
-                f"  {metric:28s} max={worst.get('actual')}  "
-                f"budget={worst.get('budget')}  {status}"
-            )
-        lines.append("")
-
-    perf_results = report.get("perf_results", [])
-    if perf_results:
-        lines.append("## perf sweep")
-        for row in sorted(perf_results, key=lambda r: (r.get("mode_arg", ""), r.get("scenario_arg", ""))):
-            mode = row.get("mode_arg", "?")
-            scenario = row.get("scenario_arg", "?")
-            lines.append(
-                f"  {mode:22s} {scenario:20s} "
-                f"avg={fmt_ns(row.get('ns_per_iter')):>10s}  "
-                f"allocs={row.get('allocations_per_iter', 0):>8}  "
-                f"bytes={fmt_bytes(row.get('allocated_bytes_per_iter', 0)):>10s}"
-            )
-            if "phase_total_ns_per_iter" in row:
-                lines.append(
-                    f"    {'phase_total':12s} "
-                    f"avg={fmt_ns(row.get('phase_total_ns_per_iter')):>10s}  "
-                    f"allocs={row.get('phase_total_allocations_per_iter', 0):>8}  "
-                    f"bytes={fmt_bytes(row.get('phase_total_allocated_bytes_per_iter', 0)):>10s}"
-                )
-                for phase in ("parse", "link", "compile", "execute"):
-                    lines.append(
-                        f"    {phase:12s} "
-                        f"avg={fmt_ns(row.get(f'{phase}_ns_per_iter')):>10s}  "
-                        f"allocs={row.get(f'{phase}_allocations_per_iter', 0):>8}  "
-                        f"bytes={fmt_bytes(row.get(f'{phase}_allocated_bytes_per_iter', 0)):>10s}"
-                    )
-            if (
-                "process_cache_hits" in row
-                or "program_cache_hits" in row
-                or "linked_cache_hits" in row
-            ):
-                extras = []
-                if "process_cache_hits" in row:
-                    extras.append(
-                        "process_cache="
-                        f"{row.get('process_cache_hits', 0)}h/"
-                        f"{row.get('process_cache_misses', 0)}m/"
-                        f"{row.get('process_cache_evictions', 0)}e"
-                    )
-                if "program_cache_hits" in row:
-                    extras.append(
-                        "program_cache="
-                        f"{row.get('program_cache_hits', 0)}h/"
-                        f"{row.get('program_cache_misses', 0)}m/"
-                        f"{row.get('program_cache_evictions', 0)}e"
-                    )
-                if "linked_cache_hits" in row:
-                    extras.append(
-                        "linked_cache="
-                        f"{row.get('linked_cache_hits', 0)}h/"
-                        f"{row.get('linked_cache_misses', 0)}m/"
-                        f"{row.get('linked_cache_evictions', 0)}e"
-                    )
-                lines.append(f"    {' '.join(extras)}")
-        lines.append("")
-
-    profile_results = report.get("profile_results", [])
-    if profile_results:
-        lines.append("## hotspot profiles")
-        for profile in profile_results:
-            scenario = profile.get("scenario_arg", profile.get("scenario", "?"))
-            lines.append(f"### {scenario}")
-            instructions = profile.get("instruction_hotspots", [])
-            if instructions:
-                lines.append("  instruction hotspots:")
-                for row in instructions[:12]:
-                    lines.append(
-                        f"    {row.get('name', '?'):24s} "
-                        f"total={fmt_ms(row.get('total_ms')):>9s}  "
-                        f"avg={fmt_ns(row.get('avg_ns')):>10s}  "
-                        f"count={row.get('count', 0)}"
-                    )
-            builtins = profile.get("builtin_hotspots", [])
-            if builtins:
-                lines.append("  builtin hotspots:")
-                for row in builtins[:12]:
-                    lines.append(
-                        f"    {row.get('name', '?'):24s} "
-                        f"total={fmt_ms(row.get('total_ms')):>9s}  "
-                        f"avg={fmt_ns(row.get('avg_ns')):>10s}  "
-                        f"count={row.get('count', 0)}"
-                    )
-            lines.append("")
-
-    return "\n".join(lines)
-
-
 def metric_pairs(name: str, baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
     rows: list[str] = []
 
@@ -511,72 +375,6 @@ def diff_runtime(baseline: dict[str, Any], current: dict[str, Any]) -> str:
     for name in sorted(set(bs) & set(cs)):
         lines.extend(metric_pairs(name, bs[name], cs[name]))
         lines.append("")
-    return "\n".join(lines)
-
-
-def diff_lash_vm(baseline: dict[str, Any], current: dict[str, Any]) -> str:
-    lines = ["# lash-vm-perf diff", ""]
-    lines.append(
-        f"baseline: {baseline.get('created_at', '?')[:19]}  "
-        f"build={baseline.get('build_mode', '?')}"
-    )
-    lines.append(
-        f"current:  {current.get('created_at', '?')[:19]}  "
-        f"build={current.get('build_mode', '?')}"
-    )
-    lines.append("")
-
-    bs = {
-        (r.get("mode_arg"), r.get("scenario_arg")): r
-        for r in baseline.get("perf_results", [])
-        if r.get("mode_arg") and r.get("scenario_arg")
-    }
-    cs = {
-        (r.get("mode_arg"), r.get("scenario_arg")): r
-        for r in current.get("perf_results", [])
-        if r.get("mode_arg") and r.get("scenario_arg")
-    }
-
-    def cmp(label: str, metric: str, b: float | int | None, c: float | int | None, fmt) -> str:
-        if b is None or c is None:
-            return f"  {label:45s} {metric:26s} baseline={'n/a':>12s}  current={'n/a':>12s}"
-        bf = float(b)
-        cf = float(c)
-        delta = cf - bf
-        pct = (delta / bf * 100.0) if bf else 0.0
-        delta_str = fmt(delta)
-        if delta >= 0 and not delta_str.startswith("+"):
-            delta_str = "+" + delta_str
-        return (
-            f"  {label:45s} {metric:26s} baseline={fmt(bf):>12s}  "
-            f"current={fmt(cf):>12s}  Δ={delta_str:>12s} ({pct:+.1f}%)"
-        )
-
-    for mode, scenario in sorted(set(bs) & set(cs)):
-        b = bs[(mode, scenario)]
-        c = cs[(mode, scenario)]
-        label = f"{mode}/{scenario}"
-        lines.append(cmp(label, "ns_per_iter", b.get("ns_per_iter"), c.get("ns_per_iter"), fmt_ns))
-        lines.append(
-            cmp(
-                label,
-                "allocations_per_iter",
-                b.get("allocations_per_iter"),
-                c.get("allocations_per_iter"),
-                lambda v: f"{v:.2f}",
-            )
-        )
-        lines.append(
-            cmp(
-                label,
-                "allocated_bytes_per_iter",
-                b.get("allocated_bytes_per_iter"),
-                c.get("allocated_bytes_per_iter"),
-                fmt_bytes,
-            )
-        )
-        lines.append("")
-
     return "\n".join(lines)
 
 
@@ -667,7 +465,6 @@ REPORT_DISPATCH: dict[
 ] = {
     "runtime-perf": (lambda payload, _top: summarize_runtime(payload), diff_runtime),
     "runtime-stack": (lambda payload, _top: summarize_runtime_stack(payload), None),
-    "lash-vm-perf": (lambda payload, _top: summarize_lash_vm(payload), diff_lash_vm),
 }
 
 
@@ -687,7 +484,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "report",
         type=Path,
-        help="runtime-perf JSON, perf guard JSON, ui-perf JSON, lash-vm-perf JSON, or *.dhat.json",
+        help="runtime-perf JSON, perf guard JSON, ui-perf JSON, or *.dhat.json",
     )
     parser.add_argument(
         "--receipt-tail-bin", type=Path,
