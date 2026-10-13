@@ -536,12 +536,31 @@ body {
   return true
 }
 
+# Cache each operand's kind once. Integer arithmetic calls the numeric
+# native directly, which also handles promotion beyond the inline range.
 function py.add(left: Any, right: Any) -> Any
 kernel 1
 charge sum(4, size(left), size(right))
 body {
   let k = kind(left)
-  if same(k, kind(right)) {
+  let r = kind(right)
+  if same(k, "integer") {
+    if same(r, "integer") {
+      return add(left, right)
+    }
+    if same(r, "float") {
+      return add(left, right)
+    }
+  }
+  if same(k, "float") {
+    if same(r, "integer") {
+      return add(left, right)
+    }
+    if same(r, "float") {
+      return add(left, right)
+    }
+  }
+  if same(k, r) {
     if same(k, "text") {
       return text.concat(left, right)
     }
@@ -551,13 +570,6 @@ body {
     if same(k, "tuple") {
       return tuple.concat(left, right)
     }
-  }
-  let ok = invoke py.is_number(left)
-  if ok {
-    set ok = invoke py.is_number(right)
-  }
-  if ok {
-    return add(left, right)
   }
   do invoke py.operand_error("+", left, right)
   return null
@@ -598,30 +610,70 @@ function py.iadd(left: Any, right: Any) -> Any
 kernel 1
 charge sum(4, size(left), size(right))
 body {
-  if same(kind(left), "list") {
+  let k = kind(left)
+  if same(k, "integer") {
+    let r = kind(right)
+    if same(r, "integer") {
+      return add(left, right)
+    }
+    if same(r, "float") {
+      return add(left, right)
+    }
+    do invoke py.operand_error("+", left, right)
+    return null
+  }
+  if same(k, "list") {
     let items = invoke py.to_list(right)
     for item in items {
       set left[list.len(left)] = item
     }
     return left
   }
-  let out = invoke py.add(left, right)
-  return out
+  let r = kind(right)
+  if same(k, "float") {
+    if same(r, "integer") {
+      return add(left, right)
+    }
+    if same(r, "float") {
+      return add(left, right)
+    }
+  }
+  if same(k, r) {
+    if same(k, "text") {
+      return text.concat(left, right)
+    }
+    if same(k, "tuple") {
+      return tuple.concat(left, right)
+    }
+  }
+  do invoke py.operand_error("+", left, right)
+  return null
 }
 
 function py.sub(left: Any, right: Any) -> Any
 kernel 1
 charge sum(4, size(left), size(right))
 body {
-  let ok = invoke py.is_number(left)
-  if ok {
-    set ok = invoke py.is_number(right)
+  let k = kind(left)
+  let r = kind(right)
+  if same(k, "integer") {
+    if same(r, "integer") {
+      return sub(left, right)
+    }
+    if same(r, "float") {
+      return sub(left, right)
+    }
   }
-  if ok {
-    return sub(left, right)
+  if same(k, "float") {
+    if same(r, "integer") {
+      return sub(left, right)
+    }
+    if same(r, "float") {
+      return sub(left, right)
+    }
   }
-  if same(kind(left), "set") {
-    if same(kind(right), "set") {
+  if same(k, "set") {
+    if same(r, "set") {
       let out = set{}
       for member in left {
         if bool.not(set.contains(right, member)) {

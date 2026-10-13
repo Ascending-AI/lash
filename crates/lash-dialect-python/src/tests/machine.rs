@@ -432,3 +432,277 @@ fn run_cell(
 fn witness_rejects_unused_delivery_batches() {
     run("print('done')", &[vec!["echo:unused".into()]]);
 }
+
+/// FIG-6102, K-CHG-007: integer add, sub and iadd do numeric work in
+/// their own bodies, without activating another Python helper. Their
+/// interpreted operations and numeric native charges account for the run.
+#[test]
+fn integer_arithmetic_runs_directly_and_accounts_for_its_body() {
+    let source = "a = 7\nb = 3\nc = a + b\nd = a - b\na += b\n";
+    let (mut machine, _) = start(source, effects(), Bindings::default());
+    machine.count_work();
+    assert!(matches!(
+        machine.run(&mut Console::default(), u64::MAX).unwrap(),
+        Step::Ended(End::Finished(_))
+    ));
+    let work = machine.work().expect("work counting is enabled");
+    assert_eq!(work.residual(), 0, "every unit belongs to executed work");
+    let mut helpers = BTreeMap::new();
+    for code in &work.codes {
+        if code.symbol.name.starts_with("py.") {
+            helpers.insert(code.symbol.name.as_str(), code.counts.calls);
+            assert!(code.counts.self_charge > 0, "a helper charges its body");
+        }
+    }
+    assert_eq!(
+        helpers,
+        BTreeMap::from([("py.add", 1), ("py.iadd", 1), ("py.sub", 1)]),
+        "integer arithmetic must not activate nested Python numeric helpers"
+    );
+}
+
+// These previous definitions are held only by this law, as sealed releases
+// hold old bodies. The unsealed production baseline keeps current bodies.
+const PREVIOUS_ARITHMETIC: &str = r#"
+use kind
+use same
+use add
+use sub
+use text.concat
+use list.concat
+use tuple.concat
+use list.len
+use set.contains
+use bool.not
+use py.is_number
+use py.operand_error
+use py.to_list
+use py.add
+
+function py.add(left: Any, right: Any) -> Any
+kernel 1
+charge sum(4, size(left), size(right))
+body {
+  let k = kind(left)
+  if same(k, kind(right)) {
+    if same(k, "text") {
+      return text.concat(left, right)
+    }
+    if same(k, "list") {
+      return list.concat(left, right)
+    }
+    if same(k, "tuple") {
+      return tuple.concat(left, right)
+    }
+  }
+  let ok = invoke py.is_number(left)
+  if ok {
+    set ok = invoke py.is_number(right)
+  }
+  if ok {
+    return add(left, right)
+  }
+  do invoke py.operand_error("+", left, right)
+  return null
+}
+
+function py.iadd(left: Any, right: Any) -> Any
+kernel 1
+charge sum(4, size(left), size(right))
+body {
+  if same(kind(left), "list") {
+    let items = invoke py.to_list(right)
+    for item in items {
+      set left[list.len(left)] = item
+    }
+    return left
+  }
+  let out = invoke py.add(left, right)
+  return out
+}
+
+function py.sub(left: Any, right: Any) -> Any
+kernel 1
+charge sum(4, size(left), size(right))
+body {
+  let ok = invoke py.is_number(left)
+  if ok {
+    set ok = invoke py.is_number(right)
+  }
+  if ok {
+    return sub(left, right)
+  }
+  if same(kind(left), "set") {
+    if same(kind(right), "set") {
+      let out = set{}
+      for member in left {
+        if bool.not(set.contains(right, member)) {
+          set out[member] = true
+        }
+      }
+      return out
+    }
+  }
+  do invoke py.operand_error("-", left, right)
+  return null
+}
+"#;
+
+const ARITHMETIC_RESUME: &str = "\
+n = await echo(7)
+x = n + 3
+y = n - 3
+n += 3
+print(n, x, y)
+big = 9223372036854775807
+big += 1
+print(big, big + 1, big - 1)
+x = 1.5
+x += 2
+print(x, 2 + 1.5, 1.5 + 2, 2 - 1.5, 1.5 - 2)
+a = [1]
+alias = a
+a += a
+a += (3,)
+print(alias, alias is a)
+print('a' + 'b', (1,) + (2,), [1] + [2], {1, 2} - {2})
+t = 'a'
+t += 'b'
+u = (1,)
+u += (2,)
+print(t, u)
+try:
+    True + 1
+except TypeError as e:
+    print(e)
+try:
+    1 - 'x'
+except TypeError as e:
+    print(e)
+try:
+    a += 1
+except TypeError as e:
+    print(e)
+";
+
+fn arithmetic_observation(
+    program: Program,
+    bounds: Bounds,
+    rebuild: bool,
+) -> (End, Vec<String>, Vec<String>, u64) {
+    let mut machine = KernelMachine::start(
+        program.clone(),
+        bounds,
+        Start {
+            target: Target::Main,
+            args: Vec::new(),
+            bindings: Bindings::default(),
+        },
+    )
+    .expect("the arithmetic document starts");
+    let mut host = Console::default();
+    let mut requests = Vec::new();
+    loop {
+        let step = machine
+            .run(&mut host, if rebuild { 1 } else { u64::MAX })
+            .expect("the arithmetic document runs");
+        if let Step::Ended(end) = step {
+            return (end, host.lines, requests, machine.meters().charged);
+        }
+        if rebuild {
+            let state = machine
+                .export()
+                .expect("every arithmetic safe point exports");
+            // Use the serialized state, rather than keeping any prepared
+            // execution coordinates from the previous machine.
+            let bytes = serde_json::to_vec(&state).expect("state serializes");
+            let state = serde_json::from_slice(&bytes).expect("state deserializes");
+            machine = KernelMachine::import(program.clone(), bounds, state)
+                .expect("every arithmetic safe point imports");
+        }
+        if let Step::Parked(park) = step {
+            for request in park.requests {
+                requests.push(label(&request));
+                let (wait, outcome) = answer(&request);
+                machine
+                    .deliver(wait, outcome)
+                    .expect("the echo outcome is delivered");
+            }
+        }
+    }
+}
+
+/// K-MACH-007/008, K-CHG-007: new arithmetic identities preserve each
+/// document's result, effects, aliases and exact body charge across slices.
+/// Previous definitions held beside them still resolve their original pins.
+#[test]
+fn arithmetic_successors_and_held_previous_definitions_resume_exactly() {
+    use lash_kernel_dialect::Library;
+    let current = installed().prepared.registry();
+    let names = ["py.add", "py.iadd", "py.sub"];
+    let ids: BTreeSet<_> = names
+        .iter()
+        .map(|name| library().resolve(name).unwrap())
+        .collect();
+    let mut previous = NamedLibrary::resolving(current, |id| !ids.contains(id)).unwrap();
+    let definitions = lash_kernel_dialect::define_functions(PREVIOUS_ARITHMETIC, &mut previous)
+        .expect("the previous arithmetic definitions resolve");
+    let mut registry = current.as_ref().clone();
+    for definition in definitions {
+        assert!(
+            !ids.contains(&definition.identity().unwrap()),
+            "a successor has a new identity"
+        );
+        registry
+            .register(definition, None)
+            .expect("previous and current bodies coexist");
+    }
+    let prepared = PreparedLibrary::new(Arc::new(registry));
+    let effects = effects();
+    let mut observations = Vec::new();
+    for named in [library(), &previous] {
+        let lowered = crate::lower(
+            ARITHMETIC_RESUME,
+            &Environment {
+                tool_roots: &BTreeSet::new(),
+                library: named,
+                effects: &effects,
+                controls: &BTreeMap::new(),
+                bindings: &BTreeSet::new(),
+                functions: &BTreeMap::new(),
+            },
+        )
+        .expect("the arithmetic witness lowers");
+        let program = Program {
+            document: Arc::new(lowered.document),
+            library: prepared.clone(),
+        };
+        let straight = arithmetic_observation(program.clone(), BOUNDS, false);
+        assert!(matches!(straight.0, End::Finished(_)), "{:?}", straight.0);
+        assert_eq!(straight.2, ["echo:7"]);
+        assert_eq!(
+            arithmetic_observation(
+                program,
+                Bounds {
+                    charge: straight.3,
+                    ..BOUNDS
+                },
+                true
+            ),
+            straight
+        );
+        observations.push(straight);
+    }
+    assert_eq!(
+        observations[0].0, observations[1].0,
+        "old and new documents finish identically"
+    );
+    assert_eq!(
+        observations[0].1, observations[1].1,
+        "numeric and fallback observations agree"
+    );
+    assert!(
+        observations[0].3 < observations[1].3,
+        "the new bodies do less work"
+    );
+}
