@@ -108,6 +108,8 @@ struct ParkedSample {
     parked_us: u64,
     /// Resolution start to the engine seeing it.
     resolve_to_resumed_us: u64,
+    /// Resolve acknowledgement to engine resume; observation only, never a gate.
+    after_resolve_commit_to_resumed_us: u64,
     /// Resolution start to `process.terminal`.
     resolve_to_terminal_us: u64,
     /// The resolution's own transaction.
@@ -121,6 +123,7 @@ pub async fn parked(run: &Run<'_>, case: &Case, park: Duration) -> Result<()> {
     let mut deployment = run.deployment();
     deployment.boot_many(run.nodes).await?;
     let mut resumes = Vec::new();
+    let mut wake_latencies = Vec::new();
     for sample in 0..run.samples {
         let token = format!("{}-{sample}", case.name);
         let mut feed = deployment.board.follow(&token);
@@ -136,6 +139,7 @@ pub async fn parked(run: &Run<'_>, case: &Case, park: Duration) -> Result<()> {
         let from = deployment.recorder.now_us();
         let started = Instant::now();
         resolve(deployment.producer(sample + 1), &key).await?;
+        let committed = Instant::now();
         let resumed = match next(&mut feed).await? {
             Seen::Resolved(at) => at,
             other => bail!("expected the resolution, saw {other:?}"),
@@ -157,10 +161,12 @@ pub async fn parked(run: &Run<'_>, case: &Case, park: Duration) -> Result<()> {
             release_after_pin_us,
             parked_us: micros(parked_from, started),
             resolve_to_resumed_us: micros(started, resumed),
+            after_resolve_commit_to_resumed_us: micros(committed, resumed),
             resolve_to_terminal_us: micros(started, done),
             resolve_commit_us,
         };
         resumes.push(record.resolve_to_terminal_us);
+        wake_latencies.push(record.after_resolve_commit_to_resumed_us);
         run.report.write("parked", &record)?;
     }
     run.report.write(
@@ -170,6 +176,7 @@ pub async fn parked(run: &Run<'_>, case: &Case, park: Duration) -> Result<()> {
             "dialect": run.database.dialect(),
             "nodes": run.nodes,
             "resolve_to_terminal": Distribution::of(&resumes)?,
+            "after_resolve_commit_to_resumed": Distribution::of(&wake_latencies)?,
         }),
     )?;
     deployment.shutdown().await

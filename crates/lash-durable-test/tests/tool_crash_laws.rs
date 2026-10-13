@@ -889,6 +889,7 @@ struct Crash {
     /// worker calls hold.
     clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
+    live_replay: Arc<lash::observe::InMemoryLiveReplayStore>,
     /// The telemetry adapter the core of a [`Turn::traced`] turn is served
     /// with.
     telemetry: telemetry::Telemetry,
@@ -921,6 +922,9 @@ impl Crash {
             backend: Mutex::default(),
             clock: Mutex::default(),
             core: Mutex::default(),
+            live_replay: Arc::new(lash::observe::InMemoryLiveReplayStore::new(
+                lash::observe::InMemoryLiveReplayStoreConfig::standard(),
+            )),
             telemetry: telemetry::Telemetry::default(),
             trace_adapter: turn.traced(),
             host: Mutex::default(),
@@ -984,6 +988,7 @@ impl Crash {
                     builder
                 };
                 builder
+                    .live_replay_store(self.live_replay.clone())
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .data_retention(lash::DataRetention::standard())
@@ -1303,13 +1308,45 @@ impl Crash {
         let Some((session, handle)) = self.host.lock_recover().take() else {
             return vec!["the host sent nothing".to_owned()];
         };
+        // Redeliver the completed call's notification after crash recovery,
+        // through the feed's production deduplication. The sink below counts
+        // every delivery; it does no comparison-side deduplication.
+        use lash::observe::{
+            LiveReplayEventDraft, LiveReplayStore as _, SessionObservationEventPayload,
+        };
+        let replay = self.live_replay.replay_after_cursor(handle.cursor()).await;
+        if let Ok(lash_core::LiveReplayOutcome::Replayed(events)) = replay {
+            for event in &events {
+                if matches!(&event.payload,
+                    SessionObservationEventPayload::TurnActivity(activity)
+                    if matches!(activity.event, lash_core::TurnEvent::ToolCallCompleted { .. }))
+                    && let Err(error) = self
+                        .live_replay
+                        .publish(
+                            &crate::session(),
+                            event.revision(),
+                            vec![LiveReplayEventDraft::new(
+                                event.turn_id.clone(),
+                                event.payload.clone(),
+                            )],
+                        )
+                        .await
+                {
+                    violations.push(format!("redeliver completion: {error}"));
+                }
+            }
+        } else {
+            violations.push(format!(
+                "read completion notifications for redelivery: {replay:?}"
+            ));
+        }
         let sink = Collected::default();
         match tokio::time::timeout(served::WATCHDOG, handle.outcome_into(&sink)).await {
             Ok(Ok(lash::SendOutcome::Settled { .. })) => {}
             other => violations.push(format!("the host's follow did not settle: {other:?}")),
         }
-        // The live stream is provisional: a dead owner's activity may come
-        // before the redrive's, but the call's start and completion arrive,
+        // A dead owner's provisional activity may precede the redrive,
+        // but the feed deduplicates a call's completion by its stable identity,
         // from the run that answers the call. A cut at `turn.commit` resumes
         // past the answered round and runs the call in no later run, and
         // what a lost owner never published is not promised (ADR 0122, decision 4).
@@ -1323,16 +1360,22 @@ impl Crash {
                     if *id == provider
             )
         });
-        let completed = activities.iter().any(|activity| {
-            matches!(
-                &activity.event,
-                lash_core::TurnEvent::ToolCallCompleted { provider_call_id: Some(id), .. }
-                    if *id == provider
-            )
-        });
-        if rerun && (!started || !completed) {
+        // Count the sink's raw deliveries, before any comparison can collapse
+        // them. Replay dedup belongs to the feed, not this oracle (FIG-6166).
+        let mut completed = BTreeMap::new();
+        for activity in &activities {
+            if let lash_core::TurnEvent::ToolCallCompleted { call_id, .. } = &activity.event {
+                *completed.entry(call_id.clone()).or_insert(0) += 1;
+            }
+        }
+        if rerun && (!started || completed.len() != 1) {
             violations.push(format!(
                 "the host's sink was not handed the call's start and completion: {activities:#?}"
+            ));
+        }
+        if completed.values().any(|count| *count != 1) {
+            violations.push(format!(
+                "the live feed delivered more than one completion per call: {completed:?}"
             ));
         }
         // The committed observation settles it: one outcome for the call.

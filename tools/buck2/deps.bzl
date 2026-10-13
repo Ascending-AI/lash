@@ -573,6 +573,7 @@ PACKAGE_DEPS = {
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_durable": "//crates/lash-durable:lash-durable",
+            "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",

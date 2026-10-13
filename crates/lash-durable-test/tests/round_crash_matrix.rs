@@ -334,6 +334,7 @@ struct RoundOwner {
     cancel_after_ms: Option<u64>,
     bodies: Arc<Catalog>,
     tripwire: Arc<Tripwire>,
+    presentations: Arc<Mutex<Vec<round::Presentation>>>,
 }
 
 impl RoundOwner {
@@ -431,7 +432,8 @@ impl RoundOwner {
         if end.round().presented().is_none() {
             let mut tx = cx.begin().await.map_err(Pass::from)?;
             let admitted = end.fold().admitted_round(RUN).unwrap();
-            round::present(&mut tx, &admitted, end.fold());
+            let presentation = round::present(&mut tx, &admitted, end.fold());
+            self.presentations.lock_recover().push(presentation);
             cx.commit(tx, CommitLabel::ROUND_PRESENT_MODEL_START)
                 .await
                 .map_err(Pass::from)?;
@@ -523,6 +525,8 @@ struct RoundScenario {
     outcomes: Arc<Mutex<Vec<ToolCallId>>>,
     /// Every final outcome each run of the scenario ended with.
     settled: Arc<Mutex<Vec<SettledOutput>>>,
+    /// What the owner actually handed to its consumer.
+    presentations: Arc<Mutex<Vec<round::Presentation>>>,
 }
 
 impl RoundScenario {
@@ -536,6 +540,7 @@ impl RoundScenario {
             backend: Mutex::default(),
             outcomes: Arc::default(),
             settled: Arc::default(),
+            presentations: Arc::default(),
         }
     }
 
@@ -585,6 +590,7 @@ impl Scenario for RoundScenario {
                 backend,
             }),
             tripwire: Arc::clone(&self.tripwire),
+            presentations: Arc::clone(&self.presentations),
         })
     }
 
@@ -998,46 +1004,34 @@ async fn a_repeatable_pending_member_reruns_with_the_same_key_across_every_cut()
     report.assert_held();
 }
 
-/// Declared order: two members whose outcomes commit in the opposite order
-/// present in declared order.
+/// Declared order: the fixture commits c,a,b and hands its consumer a,b,c.
 #[tokio::test]
 async fn outcomes_committed_out_of_order_present_in_declared_order() {
     let outcomes_in_order: Arc<Mutex<Vec<ToolCallId>>> = Arc::default();
     let shared = Arc::clone(&outcomes_in_order);
+    let presentations: Arc<Mutex<Vec<round::Presentation>>> = Arc::default();
+    let presented = Arc::clone(&presentations);
     let report = Matrix::new()
         .faults(&[])
         .run_test(move || {
             let mut fresh = RoundScenario::new(mixed_members());
             fresh.outcomes = Arc::clone(&shared);
+            fresh.presentations = Arc::clone(&presented);
             fresh
         })
         .await;
     report.assert_held();
-    let outcomes: Vec<CommitLabel> = report
-        .baseline
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    assert_eq!(
-        outcomes,
-        vec![
-            CommitLabel::MODEL_DONE,
-            // c's outcome with b's first attempt's retry, inside one window
-            CommitLabel::ROUND_OUTCOME,
-            // a's, once its body ends
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::ROUND_START,
-            // b's second attempt
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::ROUND_PRESENT_MODEL_START,
-            CommitLabel::SESSION_RELEASE,
-        ]
-    );
     assert_eq!(
         *outcomes_in_order.lock_recover(),
         vec![call("call-c"), call("call-a"), call("call-b")],
         "the outcomes committed out of their declared order"
+    );
+    let presentations = presentations.lock_recover();
+    assert_eq!(presentations.len(), 1, "the owner presented once");
+    assert_eq!(
+        presentations[0].calls(),
+        &[call("call-a"), call("call-b"), call("call-c")],
+        "the returned Presentation must follow the model's declared order"
     );
 }
 

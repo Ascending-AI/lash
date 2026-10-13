@@ -55,7 +55,7 @@ law!(
 /// runner claims it again. The host reaches the same resolve path as a webhook.
 struct ParkOnWait {
     pinned: tokio::sync::mpsc::UnboundedSender<lash_durable::domain::WaitId>,
-    resumed: tokio::sync::mpsc::UnboundedSender<std::time::Instant>,
+    resumed: tokio::sync::mpsc::UnboundedSender<lash_durable::runner::Wake>,
     wait: lash_durable::domain::WaitId,
 }
 
@@ -98,7 +98,7 @@ impl lash_durable::runner::Activation for ParkOnWait {
                 lash_durable::domain::WaitState::Resolved
             );
             self.resumed
-                .send(std::time::Instant::now())
+                .send(owned.claimed_on())
                 .expect("report resumption");
             tx.ack_seen().give_up(Release::Idle);
             owned
@@ -111,11 +111,12 @@ impl lash_durable::runner::Activation for ParkOnWait {
 }
 
 async fn resolved_wait_wake(hint: bool) {
-    use lash_durable::runner::{Runner, RunnerConfig};
+    use lash_durable::runner::{Runner, RunnerConfig, Wake};
     use lash_durable::{
-        ActorKey, ActorState, CommitLabel, DurableSettings, FormatSet, MailTx, NodeId,
+        ActorKey, ActorState, CommitLabel, DurableSettings, FormatSet, MailTx, NodeId, NodeWakes,
+        WakeBatch,
     };
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     let database_url =
         crate::postgres_test_support::database_url().expect("this law requires PostgreSQL");
     let database = IsolatedDatabase::create(&database_url).await;
@@ -125,6 +126,9 @@ async fn resolved_wait_wake(hint: bool) {
     let mut settings = DurableSettings::default();
     settings.lease.claim_poll = Duration::from_secs(10);
     settings.lease.claim_backoff = Duration::from_secs(10);
+    settings.lease.reap_every = Duration::from_secs(10);
+    settings.lease.self_stop_after = Duration::from_secs(20);
+    settings.lease.ttl = Duration::from_secs(30);
     let backend = Backend::assemble(BackendParts {
         formats: Vec::new(),
         stores: Arc::new(PostgresStoreSet::new(
@@ -147,19 +151,20 @@ async fn resolved_wait_wake(hint: bool) {
         .expect("create process actor");
     let (pinned, mut parked) = tokio::sync::mpsc::unbounded_channel();
     let (resumed, mut arrived) = tokio::sync::mpsc::unbounded_channel();
-    let mut runner = Runner::new(
+    let clock = lash_durable_test::SimClock::new();
+    let node = NodeId::new("wake-law");
+    let wakes = Arc::new(storage.node_wakes());
+    let runner = Runner::new(
         Arc::clone(store),
-        backend.clock(),
-        RunnerConfig::new(NodeId::new("wake-law"), vec![formats], backend.config()),
+        clock.clone(),
+        RunnerConfig::new(node.clone(), vec![formats], backend.config()),
         Arc::new(ParkOnWait {
             pinned,
             resumed,
             wait: lash_durable::domain::WaitId([43; 16]),
         }),
-    );
-    if hint {
-        runner = runner.with_hints(backend.hints().clone());
-    }
+    )
+    .with_node_wakes(wakes.clone());
     let task = tokio::spawn(runner.run(std::future::pending()));
     let key = tokio::time::timeout(Duration::from_secs(5), parked.recv())
         .await
@@ -174,11 +179,12 @@ async fn resolved_wait_wake(hint: bool) {
             .state,
         ActorState::Waiting
     );
-    // Let the initial claim/release pass finish before resolving. Both the
-    // empty-claim floor and ceiling are ten seconds, so no fast idle scan
-    // can accidentally stand in for a hint.
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let started = Instant::now();
+    // The initial scan has returned and the runner has armed its next scan.
+    // Its only ten-second timer is the claim/reap loop; startup, renewal and
+    // operation watchdogs have different deadlines. Virtual time stays held.
+    tokio::time::timeout(Duration::from_secs(10), clock.wait_for_sleep(10_000))
+        .await
+        .expect("the initial scan completed and the next poll is armed");
     let answer = lash_core_execution::runtime::actor::waits::resolve_host(
         &backend,
         &key.to_hex(),
@@ -187,36 +193,49 @@ async fn resolved_wait_wake(hint: bool) {
     .await
     .expect("resolution commits even without a hint");
     assert_eq!(answer, lash_durable::domain::ResolveAnswer::Resolved);
-    let committed = Instant::now();
-    let within = if hint {
-        Duration::from_millis(50)
+    assert_eq!(
+        store
+            .actor(&actor)
+            .await
+            .expect("read resolved actor")
+            .expect("actor")
+            .state,
+        ActorState::Ready,
+        "the committed resolution readied the released actor"
+    );
+    assert!(
+        arrived.try_recv().is_err(),
+        "no resume before a wake or poll"
+    );
+    assert_eq!(clock.logical_ms(), 0, "no timer fired during setup");
+    if hint {
+        // The producer's post-commit delivery goes through the real PG
+        // transport. The runner has no attachment to the producer's local
+        // hints, and no poll can fire while its clock remains held.
+        wakes
+            .committed(&WakeBatch {
+                ready: [node].into(),
+                ..WakeBatch::default()
+            })
+            .await
+            .expect("deliver the committed resolution's PG notification");
     } else {
-        Duration::from_secs(11)
-    };
-    let result = tokio::time::timeout(within, arrived.recv()).await;
+        // Drop that delivery. Only an explicitly released poll can discover
+        // the durable Ready row; the same listener remains attached.
+        clock.advance_to(10_000).await;
+    }
+    let result = tokio::time::timeout(Duration::from_secs(10), arrived.recv()).await;
     task.abort();
     let _ = task.await;
-    let arrived = result
-        .expect("resolution wakes the parked process within its bound")
+    let cause = result
+        .expect("the runner resumes after the causal witness")
         .expect("activation resumed");
-    eprintln!(
-        "resolved wait hint={hint}: from resolve start {:?}, after commit {:?}",
-        arrived.saturating_duration_since(started),
-        arrived.saturating_duration_since(committed)
-    );
-    if hint {
-        assert!(arrived.saturating_duration_since(committed) < Duration::from_millis(50));
-    } else {
-        assert!(
-            arrived.saturating_duration_since(started) >= Duration::from_millis(50),
-            "a dropped hint bypassed the poll"
-        );
-        assert!(arrived.saturating_duration_since(committed) <= Duration::from_secs(11));
-    }
+    assert_eq!(cause, if hint { Wake::Hint } else { Wake::Poll });
+    assert_eq!(clock.logical_ms(), if hint { 0 } else { 10_000 });
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_host_resolved_wait_wakes_a_parked_process_within_50ms() {
+async fn a_host_resolved_wait_wakes_a_parked_process_by_its_notification() {
     resolved_wait_wake(true).await;
 }
 

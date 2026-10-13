@@ -50,6 +50,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+lash-durable-test = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-durable = { workspace = true, features = ["testing"] }
 lash-vm-runtime = { workspace = true, features = ["testing"] }

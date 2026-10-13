@@ -36,7 +36,7 @@ tool registry, projections and event feed; facade wiring exists in
 | `prior-{0,10,100,300}` | The same cold resume after K committed turns on the session (H2) |
 | `cell-{0,1024,16384}` | A cell awaiting `tools.ext_echo` ten times, keeping each answer padded by P bytes (H5) |
 | `cell-fresh-16384` | `cell-16384` whose padding is a new text at each await |
-| `parked-process` | A process parked on a key for `--park-seconds`, then resolved by a host |
+| `parked-process` | A process parked on a key for `--park-seconds`, then resolved by a host; reports resolve-start and resolve-acknowledgement to resume latency without a correctness threshold |
 | `process-waits-10` | A process resolved ten times while its owner holds it |
 | `idle-{0,1000}` | What the deployment does for `--idle-seconds` with K processes waiting (H8) |
 | `store` | S2's claim, fence, heartbeat/reap and wake against the real `DurableStore` |
