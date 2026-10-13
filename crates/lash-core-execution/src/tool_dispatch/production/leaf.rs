@@ -9,24 +9,18 @@ fn encoding(message: String) -> SingletonRunError {
 }
 
 impl ProductionToolHandlers<'_> {
-    /// The definition a tool leaf is admitted under: its recorded binding,
-    /// its match's, or its surface entry's.
+    /// The definition a tool leaf is admitted under: its deferred match's
+    /// or its retained surface entry's.
     pub(super) fn leaf_definition(
         &self,
         invocation: &crate::session::tool_execution::ToolInvocation,
     ) -> Option<crate::ToolDefinition> {
         invocation
-            .recorded_binding
+            .execution_grant
             .as_deref()
-            .cloned()
-            .or_else(|| {
-                invocation
-                    .execution_grant
-                    .as_deref()
-                    .map(|grant| crate::ToolDefinition {
-                        manifest: grant.manifest().clone(),
-                        contract: grant.contract().clone(),
-                    })
+            .map(|grant| crate::ToolDefinition {
+                manifest: grant.manifest().clone(),
+                contract: grant.contract().clone(),
             })
             .or_else(|| {
                 self.context

@@ -17,11 +17,6 @@ pub struct ToolInvocation {
     /// Original native request correlation and replay data, when supplied.
     pub pending: Option<Box<crate::sansio::PendingToolCall>>,
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
-    /// The binding a code cell pinned for this call: the one a replayed
-    /// cell recorded when the live tool has since drifted (FIG-3587), or the
-    /// turn's own contract of a tool the turn narrows. Never part of the
-    /// call's identity.
-    pub recorded_binding: Option<Box<crate::ToolDefinition>>,
     pub child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     pub issuing_language_node_id: Option<String>,
 }
@@ -34,7 +29,6 @@ impl ToolInvocation {
             args,
             pending: None,
             execution_grant: None,
-            recorded_binding: None,
             child_execution_trace_hook: None,
             issuing_language_node_id: None,
         }
@@ -59,12 +53,6 @@ impl ToolInvocation {
         self
     }
 
-    /// Authorizes this call under a binding its code cell pinned.
-    pub fn with_recorded_binding(mut self, binding: crate::ToolDefinition) -> Self {
-        self.recorded_binding = Some(Box::new(binding));
-        self
-    }
-
     pub fn with_issuing_language_node_id(mut self, node_id: impl Into<String>) -> Self {
         self.issuing_language_node_id = Some(node_id.into());
         self
@@ -80,10 +68,6 @@ impl std::fmt::Debug for ToolInvocation {
             .field(
                 "execution_grant",
                 &self.execution_grant.as_ref().map(|_| "<grant>"),
-            )
-            .field(
-                "recorded_binding",
-                &self.recorded_binding.as_ref().map(|_| "<binding>"),
             )
             .field(
                 "child_execution_trace_hook",

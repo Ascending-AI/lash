@@ -88,7 +88,6 @@ fn call(id: &str, args: serde_json::Value) -> CellCall {
         tool_id: ToolId::new("read"),
         args,
         execution_grant: None,
-        recorded_binding: None,
         issuing_language_node_id: Some("main/1.2".to_owned()),
     }
 }

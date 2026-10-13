@@ -952,7 +952,6 @@ impl KernelEffects for LawHost {
                 tool_id: tool.clone(),
                 args,
                 execution_grant: None,
-                recorded_binding: None,
                 issuing_language_node_id: None,
             },
             request.args.clone(),

@@ -349,8 +349,21 @@ impl SurfaceTools {
     /// it did; `None` for an undrifted tool or one no entry offers.
     pub fn drift(&self, tool: &ToolId, config: &OwnerConfigView) -> Option<ToolSurfaceDrift> {
         let entry = self.routes.get(tool)?;
-        let served = self.registry.served(&entry.provider, tool, config);
-        ToolSurfaceDrift::judge(&entry.definition, served.as_ref())
+        self.drift_match(&entry.provider, &entry.definition, config)
+    }
+
+    /// Judges a retained match, including a deferred match outside the
+    /// surface, against the definition its recorded provider serves here.
+    pub(crate) fn drift_match(
+        &self,
+        provider: &ProviderKey,
+        recorded: &ToolDefinition,
+        config: &OwnerConfigView,
+    ) -> Option<ToolSurfaceDrift> {
+        let served = self
+            .registry
+            .served(provider, &recorded.manifest.id, config);
+        ToolSurfaceDrift::judge(recorded, served.as_ref())
     }
 
     fn by_name(&self, name: &str) -> Option<&SurfaceEntry> {

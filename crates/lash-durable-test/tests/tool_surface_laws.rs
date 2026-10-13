@@ -36,8 +36,8 @@ mod served;
 
 use std::sync::{Arc, Mutex};
 
-use lash_core::ToolId;
 use lash_core::llm::types::{LlmRequest, LlmRole};
+use lash_core::{ToolDefinitionBindingExt as _, ToolId};
 use lash_sansio::sync::MutexExt as _;
 
 use served::{Tier, WATCHDOG};
@@ -823,6 +823,297 @@ async fn a_recorded_call_parks_on_a_node_serving_a_changed_tool(tier: Tier) {
     core.shutdown().await.expect("the core shuts down");
 }
 
+/// A cell provider that serves its retained match by id, including when
+/// the tool is deferred and absent from its advertisement.
+struct CellSurface {
+    surface: Arc<Surface>,
+    deferred: bool,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for CellSurface {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        if self.deferred {
+            Vec::new()
+        } else {
+            self.surface
+                .tools
+                .iter()
+                .map(|tool| cell_definition(tool).manifest())
+                .collect()
+        }
+    }
+
+    fn resolve_manifest_by_id(
+        &self,
+        id: &ToolId,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<lash_core::ToolManifest> {
+        self.surface
+            .tools
+            .iter()
+            .find(|tool| tool.id == id.as_str())
+            .map(|tool| cell_definition(tool).manifest())
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        self.surface
+            .tool(name)
+            .map(|tool| Arc::new(cell_definition(tool).contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.surface.execute(call).await
+    }
+}
+
+fn cell_definition(tool: &Spec) -> lash_core::ToolDefinition {
+    tool.definition()
+        .with_tool_binding(lash_core::ToolBinding::new(["tools"], tool.name))
+}
+
+#[derive(Default)]
+struct CellResolver {
+    resolved: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for CellResolver {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        None
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::err_fmt("the resolver executes no tool").into()
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::tools::DeferredToolProvider for CellResolver {
+    async fn resolve(
+        &self,
+        _cx: &lash::tools::DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> std::collections::BTreeMap<String, lash::tools::DeferredOutcome> {
+        self.resolved
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        paths
+            .iter()
+            .map(|path| {
+                (
+                    (*path).to_owned(),
+                    if *path == "tools.surface_held" {
+                        lash::tools::DeferredOutcome::Resolved {
+                            provider: lash_core::plugin::PluginCallbackIdentity::tool_provider(
+                                SURFACE, "tools",
+                            ),
+                            definition: cell_definition(&held()),
+                            binding: None,
+                        }
+                    } else {
+                        lash::tools::DeferredOutcome::Unavailable { note: None }
+                    },
+                )
+            })
+            .collect()
+    }
+}
+
+impl Deployment {
+    fn boot_cell(
+        &self,
+        surface: &Arc<Surface>,
+        resolver: Option<&Arc<CellResolver>>,
+        prepared: Option<Arc<tokio::sync::Notify>>,
+    ) -> lash::LashCore {
+        let model = lash_core::testing::TestProvider::builder()
+            .kind("cell-surface-model")
+            .requires_streaming(true)
+            .complete(move |request: LlmRequest| {
+                let prepared = prepared.clone();
+                async move {
+                if let Some(prepared) = prepared {
+                    prepared.notify_one();
+                    std::future::pending::<()>().await;
+                }
+                let answered = request.messages.iter().any(|message| message.role == LlmRole::Assistant);
+                Ok(served::text(&request, if answered { "done" } else {
+                    "<typescript>\nconsole.log(await tools.surface_held({}));\n</typescript>"
+                }))
+                }
+            })
+            .build().into_handle();
+        let factory = lash::rlm::RlmProtocolPluginFactory::new(
+            lash::rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash::rlm::RlmChannel::Cell)
+                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                .build(),
+            lash::rlm::CellDialect::typescript(),
+        );
+        let tools = Arc::new(CellSurface {
+            surface: Arc::clone(surface),
+            deferred: resolver.is_some(),
+        });
+        let mut spec =
+            lash::plugins::PluginSpec::new().with_tool_provider(lash::hook_key!("tools"), tools);
+        if let Some(resolver) = resolver {
+            spec =
+                spec.with_deferred_provider(lash::hook_key!("deferred"), Arc::clone(resolver) as _);
+        }
+        lash::LashCore::rlm_builder(self.backend.clone(), factory)
+            .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+                lash::plugins::PluginDeclaration::initial(SURFACE),
+                spec,
+            )))
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
+            .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .data_retention(lash::DataRetention::standard())
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .serve_test_llm_profile(model, served::metadata())
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                lash::persistence::LeaseOwnerId::new("cell-surface-deployment"),
+                lash::persistence::LeaseIncarnationId::new("cell-surface-boot"),
+            ))
+            .expect("the cell core builds")
+    }
+}
+
+async fn cell_starts(deployment: &Deployment, name: &str) -> usize {
+    let roots = deployment
+        .backend
+        .durable()
+        .cell_roots(
+            &session_id(name),
+            &lash::TurnId::parse(name).expect("a turn id"),
+        )
+        .await
+        .expect("read the cell roots");
+    let mut starts = 0;
+    for root in roots {
+        starts += deployment
+            .backend
+            .durable()
+            .run_facts(&root.exec.owner())
+            .await
+            .expect("read the call ledger")
+            .rows
+            .iter()
+            .filter(|row| row.kind == lash_durable::domain::RunFactKind::XStart)
+            .count();
+    }
+    starts
+}
+
+/// SURFACE-CHANGE-OUTCOME (law 9, cell arm; S5, §5a, R-3): an open
+/// catalog call or retained deferred match parks on a build that retyped
+/// its tool, before another x_start and without entering the new provider.
+async fn a_recorded_cell_call_parks_on_a_node_serving_a_changed_tool(tier: Tier) {
+    for (deferred, admitted) in [(false, false), (false, true), (true, true)] {
+        let Some(deployment) = Deployment::new(tier).await else {
+            return;
+        };
+        let name = if deferred {
+            "changed-deferred-cell"
+        } else if admitted {
+            "changed-catalog-cell"
+        } else {
+            "changed-new-cell"
+        };
+        let resolver = deferred.then(|| Arc::new(CellResolver::default()));
+        let original = Surface::new(vec![held()]);
+        let prepared = (!admitted).then(|| Arc::new(tokio::sync::Notify::new()));
+        let core = deployment.boot_cell(&original, resolver.as_ref(), prepared.clone());
+        let session = create(&core, name).await;
+        let handle = session
+            .send(lash::TurnInput::text("call the held tool"))
+            .id(lash::TurnId::parse(name).expect("a turn id"))
+            .await
+            .expect("the send is accepted");
+        tokio::time::timeout(WATCHDOG, async {
+            tokio::select! {
+                () = async {
+                    if let Some(prepared) = prepared {
+                        prepared.notified().await;
+                    } else {
+                        original.entered.notified().await;
+                    }
+                } => (),
+                outcome = handle.outcome() => panic!("the original call must start, deferred={deferred}: {outcome:?}"),
+            }
+        }).await.expect("the original call starts");
+        drop(session);
+        core.shutdown().await.expect("the original node stops");
+        let starts = cell_starts(&deployment, name).await;
+        assert_eq!(
+            starts,
+            usize::from(admitted),
+            "only an admitted original call has an x_start"
+        );
+
+        let changed = Surface::answering(vec![held().retyped()]);
+        let core = deployment.boot_cell(&changed, resolver.as_ref(), None);
+        let session = core
+            .session(session_id(name))
+            .durable()
+            .await
+            .expect("the session resolves");
+        let outcome = tokio::time::timeout(
+            WATCHDOG,
+            session
+                .attach_id(lash::TurnId::parse(name).expect("a turn id"))
+                .outcome(),
+        )
+        .await
+        .expect("the resumed cell answers or parks")
+        .expect("read the cell outcome");
+        assert!(
+            matches!(outcome, lash::SendOutcome::Parked { .. }),
+            "a changed cell tool must park, deferred={deferred}: {outcome:?}"
+        );
+        let park = session
+            .park_reason()
+            .await
+            .expect("read the park")
+            .expect("the cell is parked");
+        let rendered = format!("{park:?}");
+        assert!(
+            rendered.contains("LashVmCellBindingDrift") && rendered.contains(held().id),
+            "the cell parks typed on its retained tool: {rendered}"
+        );
+        assert!(
+            changed.executed().is_empty(),
+            "the changed provider never runs"
+        );
+        assert_eq!(
+            cell_starts(&deployment, name).await,
+            starts,
+            "drift precedes any new x_start"
+        );
+        if let Some(resolver) = resolver {
+            assert_eq!(
+                resolver.resolved.load(std::sync::atomic::Ordering::SeqCst),
+                1,
+                "the deferred match is retained, never resolved again"
+            );
+        }
+        core.shutdown().await.expect("the changed node stops");
+    }
+}
+
 /// The environment a host start states in these laws: no tools and no
 /// components.
 fn process_environment() -> lash_core::ProcessEnv {
@@ -1013,6 +1304,7 @@ tiered_laws!(
     settling_one_of_two_calls_to_a_provider_leaves_it_required,
     a_recorded_call_runs_on_a_node_serving_the_same_surface,
     a_recorded_call_parks_on_a_node_serving_a_changed_tool,
+    a_recorded_cell_call_parks_on_a_node_serving_a_changed_tool,
     a_host_start_observes_only_the_sessions_it_names,
     a_lost_host_start_acknowledgement_recovers_the_retained_process,
 );

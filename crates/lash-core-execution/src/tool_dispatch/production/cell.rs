@@ -56,10 +56,6 @@ pub struct CellCall {
     /// The grant a deferred resolution pinned, for a tool outside the
     /// catalog.
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
-    /// The binding the cell pinned for the call: one it recorded for a
-    /// tool that has since drifted (FIG-3587), or the turn's own contract
-    /// of a tool the turn narrows.
-    pub recorded_binding: Option<Box<crate::ToolDefinition>>,
     /// The language node that issued it, for traces.
     pub issuing_language_node_id: Option<String>,
 }
@@ -73,7 +69,6 @@ impl CellCall {
             tool_id: invocation.tool_id.clone(),
             args: invocation.args.clone(),
             execution_grant: invocation.execution_grant.clone(),
-            recorded_binding: invocation.recorded_binding.clone(),
             issuing_language_node_id: invocation.issuing_language_node_id.clone(),
         }
     }
@@ -84,7 +79,6 @@ impl CellCall {
         let mut invocation =
             ToolInvocation::new(self.id.clone(), self.tool_id.clone(), self.args.clone());
         invocation.execution_grant = self.execution_grant.clone();
-        invocation.recorded_binding = self.recorded_binding.clone();
         invocation.issuing_language_node_id = self.issuing_language_node_id.clone();
         invocation
     }
@@ -103,14 +97,12 @@ impl CellCall {
 
 impl CellCall {
     /// Writes what the call is dispatched as beside its arguments and its
-    /// identity: its tool, grant, recorded binding and issuing language
-    /// node. A frozen request holds this once, with the guest's own
+    /// identity: its tool, grant and issuing language node. A frozen request holds this once, with the guest's own
     /// arguments, never their tool JSON (FIG-5887 §3).
     pub fn encode_dispatch(&self, out: &mut TokenWriter) {
-        out.seq(4);
+        out.seq(3);
         out.text(self.tool_id.as_str());
         encode_opt_tree(self.execution_grant.as_deref(), out);
-        encode_opt_tree(self.recorded_binding.as_deref(), out);
         self.issuing_language_node_id.encode(out);
     }
 
@@ -125,13 +117,12 @@ impl CellCall {
         id: crate::ToolCallId,
         args: serde_json::Value,
     ) -> Result<Self, TokenError> {
-        input.expect_struct(4)?;
+        input.expect_struct(3)?;
         Ok(Self {
             id,
             tool_id: crate::ToolId::new(input.text()?),
             args,
             execution_grant: decode_opt_tree(input)?.map(Box::new),
-            recorded_binding: decode_opt_tree(input)?.map(Box::new),
             issuing_language_node_id: Option::decode(input)?,
         })
     }
@@ -390,13 +381,15 @@ impl CellMembers {
     }
 
     /// Whether this node can run `member` as it is admitted: under its
-    /// recorded binding, its grant or the catalog. An isolated tool's call
-    /// runs only in the process engine its manifest names, and a manifest a
+    /// retained surface entry or deferred match. Drift parks before any
+    /// admission or attempt. An isolated tool's call runs only in the process engine its manifest names, and a manifest a
     /// replayed cell or a grant recorded may name one this node does not
     /// register. Runs no hook, preparation or body.
     ///
     /// # Errors
     ///
+    /// [`RuntimeErrorCode::LashVmCellBindingDrift`](crate::RuntimeErrorCode::LashVmCellBindingDrift):
+    /// the recorded tool is missing or changed on this node.
     /// [`RuntimeErrorCode::IsolationEngineUnavailable`](crate::RuntimeErrorCode::IsolationEngineUnavailable):
     /// the node takes up none of the cell, which waits for a node that
     /// registers the engine.
@@ -406,6 +399,21 @@ impl CellMembers {
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         let CellMember::Tool(call) = member;
         let context = &self.tools.context;
+        let dispatch = context.dispatch();
+        let drift = match call.execution_grant.as_deref() {
+            Some(grant) => dispatch.routes.drift_match(
+                &grant.provider,
+                &crate::ToolDefinition {
+                    manifest: grant.manifest().clone(),
+                    contract: grant.contract().clone(),
+                },
+                &dispatch.config,
+            ),
+            None => dispatch.routes.drift(&call.tool_id, &dispatch.config),
+        };
+        if let Some(drift) = drift {
+            return Err(drift.refusal(&call.id));
+        }
         let Some(definition) =
             ProductionToolHandlers::new(context.clone()).leaf_definition(&call.invocation())
         else {
