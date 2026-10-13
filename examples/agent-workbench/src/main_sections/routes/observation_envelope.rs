@@ -67,7 +67,7 @@ impl ObservationEvent {
         let payload = match &event.payload {
             SessionObservationEventPayload::LanguageExecution(observation) => {
                 ObservationPayload::LanguageExecution {
-                    observation: Box::new(observation.clone()),
+                    observation: observation.clone(),
                 }
             }
             SessionObservationEventPayload::TurnActivity(activity) => {

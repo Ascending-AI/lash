@@ -22,7 +22,10 @@ pub(super) fn event_bytes(
     }
     match &event.payload {
         SessionObservationEventPayload::LanguageExecution(observation) => {
-            counter.count(observation)?
+            counter
+                .charge(std::mem::size_of::<lash_trace::LanguageExecutionObservation>())
+                .map_err(byte_error)?;
+            counter.count(observation)?;
         }
         SessionObservationEventPayload::TurnActivity(activity) => counter.count(activity)?,
         SessionObservationEventPayload::Committed {
@@ -50,6 +53,17 @@ fn byte_error(error: impl fmt::Display) -> LiveReplayStoreError {
 struct ByteCounter(usize, usize);
 
 impl ByteCounter {
+    fn charge(&mut self, bytes: usize) -> io::Result<()> {
+        self.0 = self
+            .0
+            .checked_add(bytes)
+            .ok_or_else(|| io::Error::other("byte count overflow"))?;
+        if self.0 > self.1 {
+            return Err(io::Error::other("store retention capacity exceeded"));
+        }
+        Ok(())
+    }
+
     fn count(&mut self, value: &impl serde::Serialize) -> Result<(), LiveReplayStoreError> {
         serde_json::to_writer(self, value).map_err(byte_error)
     }
@@ -57,13 +71,7 @@ impl ByteCounter {
 
 impl Write for ByteCounter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.0 = self
-            .0
-            .checked_add(bytes.len())
-            .ok_or_else(|| io::Error::other("byte count overflow"))?;
-        if self.0 > self.1 {
-            return Err(io::Error::other("store retention capacity exceeded"));
-        }
+        self.charge(bytes.len())?;
         Ok(bytes.len())
     }
 

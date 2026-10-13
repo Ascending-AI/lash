@@ -23,7 +23,7 @@ pub(super) async fn language_identity_is_window_scoped_and_conflicts_retire_cont
     let draft = |observation| {
         LiveReplayEventDraft::new(
             None::<lash_sansio::TurnId>,
-            SessionObservationEventPayload::LanguageExecution(observation),
+            SessionObservationEventPayload::LanguageExecution(Box::new(observation)),
         )
     };
     let events = store
@@ -34,7 +34,7 @@ pub(super) async fn language_identity_is_window_scoped_and_conflicts_retire_cont
     let SessionObservationEventPayload::LanguageExecution(read) = &events[0].payload else {
         panic!("language payload survives the store");
     };
-    assert_eq!(read, &original);
+    assert_eq!(read.as_ref(), &original);
     let last = events[0].cursor.clone();
     let mut redelivered = original.clone();
     redelivered.observed_at_ms = 100;
@@ -87,5 +87,5 @@ pub(super) async fn language_identity_is_window_scoped_and_conflicts_retire_cont
     let SessionObservationEventPayload::LanguageExecution(read) = &events[0].payload else {
         panic!("typed language replay");
     };
-    assert_eq!(read, &conflict);
+    assert_eq!(read.as_ref(), &conflict);
 }

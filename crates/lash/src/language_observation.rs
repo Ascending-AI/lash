@@ -263,7 +263,9 @@ impl LanguageObservationPublisher {
                         session,
                         LiveReplayEventDraft::new(
                             execution.identity.scope.turn_id.clone(),
-                            SessionObservationEventPayload::LanguageExecution(observation()),
+                            SessionObservationEventPayload::LanguageExecution(Box::new(
+                                observation(),
+                            )),
                         ),
                     )
                 });

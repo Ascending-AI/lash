@@ -739,3 +739,49 @@ async fn an_oversized_publication_fences_continuity_without_taking_positions() {
         matches!(store.replay_after_cursor(&fresh).await, Ok(LiveReplayOutcome::Replayed(events)) if events.len() == 1)
     );
 }
+
+#[test]
+fn language_evidence_does_not_enlarge_common_replay_allocations() {
+    // FIG-6156: an inline language fact enlarged every streamed delta's draft
+    // and Arc allocation, even when no language evidence was published.
+    let common = std::mem::size_of::<crate::TurnActivity>();
+    let payload = std::mem::size_of::<SessionObservationEventPayload>();
+    eprintln!(
+        "FIG-6156 sizes: activity={common} language={} payload={payload} draft={} event={}",
+        std::mem::size_of::<lash_trace::LanguageExecutionObservation>(),
+        std::mem::size_of::<LiveReplayEventDraft>(),
+        std::mem::size_of::<SessionObservationEvent>()
+    );
+    assert!(
+        payload <= common + std::mem::align_of::<SessionObservationEventPayload>(),
+        "language evidence must not enlarge the common replay envelope: {payload} bytes, activity {common}"
+    );
+}
+
+/// Retention charges the language box as well as the common envelope and
+/// serialized payload, so moving evidence out of line cannot hide its storage.
+#[test]
+fn boxed_language_payload_is_included_in_retention_charge() {
+    let session = SessionId::from("boxed-language-charge");
+    let observation = crate::testing::session_language_observation(&session, "start", "cell");
+    let serialized_bytes = serde_json::to_vec(&observation)
+        .expect("language JSON")
+        .len();
+    let event = SessionObservationEvent::new(
+        None,
+        SessionCursor::new("incarnation", &session, SessionRevision(1), 1),
+        SessionObservationEventPayload::LanguageExecution(Box::new(observation)),
+    )
+    .expect("valid event");
+    let expected = std::mem::size_of::<StoredObservationEvent>()
+        + std::mem::size_of::<SessionObservationEvent>()
+        + 128
+        + event.cursor.as_str().len()
+        + std::mem::size_of::<lash_trace::LanguageExecutionObservation>()
+        + serialized_bytes;
+    assert_eq!(
+        bytes::event_bytes(&event, usize::MAX).expect("charge"),
+        expected
+    );
+    assert!(bytes::event_bytes(&event, expected - 1).is_err());
+}

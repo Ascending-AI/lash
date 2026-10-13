@@ -303,11 +303,12 @@ pub enum SessionQueueEventKind {
 }
 
 #[derive(Clone, Debug)]
-// justification: the enclosing replay event is already Arc-owned, so another allocation would not bound retained event storage.
+// justification: keep the common turn activity inline; only the larger, uncommon language payload needs its own allocation.
 #[allow(clippy::large_enum_variant)]
 pub enum SessionObservationEventPayload {
     /// Provisional language evidence with its stable producer identity.
-    LanguageExecution(lash_trace::LanguageExecutionObservation),
+    /// Boxed so language evidence does not enlarge every draft and event.
+    LanguageExecution(Box<lash_trace::LanguageExecutionObservation>),
     TurnActivity(crate::TurnActivity),
     /// A durable commit, by reference: the event's cursor names the
     /// committed revision, and `entries` are the transcript entries the
@@ -1157,7 +1158,8 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             }
             Self::trim_locked(&self.config, buffer, now);
         });
-        sessions.touch(session_id, now);
+        // ensure_session already refreshed the idle key at this same instant.
+        // Replacing it again only churns the retention index's allocations.
         #[cfg(any(test, feature = "testing"))]
         if let Some(gate) = self.before_notification_gate.as_ref() {
             drop(sessions);

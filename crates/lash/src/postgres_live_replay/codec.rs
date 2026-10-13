@@ -76,7 +76,7 @@ pub(super) fn encode(
     let stored = match &draft.payload {
         SessionObservationEventPayload::LanguageExecution(observation) => {
             StoredPayload::LanguageExecution {
-                observation: Box::new(observation.clone()),
+                observation: observation.clone(),
             }
         }
         SessionObservationEventPayload::TurnActivity(activity) => StoredPayload::TurnActivity {
@@ -112,7 +112,7 @@ pub(super) fn encode(
     let bytes = serde_json::to_vec(&stored).map_err(|error| codec_error("encode", error))?;
     let identity = match &draft.payload {
         SessionObservationEventPayload::LanguageExecution(observation) => {
-            Some(Identity::Language(Box::new(observation.clone())))
+            Some(Identity::Language(observation.clone()))
         }
         SessionObservationEventPayload::TurnActivity(activity) => {
             Some(match activity.id.observed_span() {
@@ -154,7 +154,7 @@ pub(super) fn decode(
         serde_json::from_slice(payload).map_err(|error| codec_error("decode", error))?;
     let payload = match stored {
         StoredPayload::LanguageExecution { observation } => {
-            SessionObservationEventPayload::LanguageExecution(*observation)
+            SessionObservationEventPayload::LanguageExecution(observation)
         }
         StoredPayload::TurnActivity { activity } => {
             SessionObservationEventPayload::TurnActivity(*activity)
@@ -333,6 +333,41 @@ mod tests {
     use lash_sansio::{ErrorEnvelope, FailureCode, ReportedFailure, TurnFailureKind};
 
     use super::*;
+
+    /// Boxing a feed fact preserves the existing inline JSON representation
+    /// and the producer's identity through a stored row round trip.
+    #[test]
+    fn boxed_language_observation_keeps_inline_stored_bytes() {
+        #[derive(serde::Serialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum InlinePayload<'a> {
+            LanguageExecution {
+                observation: &'a lash_trace::LanguageExecutionObservation,
+            },
+        }
+        let session = SessionId::from("language-codec");
+        let original = lash_core::testing::session_language_observation(&session, "start", "cell");
+        let previous_bytes = serde_json::to_vec(&InlinePayload::LanguageExecution {
+            observation: &original,
+        })
+        .expect("inline language JSON");
+        let draft = LiveReplayEventDraft::new(
+            None::<TurnId>,
+            SessionObservationEventPayload::LanguageExecution(Box::new(original.clone())),
+        );
+        let encoded = encode(&session, draft).expect("boxed language encodes");
+        assert_eq!(encoded.bytes, previous_bytes);
+        assert!(
+            matches!(&encoded.identity, Some(Identity::Language(read)) if read.as_ref() == &original)
+        );
+        let cursor = SessionCursor::new("incarnation", &session, SessionRevision(1), 1);
+        let decoded =
+            decode(cursor, None, &previous_bytes).expect("inline stored language decodes");
+        let SessionObservationEventPayload::LanguageExecution(read) = &decoded.payload else {
+            panic!("a stored language fact decodes as language evidence");
+        };
+        assert_eq!(read.as_ref(), &original);
+    }
 
     fn stored(event: TurnEvent) -> (serde_json::Value, TurnEvent) {
         let session = SessionId::from("codec");
