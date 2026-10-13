@@ -1,5 +1,9 @@
 //! Durable session layer of the Lash runtime kernel.
 //!
+//! Committed state is the recovery boundary; uncommitted work may repeat.
+//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
+//! for storage assumptions and the host's external-effect responsibilities.
+//!
 //! This crate owns the session graph, the durable session state the runtime
 //! commits, the commit-identity and checkpoint vocabulary, the attachment
 //! layer, and the `SessionStore` trait family every backend implements. It

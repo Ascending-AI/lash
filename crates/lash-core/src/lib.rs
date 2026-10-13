@@ -1,9 +1,15 @@
 //! Runtime kernel for Lash.
 //!
+//! Recovery loads committed state; uncommitted computation and diagnostics may
+//! repeat. Committed effect outcomes do not re-execute; unfinished calls follow
+//! their execution policy. Hosts deduplicate external effects on `call_id`.
+//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
+//! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
+//!
 //! The process kernel understands `SessionTurn` to coordinate child-session
 //! turns. Executable process bodies, including work a host runs outside lash,
 //! use `ProcessInput::Engine { kind, payload, launch }` and call ordinary recorded tool
-//! attempts under their process journal.
+//! attempts under their process's committed run records.
 //!
 //! Protocols follow the same boundary: core owns the `HostTurnProtocol` state
 //! shape and the `ProtocolDriverPlugin` slot, while external protocol crates

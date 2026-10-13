@@ -1,5 +1,7 @@
 # Tool attempts are atomic
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Context
 
 A tool body is opaque host code. Lash cannot discover or independently record

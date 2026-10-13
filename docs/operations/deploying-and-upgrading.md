@@ -1,5 +1,7 @@
 # Deploying and upgrading lash
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 This guide is for operators deploying lash 1.0 and planning a roll to the next
 release. [ADR 0115](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
 defines the compatibility contract. [Hosting lash 1.0 on the durable

@@ -1,5 +1,11 @@
 //! The lash-owned durability port (ruling #74).
 //!
+//! Recovery loads committed state; uncommitted computation and diagnostics may
+//! repeat. Committed effect outcomes do not re-execute; unfinished calls follow
+//! their execution policy. Hosts deduplicate external effects on `call_id`.
+//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
+//! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
+//!
 //! Every session and every process is an **actor** with one scheduling row.
 //! A serving lash process is a **node** with one heartbeat row. A node owns
 //! the actors it claimed, and its ownership of each is an **epoch**: claim,

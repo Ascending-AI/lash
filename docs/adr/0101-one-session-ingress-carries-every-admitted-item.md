@@ -1,5 +1,7 @@
 # 0101: One session ingress carries every admitted item
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted.

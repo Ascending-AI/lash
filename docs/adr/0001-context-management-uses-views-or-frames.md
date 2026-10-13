@@ -1,5 +1,7 @@
 # Context management uses views or frames
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Decision
 
 The durable session graph is append-only. Context management either computes an ephemeral Prompt View over retained content or opens an Agent Frame seeded with continuation context. Core owns frame opening; plugins and hosts choose the cut, summarization prompt, summarizer and seed. `AgentFrameReason` is an open label.

@@ -11,8 +11,10 @@
 //! one placeholder, and the history keeps them. The durable policies return
 //! decisions core writes: `compact_context` through the
 //! [`ContextCompactor`], and the pressure threshold and overflow recovery
-//! through the [`ContextPressureHook`], which core calls once per turn before
-//! the history policies (FIG-4110).
+//! through the [`ContextPressureHook`], before the history policies (FIG-4110).
+//! Recovery reuses a committed decision; if its phase did not commit, the hook
+//! may run again. A summarizer request may be sent and charged again before its
+//! response commits. See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash).
 //!
 //! The standard protocol's plugin only: RLM switches frames through the
 //! model-driven `continue_as`.

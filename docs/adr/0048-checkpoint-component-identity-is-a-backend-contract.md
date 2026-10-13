@@ -1,5 +1,7 @@
 # Checkpoint component identity is a backend contract
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Context
 
 A resumable checkpoint must retain unchanged execution bytes even when the

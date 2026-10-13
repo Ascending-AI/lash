@@ -1,5 +1,11 @@
 //! The parent side of lash's worker boundary (ADR 0123).
 //!
+//! Recovery loads committed state; uncommitted computation and diagnostics may
+//! repeat. Committed effect outcomes do not re-execute; unfinished calls follow
+//! their execution policy. Hosts deduplicate external effects on `call_id`.
+//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
+//! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
+//!
 //! Model code runs as a kernel machine in a worker process that holds guest
 //! state only. The parent holds every grant, binding, route, admission and
 //! ledger, and brokers every effect the run asks for. This crate is that

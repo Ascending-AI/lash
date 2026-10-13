@@ -1,5 +1,7 @@
 # Editing, publishing and showing workflows
 
+Recovery and external-effect guarantees follow [What survives a crash](../README.md#what-survives-a-crash).
+
 A host that lets people build workflows does four things with one: read it,
 change it, publish the change as something that can run, and show what a run
 did. `lash::workflow` is the whole surface for all four. The workflow is a

@@ -1,5 +1,7 @@
 # 0102: Every backend binds one durable engine to one store set
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted.
@@ -20,8 +22,9 @@ Lash's durable engine executes all work and persists its state through the
 store set
 ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §1).
 SQLite and PostgreSQL supply storage through `StoreSet`; the engine's SQL lives
-in one module per dialect. Nothing re-runs to rebuild state: a code cell
-resumes from its committed VM snapshot under ADR 0132 §8.
+in one module per dialect. Recovery loads committed state rather than rebuilding it by journal replay.
+A code cell resumes from its committed VM snapshot; computation after that
+snapshot may run again under ADR 0132 §8.
 
 Evidence: `crates/lash-core-execution/src/backend.rs:39`.
 

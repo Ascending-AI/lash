@@ -1,5 +1,7 @@
 # Protocol capabilities enter through the plugin contract
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 accepted

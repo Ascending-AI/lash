@@ -1,5 +1,7 @@
 # The session model is recorded at creation
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Context
 
 Context budgeting, prompt transforms and model calls need one authoritative

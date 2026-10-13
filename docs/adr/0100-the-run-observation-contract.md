@@ -1,5 +1,7 @@
 # 0100: The run-observation contract
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted.

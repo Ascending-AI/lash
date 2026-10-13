@@ -1,5 +1,7 @@
 # 0135: Attachments are durable refs delivered by the host store
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted. The durable `AttachmentRef`, host-store delivery and

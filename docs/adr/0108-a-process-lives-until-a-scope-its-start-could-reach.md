@@ -1,5 +1,7 @@
 # 0108: A process lives until a scope its start could reach
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted.

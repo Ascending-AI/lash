@@ -1,5 +1,7 @@
 # Kernel semantics
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 The lash kernel is one small language with one meaning. This document is that meaning, one behaviour per numbered rule. The design it implements is [design.md](design.md); the types the rules speak of are in `crates/lash-kernel-doc`, linking, derived facts and admission in `crates/lash-kernel-check`, edits in `crates/lash-kernel-edit`, and the machine interface in `crates/lash-kernel-vm`.
 
 A rule id is permanent. A rule is never renumbered or reused; a rule that is withdrawn keeps its id and says so. Other crates, the conformance corpus and dialect deviation registers cite rules by id. Changing what a rule says is a new kernel version (`K-VER-001`).
@@ -194,7 +196,7 @@ Rules whose cases need a running machine are pinned by the conformance corpus (`
 - **K-EFF-008.** An effect's identity is its task's identity (`K-TASK-020`), the site of the `perform` or `sleep`, how many times that task had run that site before, and the loops the task was inside, outermost first across its active calls, each with its iteration number.
 - **K-EFF-009.** An effect that fails raises the error the embedder delivers, at the `perform`.
 - **K-EFF-010.** `sleep d` requires a number of milliseconds that is finite and not negative, and raises `type_error` for another kind and `number_range` otherwise. It is always a wait.
-- **K-EFF-011.** An effect whose outcome has committed is never executed again. After a crash a run resumes from its last saved state, and a `perform` that runs again there is answered from the committed outcome.
+- **K-EFF-011.** An effect whose outcome has committed is never executed again. After a crash a run resumes from its last committed saved state and receives the committed outcome for its admitted wait. An admitted effect without an outcome follows the embedder's execution policy; in Lash a started `Once` settles `Interrupted`, and an unfinished `Repeatable` may run again. Computation, reads, printing and logging after the last save may repeat. The machine itself commits nothing.
 - **K-EFF-012.** The embedder binds each effect of a run, at its start, as recorded or as a read; the binding is part of the run's saved state, and no resume changes it. A recorded effect is performed as `K-EFF-001` says. A read-bound `perform` is not a wait: its arguments are copied out (`K-EFF-002`) and answered by the embedder inside the statement (`K-HOST-005`), and the task keeps its turn. Its answer is decoded as the `perform` states (`K-EFF-005`, `K-EFF-007`), an error the embedder answers with is raised at the `perform` (`K-EFF-009`), and it is charged exactly as a recorded `perform` is (`K-CHG-002`). It mints no wait and has no effect identity a park hands over. A binding of an effect the manifest does not list is refused at the start, and a saved state that waits on a read-bound effect is refused at its import.
 
 ## Host reads (`K-HOST`)

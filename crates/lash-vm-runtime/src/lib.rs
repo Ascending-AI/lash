@@ -1,5 +1,11 @@
 //! The lash side of the kernel machine's host boundary.
 //!
+//! Recovery loads committed state; uncommitted computation and diagnostics may
+//! repeat. Committed effect outcomes do not re-execute; unfinished calls follow
+//! their execution policy. Hosts deduplicate external effects on `call_id`.
+//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
+//! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
+//!
 //! A kernel run reaches the world three ways: it performs effects, it reads
 //! through projection handles, and it reads its clock and random source. This
 //! crate states each in the kernel's own terms. [`HostBoundary`] is the

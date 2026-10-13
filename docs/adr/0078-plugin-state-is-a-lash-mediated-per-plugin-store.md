@@ -1,5 +1,7 @@
 # Plugin state is a lash-mediated per-plugin store
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Context
 
 Durable plugin state needs observable changes and a runtime-owned checkpoint

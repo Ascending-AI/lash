@@ -1,5 +1,7 @@
 # 0132: Durability is state-first over the lash store: actors, epoch fences, no replay
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted.
@@ -44,8 +46,9 @@ SQLite database and the lock files beside it.
 
 ### 2. The no-replay rule
 
-No code is ever re-run against a recorded history, by position or by key.
-Resume loads state and continues from it.
+Recovery does not re-run code against a recorded history, by position or by
+key, to rebuild committed state. It loads that state and continues from it;
+computation after the last commit may run again.
 
 - A committed phase record is state. Resume folds rows into state; the fold
   calls no producer.
@@ -58,12 +61,15 @@ Resume loads state and continues from it.
 The rule is a falsifiable law, checked by the crash matrix of §14. For every commit
 label and every cut, after resume on another owner:
 
-- NR-1. Every admitted identity with a committed outcome has executed its
-  body exactly once in total.
+- NR-1. Every admitted identity with a committed outcome executes its body
+  zero further times after that commit. A `Repeatable` body may have executed
+  more than once before the outcome committed.
 - NR-2. A `Once` identity started without an outcome executes zero further
   times and records `Interrupted`.
 - NR-3. A `Repeatable` identity started without an outcome re-executes at its
-  same ordinal; nothing else executes again.
+  same ordinal, subject to the current policy. Recorded `Read` calls can also
+  re-enter an interrupted ordinal. Unrecorded reads and computation after the
+  last saved state may run again.
 - NR-4. The resume path performs zero outcome lookups on behalf of re-running
   code. Loading is one fold per actor.
 
@@ -125,7 +131,11 @@ effect the checkpoint names.
   deadline.
 - A model call is `Repeatable` generation. Its request is pinned and its
   `model_total` deadline recorded before the first byte is sent. A crash
-  re-sends the pinned request as the next attempt while the deadline allows.
+  before the response commits re-sends the pinned request as the next attempt
+  while the deadline allows, even if the provider already answered and charged
+  for it. A cell may hold the response until its first save;
+  [ADR 0142](0142-a-whole-node-crash-in-a-cells-first-slice-may-re-send-one-model-call.md)
+  states that window's per-crash resend bound.
 - Streaming is not durable. Deltas go to the live replay store; a re-sent call
   retracts what its earlier attempts streamed with one `ModelAttemptReset`
   read back from the live replay, then streams under ids of its own
@@ -260,10 +270,12 @@ all mutable execution state and resumes from it.
   issued since its last snapshot. Bodies start only after that commit.
 - Broker ordinals are admitted operation identities, not journal positions.
   On restore the saved outcome of each admitted operation is fed back in; no
-  earlier host operation re-runs.
+  operation with a committed outcome re-runs. Started operations without
+  outcomes follow their execution policy.
 - A clock or random read in an uncommitted stretch is drawn again after a
-  crash. Nothing outside the VM observed it, because every effect that could
-  carry it commits with the snapshot that contains it.
+  crash. Recorded effects carrying the value are admitted with the snapshot that
+  contains it. Printing, logging and advisory observations may already have
+  exposed it; those diagnostics may repeat or be lost.
 - A fuel yield that issued no effect may snapshot to bound recomputation.
   Recomputing an effect-free stretch is not replay.
 - Issue-ordinal replay, the recorded frontier and the journaled binding set as
@@ -387,8 +399,8 @@ table it writes.
 
 ### 13. The storage durability assumption
 
-Exactly-once effect admission, including NR-2's refusal to restart a `Once`
-body, survives power loss only when every boundary commit is durable before
+Committed-outcome recovery and NR-2's refusal to restart a `Once`
+body survive power loss only when every boundary commit is durable before
 it returns. SQLite file stores require `SqliteSynchronous::Full`, with storage
 that honors sync requests. `Normal` may lose acknowledged commits; `Off` may
 also corrupt the database. Both are explicit weaker contracts: losing a

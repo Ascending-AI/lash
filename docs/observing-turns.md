@@ -1,5 +1,7 @@
 # Observing turns
 
+Recovery and external-effect guarantees follow [What survives a crash](../README.md#what-survives-a-crash).
+
 Turn activities arrive on the session observation stream in cursor order.
 Keep the cursor and use the bounded live replay described in
 [ADR 0002](adr/0002-session-observation-uses-cursors-and-bounded-live-replay.md)
@@ -159,7 +161,10 @@ checkpoint, and never feeds it back
   deltas arrive coalesced into frames of about 50 ms, cut early by any other
   event. Append each delta's text to its block, as
   for a single token. A frame's activity ID names the delta range it covers,
-  so a redrive never repeats or drops streamed text on the live stream.
+  so redelivery within a retained range adds no duplicate text. A partial
+  overlap invalidates continuity and yields a gap; retention loss can discard
+  text, and a re-sent model call resets its abandoned attempt's text
+  ([ADR 0040](adr/0040-retried-model-attempts-retract-live-text-by-correlation.md)).
 - **`Stopped` is published only after its commit.** A stopped turn's terminal
   (the `Done` a cancel records, an `Error`, `TurnOutcome { Stopped }` and the
   final `Done`) reaches you only once the turn's commit is accepted. A commit

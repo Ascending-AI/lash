@@ -1,18 +1,22 @@
 # 0144: Declared reads are owned by the caller's saved state
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
-Accepted. Amends [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md)
-§9, which this extends from projection reads to declared tool reads in code
-cells, and §7, which gains a third execution policy.
+Accepted. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §9
+covers projection reads and declared tool reads in code cells; ADR 0132 §7
+states their `Read` execution policy.
 
 ## Context
 
-Every tool call a code cell makes is its own admitted execution (ADR 0132
-§5, §8). A cell parks at the `perform`, the broker commits the park with the
+A recorded tool call in a code cell is its own admitted execution (ADR 0132
+§5, §8); a planned `Read` follows §2 below. A cell parks at the `perform`, the broker commits the park with the
 call's admission, the body runs between `x_start` and `x_outcome`, and the
 cell is answered from the committed record. That is right for a call that
-changes something: the record is what makes it happen once.
+changes something: committed outcomes prevent re-execution, while an
+unfinished call follows its execution policy. External behaviour requires
+host deduplication on `call_id`.
 
 A call that changes nothing pays the same price. A cell that looks up 50
 values commits 50 admissions, 50 starts, 50 outcomes and their traced
@@ -99,8 +103,9 @@ cell's reads, elapsed time, argument and answer sizes) that is not a record.
 - A cell that reads 50 values commits once before it starts and once when it
   ends, whatever the reads answer.
 - After a crash between saves, a read's answer may differ from the one the
-  lost stretch saw. Nothing outside the cell observed the lost answer: every
-  effect that could carry it commits with a save that holds it.
+  lost stretch saw. Recorded effects carrying the answer are admitted with a save that holds
+  it. Printing, logging and advisory observations can expose an unsaved answer
+  and may repeat or be lost.
 - A cell's recorded writes are unchanged: they are admitted, run and
   answered as before, and a read never loses or duplicates one.
 

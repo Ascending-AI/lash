@@ -1,5 +1,7 @@
 # 0120: Tool presentation is a recorded, composable step
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted.

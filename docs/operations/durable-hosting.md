@@ -1,5 +1,7 @@
 # Hosting lash 1.0 on the durable substrate
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 This guide is for host integrators moving to lash 1.0. Lash 1.0 keeps its
 own durable state in the lash store and runs no external engine
 ([ADR 0132](../adr/0132-durability-is-state-first-over-the-lash-store.md)).
@@ -247,7 +249,8 @@ A release that changes a durable format retires the old build by draining it
    the node releases its lease.
 
 Nodes of the next build claim the released actors whose formats they decode
-and resume each from its committed rows: nothing is re-run that committed,
+and resume each from its committed rows: effects with committed outcomes
+do not re-execute, while uncommitted work follows the crash contract,
 and a `SendHandle` taken on the old build still answers when the turn
 finishes elsewhere. `drain` answers a `lash::NodeDrainReport` naming the
 `sessions` and `processes` it released, in release order. It refuses with
@@ -365,7 +368,7 @@ that row's survival.
 
 A whole-node crash in a cell's first slice before its first save can cost one
 extra model request with a different response, while committed tool work
-remains intact ([ADR 0142](../adr/0142-a-whole-node-crash-in-a-cells-first-slice-may-re-send-one-model-call.md)).
+with committed outcomes remains intact ([ADR 0142](../adr/0142-a-whole-node-crash-in-a-cells-first-slice-may-re-send-one-model-call.md)).
 
 **`Once` holds across a database failover only if acknowledged commits
 survive promotion.** The host chooses its topology. Lash runs no startup check

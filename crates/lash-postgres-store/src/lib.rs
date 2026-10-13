@@ -1,5 +1,11 @@
 //! PostgreSQL durable storage for Lash.
 //!
+//! Recovery loads committed state; uncommitted computation and diagnostics may
+//! repeat. Committed effect outcomes do not re-execute; unfinished calls follow
+//! their execution policy. Hosts deduplicate external effects on `call_id`.
+//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
+//! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
+//!
 //! One [`PostgresStorage`] owns the role pools of one [`PostgresHostConfig`]
 //! and creates durable implementations for the runtime session store, process
 //! registry, Lash VM artifact store, process execution

@@ -1,5 +1,7 @@
 # 0139: The Lash VM is a dialect-free kernel
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 Status: Accepted. Design: [the kernel design](../kernel/design.md); rules:
 [the kernel semantics](../kernel/semantics.md).
 

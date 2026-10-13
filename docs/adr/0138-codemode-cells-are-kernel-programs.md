@@ -1,5 +1,7 @@
 # 0138: Code mode cells are kernel programs
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 Status: Accepted. Amends ADR 0096 (the dialect selection contract and the
 shared IR), ADR 0061 (session pinning) and ADR 0056 (the code mode snapshot
 root). Design: the kernel workflow spec, rev 4.

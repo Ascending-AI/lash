@@ -1,4 +1,4 @@
-//! Durable diagnostics for the lash runtime: the [`TraceSink`] channel and its
+//! Runtime diagnostics for Lash: the [`TraceSink`] channel and its
 //! record vocabulary.
 //!
 //! A [`TraceSink`] receives one [`TraceRecord`] per runtime event — turn
@@ -12,13 +12,16 @@
 //! [`JsonlTraceSink`] writes one JSON line per record at schema
 //! [`TRACE_SCHEMA_VERSION`]; [`TeeTraceSink`] fans out to several sinks; and the
 //! optional `otel` feature adds `otel::OtelTelemetry`, which projects permitted
-//! domain completions under retained admission anchors. This is the *durable diagnostics* reporting channel —
+//! domain completions under retained admission anchors. This is the diagnostics reporting channel —
 //! distinct from the app-facing `TurnActivity` stream and the low-level
 //! `SessionStreamEvent` stream that the runtime crates expose.
 //!
 //! For the full map of reporting channels, guidance on when to consume which,
 //! and the schema-evolution policy that governs [`TRACE_SCHEMA_VERSION`], see
-//! `docs/reporting.html`; for the attach-a-sink how-to, see `docs/tracing.html`.
+//! [the tracing contract](https://github.com/Ascending-AI/lash/blob/main/docs/architecture/tracing.md).
+//! Admission exports have a retained reconciliation obligation and may duplicate
+//! between export and its record; other diagnostics are best effort and may be
+//! lost or repeated after a crash. See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash).
 mod limits;
 pub use limits::{ObservationWorkLimits, TraceLimits};
 

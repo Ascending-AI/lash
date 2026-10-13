@@ -1,5 +1,7 @@
 # Observing processes
 
+Recovery and external-effect guarantees follow [What survives a crash](../README.md#what-survives-a-crash).
+
 Lash durably keeps a process's lifecycle, outcome and bounded effect
 occurrences. Its node-level execution path is telemetry, as it is for
 session cells. A host that needs to replay that path keeps the language

@@ -1,5 +1,7 @@
 # Lash kernel: one dialect-free workflow language, many front ends
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 Status: accepted as [ADR 0139](../adr/0139-the-lash-vm-is-a-dialect-free-kernel.md); revision 4, 2026-10-09. This is the design the kernel was built to, as a clean cutover: no dual IR, no reader for the old VM's graph, continuation or snapshot formats, no transition plan. Where it says "today" it means the tree before the cutover, which is deleted. The rules themselves are in [the kernel semantics](semantics.md).
 
 ## 1. What this is for
@@ -140,7 +142,7 @@ A dialect is a package of a front end, a printer and the functions (helpers and 
 
 - The engine compiles an admitted document to an internal executable. It is a cache: derived deterministically, never edited, rebuilt at will. The library's part of it is compiled once per registry and shared by every run that uses the registry, keyed by function identity; each live immutable document is admitted and compiled once against that prepared library and layout, then reused at start and import. Weak document references isolate replacement and copy-on-write edits, and unused preparation is reclaimed on the next admission. Parked-state refusals are checked on every import.
 - Charges come from a cost table for kernel forms and from each function's charge formula; both are pinned (§6). Bounds are explicit, as today.
-- **After a crash** a run resumes from its last saved state. Whatever ran after that save runs again. An effect whose outcome committed is never executed again: its `perform` is answered from the committed outcome.
+- **After a crash** a run resumes from its last saved state. Computation after that save may run again, including clock, random, projection reads, declared `Read` tools, printing and logging. An admitted `Once` without an outcome becomes `Interrupted`; an unfinished `Repeatable` can run again under its policy. An effect whose outcome committed is never executed again: its `perform` is answered from the committed outcome.
 - Worker processes, worker reset, effect admission before execution and the host boundary stay as they are.
 
 ## 6. Parked runs
@@ -170,7 +172,7 @@ A parked run is saved in the document's vocabulary. Its schema was derived from 
 
 **Roots.** State is saved as fragments, one per root. Roots are: each active call's bindings, each session binding, each task handle, and each value held only by control state (a pending throw or return value, an iterator's taken values). An object reachable from several roots is owned by the first that reaches it in a fixed order, as the old VM did between cells. Only changed fragments are rewritten. In flight this is new work.
 
-**Law.** Resuming from saved state continues the computation and its effect ownership exactly, without re-running committed work. For each saved row the corpus holds a pair of states that differ only there and must resume differently; for each derived or discarded row it holds a pair that must resume the same.
+**Law.** Resuming from saved state continues the computation and its effect ownership exactly, without re-executing effects whose outcomes committed; unsaved computation and diagnostics may repeat. For each saved row the corpus holds a pair of states that differ only there and must resume differently; for each derived or discarded row it holds a pair that must resume the same.
 
 **Upgrades.** A parked run pins: the kernel version (forms, values, evaluation order, the statement rule, task scheduling, site derivation, the cost table and this schema), its document identity, and every function identity in its manifest, charge formulas and guards included. Most change never touches the kernel version: a library function is fixed or added as a new identity, and a host adopts it by an edit.
 

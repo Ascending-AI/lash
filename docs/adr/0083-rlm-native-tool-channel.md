@@ -1,5 +1,7 @@
 # 0083: RLM channels are pinned when a session materializes
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Context
 
 Cell transport and provider-native code calls execute against the same persistent

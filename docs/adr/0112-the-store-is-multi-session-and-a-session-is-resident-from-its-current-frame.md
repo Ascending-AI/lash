@@ -1,5 +1,7 @@
 # 0112: The store is multi-session, and a session is resident from its current frame
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted.

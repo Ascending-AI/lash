@@ -1,5 +1,7 @@
 # Durable tracing
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 Hosts install `lash::tracing::OtelTelemetry` through
 `LashCoreBuilder::telemetry`, supplying their tracer and meter providers.
 The adapter uses OpenTelemetry API 0.33. Hosts own sampling, resources,

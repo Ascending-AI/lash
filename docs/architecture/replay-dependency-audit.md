@@ -1,5 +1,7 @@
 # Replay-dependency audit (V0, FIG-5170)
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ADR 0132 §2 forbids re-running code against a recorded history, by position or by key (NR-1 to NR-4). This audit lists every site where today's turn + cell + `Once` tool path relied on replay, and says what replaces it. It is the evidence for V0's criterion P8.
 
 Each row has one class:
@@ -61,7 +63,7 @@ The following were not executed and are covered here only:
 | 7 | Logical turn: `logical_turn.rs` follow-ons (FIG-3157) and `turn_loop/follow_on_recovery.rs` | A follow-on physical turn is recovered by redriving the logical run | needs a phase record (L3) | A follow-on is a new admitted turn (`turn.admit`) carrying the withheld work as its input. `RecoverFollowOn` is deleted (row 26 below) |
 | 8 | The shift: `shift.rs:1-5`, `shift/admission.rs:18,77,164,223-267` | The root nonce and the admission receipt are journaled, so a retry never re-selects. Redrive intents gate admission | needs a phase record (L3s) | The session mail drain commits selection and sealing in its own transaction. A retry reads the committed rows and never re-runs selection. A redrive intent becomes mail |
 | 12 | `RunCoordinator`: `run_coordinator/parallel.rs:49-302` | Concurrent attempts keep a recorded schedule that a replay walks | needs a phase record (L4) | Each member of a round is admitted at ordinal 1+2i with its outcome at 2+2i (`round::member_ordinal`). The fold reads members by ordinal, never by schedule |
-| 13 | `tool_dispatch/production.rs:339,470,620-640,1212,1297` | "Replay consults X's recorded outcome" in place of a live token. The attempt runs inside a replayable step body | covered for `Once` (V0); needs a phase record (L4) for the model tool-call path | `run_body` runs a body only after its admission commits, at most once per admission (P1). The outcome commits under `round.outcome`. The stop watch is the cancel token on the admitted execution |
+| 13 | `tool_dispatch/production.rs:339,470,620-640,1212,1297` | "Replay consults X's recorded outcome" in place of a live token. The attempt runs inside a replayable step body | covered for `Once` (V0); needs a phase record (L4) for the model tool-call path | `run_body` runs a body only after its admission commits, at most once per `Once` admission (P1); unfinished `Repeatable` admissions can re-enter. The outcome commits under `round.outcome`. The stop watch is the cancel token on the admitted execution |
 | 14 | RLM executor: `lash-protocol-rlm/src/native/driver.rs:372-460` (`handle_exec_result`, `projection_rehydration`) | None in itself: it interprets an `ExecResponse` | pure | Its driver state is inside the machine checkpoint. The response it receives is the cell's `Ended` result, read from state |
 | 15 | RLM executor: `lash-vm-runtime/src/cell_bindings.rs:1-31` | The cell's binding set is journaled so that a redrive links the same surface and its recorded results still apply | pure (V0 path); needs a phase record (L7, FIG-5177) for the worker path | V0 re-links and recompiles the cell from its code, with no recorded result served. The Lash VM refuses a continuation whose executable differs (`ContinuationError::ExecutableMismatch`, `lash_vm/src/runtime/vm/continuation.rs:1517`). The snapshot row carries `executable_identity`. L7 stores the binding set with the snapshot for worker-hosted cells |
 | 16 | `worker_execution.rs:224-248` (`Capture`) | The quiet point is kept in memory. On a crash the run restarts fresh, which re-issues effects the lost run already issued | needs a phase record (L7) | `DurableSnapshotStore::{commit_quiet_point, latest}` (V0) commits VM bytes, the ledger and the admissions in one transaction (`cell.snapshot+admit`). L7 swaps `Capture` for it |
@@ -77,7 +79,7 @@ These classes refine I0's routing table in `substrate-seams.md` (which method ow
 | 1 | `TransitionPlugins` | needs a phase record | L3s: committed in the drain (`turn.admit`) |
 | 2 | `TraceBoundary` | needs a phase record | L3: the trace receipt rides the phase commit |
 | 3 | `BeforeLlmCall` | needs a phase record | L3: the hook's result commits with `model.start`. A hook that calls host code is its own admitted execution (verify §3.6) |
-| 4 | `LlmCall` | covered | `model.start` pins the attempt (V0 executed). L3 adds `model.done` so a crash after the answer does not pay for a second attempt |
+| 4 | `LlmCall` | covered | `model.start` pins the attempt (V0 executed). A committed response prevents a resend; before its commit the provider may be called and charged again (ADR 0142) |
 | 5 | `AssistantResponseHooks` | needs a phase record | L3: as `BeforeLlmCall` |
 | 6 | `Direct` | needs a phase record | L4: an admitted execution of the calling tool's body |
 | 7 | `ToolAttempt` | covered (`Once`, V0 executed); needs a phase record for the model tool-call path | `cell.snapshot+admit` (`x_start`), `round.outcome`; L4 |
@@ -120,4 +122,4 @@ These classes refine I0's routing table in `substrate-seams.md` (which method ow
 ## Accepted costs, not replay
 
 - **`ack-hidden` at `cell.snapshot+admit`.** The snapshot and `x_start` committed, but the node never learned it. The next pass folds the `Once` operation to `Interrupted` without its body ever running. A `Once` operation never runs twice, so after an unknown commit it may not run at all. The cell receives `Interrupted`.
-- **A crash after the model answered and before the next commit.** The next pass calls the model again under attempt 2. This is a second attempt of an at-least-once effect, not an answer served to re-run code. L3's `model.done` removes the cost.
+- **A crash after the model answered and before the next commit.** The next pass calls the model again under attempt 2. This is a second attempt of an at-least-once effect, not an answer served to re-run code. A committed response closes the window; a response held for a cell's first save remains exposed to a whole-node crash (ADR 0142).

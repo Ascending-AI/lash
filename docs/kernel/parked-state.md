@@ -1,5 +1,7 @@
 # Parked runs: the schema, row by row
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 A run that is not executing is data in the document's terms ([design](design.md) §6). This page is the schema's checked table: every field the old engine saved, in its `VmContinuation` and in the broker's snapshot (`crates/lash-vm-broker/src/snapshot.rs`, `ledger.rs`), with its counterpart in the kernel schema or the reason it has none. The schema is `lash-kernel-state`; the machine writes and reads it in `crates/lash-kernel-vm/src/machine/parked.rs`.
 
 A row is one of three kinds:

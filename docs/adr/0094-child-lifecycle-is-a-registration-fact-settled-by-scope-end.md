@@ -1,5 +1,7 @@
 # 0094: Child lifecycle is a registration fact settled by scope end
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 Status: Accepted
 
 ## Context

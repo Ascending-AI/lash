@@ -338,6 +338,10 @@ impl SendBuilder {
     /// is repeated, and its handle answers the one run. Reading
     /// [`attach_id`](crate::LashSession::attach_id) instead answers only what
     /// lash holds now: [`SendOutcome::NotAccepted`] when it holds nothing.
+    ///
+    /// Exactly-once acceptance does not imply exactly-once external actions:
+    /// uncommitted work can repeat. See the
+    /// [crash contract](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash).
     pub fn id(mut self, id: TurnId) -> Self {
         self.id = Some(id);
         self

@@ -1,5 +1,7 @@
 # Attempt history rides inside the result
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Context
 
 One successful response does not describe the failed or interrupted transport

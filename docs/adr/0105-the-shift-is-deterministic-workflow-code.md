@@ -1,5 +1,7 @@
 # 0105: The session actor decides from committed state
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted. The durable mechanics this decision relies on (actors, epochs, phase

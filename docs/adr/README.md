@@ -143,7 +143,7 @@ The generated region below is checked against the live filenames and headings.
 | 0107 | [A process is named by a minted id, a start by its key](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md) |
 | 0108 | [A process lives until a scope its start could reach](0108-a-process-lives-until-a-scope-its-start-could-reach.md) |
 | 0109 | [Work that outlives its transaction is an outbox of obligations](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md) |
-| 0110 | [The engine owns process recovery; lash never re-runs started work](0110-the-engine-owns-process-recovery.md) |
+| 0110 | [The engine owns process recovery from committed state](0110-the-engine-owns-process-recovery.md) |
 | 0111 | [A deployment namespace prefixes every Restate name lash binds or calls](0111-a-deployment-namespace-prefixes-every-restate-name.md) |
 | 0112 | [The store is multi-session, and a session is resident from its current frame](0112-the-store-is-multi-session-and-a-session-is-resident-from-its-current-frame.md) |
 | 0113 | [Artifacts are kept alive only by their referrers](0113-artifacts-are-kept-alive-only-by-their-referrers.md) |

@@ -1,5 +1,7 @@
 # 0116: Tools are opaque, batch is sugar, and a spawn is a declared start
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted. The [arc-baseline text](https://github.com/Ascending-AI/lash/blob/48f11c5fa761cabb4991e8497218bb870db83169/docs/adr/0116-tools-are-opaque.md)

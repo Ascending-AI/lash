@@ -1,5 +1,11 @@
 //! App-facing embedding facade for Lash.
 //!
+//! Recovery loads committed state; uncommitted computation and diagnostics may
+//! repeat. Committed effect outcomes do not re-execute; unfinished calls follow
+//! their execution policy. Hosts deduplicate external effects on `call_id`.
+//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
+//! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
+//!
 //! `lash` is intentionally a small layer above the lower-level
 //! `lash-core` runtime crate. Host applications own providers, persistence,
 //! app state, HTTP protocols, auth, and frontend streaming; this crate

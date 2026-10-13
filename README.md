@@ -4,8 +4,8 @@ A durable, performant and customizable agent harness in Rust, built for scalable
 
 Key features:
 
-1. **Durable execution**
-    1. Every turn commits atomically; a crashed turn resumes from its checkpoint on any node
+1. **Durable execution** ([crash contract](#what-survives-a-crash))
+    1. A turn's terminal commits atomically; recovery on a compatible node loads its last committed checkpoint, and uncommitted work may repeat
     2. Many nodes share one PostgreSQL store, and survive being killed, partitioned and restarted
     3. Durable processes, waits and cancellation, for approvals, callbacks and triggers
     4. Sessions fork, park and resume
@@ -26,7 +26,7 @@ Key features:
 6. **RLM, a persistent REPL over code mode**
     1. The model writes code cells in a persistent REPL: state carries from cell to cell, and printed values come back as observations
     2. Tools are typed functions the code calls, so one cell can loop over and combine many calls, and run them concurrently as tasks
-    3. Runs on the Lash VM, a small kernel language built for it; a cell saves its state whenever it waits, and a crashed cell resumes from there without re-running finished tool calls
+    3. Runs on the Lash VM, a small kernel language built for it; a cell saves its state whenever it waits, and a crashed cell resumes from there without re-executing committed effect outcomes; unfinished calls follow their execution policy
     4. Dialects lower to the kernel and none is built into it; TypeScript provided
     5. Model code runs in resettable worker processes, and every effect crosses the host
     6. Deferred tools resolve mid-session, and a granted tool stays callable after a restart
@@ -38,6 +38,84 @@ Key features:
 
 
 > **Alpha:** works today, API still moving fast — pin to an exact `=0.1.0-alpha.N` version when you embed.
+
+## What survives a crash
+
+Lash recovers from committed state. These guarantees require acknowledged
+commits to survive the failure: SQLite file stores need `SqliteSynchronous::Full`
+on storage that honors sync requests; PostgreSQL needs durable WAL flushes and
+a failover policy that preserves acknowledged commits. An in-memory SQLite store
+does not survive loss of its process. See [the storage assumption](docs/adr/0132-durability-is-state-first-over-the-lash-store.md#13-the-storage-durability-assumption)
+and [SQLite's configuration](crates/lash-sqlite-store/src/conn.rs).
+
+- **Committed effect outcomes are never re-executed.** Recovery loads the
+  outcome instead of starting its body again. This says nothing about how many
+  times an external action ran *before* its outcome committed. Store-local
+  effects committed in the same transaction as their outcome are atomic with it.
+  Enforcement: [round recovery](crates/lash-core-execution/src/runtime/actor/round/fold.rs)
+  (`RoundMember::recovery`) and [store-local settlement](crates/lash-core-execution/src/runtime/actor/round/store_local.rs).
+  Law: [the mixed-round crash matrix](crates/lash-durable-test/tests/round_crash_matrix.rs)
+  (`a_mixed_round_holds_once_and_repeatable_rules_across_every_cut`).
+- **Computation since the last committed checkpoint may run again.** This
+  includes clock, random, projection reads, declared `Read` tools, printing and
+  logging; read answers may differ, and diagnostics may repeat or be lost.
+  Planned cell reads have no individual outcome record: their results survive
+  only in the next saved cell state. A `Read` routed through a recorded call
+  can also run again when interrupted, but never retries a reported failure.
+  Enforcement: [kernel evaluation](crates/lash-kernel-vm/src/machine/eval.rs),
+  [printing](crates/lash-kernel-vm/src/machine/exec.rs),
+  [read execution](crates/lash-kernel-vm/src/machine/actions.rs) (`perform_read`),
+  and [read planning](crates/lash-protocol-rlm/src/executor/reads.rs).
+  Laws: [cell reads](crates/lash-durable-test/tests/cell_read_laws.rs)
+  (`a_read_lost_with_its_unsaved_stretch_is_made_again_on_sqlite_memory` and
+  `a_saved_read_is_never_made_again_on_sqlite_memory`).
+- **`ExecutionPolicy::Once` effects interrupted mid-body settle as
+  `Interrupted` and are never re-run.** The started row commits before the
+  body starts. Recovery cannot tell whether an external action happened before
+  the crash, so `Interrupted` is uncertainty, not proof that nothing happened.
+  `Once` also forbids retry after a reported failure; it does not promise
+  successful completion. Enforcement: [policy](crates/lash-sansio/src/tool_contract.rs)
+  (`ExecutionPolicy`) and [round recovery](crates/lash-core-execution/src/runtime/actor/round/fold.rs).
+  Law: [the mixed-round crash matrix](crates/lash-durable-test/tests/round_crash_matrix.rs).
+- **`Repeatable` effects may run again under their recorded retry policy and
+  deadlines, subject to the current declaration's veto.** Recovery of a started
+  attempt without an outcome re-enters the same ordinal; it does not consume a
+  new retry ordinal. Thus `max_attempts` bounds admitted ordinals, not total
+  body entries across repeated crashes. External systems must deduplicate on
+  `call_id` to make these repeats safe. Enforcement: [policy](crates/lash-sansio/src/tool_contract.rs)
+  (`permits_repeat`, `reruns_interrupted`), [round recovery](crates/lash-core-execution/src/runtime/actor/round/fold.rs)
+  and [retry admission](crates/lash-core-execution/src/runtime/actor/round/rounds.rs).
+  Laws: [the mixed-round crash matrix and attempt cap](crates/lash-durable-test/tests/round_crash_matrix.rs)
+  (`the_attempt_cap_ends_a_repeatable_call`).
+- **Model calls can be sent and charged again before their response commits.**
+  Recovery re-sends the pinned request while its recorded deadline allows,
+  including a crash after the provider answered but before the response commit
+  ([ADR 0132 §4](docs/adr/0132-durability-is-state-first-over-the-lash-store.md#4-turns-restore-from-their-checkpoint)).
+  A whole-node crash during a cell's first slice, before the first save carrying
+  the held response, can cost at most one extra provider call *per crash in that
+  window*. Repeated crashes can cost more; the replacement answer may differ.
+  A worker failure can avoid this resend if the surviving node commits the held
+  response. See [ADR 0142 (FIG-6108)](docs/adr/0142-a-whole-node-crash-in-a-cells-first-slice-may-re-send-one-model-call.md).
+  Enforcement: [model send and restore](crates/lash-core/src/runtime/durable/model_call.rs)
+  and [held-response phases](crates/lash-core/src/runtime/durable/phases.rs).
+  Law: [cell restore](crates/lash-durable-test/tests/cell_restore_laws.rs)
+  (`a_re_sent_call_replaces_its_cell_on_sqlite_memory`).
+- **Exactly-once external behaviour is the host's job.** Lash supplies a stable
+  `ToolCallId`, exposed as `AttemptContext::call_id()`, across crash recovery and
+  reported-failure retries of the same logical tool call. The host and external
+  system must use it as their deduplication key, with durable reconciliation for
+  uncertain outcomes. A local ledger alone does not atomically commit a remote
+  action. A fresh logical call has a fresh id; business deduplication across
+  distinct calls needs a domain key. This tool id does not promise idempotent
+  model billing. Enforcement: [identity derivation](crates/lash-sansio/src/tool_call_id.rs)
+  and [attempt context](crates/lash-core-execution/src/tool_provider.rs).
+  Laws: [tool call identity](crates/lash-durable-test/tests/tool_call_identity.rs).
+  See [the host's external-effect contract](docs/operations/durable-hosting.md#external-effects)
+  and [ADR 0117](docs/adr/0117-lash-names-every-tool-call.md).
+
+Observation replay is delivery of retained events, not re-execution of their
+producers. Live streams and logs have their own retention and delivery contracts;
+see [observing turns](docs/observing-turns.md) and [observing processes](docs/observing-processes.md).
 
 ## Examples
 

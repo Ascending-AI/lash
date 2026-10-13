@@ -1,5 +1,7 @@
 # 0065: Concurrent settlement is recorded by the logical Run
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted. Concurrent settlement follows the Run-owned contract in

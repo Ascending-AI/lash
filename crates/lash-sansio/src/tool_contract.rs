@@ -8,6 +8,11 @@ use crate::{
 };
 
 /// The contract for executing one logical call, pinned before its first attempt.
+///
+/// Recovery never re-executes an effect whose outcome committed. These rules
+/// require acknowledged database commits to survive the failure; exactly-once
+/// external behaviour requires host deduplication on `call_id`. See
+/// [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash).
 #[derive(
     Clone,
     Copy,
@@ -22,9 +27,15 @@ use crate::{
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExecutionPolicy {
     /// One application attempt, even after a reported pre-effect failure.
+    /// A crash after its start commits but before its outcome commits settles
+    /// `Interrupted` without re-entering the body. Its external action may have
+    /// happened; this policy does not promise successful completion.
     #[default]
     Once,
     /// Repeated execution is part of the tool's declared contract.
+    /// An interrupted attempt may re-enter its same ordinal; reported failures
+    /// retry within the recorded bounds and current declaration. `max_attempts`
+    /// counts admitted ordinals, not body entries across repeated crashes.
     Repeatable { retry: BoundedRetry },
     /// A read: the answer is not recorded; after a crash before the next
     /// save it is fetched again and may differ.

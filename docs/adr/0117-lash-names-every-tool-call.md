@@ -1,5 +1,7 @@
 # 0117: Lash names every tool call
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted.

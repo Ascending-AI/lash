@@ -1,5 +1,11 @@
 //! The lash kernel's parked run.
 //!
+//! In Lash, recovery loads committed state; uncommitted computation and diagnostics may
+//! repeat. Committed effect outcomes do not re-execute; unfinished calls follow
+//! their execution policy. Hosts deduplicate external effects on `call_id`.
+//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
+//! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
+//!
 //! A run that is not executing is data in the document's terms
 //! (`docs/kernel/design.md` §6, `docs/kernel/parked-state.md`): where each
 //! task stands is a site of the document, a variable is a name and the

@@ -1,5 +1,7 @@
 # 0106: Durable formats use migration, drain or coexistence
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted. The pre-1.0 version freeze applies: stored shapes change in place

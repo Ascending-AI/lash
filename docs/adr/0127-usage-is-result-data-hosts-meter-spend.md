@@ -1,5 +1,7 @@
 # 0127: Usage is result data; hosts meter spend
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted (FIG-4852). This decision replaces

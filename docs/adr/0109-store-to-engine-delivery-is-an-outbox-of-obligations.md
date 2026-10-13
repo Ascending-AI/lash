@@ -1,5 +1,7 @@
 # 0109: Work that outlives its transaction is an outbox of obligations
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted. Every cross-actor message is a mailbox write plus a wake in its

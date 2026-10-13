@@ -1,5 +1,11 @@
 //! The lash kernel's machine.
 //!
+//! In Lash, recovery loads committed state; uncommitted computation and diagnostics may
+//! repeat. Committed effect outcomes do not re-execute; unfinished calls follow
+//! their execution policy. Hosts deduplicate external effects on `call_id`.
+//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
+//! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
+//!
 //! The machine is a plain library (`docs/kernel/design.md` §9). It runs an
 //! admitted document as tasks until none is ready, hands the embedder the
 //! effects and sleeps they asked for, and takes their outcomes back one at a

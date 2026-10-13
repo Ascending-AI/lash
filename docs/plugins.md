@@ -1,5 +1,7 @@
 Plugins are fully trusted in-process Rust with the host's full authority; lash provides no sandbox or CPU/memory isolation ([ADR 0143](adr/0143-plugins-are-fully-trusted-code.md)).
 
+Recovery and external-effect guarantees follow [What survives a crash](../README.md#what-survives-a-crash).
+
 # Authoring and certifying a plugin
 
 Declare metadata and executable binders together with `PluginRegistrar`.

@@ -1,5 +1,7 @@
 # 0142: A whole-node crash in a cell's first slice may re-send one model call
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted.
@@ -46,7 +48,7 @@ commit before propagating the failure. If that commit succeeds, retry
 re-delivers the cell without asking the model again. Whole-node abort or
 power loss runs no failure handler, so it cannot take this path.
 
-### 3. Committed effects remain exactly once
+### 3. Committed effect outcomes are never re-executed
 
 No tool body starts before the cell save commits its admission. Death before
 the first save therefore loses no executed tool work from that cell. Recovery
@@ -54,9 +56,10 @@ loads committed tool outcomes without re-running their bodies; a started
 `Once` call without an outcome becomes `Interrupted`, and an unfinished
 `Repeatable` call follows its recorded policy (ADR 0132 §5).
 
-The turn retains exactly-once committed effects, epoch fencing and its
-idempotent terminal commit. These guarantees require acknowledged database
-commits to survive the failure (ADR 0132 §13). Cell stream observations and
+The turn retains committed-outcome recovery, epoch fencing and its
+idempotent terminal commit. An external action before an outcome commit may
+repeat under `Repeatable`; the host deduplicates it on `call_id`. These
+guarantees require acknowledged database commits to survive the failure (ADR 0132 §13). Cell stream observations and
 traces stay held until the response commits, so the replacement response's
 cell is the one the report and host observe. Streaming model text follows
 the attempt-reset rule of [ADR 0040](0040-retried-model-attempts-retract-live-text-by-correlation.md).

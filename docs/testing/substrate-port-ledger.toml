@@ -84,7 +84,7 @@ path = "crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_eve
 
 [planned."NR-1"]
 owner = "V0"
-law = "every admitted identity with a committed outcome executed its body exactly once in total (ADR 0132 §2)"
+law = "every admitted identity with a committed outcome executes its body zero further times after that commit (ADR 0132 §2); Repeatable bodies may have run more than once before it"
 path = "crates/lash-sim/src/crash_matrix/invariants.rs::once"
 note = "checked in every cell of every crash-matrix case, on SQLite memory, a SQLite file and PostgreSQL"
 

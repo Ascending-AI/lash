@@ -1,5 +1,7 @@
 # Lifecycle events and host waits
 
+Recovery and external-effect guarantees follow [What survives a crash](../README.md#what-survives-a-crash).
+
 Lash records a closed vocabulary of lifecycle facts. Hosts own product events,
 routing and scheduling under
 [ADR 0137](adr/0137-the-host-owns-events-routing-and-scheduling.md). Approvals,

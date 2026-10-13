@@ -1,5 +1,7 @@
 # ADR 0002: Session observation uses cursors and bounded live replay
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 Status: accepted
 
 ## Context

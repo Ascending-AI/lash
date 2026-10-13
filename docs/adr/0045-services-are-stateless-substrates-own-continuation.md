@@ -1,5 +1,7 @@
 # Services are stateless; the store owns continuation
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 A service instance is stateless with respect to correctness across a committed
 boundary. In-memory turns, watch hubs, caches and the owner's actor state
 exist, but committed phases live in the lash store. The owner's cache is keyed
@@ -11,9 +13,9 @@ and the session actor's epoch fence govern session mutations and admission
 (ADR 0101).
 
 Streaming is in memory until the next committed phase or checkpoint. A crash
-can cost recomputation of uncommitted work from the last committed state. It
-cannot authorize a fresh execution of work whose started row is committed:
-recovery follows that row's execution policy.
+can cost recomputation of uncommitted work from the last committed state. A committed started row pins recovery to its execution policy: `Once`
+settles `Interrupted` without another body entry, while unfinished
+`Repeatable` and recorded `Read` calls may run again.
 
 ## Once in flight, the store owns it
 
@@ -56,7 +58,7 @@ observation history is not session continuation authority. A host that needs
 crash-surviving preview activity supplies durable observation retention rather
 than adding token-by-token session commits.
 
-## Started work never restarts
+## Started work follows its recorded execution policy
 
 A process's started execution is a committed row. A `Once` execution started
 without an outcome records `Interrupted` and never runs again; a `Repeatable`

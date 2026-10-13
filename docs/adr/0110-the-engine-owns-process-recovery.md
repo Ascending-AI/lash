@@ -1,4 +1,6 @@
-# 0110: The engine owns process recovery; lash never re-runs started work
+# 0110: The engine owns process recovery from committed state
+
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
 
 ## Status
 

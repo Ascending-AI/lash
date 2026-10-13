@@ -876,6 +876,9 @@ impl LashSession {
     /// A send whose response was lost is sent again under the same
     /// [`id`](crate::SendBuilder::id) with the same content: the retry
     /// accepts the input exactly once and answers its run.
+    /// Effects follow their execution policy; exactly-once external behaviour
+    /// requires host deduplication on `call_id`. See the
+    /// [crash contract](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash).
     pub fn send(&self, input: TurnInput) -> crate::SendBuilder {
         crate::SendBuilder::new(crate::send::SendTarget::Live(self.clone()), input)
     }

@@ -1,5 +1,7 @@
 # PostgreSQL host configuration
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 One validated `PostgresHostConfig` sizes, guards and names every PostgreSQL
 connection a lash process opens (FIG-5240). This page is its reference: the
 entry points, every section with its defaults, the role routing, the sizing
@@ -48,7 +50,8 @@ path (`roles.work.max_connections`).
 
 ## Commit durability
 
-Lash's exactly-once effect admission survives power loss only when PostgreSQL
+Lash's committed-outcome recovery and refusal to restart a started `Once`
+body survive power loss only when PostgreSQL
 has `fsync=on` and `synchronous_commit=on` (or a synchronous level that waits
 for local WAL flush), on storage that honors sync requests. Every boundary
 commit waits at that configured level before its dependent effect or answer

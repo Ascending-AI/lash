@@ -1,5 +1,7 @@
 # Tool-run contract
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 This is the contract every tool call runs under. A call's admission (A), its
 attempts (X), its decision (D) and its presentation (V) run in memory, inside
 the admitted execution that makes the call durable
@@ -29,8 +31,9 @@ A call has one durable home: the admitted execution that runs it.
   in declared order. A member that parks records an `x_wait` before its
   `x_outcome`; see Pending calls.
 - **A code cell** (`tool_dispatch::CellMembers`, `lash_vm_broker::members`).
-  Every call a cell makes is its own admitted execution: the quiet point of
-  the operation that issues it admits it in `cell.snapshot+admit`, under the
+  Every recorded call a cell makes is its own admitted execution (planned
+  `Read` tools run inside their statement and survive only in saved cell state): the
+  quiet point of the operation that issues it admits it in `cell.snapshot+admit`, under the
   policy and limit its tool declares and, for a tool that may defer, a
   pinned `tool_completion` wait. Its body runs through the same member
   lifecycle as a round's, so a started `Once` is `Interrupted` (injected as

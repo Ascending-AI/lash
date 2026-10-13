@@ -1,5 +1,11 @@
 //! The lash kernel's executor interface.
 //!
+//! In Lash, recovery loads committed state; uncommitted computation and diagnostics may
+//! repeat. Committed effect outcomes do not re-execute; unfinished calls follow
+//! their execution policy. Hosts deduplicate external effects on `call_id`.
+//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
+//! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
+//!
 //! The kernel keeps one durable meaning: documents, function definitions,
 //! content identities, statement sites and parked runs. Below it, every
 //! executable form is a disposable derivative built against this crate:

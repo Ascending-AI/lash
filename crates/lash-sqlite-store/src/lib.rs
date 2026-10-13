@@ -1,5 +1,11 @@
 //! # lash-sqlite-store
 //!
+//! Recovery loads committed state; uncommitted computation and diagnostics may
+//! repeat. Committed effect outcomes do not re-execute; unfinished calls follow
+//! their execution policy. Hosts deduplicate external effects on `call_id`.
+//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
+//! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
+//!
 //! The local durable persistence backend for the lash agent runtime. One
 //! [`SqliteStore`] owns the durable-core catalog for all sessions, with a
 //! writer connection and a fixed pool of WAL readers. It implements

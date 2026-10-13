@@ -1,5 +1,7 @@
 # 0133: Prompt sections are keyed, trusted, and placed by the host
 
+Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
+
 ## Status
 
 Accepted. The contract of §1 to §5 is on main (FIG-5254):
