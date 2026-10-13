@@ -64,6 +64,7 @@ pub struct LashCore {
     /// The claim tokens the core's node serves (S7), projected once from
     /// its installed registrations when it was built.
     pub(crate) serves: Arc<[String]>,
+    transcript_decoders: crate::transcript::TranscriptDecoders,
     /// Weak metadata readers; inspection never keeps a materialization alive.
     pub(crate) diagnostic_hosts:
         Arc<std::sync::Mutex<Vec<crate::plugins::WeakMaterializedInventoryReader>>>,
@@ -87,13 +88,7 @@ impl LashCore {
     }
 
     pub(crate) fn transcript_decoders(&self) -> crate::transcript::TranscriptDecoders {
-        self.protocol_factory
-            .iter()
-            .chain(self.plugin_factories.iter())
-            .filter_map(|factory| factory.transcript_decoder())
-            .fold(Default::default(), |decoders, decoder| {
-                decoders.with_decoder(decoder)
-            })
+        self.transcript_decoders.clone()
     }
 
     /// A [`LashCoreBuilder`] over `backend`, the one substrate every
@@ -1309,6 +1304,7 @@ impl LashCoreBuilder {
         // A plugin whose declaration contradicts itself refuses the build
         // before anything runs under it.
         default_plugin_host.composition()?;
+        let transcript_decoders = default_plugin_host.transcript_decoders()?;
         // Every runtime of this core, its workers' too, composes a process
         // from these components and nothing else (FIG-6034 §5.1).
         let mut core = core;
@@ -1371,6 +1367,7 @@ impl LashCoreBuilder {
         let core = LashCore {
             observer_pacing: Arc::new(self.observer_pacing),
             serves,
+            transcript_decoders,
             diagnostic_hosts: Arc::default(),
             runtime_owner,
             env,

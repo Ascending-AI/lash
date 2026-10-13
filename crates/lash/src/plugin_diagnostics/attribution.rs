@@ -51,14 +51,14 @@ impl PluginDiagnostics {
                     .await?;
                 let evidence = match facts.rows.iter().find(|row| row.ordinal == *ordinal) {
                     None => unavailable(EvidenceAbsence::NotRetainedOrNeverRecorded),
-                    Some(_)
+                    Some(row)
                         if matches!(
                             selection,
                             ToolDecisionSelection::BeforeCheck { .. }
                                 | ToolDecisionSelection::ResultCheck { .. }
                         ) =>
                     {
-                        unavailable(EvidenceAbsence::AttributionNotRecorded)
+                        retained_check_attribution(&facts, row, record, call, selection)?
                     }
                     Some(row) if row.kind == RunFactKind::Admit => {
                         let bindings =
@@ -256,4 +256,167 @@ fn matches_recorded(key: &ContributionKey, record: &RecordedAttribution) -> bool
             matches!(key, ContributionKey::Callback(key) if checks.replies().iter().any(|reply| reply.callback == *key))
         }
     }
+}
+
+/// Expiry records are already retained in the selected output. They carry
+/// runtime verdicts, not the admission journal's verdict representation.
+fn retained_check_attribution(
+    facts: &lash_core::durable_port::domain::RunFacts,
+    row: &lash_core::durable_port::domain::RunFactRow,
+    source: &RecordLocator,
+    call: &crate::ToolCallId,
+    selection: &ToolDecisionSelection,
+) -> Result<Evidence<RecordedAttribution>, DiagnosticError> {
+    use crate::plugins::{AfterToolDecision, BeforeToolDecision};
+    let Some(output) = lash_core::tool_outcome_of(facts, row, call)
+        .map_err(lash_core::durable_port::DurableError::Graph)?
+    else {
+        return Ok(unavailable(EvidenceAbsence::AttributionNotRecorded));
+    };
+    let (raw, expired) = match output.outcome {
+        lash_core::ToolCallOutcome::Failure(failure) => {
+            let expired = matches!(
+                failure.cause.as_deref(),
+                Some(lash_core::ToolFailureCause::ControlPhaseExpired { .. })
+            );
+            (failure.raw, expired)
+        }
+        lash_core::ToolCallOutcome::Cancelled(cancellation) => (cancellation.raw, false),
+        lash_core::ToolCallOutcome::Success(_) => (None, false),
+    };
+    let Some(raw) = raw else {
+        return Ok(unavailable(EvidenceAbsence::AttributionNotRecorded));
+    };
+    // The graph read is bounded above; impose a tighter bound on the optional
+    // diagnostic representation and use serde's depth-limited JSON reader.
+    let bytes = match serde_json::to_vec(&raw.to_json_value()) {
+        Ok(bytes) if bytes.len() <= 1024 * 1024 => bytes,
+        Ok(_) => return Ok(unavailable(EvidenceAbsence::ReadBoundExceeded)),
+        Err(_) => {
+            return Ok(unavailable(
+                EvidenceAbsence::UnsupportedRetainedRepresentation,
+            ));
+        }
+    };
+    let is_record = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .is_some_and(|value| {
+            value.as_array().is_some_and(|replies| {
+                replies
+                    .iter()
+                    .any(|reply| reply.get("callback").is_some() && reply.get("verdict").is_some())
+            })
+        });
+    if !is_record {
+        return Ok(unavailable(if expired {
+            EvidenceAbsence::UnsupportedRetainedRepresentation
+        } else {
+            EvidenceAbsence::AttributionNotRecorded
+        }));
+    }
+    let (value, missing) = match selection {
+        ToolDecisionSelection::BeforeCheck { reply } => {
+            let checks = match decode_expiry_checks::<BeforeToolDecision>(
+                &bytes,
+                "tool_args_check",
+                "tool_args",
+                |verdict| match verdict {
+                    BeforeToolDecision::Deny(failure) => Some(failure),
+                    _ => None,
+                },
+            ) {
+                Ok(checks) => checks,
+                Err(reason) => return Ok(unavailable(reason)),
+            };
+            let selected = select_reply(&checks, *reply);
+            let missing = if reply.is_some() && selected.is_none() {
+                vec![EvidenceAbsence::NotRetainedOrNeverRecorded]
+            } else {
+                Vec::new()
+            };
+            (
+                RecordedAttribution::BeforeCheck { checks, selected },
+                missing,
+            )
+        }
+        ToolDecisionSelection::ResultCheck { reply, .. } => {
+            let checks = match decode_expiry_checks::<AfterToolDecision>(
+                &bytes,
+                "tool_result_check",
+                "tool_result",
+                |verdict| match verdict {
+                    AfterToolDecision::Deny(failure) => Some(failure),
+                    _ => None,
+                },
+            ) {
+                Ok(checks) => checks,
+                Err(reason) => return Ok(unavailable(reason)),
+            };
+            let selected = select_reply(&checks, *reply);
+            let mut missing = vec![EvidenceAbsence::OccurrenceNotRecorded];
+            if reply.is_some() && selected.is_none() {
+                missing.push(EvidenceAbsence::NotRetainedOrNeverRecorded);
+            }
+            (
+                RecordedAttribution::ResultCheck { checks, selected },
+                missing,
+            )
+        }
+        _ => return Ok(unavailable(EvidenceAbsence::UnsupportedRecordKind)),
+    };
+    Ok(if missing.is_empty() {
+        Evidence::Recorded {
+            source: source.clone(),
+            value,
+        }
+    } else {
+        Evidence::Partial {
+            source: source.clone(),
+            value,
+            missing,
+        }
+    })
+}
+
+fn select_reply<V: Clone + lash_core::tool_run::RankedVerdict>(
+    checks: &CheckRecord<V>,
+    reply: Option<u32>,
+) -> Option<AttributedVerdict<V>> {
+    reply.map_or_else(
+        || checks.winner().cloned(),
+        |index| checks.replies().get(index as usize).cloned(),
+    )
+}
+
+fn decode_expiry_checks<V: serde::de::DeserializeOwned + lash_core::tool_run::RankedVerdict>(
+    bytes: &[u8],
+    slot: &str,
+    phase: &str,
+    failure: impl Fn(&V) -> Option<&lash_core::ToolFailure>,
+) -> Result<CheckRecord<V>, EvidenceAbsence> {
+    let checks: CheckRecord<V> = serde_json::from_slice(bytes)
+        .map_err(|_| EvidenceAbsence::UnsupportedRetainedRepresentation)?;
+    if checks.replies().len() > 4096 {
+        return Err(EvidenceAbsence::ReadBoundExceeded);
+    }
+    if !checks.is_reduced() {
+        return Err(EvidenceAbsence::UnsupportedRetainedRepresentation);
+    }
+    let prefix = format!("{slot}:");
+    if checks
+        .replies()
+        .iter()
+        .any(|reply| !reply.callback.key.starts_with(&prefix))
+    {
+        return Err(EvidenceAbsence::AttributionNotRecorded);
+    }
+    let retained_expiry = checks.replies().iter().any(|reply| {
+        failure(&reply.verdict).is_some_and(|failure| matches!(failure.cause.as_deref(),
+            Some(lash_core::ToolFailureCause::ControlPhaseExpired { expiry })
+                if expiry.phase == phase && expiry.plugin == reply.callback.owner && expiry.callback == reply.callback.key))
+    });
+    if !retained_expiry {
+        return Err(EvidenceAbsence::UnsupportedRetainedRepresentation);
+    }
+    Ok(checks)
 }

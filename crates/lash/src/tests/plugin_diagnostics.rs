@@ -472,3 +472,288 @@ async fn recorded_attribution_survives_removal() {
     ));
     removed.shutdown().await.unwrap();
 }
+
+/// Retained expiry replies remain attributable after their owner is removed.
+#[tokio::test]
+async fn retained_expiry_check_attribution_survives_removal() {
+    use lash_core::durable_port::domain::{RunFactKind, RunFactWrite};
+    use lash_core::testing::{CallOutcome, MaterialNode, RoundFact, SettledFact};
+    use lash_core::tool_run::{AttemptOutcome, MaterialOwner, MaterialRole};
+    use lash_core_store::checkpoint_graph::{EncodeBudget, ExplicitLimit, GraphStaging};
+    let backend = sqlite_memory_store_backend().await;
+    let core = diagnostic_core(backend.clone());
+    let store = backend.durable();
+    let actor = ActorKey::session("expiry-attribution").unwrap();
+    let format = FormatSet::new("expiry-attribution");
+    let writer = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("expiry-writer"),
+            decodes: vec![format.clone()],
+            serves: Vec::new(),
+            ttl_millis: 60000,
+        })
+        .await
+        .unwrap();
+    let mut mail = MailTx::new();
+    mail.create_actor(actor.clone(), format);
+    store
+        .commit_mail(mail, CommitLabel::TURN_ADMIT)
+        .await
+        .unwrap();
+    let epoch = store.claim(&writer, 1).await.unwrap()[0].epoch;
+    let owner = OwnerKey::Turn("expiry-attribution".into(), "recorded-run".into());
+    let mut tx = store.begin(&actor, epoch).await.unwrap();
+    tx.write(DomainWrite::Turn(TurnWrite::Admit {
+        session: "expiry-attribution".into(),
+        run: "recorded-run".into(),
+        admission: lash_core::store::RunAdmissionRecord::Turn {
+            took: lash_core::store::AdmittedTurnRows::Inputs {
+                ids: lash_core::store::AdmittedInputIds::one("input".into()),
+            },
+            trace: None,
+        },
+        turn_deadline: None,
+    }));
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(1024 * 1024)));
+    let mut decisions = Vec::new();
+    for (index, phase) in [
+        "tool_args",
+        "tool_result",
+        "tool_args",
+        "tool_result",
+        "tool_args",
+        "tool_args",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let key = if index % 2 == 0 {
+            "tool_args_check:timeout"
+        } else {
+            "tool_result_check:timeout"
+        };
+        let callback = crate::plugins::PluginCallbackIdentity {
+            owner: "removed-check".into(),
+            key: key.into(),
+        };
+        let expiry = lash_sansio::ControlPhaseExpired {
+            phase: phase.into(),
+            bound_ms: 10,
+            plugin: callback.owner.clone(),
+            callback: callback.key.clone(),
+        };
+        let failure = lash_core::ToolFailure::runtime(
+            lash_core::ToolFailureClass::Internal,
+            "expired",
+            "expired",
+        )
+        .with_cause(lash_core::ToolFailureCause::ControlPhaseExpired {
+            expiry: Box::new(expiry),
+        });
+        let prefix = if index % 2 == 0 {
+            "tool_args_check"
+        } else {
+            "tool_result_check"
+        };
+        let answered = crate::plugins::PluginCallbackIdentity {
+            owner: "answered".into(),
+            key: format!("{prefix}:allow"),
+        };
+        let stronger = crate::plugins::PluginCallbackIdentity {
+            owner: "stronger".into(),
+            key: format!("{prefix}:abort"),
+        };
+        let evidence = if index % 2 == 0 {
+            let mut replies = vec![
+                AttributedVerdict {
+                    callback: callback.clone(),
+                    verdict: crate::plugins::BeforeToolDecision::Deny(failure.clone()),
+                },
+                AttributedVerdict {
+                    callback: answered,
+                    verdict: crate::plugins::BeforeToolDecision::Allow,
+                },
+            ];
+            if index >= 2 {
+                replies.push(AttributedVerdict {
+                    callback: stronger,
+                    verdict: crate::plugins::BeforeToolDecision::AbortRun(
+                        crate::plugins::PluginAbort::new("stop", "stop"),
+                    ),
+                });
+            }
+            serde_json::to_value(CheckRecord::reduce(replies)).unwrap()
+        } else {
+            let mut replies = vec![
+                AttributedVerdict {
+                    callback: callback.clone(),
+                    verdict: crate::plugins::AfterToolDecision::Deny(failure.clone()),
+                },
+                AttributedVerdict {
+                    callback: answered,
+                    verdict: crate::plugins::AfterToolDecision::Allow,
+                },
+            ];
+            if index >= 2 {
+                replies.push(AttributedVerdict {
+                    callback: stronger,
+                    verdict: crate::plugins::AfterToolDecision::AbortRun(
+                        crate::plugins::PluginAbort::new("stop", "stop"),
+                    ),
+                });
+            }
+            serde_json::to_value(CheckRecord::reduce(replies)).unwrap()
+        };
+        let evidence = match index {
+            4 => serde_json::json!({"ordinary_tool_data": true}),
+            5 => {
+                serde_json::json!([{"callback": callback, "verdict": {"verdict": "future_representation"}}])
+            }
+            _ => evidence,
+        };
+        let raw = lash_core::ToolValue::untrusted_json(evidence);
+        let output = if index == 3 {
+            let mut cancellation = lash_core::ToolCancellation::runtime("selected cancellation");
+            cancellation.raw = Some(raw);
+            lash_core::ToolCallOutput::cancelled(cancellation)
+        } else {
+            let mut selected_failure = if index == 2 || index == 4 {
+                lash_core::ToolFailure::runtime(
+                    lash_core::ToolFailureClass::Internal,
+                    "selected",
+                    "selected",
+                )
+            } else {
+                failure
+            };
+            selected_failure.raw = Some(raw);
+            lash_core::ToolCallOutput::failure(selected_failure)
+        };
+        let call = crate::ToolCallId::fixture(&format!("expiry-{index}"));
+        let completed = lash_sansio::sansio::CompletedToolCall {
+            call_id: call.clone(),
+            provider_call_id: None,
+            tool_name: "probe".into(),
+            args: serde_json::json!({}),
+            model_return: lash_sansio::tool_output::ModelToolReturn::from_output(
+                "probe".into(),
+                &output,
+            ),
+            output,
+            intent_outcomes: Vec::<lash_core::ToolIntentExecutionOutcome>::new(),
+            replay: None,
+        };
+        let material = MaterialNode::Outcome(
+            CallOutcome::of(&completed, None, 1)
+                .stage(&mut staging)
+                .unwrap(),
+        );
+        let named = material.material(
+            MaterialOwner::Run {
+                opener: lash_core::EffectOpener::turn("expiry-attribution", "recorded-run"),
+            },
+            MaterialRole::AttemptOutput,
+        );
+        let fact = RoundFact::Outcome {
+            start: 1,
+            output: SettledFact {
+                outcome: AttemptOutcome::Completed(named.reference().clone()),
+                material: Some(material),
+            },
+            state: Vec::new(),
+        };
+        let record = fact.stage(&mut staging).unwrap();
+        let ordinal = Ordinal(u64::try_from(index).unwrap());
+        tx.write(DomainWrite::RunFact(RunFactWrite::Append {
+            owner: owner.clone(),
+            run: RunSeq(1),
+            ordinal,
+            kind: RunFactKind::XOutcome,
+            call: Some(call.clone()),
+            record,
+        }));
+        decisions.push((
+            RecordLocator::RunFact {
+                owner: owner.clone(),
+                run: RunSeq(1),
+                ordinal,
+            },
+            call,
+            callback,
+        ));
+    }
+    tx.stage_all(staging);
+    store.commit(tx, CommitLabel::TURN_ADMIT).await.unwrap();
+    for (index, (record, call, callback)) in decisions.into_iter().enumerate() {
+        let reply = Some(if index >= 2 { 1 } else { 0 });
+        let selection = if index % 2 == 0 || index == 5 {
+            ToolDecisionSelection::BeforeCheck { reply }
+        } else {
+            ToolDecisionSelection::ResultCheck {
+                occurrence: ToolHookOccurrence::Cached,
+                reply,
+            }
+        };
+        let attributed = core
+            .plugin_diagnostics()
+            .attribute(&DecisionRef::Tool {
+                record: record.clone(),
+                call: call.clone(),
+                selection,
+            })
+            .await
+            .unwrap();
+        assert!(attributed.installed_now.is_empty());
+        if index >= 4 {
+            let reason = if index == 4 {
+                EvidenceAbsence::AttributionNotRecorded
+            } else {
+                EvidenceAbsence::UnsupportedRetainedRepresentation
+            };
+            assert!(
+                matches!(attributed.evidence, Evidence::Unavailable { reason: observed } if observed == reason)
+            );
+            continue;
+        }
+        match attributed.evidence {
+            Evidence::Recorded {
+                value:
+                    RecordedAttribution::BeforeCheck {
+                        selected: Some(reply),
+                        ..
+                    },
+                ..
+            } if index % 2 == 0 => assert_eq!(reply.callback, callback),
+            Evidence::Partial {
+                value:
+                    RecordedAttribution::ResultCheck {
+                        selected: Some(reply),
+                        ..
+                    },
+                missing,
+                ..
+            } if index % 2 == 1 => {
+                assert_eq!(reply.callback, callback);
+                assert!(
+                    missing.contains(&EvidenceAbsence::OccurrenceNotRecorded),
+                    "occurrence was never retained"
+                );
+            }
+            other => panic!("expiry evidence must be read: {other:?}"),
+        }
+        let absent = core
+            .plugin_diagnostics()
+            .attribute(&DecisionRef::Tool {
+                record,
+                call: crate::ToolCallId::fixture("another-call"),
+                selection: ToolDecisionSelection::BeforeCheck { reply: None },
+            })
+            .await
+            .unwrap();
+        assert!(
+            matches!(absent.evidence, Evidence::Unavailable { .. }),
+            "never attribute another call's outcome"
+        );
+    }
+    core.shutdown().await.unwrap();
+}

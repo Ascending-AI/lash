@@ -179,7 +179,7 @@ pub struct ToolResultCheckInput {
 /// data only: it carries no intents, resolver, process start or Run control,
 /// and it runs through the result transforms and after-checks like a body
 /// result.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CachedToolSuccess {
     pub value: crate::ToolValue,
     pub view: Option<crate::ToolView>,
@@ -205,7 +205,7 @@ impl CachedToolSuccess {
 }
 
 /// A before-check's one verdict over the prepared call.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "verdict", content = "value", rename_all = "snake_case")]
 pub enum BeforeToolDecision {
     Allow,
@@ -222,7 +222,7 @@ pub enum BeforeToolDecision {
 /// An after-check's one verdict over the final result. It has no variant
 /// that carries a result: an after-check cannot replace one, and recovery
 /// belongs in a result transform.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "verdict", content = "value", rename_all = "snake_case")]
 pub enum AfterToolDecision {
     #[default]

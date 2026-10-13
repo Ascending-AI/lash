@@ -269,9 +269,11 @@ pub fn prompt_catalog(
     plugins: Vec<(&'static str, PromptRegistration)>,
 ) -> Result<crate::plugin::prompt::PromptCatalog, PluginError> {
     let mut contributions = crate::plugin::PluginContributions::default();
+    let mut entries = Vec::new();
     for (id, register) in plugins {
         let mut recipe = crate::plugin::PluginRegistrar::new(id);
         register(&mut recipe)?;
+        entries.extend(recipe.descriptors(id, crate::plugin::RegistryKind::Session));
         let owner = crate::RuntimeOwner::Session("prompt-fixture".into());
         let state = crate::plugin::PluginStateView::bind(&owner, id, std::sync::Arc::default());
         let mut reg = crate::plugin::BoundRegistrar::new(id.into());
@@ -281,6 +283,15 @@ pub fn prompt_catalog(
     }
     Ok(crate::plugin::prompt::PromptCatalog::new(
         contributions.prompt,
+        crate::plugin::prompt::PromptCatalogSnapshot::from_inventory(
+            &crate::plugin::InstalledInventory {
+                scope: crate::plugin::InventoryScope::Deployment(
+                    crate::plugin::RegistryKind::Session,
+                ),
+                readiness: vec![crate::plugin::ContributionReadiness::NotValidated; entries.len()],
+                entries,
+            },
+        ),
     ))
 }
 
@@ -300,6 +311,10 @@ pub fn prompt_catalog_from_recipes(
         extensions: crate::plugin::PluginExtensions::default(),
     };
     let mut contributions = crate::plugin::PluginContributions::default();
+    let entries = recipes
+        .iter()
+        .flat_map(|recipe| recipe.entries.clone())
+        .collect::<Vec<_>>();
     for recipe in recipes {
         let id = recipe
             .entries
@@ -314,5 +329,14 @@ pub fn prompt_catalog_from_recipes(
     }
     Ok(crate::plugin::prompt::PromptCatalog::new(
         contributions.prompt,
+        crate::plugin::prompt::PromptCatalogSnapshot::from_inventory(
+            &crate::plugin::InstalledInventory {
+                scope: crate::plugin::InventoryScope::Deployment(
+                    crate::plugin::RegistryKind::Session,
+                ),
+                readiness: vec![crate::plugin::ContributionReadiness::NotValidated; entries.len()],
+                entries,
+            },
+        ),
     ))
 }

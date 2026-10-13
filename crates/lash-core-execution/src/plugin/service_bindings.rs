@@ -492,6 +492,41 @@ impl ServiceBindings {
             .await
     }
 
+    /// The callable adapters installed by RuntimeSessionServices for session owners.
+    /// Process adapters are installed only when the runtime has its process registry;
+    /// actual invocation bindings are checked again before owner construction.
+    pub(crate) fn session_runtime_services(
+        processes: bool,
+    ) -> std::collections::BTreeSet<ServiceKind> {
+        use ServiceKind::*;
+        let mut services = std::collections::BTreeSet::from([
+            TurnScope,
+            CurrentSessionSnapshot,
+            NamedSessionSnapshot,
+            RecordedToolCatalog,
+            SessionCreate,
+            SessionGraphAppend,
+        ]);
+        if processes {
+            services.extend([
+                ProcessList,
+                ProcessListForAttempt,
+                ProcessStartFromRequest,
+                ProcessRecordedStart,
+                ProcessBoundStart,
+                ProcessBoundCancel,
+                ProcessStart,
+                ProcessAwait,
+                ProcessReleaseHold,
+                ProcessAbandonHold,
+                ProcessValidateVisible,
+                ProcessCancel,
+                ProcessRecordedCancel,
+                ProcessTransfer,
+            ]);
+        }
+        services
+    }
     pub fn available(&self) -> std::collections::BTreeSet<ServiceKind> {
         let mut services = std::collections::BTreeSet::new();
         if self.turn_scope.is_some() {

@@ -15,6 +15,7 @@ pub struct PluginHost {
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     recipes: Arc<std::sync::OnceLock<Result<Vec<Arc<PluginRecipe>>, PluginError>>>,
     protocol_factory: Option<Arc<dyn PluginFactory>>,
+    deployment_inventory: Arc<std::sync::OnceLock<InstalledInventory>>,
     pub(super) export_plugin_namespaces: bool,
     extensions: PluginExtensions,
     sessions: Arc<StdMutex<BTreeMap<RuntimeOwner, Weak<PluginSession>>>>,
@@ -166,6 +167,7 @@ impl PluginHost {
             factories: Arc::new(all_factories),
             recipes: Arc::default(),
             protocol_factory: None,
+            deployment_inventory: Arc::default(),
             export_plugin_namespaces: true,
             extensions,
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
@@ -180,6 +182,8 @@ impl PluginHost {
     /// Select the protocol factory without constructing a session.
     pub fn with_protocol_plugin(mut self, protocol: Arc<dyn PluginFactory>) -> Self {
         self.recipes = Arc::default();
+        self.deployment_inventory = Arc::default();
+        self.config_registry = Arc::default();
         let factories = Arc::make_mut(&mut self.factories);
         if let Some(existing) = factories
             .iter_mut()
@@ -229,6 +233,7 @@ impl PluginHost {
             factories: Arc::clone(&self.factories),
             recipes: Arc::clone(&self.recipes),
             protocol_factory: self.protocol_factory.clone(),
+            deployment_inventory: Arc::clone(&self.deployment_inventory),
             export_plugin_namespaces: self.export_plugin_namespaces,
             extensions: self.extensions.clone(),
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
@@ -261,14 +266,23 @@ impl PluginHost {
 
     /// Every factory's transcript decoder, the protocol's first: a pure
     /// extension that needs no materialized plugin.
-    pub fn transcript_decoders(&self) -> lash_core_store::transcript::TranscriptDecoders {
-        self.protocol_factory
+    pub fn transcript_decoders(
+        &self,
+    ) -> Result<lash_core_store::transcript::TranscriptDecoders, PluginError> {
+        let recipes = self.recipes()?;
+        let protocol = self.protocol_plugin_id();
+        Ok(recipes
             .iter()
-            .chain(self.factories.iter())
-            .filter_map(|factory| factory.transcript_decoder())
+            .filter(|recipe| Some(recipe.owner()) == protocol)
+            .chain(
+                recipes
+                    .iter()
+                    .filter(|recipe| Some(recipe.owner()) != protocol),
+            )
+            .filter_map(|recipe| recipe.transcript_decoder.clone())
             .fold(Default::default(), |decoders, decoder| {
                 decoders.with_decoder(decoder)
-            })
+            }))
     }
 
     /// This host's plugins in hook order ([`super::PluginComposition`]): the
@@ -365,7 +379,15 @@ impl PluginHost {
         mut runtime_host: crate::RuntimeHostConfig,
         process_lifecycle_available: bool,
     ) -> Result<crate::RuntimeHostConfig, PluginError> {
-        self.composition()?;
+        self.preflight_available(&ServiceBindings::session_runtime_services(
+            process_lifecycle_available,
+        ))?;
+        runtime_host
+            .process_engines
+            .components()
+            .preflight_deployment()?;
+        let inventory = self.inventory(ContributionReadiness::Ready)?;
+        let _ = self.deployment_inventory.set(inventory);
         let trace_runtime = runtime_host.tracing.clone();
         let backend = runtime_host.backend().clone();
         let ctx = super::ProcessEngineContributionContext::new(
@@ -419,6 +441,8 @@ impl PluginHost {
         self.composition()?;
         Ok(Arc::new(PluginSession {
             bindings: Arc::default(),
+            declared_inventory: Arc::new(self.installed_inventory()?),
+            transcript_decoders: self.transcript_decoders()?,
             state: Arc::new(StdMutex::new({
                 let mut registry = if forked {
                     PluginStateRegistry::from_fork(snapshot)
@@ -620,6 +644,10 @@ impl PluginHost {
     }
 
     pub fn preflight_services(&self, bindings: &ServiceBindings) -> Result<(), PluginError> {
+        self.preflight_available(&bindings.available())
+    }
+
+    fn preflight_available(&self, available: &BTreeSet<ServiceKind>) -> Result<(), PluginError> {
         let recipes = self.recipes()?;
         for (slot, port) in [
             (
@@ -649,14 +677,27 @@ impl PluginHost {
             }
         }
         for (factory, recipe) in self.factories().iter().zip(self.recipes()?) {
-            bindings
-                .preflight(factory.id(), &recipe.requirements)
-                .map_err(PluginError::Preflight)?;
+            if let Some(service) = recipe.requirements.services.difference(available).next() {
+                return Err(PluginError::Preflight(PreflightIssue::MissingService {
+                    owner: factory.id().into(),
+                    service: *service,
+                }));
+            }
         }
         Ok(())
     }
     /// Deployment declarations; this never constructs an owner or executes callbacks.
     pub fn installed_inventory(&self) -> Result<InstalledInventory, PluginError> {
+        match self.deployment_inventory.get() {
+            Some(inventory) => Ok(inventory.clone()),
+            None => self.inventory(ContributionReadiness::NotValidated),
+        }
+    }
+
+    fn inventory(
+        &self,
+        readiness: ContributionReadiness,
+    ) -> Result<InstalledInventory, PluginError> {
         let entries = self
             .recipes()?
             .iter()
@@ -669,7 +710,7 @@ impl PluginHost {
             .collect::<Vec<_>>();
         Ok(InstalledInventory {
             scope: InventoryScope::Deployment(lash_core_store::obligations::RegistryKind::Session),
-            readiness: vec![ContributionReadiness::Ready; entries.len()],
+            readiness: vec![readiness; entries.len()],
             entries,
         })
     }
@@ -681,7 +722,7 @@ impl PluginHost {
     ) -> Result<BuiltSessionContributions, PluginError> {
         self.preflight_services(&ctx.bindings)?;
         let recipes = self.recipes()?;
-        let inventory = self.installed_inventory()?;
+        let inventory = self.inventory(ContributionReadiness::Ready)?;
         let mut registry = state.lock_recover();
         for factory in self.factories() {
             registry

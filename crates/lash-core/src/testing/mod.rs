@@ -186,4 +186,6 @@ pub fn response_synthesized_from_aborted_stream(
 /// Laws exercised by optional plugins over their own durable codecs.
 pub use lash_core_store::testing::guarded_surfaces;
 
-pub use lash_core_execution::runtime::actor::round::graph::{AdmitMember, PinnedMember, RoundFact};
+pub use lash_core_execution::runtime::actor::round::graph::{
+    AdmitMember, CallOutcome, MaterialNode, PinnedMember, RoundFact, SettledFact,
+};

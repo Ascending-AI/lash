@@ -70,9 +70,6 @@ impl PluginMetadata for CountedFactory {
 }
 #[async_trait::async_trait]
 impl PluginFactory for CountedFactory {
-    fn transcript_decoder(&self) -> Option<Arc<dyn crate::plugins::TranscriptDecoderPlugin>> {
-        self.inner.transcript_decoder()
-    }
     fn initialize_state(
         &self,
         owner: &crate::RuntimeOwner,

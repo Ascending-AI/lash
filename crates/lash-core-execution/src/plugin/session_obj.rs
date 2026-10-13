@@ -212,6 +212,8 @@ pub struct PluginSession {
     pub(super) state: Arc<std::sync::Mutex<PluginStateRegistry>>,
     pub(super) native_view: Arc<std::sync::Mutex<Option<PluginNativeView>>>,
     pub(super) host: PluginHost,
+    pub(super) declared_inventory: Arc<InstalledInventory>,
+    pub(super) transcript_decoders: lash_core_store::transcript::TranscriptDecoders,
     pub(super) owner: crate::RuntimeOwner,
     pub(super) capabilities: Arc<std::sync::OnceLock<PluginSessionCapabilities>>,
     pub(super) materialized: Arc<std::sync::atomic::AtomicBool>,
@@ -573,7 +575,7 @@ impl PluginSession {
     /// The host's transcript decoders: pure, so a session decodes its
     /// committed history whether or not its plugins are materialized.
     pub fn transcript_decoders(&self) -> lash_core_store::transcript::TranscriptDecoders {
-        self.host.transcript_decoders()
+        self.transcript_decoders.clone()
     }
 
     pub fn assistant_prose_projector(&self) -> Option<Arc<dyn AssistantProseProjectorPlugin>> {
@@ -598,11 +600,13 @@ impl PluginSession {
     }
 
     pub fn plugin_operations(&self) -> Vec<PluginOperationDef> {
-        self.capabilities()
-            .contributions
-            .plugin_operations
-            .values()
-            .map(|op| op.def().clone())
+        self.declared_inventory
+            .entries
+            .iter()
+            .filter_map(|entry| match &entry.details {
+                ContributionDetails::Operation(def) => Some(def.clone()),
+                _ => None,
+            })
             .collect()
     }
 

@@ -646,6 +646,7 @@ struct RegisteredPromptWrap {
     wrapper: Arc<dyn PromptSectionWrap>,
 }
 
+#[cfg(test)]
 impl RegisteredPromptWrap {
     fn id(&self) -> PromptWrapId {
         PromptWrapId {
@@ -664,11 +665,6 @@ pub struct PromptRegistry {
 }
 
 impl PromptRegistry {
-    pub fn owners(&self) -> impl Iterator<Item = (String, PromptSectionId)> {
-        self.sections()
-            .map(|section| (section.owner.clone(), section.id()))
-    }
-
     fn sections(&self) -> impl Iterator<Item = &RegisteredPromptSection> {
         self.entries.iter().filter_map(|entry| match entry {
             RegisteredPromptEntry::Section(section) => Some(section),
@@ -824,7 +820,7 @@ pub struct PromptSectionFamilyInfo {
 
 /// A session's registered sections, families and wrappers. Read-only.
 #[derive(Clone, Default)]
-pub struct PromptCatalog(Arc<PromptRegistry>);
+pub struct PromptCatalog(Arc<PromptRegistry>, PromptCatalogSnapshot);
 
 /// A section selected for one call, before placement.
 struct SelectedSection {
@@ -835,50 +831,23 @@ struct SelectedSection {
 }
 
 impl PromptCatalog {
-    pub(crate) fn new(registry: PromptRegistry) -> Self {
-        Self(Arc::new(registry))
+    pub(crate) fn new(registry: PromptRegistry, metadata: PromptCatalogSnapshot) -> Self {
+        Self(Arc::new(registry), metadata)
     }
 
     /// Every registered section, in registration order.
     pub fn sections(&self) -> Vec<PromptSectionInfo> {
-        self.0
-            .sections()
-            .map(|section| PromptSectionInfo {
-                section: section.id(),
-                owner: section.owner.clone(),
-                default_placement: section.spec.default_placement,
-                purposes: section.spec.purposes.clone(),
-            })
-            .collect()
+        self.1.sections()
     }
 
     /// Every registered section family, in registration order.
     pub fn families(&self) -> Vec<PromptSectionFamilyInfo> {
-        self.0
-            .families()
-            .map(|family| PromptSectionFamilyInfo {
-                family: family.id(),
-                owner: family.owner.clone(),
-                default_placement: family.spec.default_placement,
-                purposes: family.spec.purposes.clone(),
-            })
-            .collect()
+        self.1.families()
     }
 
-    /// Every registered wrapper, in chain order: plugin registration order,
-    /// then declaration order.
+    /// Every wrapper, in declaration order, from the frozen inventory.
     pub fn wraps(&self) -> Vec<ResolvedPromptWrap> {
-        self.0
-            .wraps
-            .iter()
-            .zip(0u32..)
-            .map(|(wrap, ordinal)| ResolvedPromptWrap {
-                wrap: wrap.id(),
-                owner: wrap.owner.clone(),
-                target: wrap.spec.target.clone(),
-                ordinal,
-            })
-            .collect()
+        self.1.wraps()
     }
 
     /// The sections that render for a `purpose` call offered `offered`, in
@@ -936,19 +905,7 @@ impl PromptCatalog {
     /// a registered family's prefix is admitted even when this call offers
     /// none of that family's tools.
     pub fn validate_plan(&self, plan: &PromptPlan) -> Result<(), PromptPlanError> {
-        plan.validate()?;
-        for section in plan
-            .order
-            .iter()
-            .chain(plan.placements.iter().map(|p| &p.section))
-        {
-            if !self.0.knows(section) {
-                return Err(PromptPlanError::UnknownSection {
-                    section: section.clone(),
-                });
-            }
-        }
-        Ok(())
+        self.1.validate_plan(plan)
     }
 
     /// How `plan` resolves for a `purpose` call offered `offered`: the

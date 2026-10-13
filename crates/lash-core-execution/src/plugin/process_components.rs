@@ -413,7 +413,7 @@ impl ProcessComponentRegistry {
                 declaration.id
             )));
         }
-        let recipe = Arc::new(Arc::clone(&factory).recipe()?);
+        let mut recipe = Arc::clone(&factory).recipe()?;
         validate_process_entries(&recipe.entries)?;
         if recipe
             .entries
@@ -425,6 +425,18 @@ impl ProcessComponentRegistry {
                 declaration.id
             )));
         }
+        recipe.entries.push(ContributionDescriptor {
+            registry: RegistryKind::Process,
+            kind: ContributionKind::ConfigNamespace,
+            key: ContributionKey::Named {
+                owner: declaration.id.to_string(),
+                key: key.component().into(),
+            },
+            registration_order: u32::try_from(recipe.entries.len()).unwrap_or(u32::MAX),
+            priority: None,
+            details: ContributionDetails::Named,
+        });
+        let recipe = Arc::new(recipe);
         let mut components = (*self.components).clone();
         components.insert(
             declaration.id.as_str().to_owned(),
@@ -460,7 +472,12 @@ impl ProcessComponentRegistry {
     /// installed registrations.
     pub fn served_tokens(&self) -> BTreeSet<crate::ObligationToken> {
         let mut served = self.installed_inventory().served_tokens();
-        for declaration in self.declarations() {
+        for registered in self
+            .components
+            .values()
+            .filter(|registered| self.preflight_component(registered).is_ok())
+        {
+            let declaration = &registered.declaration;
             for format in &declaration.readable_formats {
                 served.insert(crate::ObligationToken::for_component(
                     &declaration.id,
@@ -475,16 +492,46 @@ impl ProcessComponentRegistry {
         self.materialized_inventories.clone()
     }
 
+    /// Validate unconditional deployment ports without admitting an environment or binding an owner.
+    pub fn preflight_deployment(&self) -> Result<(), PluginError> {
+        for registered in self.components.values() {
+            self.preflight_component(registered)
+                .map_err(PluginError::Preflight)?;
+        }
+        Ok(())
+    }
+
+    fn preflight_component(&self, registered: &RegisteredComponent) -> Result<(), PreflightIssue> {
+        for service in &registered.recipe.requirements.services {
+            if *service != ServiceKind::GrantedSessionReads || self.host.sessions.is_none() {
+                return Err(PreflightIssue::MissingService {
+                    owner: registered.declaration.id.to_string(),
+                    service: *service,
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub fn installed_inventory(&self) -> InstalledInventory {
-        let entries = self
-            .components
-            .values()
-            .flat_map(|registered| registered.recipe.entries.clone())
-            .collect::<Vec<_>>();
+        let mut entries = Vec::new();
+        let mut readiness = Vec::new();
+        for registered in self.components.values() {
+            let ready = self
+                .preflight_component(registered)
+                .map_or_else(ContributionReadiness::Refused, |_| {
+                    ContributionReadiness::Ready
+                });
+            for mut entry in registered.recipe.entries.clone() {
+                entry.registration_order = u32::try_from(entries.len()).unwrap_or(u32::MAX);
+                entries.push(entry);
+                readiness.push(ready.clone());
+            }
+        }
         InstalledInventory {
             scope: InventoryScope::Deployment(crate::RegistryKind::Process),
-            readiness: vec![ContributionReadiness::Ready; entries.len()],
             entries,
+            readiness,
         }
     }
 
@@ -565,23 +612,6 @@ impl ProcessComponentRegistry {
     ) -> Result<BuiltComponents, ProcessEnvRefusal> {
         let mut contributions = PluginContributions::default();
         let mut owners = Vec::with_capacity(env.components().len());
-        let entries = env
-            .components()
-            .iter()
-            .map(|entry| self.component(entry))
-            .collect::<Result<Vec<_>, _>>()?
-            .iter()
-            .flat_map(|registered| registered.recipe.entries.clone())
-            .collect::<Vec<_>>();
-        let inventory = InstalledInventory {
-            scope: process.map_or(
-                InventoryScope::Deployment(crate::RegistryKind::Process),
-                |process| InventoryScope::Owner(crate::RuntimeOwner::Process(process.clone())),
-            ),
-            readiness: vec![ContributionReadiness::Ready; entries.len()],
-            entries,
-        };
-        contributions.inventory = Some(Arc::new(inventory));
         let mut presenter = None;
         for entry in env.components() {
             let registered = self.component(entry)?;
@@ -610,6 +640,28 @@ impl ProcessComponentRegistry {
                 presenter = Some(entry.id().to_string());
             }
         }
+        let entries = env
+            .components()
+            .iter()
+            .map(|entry| self.component(entry))
+            .collect::<Result<Vec<_>, _>>()?
+            .iter()
+            .flat_map(|registered| registered.recipe.entries.clone())
+            .enumerate()
+            .map(|(index, mut entry)| {
+                entry.registration_order = u32::try_from(index).unwrap_or(u32::MAX);
+                entry
+            })
+            .collect::<Vec<_>>();
+        let inventory = InstalledInventory {
+            scope: process.map_or(
+                InventoryScope::Deployment(crate::RegistryKind::Process),
+                |process| InventoryScope::Owner(crate::RuntimeOwner::Process(process.clone())),
+            ),
+            readiness: vec![ContributionReadiness::Ready; entries.len()],
+            entries,
+        };
+        contributions.inventory = Some(Arc::new(inventory));
         for entry in env.components() {
             let registered = self.component(entry)?;
             let id = entry.id().to_string();
@@ -1137,7 +1189,7 @@ fn validate_process_entries(entries: &[ContributionDescriptor]) -> Result<(), Pl
             ContributionKind::PromptSection => {
                 matches!(&entry.details, ContributionDetails::PromptSection(spec) if spec.purposes.iter().all(|purpose| matches!(purpose, PromptPurpose::Direct { .. })))
             }
-            ContributionKind::StateReducer => true,
+            ContributionKind::StateReducer | ContributionKind::ConfigNamespace => true,
             _ => false,
         };
         if !allowed {

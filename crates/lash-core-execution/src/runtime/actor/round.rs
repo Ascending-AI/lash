@@ -877,6 +877,39 @@ pub fn admitted_bindings_of(
     }
 }
 
+/// Read only the selected call's retained output, with the fact and material checks
+/// used by execution. This does not fold the run or execute a callback.
+///
+/// # Errors
+/// A malformed fact, material reference or outcome graph.
+pub fn tool_outcome_of(
+    facts: &lash_durable::domain::graph::RunFacts,
+    row: &lash_durable::domain::graph::RunFactRow,
+    call: &ToolCallId,
+) -> Result<Option<crate::ToolCallOutput>, lash_core_store::checkpoint_graph::GraphRefusal> {
+    use lash_core_store::checkpoint_graph::{GraphDecoder, GraphRefusal, NodeKind};
+    if row.kind != lash_durable::domain::RunFactKind::XOutcome
+        || row.call.as_ref().is_some_and(|recorded| recorded != call)
+    {
+        return Ok(None);
+    }
+    let mut decoder = GraphDecoder::new(facts, facts.read_limits);
+    let graph::RoundFact::Outcome { output, .. } =
+        graph::RoundFact::load(&mut decoder, row.record)?
+    else {
+        return Err(GraphRefusal::InvalidBody {
+            kind: NodeKind::ROUND_FACT.0,
+            reason: "an outcome row holds another fact kind".into(),
+        });
+    };
+    output.check(&mut decoder)?;
+    let Some(graph::MaterialNode::Outcome(node)) = output.material else {
+        return Ok(None);
+    };
+    let outcome = graph::CallOutcome::load(&mut decoder, node)?;
+    Ok((outcome.call_id == *call).then_some(outcome.output))
+}
+
 /// Refuse an admission of no draft, or of one call twice.
 fn check_drafts(drafts: &[ExecutionDraft]) -> Result<(), AdmissionRefusal> {
     if drafts.is_empty() {

@@ -33,10 +33,10 @@ pub use lash_core_execution::process_id_from_handle_json;
 pub use lash_core_execution::runtime::actor::claim_obligations::{
     ObligationSite, ObligationStage, ObligationUse, RecordedWork, RequiresMismatch,
 };
-pub use lash_core_execution::runtime::actor::round::admitted_bindings_of;
 pub use lash_core_execution::runtime::actor::round::{
     CallOwner, ParkedCall, StagedPluginState, StoreLocalEffect, StoreLocalRows, parked,
 };
+pub use lash_core_execution::runtime::actor::round::{admitted_bindings_of, tool_outcome_of};
 /// Durable tool-effect format versions, re-exported for the format manifest.
 pub use lash_core_execution::waits;
 pub use lash_core_execution::{

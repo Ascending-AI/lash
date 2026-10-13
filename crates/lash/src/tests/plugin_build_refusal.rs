@@ -13,6 +13,110 @@ const REFUSAL: &str = "the probe refuses this session";
 /// Generous for a mock turn, and far short of a hang.
 const SETTLES_WITHIN: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// PORT-PREFLIGHT-PRECEDES-BIND includes deployment engine installation.
+#[tokio::test]
+async fn deployment_preflight_precedes_engine_binding() {
+    use crate::plugins::{PluginRegistrar, PreflightIssue, RequiredPort};
+    let backend = sqlite_memory_store_backend().await;
+    let binds = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&binds);
+    let mut reg = PluginRegistrar::<()>::new("missing-driver");
+    reg.protocol()
+        .session(|_, _| Err(lash_core::PluginError::Invoke("cannot bind".into())))
+        .unwrap();
+    let recipe = PluginRecipe::bound("missing-driver", reg, |_, _| Ok(Arc::new(())))
+        .with_process_engine("testing-fixture", move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok(lash_core::ProcessEngineRegistration::accepting(Arc::new(
+                lash_core::testing::FixtureProcessEngine,
+            )))
+        });
+    let result = explicit_ephemeral_facets(LashCore::builder(backend))
+        .protocol_plugin(Arc::new(PluginRecipeFactory::new(
+            PluginDeclaration::initial("missing-driver"),
+            recipe,
+        )))
+        .build(crate::testing::runtime_lease_owner());
+    assert!(
+        matches!(
+            result,
+            Err(EmbedError::Plugin(lash_core::PluginError::Preflight(
+                PreflightIssue::MissingPort {
+                    port: RequiredPort::ProtocolDriver
+                }
+            )))
+        ),
+        "deployment refuses before advertising callbacks"
+    );
+    assert_eq!(binds.load(Ordering::SeqCst), 0);
+}
+
+/// A missing process host port refuses the deployment before engine binding.
+#[tokio::test]
+async fn deployment_preflight_requires_process_host_port() {
+    use crate::plugins::{PluginRegistrar, PreflightIssue, ProcessRecipe, ServiceKind};
+    struct Component;
+    impl lash_core::plugin::ProcessComponentFactory for Component {
+        fn declaration(&self) -> lash_core::plugin::ProcessComponentDeclaration {
+            lash_core::plugin::ProcessComponentDeclaration::initial(
+                "needs-reads",
+                lash_core::FormatVersion::ONE,
+            )
+            .unwrap()
+        }
+        fn config_type(&self) -> std::any::TypeId {
+            std::any::TypeId::of::<()>()
+        }
+        fn validate(
+            &self,
+            _: &lash_core::ProcessComponentEntry,
+            _: &lash_core::ProcessEnv,
+        ) -> std::result::Result<(), lash_core::ProcessEnvRefusal> {
+            Ok(())
+        }
+        fn recipe(self: Arc<Self>) -> std::result::Result<ProcessRecipe, lash_core::PluginError> {
+            let mut reg = PluginRegistrar::<()>::for_process("needs-reads");
+            reg.require(ServiceKind::GrantedSessionReads);
+            Ok(ProcessRecipe::new("needs-reads", reg, |_| {
+                panic!("unavailable host cannot bind")
+            }))
+        }
+    }
+    let binds = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&binds);
+    let engine = PluginRecipe::empty("engine-spy", |_, _| Ok(())).with_process_engine(
+        "testing-fixture",
+        move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok(lash_core::ProcessEngineRegistration::accepting(Arc::new(
+                lash_core::testing::FixtureProcessEngine,
+            )))
+        },
+    );
+    let result = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .plugin(Arc::new(PluginRecipeFactory::new(
+        PluginDeclaration::initial("engine-spy"),
+        engine,
+    )))
+    .process_component(
+        Arc::new(Component),
+        lash_core::ProcessConfigKey::<()>::new("needs-reads", lash_core::FormatVersion::ONE),
+    )
+    .build(crate::testing::runtime_lease_owner());
+    assert!(matches!(
+        result,
+        Err(EmbedError::Plugin(lash_core::PluginError::Preflight(
+            PreflightIssue::MissingService {
+                service: ServiceKind::GrantedSessionReads,
+                ..
+            }
+        )))
+    ));
+    assert_eq!(binds.load(Ordering::SeqCst), 0);
+}
+
 /// A factory whose build answers `refusal(attempt)` for each 1-based attempt,
 /// and an empty plugin once that answers `None`.
 fn probe(

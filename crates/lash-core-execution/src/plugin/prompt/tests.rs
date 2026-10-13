@@ -15,7 +15,47 @@ fn catalog(plugins: Vec<(&'static str, Register)>) -> Result<PromptCatalog, Plug
         register(&mut reg)?;
         contributions = reg.contributions;
     }
-    Ok(PromptCatalog::new(contributions.prompt))
+    // Renderer fixtures use internal executable registrations; prepare their
+    // explicit declaration fixture before handing it to the descriptive reader.
+    let mut entries = Vec::new();
+    for entry in &contributions.prompt.entries {
+        let (kind, key, details) = match entry {
+            RegisteredPromptEntry::Section(section) => (
+                crate::plugin::ContributionKind::PromptSection,
+                crate::plugin::ContributionKey::PromptSection(section.id()),
+                crate::plugin::ContributionDetails::PromptSection(section.spec.clone()),
+            ),
+            RegisteredPromptEntry::Family(family) => (
+                crate::plugin::ContributionKind::PromptFamily,
+                crate::plugin::ContributionKey::PromptFamily(family.id()),
+                crate::plugin::ContributionDetails::PromptFamily(family.spec.clone()),
+            ),
+        };
+        entries.push(crate::plugin::ContributionDescriptor {
+            registry: crate::plugin::RegistryKind::Session,
+            kind,
+            key,
+            details,
+            registration_order: u32::try_from(entries.len()).unwrap(),
+            priority: None,
+        });
+    }
+    for wrap in &contributions.prompt.wraps {
+        entries.push(crate::plugin::ContributionDescriptor {
+            registry: crate::plugin::RegistryKind::Session,
+            kind: crate::plugin::ContributionKind::PromptWrapper,
+            key: crate::plugin::ContributionKey::PromptWrapper(wrap.id()),
+            details: crate::plugin::ContributionDetails::PromptWrapper(wrap.spec.clone()),
+            registration_order: u32::try_from(entries.len()).unwrap(),
+            priority: None,
+        });
+    }
+    let metadata = PromptCatalogSnapshot::from_inventory(&crate::plugin::InstalledInventory {
+        scope: crate::plugin::InventoryScope::Deployment(crate::plugin::RegistryKind::Session),
+        readiness: vec![crate::plugin::ContributionReadiness::NotValidated; entries.len()],
+        entries,
+    });
+    Ok(PromptCatalog::new(contributions.prompt, metadata))
 }
 
 fn key(key: &str) -> PromptSectionKey {

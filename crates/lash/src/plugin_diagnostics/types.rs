@@ -140,6 +140,8 @@ pub enum EvidenceAbsence {
     DetailsNotRequested,
     ObservationChanged,
     StoredRequiresMismatch,
+    OccurrenceNotRecorded,
+    UnsupportedRetainedRepresentation,
     ReadBoundExceeded,
 }
 #[derive(Clone, Debug)]
@@ -165,12 +167,12 @@ pub enum RecordedAttribution {
     },
     Presentation(PresentationBinding),
     BeforeCheck {
-        checks: CheckRecord<BeforeCheckVerdict>,
-        selected: Option<AttributedVerdict<BeforeCheckVerdict>>,
+        checks: CheckRecord<crate::plugins::BeforeToolDecision>,
+        selected: Option<AttributedVerdict<crate::plugins::BeforeToolDecision>>,
     },
     ResultCheck {
-        checks: CheckRecord<AfterCheckVerdict>,
-        selected: Option<AttributedVerdict<AfterCheckVerdict>>,
+        checks: CheckRecord<crate::plugins::AfterToolDecision>,
+        selected: Option<AttributedVerdict<crate::plugins::AfterToolDecision>>,
     },
     Prompt(ResolvedPromptSection),
     Owner(RecordedTurnContribution),

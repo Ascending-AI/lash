@@ -19,6 +19,7 @@ pub enum ContributionKind {
     ConfigCommand,
     Extension,
     ProcessEngine,
+    TranscriptDecoder,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ContributionKey {
@@ -71,6 +72,8 @@ pub enum InventoryScope {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ContributionReadiness {
+    /// Declarations have not passed deployment preflight and serve no callbacks.
+    NotValidated,
     Ready,
     Refused(PreflightIssue),
 }
@@ -940,6 +943,7 @@ pub struct PluginRecipe {
     pub(crate) configuration: ConfigRegistrar,
     pub(crate) factory_extensions: Vec<PluginExtensionContribution>,
     engines: Vec<DeclaredProcessEngine>,
+    pub(crate) transcript_decoder: Option<Arc<dyn TranscriptDecoderPlugin>>,
     pub(crate) entries: Vec<ContributionDescriptor>,
     pub requirements: Requirements,
     bind: SessionOwnerBinder,
@@ -964,6 +968,15 @@ impl PluginRecipe {
     }
     /// Freeze the codecs registered through the configuration facet.
     pub fn with_configuration(mut self, configuration: ConfigRegistrar) -> Self {
+        self.entries.retain(|entry| {
+            !matches!(
+                entry.kind,
+                ContributionKind::ConfigNamespace | ContributionKind::ConfigCommand
+            )
+        });
+        for (index, entry) in self.entries.iter_mut().enumerate() {
+            entry.registration_order = u32::try_from(index).unwrap_or(u32::MAX);
+        }
         let offset = u32::try_from(self.entries.len()).unwrap_or(u32::MAX);
         self.entries.extend(
             configuration
@@ -976,6 +989,24 @@ impl PluginRecipe {
                 }),
         );
         self.configuration = configuration;
+        self
+    }
+    /// Install the pure history decoder and its owner-attributed descriptor together.
+    pub fn with_transcript_decoder(mut self, decoder: Arc<dyn TranscriptDecoderPlugin>) -> Self {
+        if self.transcript_decoder.is_none() {
+            self.entries.push(ContributionDescriptor {
+                registry: RegistryKind::Session,
+                kind: ContributionKind::TranscriptDecoder,
+                key: ContributionKey::Named {
+                    owner: self.owner.clone(),
+                    key: "transcript".into(),
+                },
+                registration_order: u32::try_from(self.entries.len()).unwrap_or(u32::MAX),
+                priority: None,
+                details: ContributionDetails::Named,
+            });
+        }
+        self.transcript_decoder = Some(decoder);
         self
     }
     pub fn with_factory_extension(mut self, extension: PluginExtensionContribution) -> Self {
@@ -1073,6 +1104,7 @@ impl PluginRecipe {
             configuration: ConfigRegistrar::new(owner),
             factory_extensions: Vec::new(),
             engines: Vec::new(),
+            transcript_decoder: None,
             entries,
             requirements,
             bind: Arc::new(move |context, state, reg| {
@@ -1129,6 +1161,7 @@ impl PluginRecipe {
             configuration: ConfigRegistrar::new(id),
             factory_extensions: Vec::new(),
             engines: Vec::new(),
+            transcript_decoder: None,
             entries: registrations.descriptors(id, RegistryKind::Session),
             requirements: registrations.requirements.clone(),
             bind: Arc::new(move |context, state, reg| {

@@ -843,12 +843,6 @@ pub trait PluginMetadata {
 /// [`shutdown`](Self::shutdown).
 #[async_trait::async_trait]
 pub trait PluginFactory: PluginMetadata + Send + Sync {
-    /// Pure display extension. Available to durable readers without plugin
-    /// materialization, state restoration, effects or a session writer.
-    fn transcript_decoder(&self) -> Option<Arc<dyn super::TranscriptDecoderPlugin>> {
-        None
-    }
-
     fn id(&self) -> &'static str;
 
     /// Pure initial values for a namespace absent from the recorded base.

@@ -221,12 +221,6 @@ impl RlmProtocolPluginFactory {
 }
 
 impl PluginFactory for RlmProtocolPluginFactory {
-    fn transcript_decoder(&self) -> Option<Arc<dyn lash_core::plugin::TranscriptDecoderPlugin>> {
-        Some(Arc::new(
-            crate::projection::transcript::RlmTranscriptDecoder,
-        ))
-    }
-
     fn id(&self) -> &'static str {
         RLM_PROTOCOL_PLUGIN_ID
     }
@@ -312,7 +306,9 @@ impl PluginFactory for RlmProtocolPluginFactory {
                 },
             ))
         };
-        let mut recipe = recipe?;
+        let mut recipe = recipe?.with_transcript_decoder(Arc::new(
+            crate::projection::transcript::RlmTranscriptDecoder,
+        ));
         let mut configuration = lash_core::plugin::ConfigRegistrar::new(
             lash_core::plugin::PluginFactory::id(recipe_factory.as_ref()),
         );
