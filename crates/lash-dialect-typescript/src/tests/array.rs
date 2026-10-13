@@ -151,6 +151,113 @@ fn law(source: &str) {
     }
 }
 
+/// Discarded direct pushes do only the append work, attributed to the
+/// document body under K-CHG-007. There is no return-length computation.
+#[test]
+fn discarded_push_charges_only_the_append_body() {
+    for (source, lengths) in [
+        ("const a = []; a.push();", 0),
+        ("const a = []; a.push(1);", 1),
+        ("const a = []; a.push(1, 2);", 2),
+    ] {
+        let lowered = super::lower(source).unwrap();
+        let text = lash_kernel_doc::print_document(&lowered.document);
+        assert_eq!(text.matches("list.len(").count(), lengths, "{text}");
+        assert!(!text.contains("num.to_float("), "{text}");
+        let mut machine = KernelMachine::start(
+            Program {
+                document: Arc::new(lowered.document),
+                library: kernel().prepared.clone(),
+            },
+            Bounds {
+                charge: 100_000_000,
+                memory: 16 << 20,
+                call_depth: 200,
+                live_tasks: 100,
+                requests_per_park: 100,
+                join_members: 100,
+            },
+            Start {
+                target: Target::Main,
+                args: Vec::new(),
+                bindings: Bindings::default(),
+            },
+        )
+        .unwrap();
+        machine.count_work();
+        assert!(matches!(
+            machine.run(&mut NoHost, u64::MAX).unwrap(),
+            Step::Ended(End::Finished(_))
+        ));
+        let work = machine.work().unwrap();
+        assert_eq!(work.residual(), 0, "{work:?}");
+        assert_eq!(work.insertion_residual(), 0, "{work:?}");
+        assert_eq!(work.unattributed_charge, 0, "{work:?}");
+        assert_eq!(work.charged, machine.meters().charged);
+    }
+}
+
+/// Expression consumers and spread arguments still get push's new length.
+#[test]
+fn consumed_and_spread_pushes_return_the_new_length() {
+    law(r#"
+        const a = [];
+        const n = a.push(1);
+        const f = (x) => x;
+        const passed = f(a.push(2, 3));
+        const expression = [a.push(4) + 1];
+        const spread = a.push(...[5, 6]);
+        a.push(...[7, 8]);
+        const empty = a.push();
+        function typed(a: number[]) { return a.push(9); }
+        await finish(n === 1 && passed === 3 && expression[0] === 5
+            && spread === 6 && empty === 8 && typed(a) === 9
+            && a.join(',') === '1,2,3,4,5,6,7,8,9');
+    "#);
+}
+
+/// Receiver evaluation precedes arguments; every argument precedes the
+/// outer append, whose positions use the list's length after argument mutation.
+#[test]
+fn discarded_multi_argument_push_preserves_evaluation_and_mutation_order() {
+    law(r#"
+        const a = ['start']; let trace = '';
+        const receiver = () => { trace += 'receiver;'; return a; };
+        const first = () => { trace += 'first:' + a.length + ';'; a.push('inner'); return 'one'; };
+        const second = () => { trace += 'second:' + a.join(',') + ';'; return 'two'; };
+        receiver().push(first(), second());
+        function typed(a: string[]) { a.push('typed-one', 'typed-two'); }
+        typed(a);
+        let caught = false;
+        const fail = () => { throw 'stop'; };
+        try { a.push('never', fail()); } catch (e) { caught = e === 'stop'; }
+        await finish(trace === 'receiver;first:1;second:start,inner;'
+            && a.join(',') === 'start,inner,one,two,typed-one,typed-two' && caught);
+    "#);
+}
+
+/// A non-array method is read before its arguments, keeps its receiver,
+/// and is called even when its result is discarded. Borrowed push stays generic.
+#[test]
+fn discarded_push_on_non_arrays_keeps_generic_method_semantics() {
+    law(r#"
+        let trace = '';
+        const o = { tag: 'old', push(x, y) { trace += this.tag + ':' + x + y + ';'; return 99; } };
+        const replace = () => { o.push = () => { trace += 'replacement;'; return 7; }; return 'x'; };
+        o.push(replace(), 'y');
+        o.push();
+        const arraylike = { length: 1, 0: 'a', push: Array.prototype.push };
+        arraylike.push('b', 'c');
+        const unknown = (value) => { value.push('d'); };
+        unknown(arraylike);
+        const a = [];
+        a.push(o.push());
+        await finish(trace === 'old:xy;replacement;replacement;'
+            && arraylike.length === 4 && arraylike[1] === 'b'
+            && arraylike[2] === 'c' && arraylike[3] === 'd' && a[0] === 7);
+    "#);
+}
+
 /// ECMA Array's absent slots differ from present undefined values, and an
 /// index write/length write preserve the same array identity.
 #[test]

@@ -136,7 +136,7 @@ impl Lowerer<'_> {
                 expressions,
             } => self.lower_template(quasis, expressions),
             ast::Expr::Function(function) => self.lower_function_expression(function),
-            ast::Expr::Call { callee, args, span } => self.lower_call(callee, args, *span),
+            ast::Expr::Call { callee, args, span } => self.lower_call(callee, args, *span, false),
             ast::Expr::New { constructor, args } => self.lower_new(constructor, args),
             ast::Expr::OptionalChain { base, operations } => {
                 self.lower_optional_chain(base, operations)

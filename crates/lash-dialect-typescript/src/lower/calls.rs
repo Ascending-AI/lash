@@ -756,6 +756,7 @@ impl Lowerer<'_> {
         callee: &ast::Expr,
         args: &[ast::CallArg],
         span: SourceSpan,
+        discard_result: bool,
     ) -> Lowering<Operand> {
         if let ast::Expr::Member {
             object,
@@ -882,7 +883,7 @@ impl Lowerer<'_> {
                 let object = self.pin(object);
                 let key = self.lower_key(property)?;
                 if let Key::Static(name) = &key
-                    && let Some(called) = self.call_declared(&object, name, args)?
+                    && let Some(called) = self.call_declared(&object, name, args, discard_result)?
                 {
                     return Ok(called);
                 }
@@ -969,6 +970,7 @@ impl Lowerer<'_> {
         object: &Operand,
         name: &str,
         args: &[ast::CallArg],
+        discard_result: bool,
     ) -> Lowering<Option<Operand>> {
         let Some((receiver, check)) = declared_receiver(&object.ty) else {
             return Ok(None);
@@ -985,7 +987,7 @@ impl Lowerer<'_> {
         let fresh = crate::types::FRESH_LIST_METHODS.contains(&name);
         if object.ty == Ty::Array {
             // A list the source built takes its row without the test.
-            let result = self.call_list_method(object, name, function, args)?;
+            let result = self.call_list_method(object, name, function, args, discard_result)?;
             return Ok(Some(if fresh {
                 Operand {
                     ty: Ty::Array,
@@ -999,7 +1001,7 @@ impl Lowerer<'_> {
             return self
                 .array_branch(
                     object,
-                    |this| this.call_list_method(object, name, function, args),
+                    |this| this.call_list_method(object, name, function, args, discard_result),
                     |this| {
                         let generic = Operand {
                             ty: Ty::Unknown,
@@ -1043,6 +1045,7 @@ impl Lowerer<'_> {
         name: &str,
         function: &str,
         args: &[ast::CallArg],
+        discard_result: bool,
     ) -> Lowering<Operand> {
         let values: Option<Vec<&ast::Expr>> = args
             .iter()
@@ -1063,6 +1066,12 @@ impl Lowerer<'_> {
                     index: length,
                 });
                 self.store(place, value);
+            }
+            // A statement-position call has no consumer of the new length.
+            // Its assignments are ordinary document forms: only the append
+            // work is executed and charged (K-CHG-002), in this body's account.
+            if discard_result {
+                return Ok(Operand::undefined());
             }
             let length = self.native("list.len", vec![object.expr()])?;
             let length = self.native("num.to_float", vec![length])?;

@@ -157,7 +157,14 @@ impl Lowerer<'_> {
                         self.span,
                     ));
                 }
-                let value = self.lower_expr(expr)?;
+                // Only the outer call has no consumer. Calls in its receiver
+                // and arguments still lower as expressions with their result.
+                let value = match expr {
+                    ast::Expr::Call { callee, args, span } => {
+                        self.lower_call(callee, args, *span, true)?
+                    }
+                    _ => self.lower_expr(expr)?,
+                };
                 self.discard(value);
                 Ok(())
             }
